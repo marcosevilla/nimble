@@ -113,25 +113,36 @@ function ReviewStep({
 
   return (
     <div className={cn(
-      'rounded-lg border p-4 transition-all duration-300',
+      'rounded-lg border p-4 transition-[background-color,border-color] duration-300',
       active ? 'bg-card border-border' : 'bg-muted/30 border-border/30',
-      active && 'animate-in fade-in slide-in-from-bottom-2 duration-200',
     )}>
       <div className="flex items-center gap-2 mb-3">
-        <span className={cn(
-          'flex size-6 items-center justify-center rounded-full text-meta-strong',
-          done ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground',
-        )}>
+        <span
+          className={cn(
+            'flex size-6 items-center justify-center rounded-full text-meta-strong',
+            done ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground',
+            active && 'animate-row-enter',
+          )}
+          style={active ? { animationDelay: '0ms' } : undefined}
+        >
           {done ? <Check className="size-3.5" /> : step}
         </span>
-        <h3 className={cn(
-          'text-body-strong',
-          done && 'text-muted-foreground',
-        )}>
+        <h3
+          className={cn(
+            'text-body-strong',
+            done && 'text-muted-foreground',
+            active && 'animate-row-enter',
+          )}
+          style={active ? { animationDelay: '60ms' } : undefined}
+        >
           {title}
         </h3>
       </div>
-      {active && <div>{children}</div>}
+      {active && (
+        <div className="animate-row-enter" style={{ animationDelay: '120ms' }}>
+          {children}
+        </div>
+      )}
     </div>
   )
 }
