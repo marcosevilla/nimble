@@ -234,59 +234,61 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
   return (
     <>
       <PageHeader title="Today" meta={dateStr} />
-      <div className="px-5 py-6 space-y-4 w-full">
-        {/* Greeting — demoted to first content block */}
-        {(() => { const g = getGreeting(); return (
-          <div className="text-center space-y-1 py-4">
-            <h2 className="text-heading">{g.headline}</h2>
-            <p className="text-body text-muted-foreground pt-1">{g.subtitle}</p>
-          </div>
-        )})()}
+      <div className="px-5 py-6 w-full flex justify-center">
+        <div className="w-full max-w-[520px] space-y-4">
+          {/* Greeting — demoted to first content block */}
+          {(() => { const g = getGreeting(); return (
+            <div className="text-center space-y-1 py-4">
+              <h2 className="text-heading">{g.headline}</h2>
+              <p className="text-body text-muted-foreground pt-1">{g.subtitle}</p>
+            </div>
+          )})()}
 
-      {/* Step 1: Daily brief or calendar glance */}
-      <ReviewStep
-        step={1}
-        title={brief ? 'Your daily brief' : 'Your schedule'}
-        active={step === 1}
-        completed={step > 1}
-      >
-        {brief === undefined ? (
-          <div className="space-y-2">
-            <Skeleton className="h-5 w-3/4" />
-            <Skeleton className="h-5 w-1/2" />
-            <Skeleton className="h-5 w-2/3" />
+        {/* Step 1: Daily brief or calendar glance */}
+        <ReviewStep
+          step={1}
+          title={brief ? 'Your daily brief' : 'Your schedule'}
+          active={step === 1}
+          completed={step > 1}
+        >
+          {brief === undefined ? (
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-3/4" />
+              <Skeleton className="h-5 w-1/2" />
+              <Skeleton className="h-5 w-2/3" />
+            </div>
+          ) : brief ? (
+            <div className="max-h-[32rem] overflow-y-auto">
+              <BriefDisplay markdown={brief} />
+            </div>
+          ) : (
+            <CalendarGlance />
+          )}
+          <div className="flex justify-end mt-3">
+            <Button size="sm" onClick={() => setStep(2)} className="gap-1.5">
+              Next <ArrowRight className="size-3.5" />
+            </Button>
           </div>
-        ) : brief ? (
-          <div className="max-h-[32rem] overflow-y-auto">
-            <BriefDisplay markdown={brief} />
+        </ReviewStep>
+
+        {/* Step 2: Energy + Priorities */}
+        <ReviewStep step={2} title="Set your energy & get priorities" active={step === 2} completed={step > 2}>
+          <PrioritiesSection onGenerated={handlePrioritiesGenerated} compact />
+        </ReviewStep>
+
+        {/* Step 3: Triage */}
+        <ReviewStep step={3} title="Quick triage" active={step === 3} completed={step > 3}>
+          <TriageSection
+            todoistTasks={todoistTasks}
+            onSnooze={snoozeTask}
+          />
+          <div className="flex justify-end mt-3">
+            <Button size="sm" onClick={handleFinish} className="gap-1.5">
+              <Check className="size-3.5" /> Ready to go
+            </Button>
           </div>
-        ) : (
-          <CalendarGlance />
-        )}
-        <div className="flex justify-end mt-3">
-          <Button size="sm" onClick={() => setStep(2)} className="gap-1.5">
-            Next <ArrowRight className="size-3.5" />
-          </Button>
+        </ReviewStep>
         </div>
-      </ReviewStep>
-
-      {/* Step 2: Energy + Priorities */}
-      <ReviewStep step={2} title="Set your energy & get priorities" active={step === 2} completed={step > 2}>
-        <PrioritiesSection onGenerated={handlePrioritiesGenerated} compact />
-      </ReviewStep>
-
-      {/* Step 3: Triage */}
-      <ReviewStep step={3} title="Quick triage" active={step === 3} completed={step > 3}>
-        <TriageSection
-          todoistTasks={todoistTasks}
-          onSnooze={snoozeTask}
-        />
-        <div className="flex justify-end mt-3">
-          <Button size="sm" onClick={handleFinish} className="gap-1.5">
-            <Check className="size-3.5" /> Ready to go
-          </Button>
-        </div>
-      </ReviewStep>
       </div>
     </>
   )
