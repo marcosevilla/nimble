@@ -160,7 +160,10 @@ function CalendarGlance() {
         </div>
       ))}
       {events.length > 5 && (
-        <Meta as="p" className="pl-[62px]">+{events.length - 5} more</Meta>
+        <div className="flex items-center gap-3">
+          <span className="w-14 shrink-0" />
+          <Meta as="p">+{events.length - 5} more</Meta>
+        </div>
       )}
     </div>
   )
@@ -254,7 +257,7 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
             <Skeleton className="h-5 w-2/3" />
           </div>
         ) : brief ? (
-          <div className="max-h-[50vh] overflow-y-auto">
+          <div className="max-h-[32rem] overflow-y-auto">
             <BriefDisplay markdown={brief} />
           </div>
         ) : (
