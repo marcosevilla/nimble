@@ -100,7 +100,7 @@ function ReviewStep({
 }) {
   if (!active && !done) {
     return (
-      <div className="rounded-lg p-4 opacity-40">
+      <div className="rounded-xl p-4 opacity-40">
         <div className="flex items-center gap-2">
           <span className="flex size-6 items-center justify-center rounded-full bg-muted text-meta-strong text-muted-foreground">
             {step}
@@ -113,7 +113,7 @@ function ReviewStep({
 
   return (
     <div className={cn(
-      'rounded-lg border p-4 transition-[background-color,border-color] duration-300',
+      'rounded-xl border p-4 transition-[background-color,border-color] duration-300',
       active ? 'bg-card border-border' : 'bg-muted/30 border-border/30',
     )}>
       <div className="flex items-center gap-2 mb-3">
@@ -431,7 +431,7 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
           <Skeleton className="h-5 w-1/2" />
         </div>
       ) : briefContent ? (
-        <div className="rounded-lg border border-border/30 bg-muted/30 p-4">
+        <div className="rounded-xl border border-border/30 bg-muted/30 p-4">
           <BriefDisplay markdown={briefContent} />
         </div>
       ) : (
