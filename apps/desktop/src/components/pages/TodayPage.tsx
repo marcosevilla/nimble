@@ -23,11 +23,11 @@ import { Meta } from '@/components/shared/typography'
 
 // ── Shared Utilities ──
 
-function getGreeting(): string {
+function getGreeting(): { headline: string; subtitle: string } {
   const hour = new Date().getHours()
-  if (hour < 12) return 'Good morning'
-  if (hour < 17) return 'Good afternoon'
-  return 'Good evening'
+  if (hour < 12) return { headline: 'Good morning', subtitle: "Let's plan your day." }
+  if (hour < 17) return { headline: 'Good afternoon', subtitle: "Pick up where you left off." }
+  return { headline: 'Good evening', subtitle: 'Quick end-of-day pass?' }
 }
 
 function ProgressBar({ completed, total }: { completed: number; total: number }) {
@@ -234,10 +234,12 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
       <PageHeader title="Today" meta={dateStr} />
       <div className="px-5 py-6 space-y-4 w-full">
         {/* Greeting — demoted to first content block */}
-        <div className="text-center space-y-1 py-4">
-          <h2 className="text-heading">{getGreeting()}</h2>
-          <p className="text-body text-muted-foreground pt-1">Let's plan your day.</p>
-        </div>
+        {(() => { const g = getGreeting(); return (
+          <div className="text-center space-y-1 py-4">
+            <h2 className="text-heading">{g.headline}</h2>
+            <p className="text-body text-muted-foreground pt-1">{g.subtitle}</p>
+          </div>
+        )})()}
 
       {/* Step 1: Daily brief or calendar glance */}
       <ReviewStep
@@ -377,14 +379,18 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
       />
       <div className="px-5 py-6 space-y-4 w-full">
         {/* Greeting — demoted to first content block */}
-        <div className="mb-2 space-y-1">
-          <h2 className="text-heading">{getGreeting()}</h2>
-          {total > 0 && (
-            <p className="text-body text-muted-foreground">
-              {remaining === 0 ? 'All done for today.' : `${remaining} item${remaining === 1 ? '' : 's'} remaining`}
-            </p>
-          )}
-        </div>
+        {(() => { const g = getGreeting(); return (
+          <div className="mb-2 space-y-1">
+            <h2 className="text-heading">{g.headline}</h2>
+            {total > 0 ? (
+              <p className="text-body text-muted-foreground">
+                {remaining === 0 ? 'All done for today.' : `${remaining} item${remaining === 1 ? '' : 's'} remaining`}
+              </p>
+            ) : (
+              <p className="text-body text-muted-foreground">{g.subtitle}</p>
+            )}
+          </div>
+        )})()}
 
       {/* Date strip + Brief */}
       <DateStrip briefDates={briefDates} selected={selectedDate} onSelect={setSelectedDate} />
