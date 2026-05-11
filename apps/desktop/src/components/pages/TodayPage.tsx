@@ -174,17 +174,17 @@ function TriageSection({
   todoistTasks: TodoistTaskRow[]
   onSnooze: (id: string) => void
 }) {
-  const overdue = todoistTasks.filter((t) => {
+  const carriedOver = todoistTasks.filter((t) => {
     const today = new Date().toISOString().slice(0, 10)
     return t.due_date != null && t.due_date < today
   })
   const highPriority = todoistTasks.filter((t) => t.priority >= 3)
-  const needsAttention = [...overdue, ...highPriority.filter((t) => !overdue.includes(t))]
+  const stillOpen = [...carriedOver, ...highPriority.filter((t) => !carriedOver.includes(t))]
 
-  if (needsAttention.length === 0) {
+  if (stillOpen.length === 0) {
     return (
       <p className="text-body text-muted-foreground">
-        Nothing urgent — you're in good shape.
+        Nothing left to triage.
       </p>
     )
   }
@@ -192,9 +192,9 @@ function TriageSection({
   return (
     <div className="space-y-1">
       <Meta as="p" className="mb-2">
-        {needsAttention.length} item{needsAttention.length !== 1 ? 's' : ''} need attention. Complete or snooze to clear them.
+        {stillOpen.length} still open — clear or carry forward.
       </Meta>
-      {needsAttention.map((task) => (
+      {stillOpen.map((task) => (
         <TaskRow
           key={task.id}
           task={task}
