@@ -238,7 +238,7 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
         <div className="w-full max-w-[520px] space-y-4">
           {/* Greeting — demoted to first content block */}
           {(() => { const g = getGreeting(); return (
-            <div className="text-center space-y-1 py-4">
+            <div className="space-y-1 py-4">
               <h2 className="text-heading">{g.headline}</h2>
               <p className="text-body text-muted-foreground pt-1">{g.subtitle}</p>
             </div>
