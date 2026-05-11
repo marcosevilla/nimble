@@ -98,7 +98,18 @@ function ReviewStep({
   completed: boolean
   children: React.ReactNode
 }) {
-  if (!active && !done) return null
+  if (!active && !done) {
+    return (
+      <div className="rounded-lg p-4 opacity-40">
+        <div className="flex items-center gap-2">
+          <span className="flex size-6 items-center justify-center rounded-full bg-muted text-meta-strong text-muted-foreground">
+            {step}
+          </span>
+          <h3 className="text-body-strong text-muted-foreground">{title}</h3>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={cn(
