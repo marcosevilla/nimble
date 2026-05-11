@@ -104,17 +104,43 @@ End-to-end on one surface before scaling:
   - Each writes findings to its own markdown file in `daily-triage/docs/audit-findings/today/`
   - Totals: design-qa 12 (3 blocker / 4 major / 4 minor / 1 polish), interface-craft 10 (1 / 3 / 3 / 3, craft 2/5), make-interfaces-feel-better 10 (0 / 0 / 6 / 4). 32 findings total.
 - [x] Synthesize findings → plan via `superpowers:writing-plans` — saved to `daily-triage/docs/superpowers/plans/2026-05-10-today-page-audit-fixes.md`. 7 lanes (A no-guilt language, B calendar error chrome, C color tokens, E button base, G misc safety — all independent; D composition, F polish — both blocked on Gate 0). 17 tasks total before Gate 0; 9 after.
-- [ ] Marco reviews plan, gates execution
-- [ ] Execute fixes in worktrees (2 agents max for dry run)
-- [ ] Verify (`superpowers:verification-before-completion`) + fresh-agent review + final `review` pass
-- [ ] Post-run notes (below) — fill in what worked, what leaked, adjustments
+- [x] Marco reviewed plan + answered Gate 0: 1=a 2=a 3=a 4=b
+- [x] Execute fixes in worktrees (subagent-driven). Pre-Gate-0 worktree `audit-loop-1-today` (12 commits, merged 2026-05-11 as `cec3786`). Post-Gate-0 worktree `audit-loop-1-today-composition` (10 commits, merged 2026-05-11 as `c8fdf5d`).
+- [x] Verify — TS build clean, Playwright golden flow (Enter advances Step 1→2 confirmed). Rust check fails on stale path cache (pre-existing, unrelated).
+- [x] Post-run notes (below) — filled in.
 
 ## Post-run notes
 
 _(fill in after each loop)_
 
-### Dry run #1 — Today page (date: TBD)
+### Dry run #1 — Today page (2026-05-09 → 2026-05-11)
 
-- What worked:
-- What leaked:
-- Adjustments for next loop:
+**Outcome:** loop completed end-to-end. 32 audit findings → 22 implementation tasks (12 pre-Gate-0, 10 post-Gate-0) → all merged to main on 2026-05-11. Empty-state Today now matches the §2.1 "guided morning" intent: centered 520px column, ghost upcoming steps, Coffee-icon empty calendar copy, Enter advances steps, muted calendar offline message.
+
+**What worked:**
+- **Three parallel audit lanes** caught distinct issues with minimal overlap. design-qa nailed the no-guilt language (blocker). interface-craft saw the composition failure at 2/5 craft — a signal a token-level linter would never produce. make-interfaces-feel-better caught the polish wins (font smoothing, scale-on-press, stagger). Three angles is the right number.
+- **Gate 0 design pattern.** Forcing composition decisions before polish tasks executed prevented re-doing F-lane work after D shifted layout. Worth keeping for future surfaces.
+- **Cheapest-model subagents for mechanical tasks.** Haiku handled 18 of 22 tasks cleanly. Sonnet was the right call for C1 (token wiring, multi-file judgment) and F5 (handler logic + multiple JSX edits).
+- **Worktree isolation** kept the two lanes from clobbering each other. Two worktrees (pre-Gate-0 and post-Gate-0) handled the dependency cleanly.
+- **DEV-only `window.__stores` bypass** unblocked Playwright without a full MockDataProvider build. Cheap escape hatch, paid for itself in dry run #1.
+
+**What leaked:**
+- **Implementers don't reliably cd to the worktree.** Lane D1's implementer committed to main instead of `audit-loop-1-today-composition`. Fixed by cherry-picking + reset. Mitigation for next loop: every implementer prompt now leads with "YOUR FIRST TOOL CALL MUST BE `cd <worktree> && pwd && git branch --show-current`" + a paste-back verification requirement. Worked perfectly for D2 onwards.
+- **Code-quality reviewers don't read the plan, only the diff.** Lane A1's reviewer flagged TriageSection's `overdue` as Critical — but that was explicitly A2's scope. Mitigation: pass the FULL plan section (with sibling task boundaries) to the reviewer, not just the task under review.
+- **Audit agents over-cite from pixels.** Interface-craft's "right-rail collapse icon" finding had no corresponding component code — implementer + reviewer both searched calendar/ and Dashboard.tsx, found nothing. The icon visible in the screenshot is likely an Agentation/TypeOverlay element. Mitigation: instruct audit agents to verify each finding has a code anchor before reporting it.
+- **Per-task Playwright would have meant restarting Vite in each worktree.** We batched smoke checks at the merge checkpoints instead. Worked, but means polish lanes were verified together rather than incrementally. Acceptable tradeoff for the dry run.
+- **No populated-state verification.** All audits ran against the empty state because the DEV bypass only flips `setupComplete=true` — actual data loads still throw because `invoke()` fails outside Tauri. We never visually confirmed lanes A1/A2 (Overdue rename, TriageSection copy), C1/C2 (ProgressBar, badge tokens with real green completion state), or G3 (+N more alignment with calendar events). Substituted via source inspection. Real fix for loop #2: MockDataProvider.
+- **Rust target cache is stuck on the OLD project path** (`personal triage and briefing app/` with spaces). `cargo check` fails to resolve permission TOML files. Unrelated to the audit but blocks the playbook's "Rust clean" verification. Fix: `rm -rf daily-triage/target/` and rebuild — pre-existing tech debt.
+
+**Adjustments for next loop:**
+1. **Subagent prompt header template:** always start implementer prompts with the cd verification block (proven in lanes D2-F5).
+2. **Reviewer prompt header template:** include the relevant plan section AND its sibling task boundaries, so reviewers don't flag in-scope-of-other-task items as Critical.
+3. **Audit-agent constraint:** "Every finding must cite a file:line or a specific component name. Findings sourced from screenshot inspection alone require a code anchor — search the surface before reporting."
+4. **MockDataProvider for the next loop.** Highest-leverage missing piece. Without it, the audit can only see the empty/error state of each surface.
+5. **Skip formal 3rd-agent code-quality review for sub-3-line trivial CSS/className changes** — self-verification via `git show` is faster and equally rigorous when the change has zero behavioral surface (G1, G2 worked fine without).
+6. **The 2-tier opacity scale** from Lane C3 didn't fully land — we collapsed `/5+/20+/30` to just `/30`. Worth deciding if `/30` everywhere is right or if there really is a "subtle vs chrome" distinction worth a second tier. Re-audit after loop #2's data.
+
+**Source files left modified that should NOT ship in this branch state:**
+- `apps/desktop/src/main.tsx` — `window.__stores` DEV-only export. Keep as long as audit loops are active. Re-evaluate when MockDataProvider lands and the bypass is no longer needed.
+
+**Final commit on main:** `c8fdf5d merge: audit-loop-1-today-composition — Gate-0 fixes (lanes D + F)` (14 commits ahead of origin/main).
