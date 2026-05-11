@@ -262,7 +262,12 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
           {/* Greeting — demoted to first content block */}
           {(() => { const g = getGreeting(); return (
             <div className="py-4">
-              <h2 className="text-heading">{g.headline}</h2>
+              <h2
+                className="text-heading animate-row-enter"
+                style={{ animationDelay: '0ms' }}
+              >
+                {g.headline}
+              </h2>
             </div>
           )})()}
 
