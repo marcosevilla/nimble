@@ -16,7 +16,7 @@ import type { Priority, TodoistTaskRow } from '@daily-triage/types'
 import { BriefDisplay } from '@/components/shared/BriefDisplay'
 import { DateStrip } from '@/components/shared/DateStrip'
 import { HabitsSection } from '@/components/goals/HabitsSection'
-import { ArrowRight, Check } from 'lucide-react'
+import { ArrowRight, Check, Coffee } from 'lucide-react'
 import { format } from 'date-fns'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Meta } from '@/components/shared/typography'
@@ -151,9 +151,10 @@ function CalendarGlance() {
 
   if (events.length === 0) {
     return (
-      <p className="text-body text-muted-foreground">
-        No meetings today — wide open for deep work.
-      </p>
+      <div className="flex items-center gap-2 text-body text-muted-foreground">
+        <Coffee className="size-4 shrink-0" />
+        <span>No meetings today — wide open for deep work.</span>
+      </div>
     )
   }
 
