@@ -159,6 +159,11 @@
     font-weight: var(--typo-meta-weight, 400);
     letter-spacing: var(--typo-meta-tracking, 0);
   }
+  .text-meta-strong {
+    font-family: var(--typo-meta-strong-family, var(--font-sans));
+    font-weight: var(--typo-meta-strong-weight, 500);
+    letter-spacing: var(--typo-meta-strong-tracking, 0);
+  }
   .text-body {
     font-family: var(--typo-body-family, var(--font-sans));
     font-weight: var(--typo-body-weight, 400);

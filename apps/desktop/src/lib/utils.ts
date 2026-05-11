@@ -23,6 +23,7 @@ const customTwMerge = extendTailwindMerge({
             'caption',
             'label',
             'meta',
+            'meta-strong',
             'body',
             'body-strong',
             'heading-sm',

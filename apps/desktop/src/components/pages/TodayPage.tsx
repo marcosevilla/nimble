@@ -107,10 +107,9 @@ function ReviewStep({
       active && 'animate-in fade-in slide-in-from-bottom-2 duration-200',
     )}>
       <div className="flex items-center gap-2 mb-3">
-        {/* font-semibold kept for contrast on colored circular badge */}
         <span className={cn(
-          'flex size-6 items-center justify-center rounded-full text-meta font-semibold',
-          done ? 'bg-green-500/10 text-green-500' : 'bg-muted text-muted-foreground',
+          'flex size-6 items-center justify-center rounded-full text-meta-strong',
+          done ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground',
         )}>
           {done ? <Check className="size-3.5" /> : step}
         </span>
