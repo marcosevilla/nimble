@@ -44,9 +44,9 @@ export function PageHeader({
           className="flex flex-1 items-baseline gap-2 min-w-0"
           data-tauri-drag-region
         >
-          <h1 className="text-heading-sm truncate">{title}</h1>
+          <h1 className="text-heading-sm text-balance truncate">{title}</h1>
           {meta && (
-            <span className="text-meta text-muted-foreground shrink-0">
+            <span className="text-meta text-muted-foreground relative top-px shrink-0">
               {meta}
             </span>
           )}
