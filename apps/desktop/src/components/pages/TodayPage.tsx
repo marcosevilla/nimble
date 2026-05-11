@@ -23,11 +23,11 @@ import { Meta } from '@/components/shared/typography'
 
 // ── Shared Utilities ──
 
-function getGreeting(): string {
+function getGreeting(): { headline: string; subtitle: string } {
   const hour = new Date().getHours()
-  if (hour < 12) return 'Good morning'
-  if (hour < 17) return 'Good afternoon'
-  return 'Good evening'
+  if (hour < 12) return { headline: 'Good morning', subtitle: "Let's plan your day." }
+  if (hour < 17) return { headline: 'Good afternoon', subtitle: "Pick up where you left off." }
+  return { headline: 'Good evening', subtitle: 'Quick end-of-day pass?' }
 }
 
 function ProgressBar({ completed, total }: { completed: number; total: number }) {
@@ -37,8 +37,8 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
       <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
         <div
           className={cn(
-            'h-full rounded-full transition-all duration-500',
-            pct === 100 ? 'bg-green-500' : 'bg-accent-blue',
+            'h-full rounded-full transition-[width] duration-500',
+            pct === 100 ? 'bg-success' : 'bg-foreground/40',
           )}
           style={{ width: `${pct}%` }}
         />
@@ -61,24 +61,24 @@ interface UrgencyGroup {
 
 function groupByUrgency(tasks: TodoistTaskRow[]): UrgencyGroup[] {
   const today = new Date().toISOString().slice(0, 10)
-  const overdue: TodoistTaskRow[] = []
+  const stillOpen: TodoistTaskRow[] = []
   const highPriority: TodoistTaskRow[] = []
   const dueToday: TodoistTaskRow[] = []
   const quickWins: TodoistTaskRow[] = []
 
   for (const task of tasks) {
-    const isOverdue = task.due_date != null && task.due_date < today
-    if (isOverdue) overdue.push(task)
+    const isCarriedOver = task.due_date != null && task.due_date < today
+    if (isCarriedOver) stillOpen.push(task)
     else if (task.priority >= 3) highPriority.push(task)
     else if (task.content.length < 50 && task.priority <= 2) quickWins.push(task)
     else dueToday.push(task)
   }
 
   const groups: UrgencyGroup[] = []
-  if (overdue.length > 0) groups.push({ key: 'overdue', title: 'Overdue', tasks: overdue, defaultOpen: true })
-  if (highPriority.length > 0) groups.push({ key: 'high', title: 'High Priority', tasks: highPriority, defaultOpen: true })
-  if (dueToday.length > 0) groups.push({ key: 'today', title: 'Due Today', tasks: dueToday, defaultOpen: true })
-  if (quickWins.length > 0) groups.push({ key: 'quick', title: 'Quick Wins', tasks: quickWins, defaultOpen: false })
+  if (stillOpen.length > 0) groups.push({ key: 'still-open', title: 'Still open', tasks: stillOpen, defaultOpen: true })
+  if (highPriority.length > 0) groups.push({ key: 'high', title: 'High priority', tasks: highPriority, defaultOpen: true })
+  if (dueToday.length > 0) groups.push({ key: 'today', title: 'Due today', tasks: dueToday, defaultOpen: true })
+  if (quickWins.length > 0) groups.push({ key: 'quick', title: 'Quick wins', tasks: quickWins, defaultOpen: false })
   return groups
 }
 
@@ -107,10 +107,9 @@ function ReviewStep({
       active && 'animate-in fade-in slide-in-from-bottom-2 duration-200',
     )}>
       <div className="flex items-center gap-2 mb-3">
-        {/* font-semibold kept for contrast on colored circular badge */}
         <span className={cn(
-          'flex size-6 items-center justify-center rounded-full text-meta font-semibold',
-          done ? 'bg-green-500/10 text-green-500' : 'bg-muted text-muted-foreground',
+          'flex size-6 items-center justify-center rounded-full text-meta-strong',
+          done ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground',
         )}>
           {done ? <Check className="size-3.5" /> : step}
         </span>
@@ -161,7 +160,10 @@ function CalendarGlance() {
         </div>
       ))}
       {events.length > 5 && (
-        <Meta as="p" className="pl-[62px]">+{events.length - 5} more</Meta>
+        <div className="flex items-center gap-3">
+          <span className="w-14 shrink-0" />
+          <Meta as="p">+{events.length - 5} more</Meta>
+        </div>
       )}
     </div>
   )
@@ -174,17 +176,17 @@ function TriageSection({
   todoistTasks: TodoistTaskRow[]
   onSnooze: (id: string) => void
 }) {
-  const overdue = todoistTasks.filter((t) => {
+  const carriedOver = todoistTasks.filter((t) => {
     const today = new Date().toISOString().slice(0, 10)
     return t.due_date != null && t.due_date < today
   })
   const highPriority = todoistTasks.filter((t) => t.priority >= 3)
-  const needsAttention = [...overdue, ...highPriority.filter((t) => !overdue.includes(t))]
+  const stillOpen = [...carriedOver, ...highPriority.filter((t) => !carriedOver.includes(t))]
 
-  if (needsAttention.length === 0) {
+  if (stillOpen.length === 0) {
     return (
       <p className="text-body text-muted-foreground">
-        Nothing urgent — you're in good shape.
+        Nothing left to triage.
       </p>
     )
   }
@@ -192,9 +194,9 @@ function TriageSection({
   return (
     <div className="space-y-1">
       <Meta as="p" className="mb-2">
-        {needsAttention.length} item{needsAttention.length !== 1 ? 's' : ''} need attention. Complete or snooze to clear them.
+        {stillOpen.length} still open — clear or carry forward.
       </Meta>
-      {needsAttention.map((task) => (
+      {stillOpen.map((task) => (
         <TaskRow
           key={task.id}
           task={task}
@@ -234,10 +236,12 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
       <PageHeader title="Today" meta={dateStr} />
       <div className="px-5 py-6 space-y-4 w-full">
         {/* Greeting — demoted to first content block */}
-        <div className="text-center space-y-1 py-4">
-          <h2 className="text-heading">{getGreeting()}</h2>
-          <p className="text-body text-muted-foreground pt-1">Let's plan your day.</p>
-        </div>
+        {(() => { const g = getGreeting(); return (
+          <div className="text-center space-y-1 py-4">
+            <h2 className="text-heading">{g.headline}</h2>
+            <p className="text-body text-muted-foreground pt-1">{g.subtitle}</p>
+          </div>
+        )})()}
 
       {/* Step 1: Daily brief or calendar glance */}
       <ReviewStep
@@ -253,7 +257,7 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
             <Skeleton className="h-5 w-2/3" />
           </div>
         ) : brief ? (
-          <div className="max-h-[50vh] overflow-y-auto">
+          <div className="max-h-[32rem] overflow-y-auto">
             <BriefDisplay markdown={brief} />
           </div>
         ) : (
@@ -377,14 +381,18 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
       />
       <div className="px-5 py-6 space-y-4 w-full">
         {/* Greeting — demoted to first content block */}
-        <div className="mb-2 space-y-1">
-          <h2 className="text-heading">{getGreeting()}</h2>
-          {total > 0 && (
-            <p className="text-body text-muted-foreground">
-              {remaining === 0 ? 'All done for today.' : `${remaining} item${remaining === 1 ? '' : 's'} remaining`}
-            </p>
-          )}
-        </div>
+        {(() => { const g = getGreeting(); return (
+          <div className="mb-2 space-y-1">
+            <h2 className="text-heading">{g.headline}</h2>
+            {total > 0 ? (
+              <p className="text-body text-muted-foreground">
+                {remaining === 0 ? 'All done for today.' : `${remaining} item${remaining === 1 ? '' : 's'} remaining`}
+              </p>
+            ) : (
+              <p className="text-body text-muted-foreground">{g.subtitle}</p>
+            )}
+          </div>
+        )})()}
 
       {/* Date strip + Brief */}
       <DateStrip briefDates={briefDates} selected={selectedDate} onSelect={setSelectedDate} />
@@ -394,11 +402,11 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
           <Skeleton className="h-5 w-1/2" />
         </div>
       ) : briefContent ? (
-        <div className="rounded-lg border border-border/20 bg-muted/5 p-4">
+        <div className="rounded-lg border border-border/30 bg-muted/30 p-4">
           <BriefDisplay markdown={briefContent} />
         </div>
       ) : (
-        <p className="text-meta text-muted-foreground/40 text-center py-2">
+        <p className="text-meta text-muted-foreground text-center py-2">
           No brief for this date.
         </p>
       )}
@@ -415,7 +423,7 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
 
       {!localLoading && topLevelLocal.length > 0 && (
         <CollapsibleSection title="Tasks" count={topLevelLocal.filter((t) => !t.completed).length} defaultOpen={true}>
-          <div className="divide-y divide-border/20">
+          <div className="divide-y divide-border/30">
             {topLevelLocal.map((task, i) => {
               const subs = subtaskMap[task.id] ?? []
               const done = subs.filter((s) => s.completed || s.status === 'complete').length
@@ -446,7 +454,7 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
 
       {todoistTasks.length > 0 && (
         <CollapsibleSection title="Todoist" count={todoistTasks.length} defaultOpen={false}>
-          <div className="divide-y divide-border/20">
+          <div className="divide-y divide-border/30">
             {todoistTasks.map((task, i) => {
               const delay = `${Math.min(i, 14) * 25}ms`
               return (

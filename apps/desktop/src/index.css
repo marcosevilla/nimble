@@ -85,6 +85,8 @@
     --color-foreground: var(--foreground);
     --color-background: var(--background);
     --color-accent-blue: var(--accent-blue);
+    --color-success: var(--success);
+    --color-success-fg: var(--success-fg);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -119,6 +121,8 @@
     }
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     }
   html {
     @apply font-sans;
@@ -156,6 +160,11 @@
     font-family: var(--typo-meta-family, var(--font-sans));
     font-weight: var(--typo-meta-weight, 400);
     letter-spacing: var(--typo-meta-tracking, 0);
+  }
+  .text-meta-strong {
+    font-family: var(--typo-meta-strong-family, var(--font-sans));
+    font-weight: var(--typo-meta-strong-weight, 500);
+    letter-spacing: var(--typo-meta-strong-tracking, 0);
   }
   .text-body {
     font-family: var(--typo-body-family, var(--font-sans));
