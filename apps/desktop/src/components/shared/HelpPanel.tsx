@@ -182,6 +182,7 @@ export function HelpPanel() {
           'bg-muted/60 text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground hover:shadow-md',
           'backdrop-blur-sm border border-border/20',
           open && 'bg-muted text-muted-foreground shadow-md',
+          'before:absolute before:inset-[-2px] before:content-[\'\'] before:rounded-full',
         )}
       >
         {open ? <X className="size-4" /> : <HelpCircle className="size-4" />}
