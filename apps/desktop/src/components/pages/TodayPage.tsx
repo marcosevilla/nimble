@@ -61,24 +61,24 @@ interface UrgencyGroup {
 
 function groupByUrgency(tasks: TodoistTaskRow[]): UrgencyGroup[] {
   const today = new Date().toISOString().slice(0, 10)
-  const overdue: TodoistTaskRow[] = []
+  const stillOpen: TodoistTaskRow[] = []
   const highPriority: TodoistTaskRow[] = []
   const dueToday: TodoistTaskRow[] = []
   const quickWins: TodoistTaskRow[] = []
 
   for (const task of tasks) {
-    const isOverdue = task.due_date != null && task.due_date < today
-    if (isOverdue) overdue.push(task)
+    const isCarriedOver = task.due_date != null && task.due_date < today
+    if (isCarriedOver) stillOpen.push(task)
     else if (task.priority >= 3) highPriority.push(task)
     else if (task.content.length < 50 && task.priority <= 2) quickWins.push(task)
     else dueToday.push(task)
   }
 
   const groups: UrgencyGroup[] = []
-  if (overdue.length > 0) groups.push({ key: 'overdue', title: 'Overdue', tasks: overdue, defaultOpen: true })
-  if (highPriority.length > 0) groups.push({ key: 'high', title: 'High Priority', tasks: highPriority, defaultOpen: true })
-  if (dueToday.length > 0) groups.push({ key: 'today', title: 'Due Today', tasks: dueToday, defaultOpen: true })
-  if (quickWins.length > 0) groups.push({ key: 'quick', title: 'Quick Wins', tasks: quickWins, defaultOpen: false })
+  if (stillOpen.length > 0) groups.push({ key: 'still-open', title: 'Still open', tasks: stillOpen, defaultOpen: true })
+  if (highPriority.length > 0) groups.push({ key: 'high', title: 'High priority', tasks: highPriority, defaultOpen: true })
+  if (dueToday.length > 0) groups.push({ key: 'today', title: 'Due today', tasks: dueToday, defaultOpen: true })
+  if (quickWins.length > 0) groups.push({ key: 'quick', title: 'Quick wins', tasks: quickWins, defaultOpen: false })
   return groups
 }
 
