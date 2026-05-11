@@ -399,11 +399,11 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
           <Skeleton className="h-5 w-1/2" />
         </div>
       ) : briefContent ? (
-        <div className="rounded-lg border border-border/20 bg-muted/5 p-4">
+        <div className="rounded-lg border border-border/30 bg-muted/30 p-4">
           <BriefDisplay markdown={briefContent} />
         </div>
       ) : (
-        <p className="text-meta text-muted-foreground/40 text-center py-2">
+        <p className="text-meta text-muted-foreground text-center py-2">
           No brief for this date.
         </p>
       )}
@@ -420,7 +420,7 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
 
       {!localLoading && topLevelLocal.length > 0 && (
         <CollapsibleSection title="Tasks" count={topLevelLocal.filter((t) => !t.completed).length} defaultOpen={true}>
-          <div className="divide-y divide-border/20">
+          <div className="divide-y divide-border/30">
             {topLevelLocal.map((task, i) => {
               const subs = subtaskMap[task.id] ?? []
               const done = subs.filter((s) => s.completed || s.status === 'complete').length
@@ -451,7 +451,7 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
 
       {todoistTasks.length > 0 && (
         <CollapsibleSection title="Todoist" count={todoistTasks.length} defaultOpen={false}>
-          <div className="divide-y divide-border/20">
+          <div className="divide-y divide-border/30">
             {todoistTasks.map((task, i) => {
               const delay = `${Math.min(i, 14) * 25}ms`
               return (
