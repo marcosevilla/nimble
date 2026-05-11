@@ -16,7 +16,7 @@ import type { Priority, TodoistTaskRow } from '@daily-triage/types'
 import { BriefDisplay } from '@/components/shared/BriefDisplay'
 import { DateStrip } from '@/components/shared/DateStrip'
 import { HabitsSection } from '@/components/goals/HabitsSection'
-import { ArrowRight, Check, Coffee } from 'lucide-react'
+import { Check, Coffee } from 'lucide-react'
 import { format } from 'date-fns'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Meta } from '@/components/shared/typography'
@@ -245,6 +245,21 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
     dp.dailyState.readDailyBrief().then(setBrief).catch(() => setBrief(null))
   }, [dp])
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Enter') return
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      if (target?.matches('input, textarea, [contenteditable="true"]')) return
+      e.preventDefault()
+      if (step === 1) setStep(2)
+      else if (step === 3 && priorities) onComplete(priorities)
+      // Step 2 advances via PrioritiesSection's own button — leave it alone
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [step, priorities, onComplete])
+
   const handlePrioritiesGenerated = useCallback((p: Priority[]) => {
     setPriorities(p)
     setStep(3)
@@ -293,7 +308,7 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
           )}
           <div className="flex justify-end mt-3">
             <Button size="sm" onClick={() => setStep(2)} className="gap-1.5">
-              Next <ArrowRight className="size-3.5" />
+              Next <span className="ml-1 inline-flex items-center justify-center rounded bg-foreground/10 px-1 text-meta tabular-nums">↵</span>
             </Button>
           </div>
         </ReviewStep>
@@ -312,6 +327,7 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
           <div className="flex justify-end mt-3">
             <Button size="sm" onClick={handleFinish} className="gap-1.5">
               <Check className="size-3.5" /> Ready to go
+              <span className="ml-1 inline-flex items-center justify-center rounded bg-foreground/10 px-1 text-meta tabular-nums">↵</span>
             </Button>
           </div>
         </ReviewStep>
