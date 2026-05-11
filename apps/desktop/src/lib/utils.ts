@@ -68,6 +68,8 @@ const customTwMerge = extendTailwindMerge({
             'sidebar-border',
             'sidebar-ring',
             'accent-blue',
+            'success',
+            'success-fg',
           ],
         },
       ],

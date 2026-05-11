@@ -37,8 +37,8 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
       <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
         <div
           className={cn(
-            'h-full rounded-full transition-all duration-500',
-            pct === 100 ? 'bg-green-500' : 'bg-accent-blue',
+            'h-full rounded-full transition-[width] duration-500',
+            pct === 100 ? 'bg-success' : 'bg-foreground/40',
           )}
           style={{ width: `${pct}%` }}
         />
