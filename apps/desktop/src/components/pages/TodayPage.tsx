@@ -263,7 +263,7 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
           {(() => { const g = getGreeting(); return (
             <div className="py-4">
               <h2
-                className="text-heading animate-row-enter"
+                className="text-heading text-balance animate-row-enter"
                 style={{ animationDelay: '0ms' }}
               >
                 {g.headline}
@@ -412,13 +412,13 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
         {/* Greeting — demoted to first content block */}
         {(() => { const g = getGreeting(); return (
           <div className="mb-2 space-y-1">
-            <h2 className="text-heading">{g.headline}</h2>
+            <h2 className="text-heading text-balance">{g.headline}</h2>
             {total > 0 ? (
-              <p className="text-body text-muted-foreground">
+              <p className="text-body text-muted-foreground [text-wrap:pretty]">
                 {remaining === 0 ? 'All done for today.' : `${remaining} item${remaining === 1 ? '' : 's'} remaining`}
               </p>
             ) : (
-              <p className="text-body text-muted-foreground">{g.subtitle}</p>
+              <p className="text-body text-muted-foreground [text-wrap:pretty]">{g.subtitle}</p>
             )}
           </div>
         )})()}
