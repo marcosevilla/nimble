@@ -92,7 +92,7 @@ export function RightSidebar() {
         </>
       )}
 
-      {!collapsed && <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
+      {!collapsed && <div className="flex-1 overflow-y-auto flex flex-col min-h-0 [scrollbar-gutter:stable]">
         <div className="flex flex-col flex-1 min-h-0">
           {/* Schedule section */}
           <div className="p-4 pt-2 flex flex-col flex-1 min-h-0">

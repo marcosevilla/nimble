@@ -121,9 +121,7 @@ function ReviewStep({
           className={cn(
             'flex size-6 items-center justify-center rounded-full text-meta-strong',
             done ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground',
-            active && 'animate-row-enter',
           )}
-          style={active ? { animationDelay: '0ms' } : undefined}
         >
           {done ? <Check className="size-3.5" /> : step}
         </span>
@@ -131,18 +129,12 @@ function ReviewStep({
           className={cn(
             'text-body-strong',
             done && 'text-muted-foreground',
-            active && 'animate-row-enter',
           )}
-          style={active ? { animationDelay: '60ms' } : undefined}
         >
           {title}
         </h3>
       </div>
-      {active && (
-        <div className="animate-row-enter" style={{ animationDelay: '120ms' }}>
-          {children}
-        </div>
-      )}
+      {active && <div>{children}</div>}
     </div>
   )
 }
@@ -277,10 +269,7 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
           {/* Greeting — demoted to first content block */}
           {(() => { const g = getGreeting(); return (
             <div className="py-4">
-              <h2
-                className="text-heading text-balance animate-row-enter"
-                style={{ animationDelay: '0ms' }}
-              >
+              <h2 className="text-heading text-balance">
                 {g.headline}
               </h2>
             </div>
@@ -300,7 +289,7 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
               <Skeleton className="h-5 w-2/3" />
             </div>
           ) : brief ? (
-            <div className="max-h-[32rem] overflow-y-auto">
+            <div className="max-h-[32rem] overflow-y-auto [scrollbar-gutter:stable]">
               <BriefDisplay markdown={brief} />
             </div>
           ) : (
@@ -469,17 +458,12 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
       {!localLoading && topLevelLocal.length > 0 && (
         <CollapsibleSection title="Tasks" count={topLevelLocal.filter((t) => !t.completed).length} defaultOpen={true}>
           <div className="divide-y divide-border/30">
-            {topLevelLocal.map((task, i) => {
+            {topLevelLocal.map((task) => {
               const subs = subtaskMap[task.id] ?? []
               const done = subs.filter((s) => s.completed || s.status === 'complete').length
               const stats = subs.length > 0 ? { done, total: subs.length } : undefined
-              const delay = `${Math.min(i, 14) * 25}ms`
               return (
-                <div
-                  key={task.id}
-                  className="animate-row-enter"
-                  style={{ animationDelay: delay }}
-                >
+                <div key={task.id}>
                   <LocalTaskRow
                     task={task}
                     projects={projects}
@@ -500,14 +484,9 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
       {todoistTasks.length > 0 && (
         <CollapsibleSection title="Todoist" count={todoistTasks.length} defaultOpen={false}>
           <div className="divide-y divide-border/30">
-            {todoistTasks.map((task, i) => {
-              const delay = `${Math.min(i, 14) * 25}ms`
+            {todoistTasks.map((task) => {
               return (
-                <div
-                  key={task.id}
-                  className="animate-row-enter"
-                  style={{ animationDelay: delay }}
-                >
+                <div key={task.id}>
                   <TaskRow task={task} onSnooze={snoozeTask} />
                 </div>
               )

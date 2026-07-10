@@ -282,13 +282,10 @@ export function InboxPage() {
         </div>
       ) : (
         <div className="divide-y divide-border/20">
-          {items.map((item, i) => {
-            const delay = `${Math.min(i, 14) * 25}ms`
+          {items.map((item) => {
             return (
               <div
                 key={item.kind === 'task' ? `task-${item.data.id}` : `note-${item.data.id}`}
-                className="animate-row-enter"
-                style={{ animationDelay: delay }}
               >
                 {item.kind === 'task' ? (
                   <InboxTaskRow
@@ -487,7 +484,7 @@ function MoveToDocPicker({
         </div>
 
         {/* Doc list */}
-        <div className="max-h-48 overflow-y-auto space-y-0.5">
+        <div className="max-h-48 overflow-y-auto space-y-0.5 [scrollbar-gutter:stable]">
           {loading ? (
             <p className="text-meta text-muted-foreground/40 py-2 text-center">Loading...</p>
           ) : filteredDocs.length === 0 ? (

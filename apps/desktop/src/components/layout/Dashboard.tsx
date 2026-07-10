@@ -212,7 +212,7 @@ export function Dashboard() {
           {focusActive && !focusCompact ? (
             <FocusView />
           ) : detailTarget && detailMode === 'body' ? (
-            <main key={`detail-${detailTarget.id}`} className="flex-1 min-w-0 p-6 animate-page-enter">
+            <main key={`detail-${detailTarget.id}`} className="flex-1 min-w-0 p-6">
               <div className={cn('mx-auto w-full', contentMaxW)}>
                 {detailTarget.type === 'task' ? <TaskDetailPage /> : <CaptureDetailPage />}
               </div>
@@ -220,7 +220,7 @@ export function Dashboard() {
           ) : (
             <main
               key={currentPage}
-              className="flex-1 min-w-0 flex flex-col animate-page-enter"
+              className="flex-1 min-w-0 flex flex-col"
             >
               <PageContent page={currentPage} />
             </main>

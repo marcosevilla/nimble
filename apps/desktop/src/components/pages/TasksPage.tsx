@@ -179,7 +179,9 @@ function AllTasksView({
   )
 
   return (
-    <div className="flex-1 overflow-y-auto flex flex-col min-w-0">
+    // scrollbar-gutter keeps centered content from shifting when the
+    // classic 6px scrollbar appears after async content loads
+    <div className="flex-1 overflow-y-auto flex flex-col min-w-0 [scrollbar-gutter:stable]">
       <PageHeader
         title="Tasks"
         meta={`${filteredTasks.length} task${filteredTasks.length !== 1 ? 's' : ''}${statusFilter !== 'all' ? ` · ${statusFilter.replace('_', ' ')}` : ''}`}

@@ -196,11 +196,6 @@ export function SortableTaskList({
   const taskMap: Record<string, LocalTask> = {}
   for (const t of topLevel) taskMap[t.id] = t
 
-  // Pre-compute a flat row index so each row can stagger-enter based on
-  // its actual position in the rendered list (parents + subtasks).
-  let flatRowIdx = 0
-  const delayFor = (idx: number) => `${Math.min(idx, 14) * 25}ms`
-
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <SortableContext items={items} strategy={verticalListSortingStrategy}>
@@ -218,14 +213,8 @@ export function SortableTaskList({
               ? { done, total: subtasks.length }
               : undefined
 
-            const parentDelay = delayFor(flatRowIdx++)
-
             return [
-              <div
-                key={id}
-                className="animate-row-enter"
-                style={{ animationDelay: parentDelay }}
-              >
+              <div key={id}>
                 <SortableTaskItem
                   task={task}
                   projects={projects}
@@ -238,13 +227,8 @@ export function SortableTaskList({
                 />
               </div>,
               ...subtasks.map((sub) => {
-                const subDelay = delayFor(flatRowIdx++)
                 return (
-                  <div
-                    key={sub.id}
-                    className="animate-row-enter"
-                    style={{ animationDelay: subDelay }}
-                  >
+                  <div key={sub.id}>
                     <SubtaskRow
                       task={sub}
                       projects={projects}
