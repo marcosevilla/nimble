@@ -2,11 +2,30 @@ import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { useGoalsStore } from '@/stores/goalsStore'
 import { useDataProvider } from '@/services/provider-context'
-import type { HabitHeatmapEntry } from '@daily-triage/types'
+import type { HabitHeatmapEntry, HabitWithStats } from '@daily-triage/types'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Flame } from 'lucide-react'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from '@/components/ui/alert-dialog'
+import { Flame, Plus, Settings2, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
+
+const HABIT_COLORS = [
+  '#f59e0b', '#ef4444', '#22c55e', '#3b82f6', '#8b5cf6',
+  '#ec4899', '#14b8a6', '#f97316',
+]
 
 // Map icon string to Lucide component, fallback to emoji based on category/name
 function getHabitEmoji(name: string, category: string | null): string {
@@ -352,7 +371,28 @@ export function HabitsSection() {
     )
   }
 
-  if (activeHabits.length === 0) return null
+  if (activeHabits.length === 0) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Flame className="size-3.5 text-amber-500" />
+          <h3 className="text-body-strong">Habits</h3>
+        </div>
+        <div className="flex items-center gap-3">
+          <p className="text-meta text-muted-foreground/60">
+            Track a small daily action — any effort counts.
+          </p>
+          <AddHabitPopover
+            onCreated={loadHabits}
+            triggerClassName={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-1.5 shrink-0')}
+          >
+            <Plus className="size-3.5" />
+            Add habit
+          </AddHabitPopover>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3">
@@ -364,6 +404,7 @@ export function HabitsSection() {
           <span className="text-label text-muted-foreground tabular-nums">
             {completedCount}/{activeHabits.length}
           </span>
+          <ManageHabitsPopover habits={activeHabits} onChanged={loadHabits} />
         </div>
         {avgMomentum > 0 && (
           <span className="text-label text-muted-foreground">
@@ -386,6 +427,12 @@ export function HabitsSection() {
             onToggle={() => handleToggle(habit.id, habit.today_completed)}
           />
         ))}
+        <AddHabitPopover
+          onCreated={loadHabits}
+          triggerClassName="size-10 rounded-full flex items-center justify-center ring-1 ring-dashed ring-border/40 text-muted-foreground/40 hover:text-muted-foreground hover:ring-border/70 transition-all"
+        >
+          <Plus className="size-4" />
+        </AddHabitPopover>
       </div>
 
       {/* Heatmap (collapsible) */}
@@ -396,6 +443,184 @@ export function HabitsSection() {
           <HabitHeatmap data={heatmapData} />
         )}
       </CollapsibleSection>
+    </div>
+  )
+}
+
+// ── Add Habit ──
+
+function AddHabitPopover({
+  children,
+  triggerClassName,
+  onCreated,
+}: {
+  children: React.ReactNode
+  triggerClassName?: string
+  onCreated: () => void
+}) {
+  const dp = useDataProvider()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [color, setColor] = useState(HABIT_COLORS[0])
+  const [saving, setSaving] = useState(false)
+
+  const handleCreate = async () => {
+    const trimmed = name.trim()
+    if (!trimmed || saving) return
+    setSaving(true)
+    try {
+      await dp.habits.create({ name: trimmed, icon: 'Circle', color })
+      toast.success(`Habit added: "${trimmed}"`)
+      setName('')
+      setColor(HABIT_COLORS[0])
+      setOpen(false)
+      onCreated()
+    } catch (e) {
+      toast.error(`Failed to add habit: ${e}`)
+    }
+    setSaving(false)
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger className={triggerClassName} aria-label="Add habit">
+        {children}
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="start" sideOffset={4} className="w-64 p-3 space-y-3">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
+          placeholder="Stretch for 5 minutes"
+          autoFocus
+        />
+        <div className="flex items-center gap-1.5">
+          {HABIT_COLORS.map((c) => (
+            <button
+              key={c}
+              className={cn(
+                'size-5 rounded-full border-2 transition-all',
+                color === c ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',
+              )}
+              style={{ backgroundColor: c }}
+              onClick={() => setColor(c)}
+              aria-label={`Select color ${c}`}
+            />
+          ))}
+        </div>
+        <Button size="sm" className="w-full" onClick={handleCreate} disabled={!name.trim() || saving}>
+          {saving ? 'Adding...' : 'Add habit'}
+        </Button>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+// ── Manage Habits ──
+
+function ManageHabitsPopover({ habits, onChanged }: { habits: HabitWithStats[]; onChanged: () => void }) {
+  const dp = useDataProvider()
+  const [deleting, setDeleting] = useState<HabitWithStats | null>(null)
+
+  const handleRename = useCallback(async (id: string, name: string) => {
+    try {
+      await dp.habits.update({ id, name })
+      onChanged()
+    } catch (e) {
+      toast.error(`Failed to rename habit: ${e}`)
+    }
+  }, [dp, onChanged])
+
+  const handleDelete = useCallback(async () => {
+    if (!deleting) return
+    try {
+      await dp.habits.delete(deleting.id)
+      toast.success(`Habit deleted: "${deleting.name}"`)
+      onChanged()
+    } catch (e) {
+      toast.error(`Failed to delete habit: ${e}`)
+    }
+    setDeleting(null)
+  }, [deleting, dp, onChanged])
+
+  return (
+    <>
+      <Popover>
+        <PopoverTrigger
+          className="flex size-5 items-center justify-center rounded-md text-muted-foreground/30 hover:text-muted-foreground hover:bg-accent/20 transition-colors"
+          aria-label="Manage habits"
+        >
+          <Settings2 className="size-3" />
+        </PopoverTrigger>
+        <PopoverContent side="bottom" align="start" sideOffset={4} className="w-64 p-1.5 space-y-0.5">
+          {habits.map((h) => (
+            <ManageHabitRow key={h.id} habit={h} onRename={handleRename} onDelete={() => setDeleting(h)} />
+          ))}
+        </PopoverContent>
+      </Popover>
+
+      <AlertDialog open={!!deleting} onOpenChange={(o) => { if (!o) setDeleting(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{deleting?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the habit and its check-off history. This can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  )
+}
+
+function ManageHabitRow({
+  habit,
+  onRename,
+  onDelete,
+}: {
+  habit: HabitWithStats
+  onRename: (id: string, name: string) => void
+  onDelete: () => void
+}) {
+  const [draft, setDraft] = useState(habit.name)
+
+  useEffect(() => { setDraft(habit.name) }, [habit.name])
+
+  const save = () => {
+    const trimmed = draft.trim()
+    if (trimmed && trimmed !== habit.name) onRename(habit.id, trimmed)
+    else setDraft(habit.name)
+  }
+
+  return (
+    <div className="group flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent/10 transition-colors">
+      <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: habit.color }} />
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur() }
+          if (e.key === 'Escape') { setDraft(habit.name); (e.target as HTMLInputElement).blur() }
+        }}
+        className="flex-1 min-w-0 bg-transparent text-body outline-none"
+      />
+      <button
+        onClick={onDelete}
+        className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all"
+        aria-label={`Delete habit ${habit.name}`}
+      >
+        <Trash2 className="size-3.5" />
+      </button>
     </div>
   )
 }
