@@ -27,6 +27,7 @@ import { FocusResumeDialog } from '@/components/focus/FocusResumeDialog'
 import { useDetailStore } from '@/stores/detailStore'
 import { TaskDetailPage } from '@/components/detail/TaskDetailPage'
 import { CaptureDetailPage } from '@/components/detail/CaptureDetailPage'
+import { GoalDetailPage } from '@/components/detail/GoalDetailPage'
 import { DetailSidebar } from '@/components/detail/DetailSidebar'
 
 // Page titles live on each page's own <PageHeader> now. No central map.
@@ -214,7 +215,7 @@ export function Dashboard() {
           ) : detailTarget && detailMode === 'body' ? (
             <main key={`detail-${detailTarget.id}`} className="flex-1 min-w-0 p-6">
               <div className={cn('mx-auto w-full', contentMaxW)}>
-                {detailTarget.type === 'task' ? <TaskDetailPage /> : <CaptureDetailPage />}
+                {detailTarget.type === 'task' ? <TaskDetailPage /> : detailTarget.type === 'goal' ? <GoalDetailPage /> : <CaptureDetailPage />}
               </div>
             </main>
           ) : (

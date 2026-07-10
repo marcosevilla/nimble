@@ -244,17 +244,18 @@ pub async fn update_goal(
         sqlx::query("UPDATE goals SET status = ?, updated_at = datetime('now', 'localtime') WHERE id = ?")
             .bind(val).bind(id).execute(pool).await?;
     }
+    // Empty string clears the nullable fields below (None = leave unchanged)
     if let Some(val) = life_area_id {
         sqlx::query("UPDATE goals SET life_area_id = ?, updated_at = datetime('now', 'localtime') WHERE id = ?")
-            .bind(val).bind(id).execute(pool).await?;
+            .bind(if val.is_empty() { None } else { Some(val) }).bind(id).execute(pool).await?;
     }
     if let Some(val) = start_date {
         sqlx::query("UPDATE goals SET start_date = ?, updated_at = datetime('now', 'localtime') WHERE id = ?")
-            .bind(val).bind(id).execute(pool).await?;
+            .bind(if val.is_empty() { None } else { Some(val) }).bind(id).execute(pool).await?;
     }
     if let Some(val) = target_date {
         sqlx::query("UPDATE goals SET target_date = ?, updated_at = datetime('now', 'localtime') WHERE id = ?")
-            .bind(val).bind(id).execute(pool).await?;
+            .bind(if val.is_empty() { None } else { Some(val) }).bind(id).execute(pool).await?;
     }
     if let Some(val) = color {
         sqlx::query("UPDATE goals SET color = ?, updated_at = datetime('now', 'localtime') WHERE id = ?")

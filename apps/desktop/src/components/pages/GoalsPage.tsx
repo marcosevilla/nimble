@@ -37,24 +37,8 @@ import {
 } from 'lucide-react'
 import { GoalTimeline } from '@/components/goals/GoalTimeline'
 import { PageHeader } from '@/components/shared/PageHeader'
-
-// ── Status Config ──
-
-const GOAL_STATUSES: { value: GoalStatus; label: string; color: string }[] = [
-  { value: 'not_started', label: 'Not started', color: 'text-muted-foreground' },
-  { value: 'active', label: 'Active', color: 'text-amber-500' },
-  { value: 'paused', label: 'Paused', color: 'text-blue-400' },
-  { value: 'achieved', label: 'Achieved', color: 'text-green-500' },
-  { value: 'abandoned', label: 'Abandoned', color: 'text-muted-foreground/50' },
-]
-
-function statusLabel(status: GoalStatus): string {
-  return GOAL_STATUSES.find((s) => s.value === status)?.label ?? status
-}
-
-function statusColor(status: GoalStatus): string {
-  return GOAL_STATUSES.find((s) => s.value === status)?.color ?? 'text-muted-foreground'
-}
+import { useDetailStore } from '@/stores/detailStore'
+import { GOAL_STATUSES, GOAL_COLORS, statusLabel, statusColor } from '@/lib/goalStatus'
 
 // ── Goal Card ──
 
@@ -148,11 +132,6 @@ function GoalCard({
 }
 
 // ── Goal Create Dialog ──
-
-const GOAL_COLORS = [
-  '#f59e0b', '#ef4444', '#22c55e', '#3b82f6', '#8b5cf6',
-  '#ec4899', '#14b8a6', '#f97316',
-]
 
 function GoalCreateDialog({
   open,
@@ -411,10 +390,11 @@ export function GoalsPage() {
     setImporting(false)
   }, [dp, refresh])
 
-  const handleGoalClick = useCallback((_goalId: string) => {
-    // TODO: Open goal detail view
-    // Could use detailStore or a goal-specific detail panel
-  }, [])
+  const openGoal = useDetailStore((s) => s.openGoal)
+
+  const handleGoalClick = useCallback((goalId: string) => {
+    openGoal(goalId)
+  }, [openGoal])
 
   if (goalsLoading) {
     return (

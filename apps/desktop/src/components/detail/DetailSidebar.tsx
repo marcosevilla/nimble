@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { useDetailStore } from '@/stores/detailStore'
 import { TaskDetailPage } from './TaskDetailPage'
 import { CaptureDetailPage } from './CaptureDetailPage'
+import { GoalDetailPage } from './GoalDetailPage'
 import { IconButton } from '@/components/shared/IconButton'
 import { cn } from '@/lib/utils'
 import { Maximize2, X } from 'lucide-react'
@@ -69,7 +70,7 @@ export function DetailSidebar() {
       {/* Sidebar header */}
       <div className="flex items-center justify-between border-b border-border/20 px-3 py-2">
         <span className="text-label text-muted-foreground">
-          {target.type === 'task' ? 'Task' : 'Note'}
+          {target.type === 'task' ? 'Task' : target.type === 'goal' ? 'Goal' : 'Note'}
         </span>
         <div className="flex items-center gap-0.5">
           <IconButton
@@ -89,7 +90,7 @@ export function DetailSidebar() {
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {target.type === 'task' ? <TaskDetailPage /> : <CaptureDetailPage />}
+        {target.type === 'task' ? <TaskDetailPage /> : target.type === 'goal' ? <GoalDetailPage /> : <CaptureDetailPage />}
       </div>
     </aside>
   )

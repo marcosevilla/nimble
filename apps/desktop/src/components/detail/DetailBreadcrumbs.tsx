@@ -1,10 +1,13 @@
 import { useDetailStore } from '@/stores/detailStore'
+import { useGoalsStore } from '@/stores/goalsStore'
 import { useTaskDetail } from '@/hooks/useTaskDetail'
 import { ArrowLeft, ChevronRight } from 'lucide-react'
 
 function BreadcrumbLabel({ type, id }: { type: string; id: string }) {
   const { task } = useTaskDetail(type === 'task' ? id : null)
+  const goalName = useGoalsStore((s) => type === 'goal' ? s.goals.find((g) => g.id === id)?.name : undefined)
   if (type === 'capture') return <span>Note</span>
+  if (type === 'goal') return <span className="truncate">{goalName ?? 'Goal'}</span>
   return <span className="truncate">{task?.content ?? '...'}</span>
 }
 

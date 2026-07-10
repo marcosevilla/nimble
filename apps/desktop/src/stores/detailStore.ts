@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { Page } from './appStore'
 
 export type DetailMode = 'body' | 'sidebar'
-export type DetailType = 'task' | 'capture' | 'doc'
+export type DetailType = 'task' | 'capture' | 'doc' | 'goal'
 
 export interface DetailTarget {
   type: DetailType
@@ -35,6 +35,7 @@ interface DetailStore {
   openTask: (taskId: string, mode?: DetailMode) => void
   openCapture: (captureId: string, mode?: DetailMode) => void
   openDoc: (docId: string, mode?: DetailMode) => void
+  openGoal: (goalId: string, mode?: DetailMode) => void
   switchMode: (mode: DetailMode) => void
   drillDown: (target: DetailTarget) => void
   navigateUp: (index?: number) => void
@@ -97,6 +98,14 @@ export const useDetailStore = create<DetailStore>((set, get) => ({
   openDoc: (docId, mode = 'body') => {
     updateCurrentPage(get, set, () => ({
       target: { type: 'doc', id: docId },
+      mode,
+      breadcrumbs: [],
+    }))
+  },
+
+  openGoal: (goalId, mode = 'body') => {
+    updateCurrentPage(get, set, () => ({
+      target: { type: 'goal', id: goalId },
       mode,
       breadcrumbs: [],
     }))
