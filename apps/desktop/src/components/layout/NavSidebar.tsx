@@ -274,7 +274,7 @@ export function NavSidebar() {
 
   return (
     <nav
-      className="relative flex flex-col border-r border-border/20 bg-muted/30 py-3"
+      className="relative flex flex-col border-r border-border/20 bg-sidebar py-3"
       style={{ width }}
     >
       {/* Demo mode pill — click jumps to Settings to toggle off */}

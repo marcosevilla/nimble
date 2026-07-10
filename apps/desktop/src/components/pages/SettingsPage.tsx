@@ -193,6 +193,7 @@ const ACCENT_THEMES: { value: AccentTheme; label: string; swatch: string }[] = [
   { value: 'rose', label: 'Rose', swatch: 'oklch(0.58 0.18 350)' },
   { value: 'mono', label: 'Mono', swatch: 'oklch(0.45 0 0)' },
   { value: 'forest', label: 'Forest', swatch: 'oklch(0.50 0.15 155)' },
+  { value: 'runner', label: 'Runner', swatch: 'oklch(0.60 0.13 50)' },
 ]
 
 // ── Color presets for calendar feeds ──

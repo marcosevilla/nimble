@@ -9,9 +9,9 @@ import {
 } from '@/lib/fonts'
 
 type Mode = 'light' | 'dark' | 'system'
-export type AccentTheme = 'warm' | 'ocean' | 'rose' | 'mono' | 'forest'
+export type AccentTheme = 'warm' | 'ocean' | 'rose' | 'mono' | 'forest' | 'runner'
 
-const ACCENT_THEMES: AccentTheme[] = ['warm', 'ocean', 'rose', 'mono', 'forest']
+const ACCENT_THEMES: AccentTheme[] = ['warm', 'ocean', 'rose', 'mono', 'forest', 'runner']
 const FONT_VALUES = new Set<ProductFont>(FONT_OPTIONS.map((f) => f.value))
 
 function applyMode(mode: Mode) {
