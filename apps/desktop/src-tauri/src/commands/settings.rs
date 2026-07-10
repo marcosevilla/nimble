@@ -5,6 +5,12 @@ pub use daily_triage_core::types::SettingRow;
 
 #[tauri::command]
 pub async fn check_setup_complete(app: AppHandle) -> Result<bool, String> {
+    // Demo mode runs against a blank throwaway db — never show onboarding.
+    if let Ok(dir) = app.path().app_data_dir() {
+        if dir.join("demo-mode").exists() {
+            return Ok(true);
+        }
+    }
     let pool = app.state::<SqlitePool>();
     daily_triage_core::db::settings::check_setup_complete(pool.inner())
         .await

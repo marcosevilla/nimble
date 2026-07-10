@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 import { useDataProvider } from '@/services/provider-context'
 import type { UpdateStatus, CalendarFeed, CaptureRoute, Document, SyncStatus } from '@daily-triage/types'
 import { useAppStore } from '@/stores/appStore'
@@ -400,6 +401,51 @@ function CalendarsSection() {
         </Button>
       )}
     </section>
+  )
+}
+
+// ── Demo Mode Section ──
+
+function DemoModeSection() {
+  const dp = useDataProvider()
+  const [active, setActive] = useState(false)
+  const [switching, setSwitching] = useState(false)
+
+  useEffect(() => {
+    dp.system.getDemoStatus().then(setActive).catch(() => {})
+  }, [dp])
+
+  const handleToggle = async (on: boolean) => {
+    setSwitching(true)
+    try {
+      await dp.system.toggleDemoMode(on)
+      setActive(on)
+      toast.message(on ? 'Entering demo mode...' : 'Leaving demo mode...', {
+        description: 'Restarting Daily Triage.',
+      })
+    } catch (e) {
+      toast.error(`Failed to toggle demo mode: ${e}`)
+      setSwitching(false)
+    }
+  }
+
+  return (
+    <div className="flex items-start justify-between gap-6">
+      <div className="space-y-1">
+        <SectionLabel as="div">{active ? 'Demo mode is on' : 'Demo mode'}</SectionLabel>
+        <Meta as="p">
+          {active
+            ? 'Showing a blank throwaway workspace. Toggle off to restart with your real data — everything created during the demo is discarded.'
+            : 'Restarts into a blank throwaway workspace — no tasks, captures, docs, goals, calendar, or integrations. Your real data stays untouched and comes back when you toggle off.'}
+        </Meta>
+      </div>
+      <Switch
+        checked={active}
+        onCheckedChange={handleToggle}
+        disabled={switching}
+        aria-label="Toggle demo mode"
+      />
+    </div>
   )
 }
 
@@ -1228,6 +1274,11 @@ export function SettingsPage() {
             </a>
           </li>
           <li>
+            <a href="#demo" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
+              Demo Mode
+            </a>
+          </li>
+          <li>
             <a href="#about" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
               About
             </a>
@@ -1457,6 +1508,17 @@ export function SettingsPage() {
             />
           ))}
         </div>
+      </section>
+
+      <Separator />
+
+      {/* Demo Mode */}
+      <section id="demo" className="space-y-4 scroll-mt-6">
+        <SectionHeader
+          title="Demo Mode"
+          description="A clean-slate workspace for demos and screen shares. Toggling restarts the app."
+        />
+        <DemoModeSection />
       </section>
 
       <Separator />

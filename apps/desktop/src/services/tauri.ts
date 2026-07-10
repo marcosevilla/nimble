@@ -728,3 +728,14 @@ export async function syncInitializeRemote(): Promise<void> {
 export async function syncSeedExisting(): Promise<number> {
   return invoke<number>('sync_seed_existing')
 }
+
+// ── Demo Mode ──
+
+export async function getDemoStatus(): Promise<boolean> {
+  return invoke<boolean>('demo_status')
+}
+
+/** Switches to (or from) the throwaway demo database and restarts the app. */
+export async function toggleDemoMode(on: boolean): Promise<void> {
+  return invoke<void>('demo_toggle', { on })
+}

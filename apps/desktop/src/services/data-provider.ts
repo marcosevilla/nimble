@@ -322,6 +322,9 @@ export interface DataProvider {
   system: {
     openUrl(url: string): Promise<void>
     checkForUpdates(): Promise<UpdateStatus>
+    getDemoStatus(): Promise<boolean>
+    /** Switches to/from the throwaway demo database and restarts the app. */
+    toggleDemoMode(on: boolean): Promise<void>
   }
 
   sync: {

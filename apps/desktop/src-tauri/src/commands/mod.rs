@@ -3,6 +3,7 @@ pub mod ai;
 pub mod calendar;
 pub mod capture_routes;
 pub mod captures;
+pub mod demo;
 pub mod docs;
 pub mod focus;
 pub mod goals;

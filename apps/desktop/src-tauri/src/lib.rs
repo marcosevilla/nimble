@@ -15,7 +15,7 @@ use tauri::{
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-use commands::{activity, ai, calendar, capture_routes, captures, docs, focus, goals, habits, import, local_tasks, obsidian, open_url, priorities, progress, projects, settings, sync, todoist, updater};
+use commands::{activity, ai, calendar, capture_routes, captures, demo, docs, focus, goals, habits, import, local_tasks, obsidian, open_url, priorities, progress, projects, settings, sync, todoist, updater};
 
 /// Show and focus the main window
 fn show_window(app: &tauri::AppHandle) {
@@ -145,7 +145,14 @@ pub fn run() {
                     .expect("failed to get app data dir");
                 std::fs::create_dir_all(&app_dir).expect("failed to create app data dir");
 
-                let db_path = app_dir.join("daily-triage.db");
+                // Demo mode: a marker file switches the app to a throwaway
+                // demo.db so real data never loads. See commands/demo.rs.
+                let demo_mode = app_dir.join("demo-mode").exists();
+                let db_path = if demo_mode {
+                    app_dir.join("demo.db")
+                } else {
+                    app_dir.join("daily-triage.db")
+                };
                 let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
                 let pool = SqlitePoolOptions::new()
@@ -159,7 +166,11 @@ pub fn run() {
                     .await
                     .expect("failed to run migrations");
 
-                log::info!("Database initialized at {:?}", db_path);
+                if demo_mode {
+                    log::info!("DEMO MODE — database initialized at {:?}", db_path);
+                } else {
+                    log::info!("Database initialized at {:?}", db_path);
+                }
 
                 // Store pool in app state
                 app_handle.manage(pool);
@@ -276,6 +287,8 @@ pub fn run() {
             sync::sync_test_connection,
             sync::sync_initialize_remote,
             sync::sync_seed_existing,
+            demo::demo_status,
+            demo::demo_toggle,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

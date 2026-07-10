@@ -150,6 +150,8 @@ export function createTauriProvider(): DataProvider {
     system: {
       openUrl: tauri.openUrl,
       checkForUpdates: tauri.checkForUpdates,
+      getDemoStatus: tauri.getDemoStatus,
+      toggleDemoMode: tauri.toggleDemoMode,
     },
 
     sync: {

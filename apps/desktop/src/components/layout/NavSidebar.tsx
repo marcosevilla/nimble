@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { useAppStore } from '@/stores/appStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { useDetailStore } from '@/stores/detailStore'
+import { useDataProvider } from '@/services/provider-context'
 import { cn } from '@/lib/utils'
 import { Sun, CheckSquare, Inbox, FileText, Target, BookOpen, Settings, Command } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -193,6 +194,13 @@ export function NavSidebar() {
 
   const expanded = width >= COLLAPSE_THRESHOLD
 
+  // Demo mode indicator — always visible while the throwaway db is active
+  const dp = useDataProvider()
+  const [demoMode, setDemoMode] = useState(false)
+  useEffect(() => {
+    dp.system.getDemoStatus().then(setDemoMode).catch(() => {})
+  }, [dp])
+
   // Resize handle logic
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -269,6 +277,25 @@ export function NavSidebar() {
       className="relative flex flex-col border-r border-border/20 bg-muted/30 py-3"
       style={{ width }}
     >
+      {/* Demo mode pill — click jumps to Settings to toggle off */}
+      {demoMode && (
+        <div className={cn('mb-2 flex', expanded ? 'px-2' : 'justify-center')}>
+          <Tooltip>
+            <TooltipTrigger
+              className={cn(
+                'flex items-center gap-1.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 transition-colors hover:bg-amber-500/25',
+                expanded ? 'px-2.5 py-1 text-label' : 'size-6 justify-center',
+              )}
+              onClick={() => setCurrentPage('settings')}
+            >
+              <span className="size-1.5 rounded-full bg-current animate-pulse" />
+              {expanded && 'Demo'}
+            </TooltipTrigger>
+            <TooltipContent side="right">Demo mode — real data hidden. Click to manage.</TooltipContent>
+          </Tooltip>
+        </div>
+      )}
+
       {/* Sortable nav items */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={navOrder} strategy={verticalListSortingStrategy}>
