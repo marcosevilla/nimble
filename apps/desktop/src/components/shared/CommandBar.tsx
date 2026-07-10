@@ -6,10 +6,11 @@ import { useDataProvider } from '@/services/provider-context'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { useDocsStore } from '@/stores/docsStore'
 import { useAppStore } from '@/stores/appStore'
+import { useDetailStore } from '@/stores/detailStore'
 import { CommandBarResults, type BarMode } from './CommandBarResults'
 import { toast } from 'sonner'
 import { taskToast } from '@/lib/taskToast'
-import type { LocalTask, Document } from '@daily-triage/types'
+import type { LocalTask, Document, Capture } from '@daily-triage/types'
 
 const MAX_RESULTS = 8
 
@@ -58,6 +59,7 @@ export function CommandBar() {
   const { tasks, addTask, complete, refresh } = useLocalTasks()
   const { projects } = useProjects()
   const [docResults, setDocResults] = useState<Document[]>([])
+  const [captureResults, setCaptureResults] = useState<Capture[]>([])
 
   const { mode, query } = useMemo(() => parseMode(rawQuery), [rawQuery])
 
@@ -81,7 +83,27 @@ export function CommandBar() {
     return () => clearTimeout(timeout)
   }, [query, mode, dp])
 
-  const totalItems = filteredTasks.length + docResults.length + 2
+  // Search captures when query changes (client-side filter — no search backend)
+  useEffect(() => {
+    if (!query.trim() || mode !== 'search') {
+      setCaptureResults([])
+      return
+    }
+    const timeout = setTimeout(() => {
+      const q = query.trim().toLowerCase()
+      dp.captures.list(200, false)
+        .then((caps) => setCaptureResults(caps.filter((c) => c.content.toLowerCase().includes(q)).slice(0, 5)))
+        .catch(() => setCaptureResults([]))
+    }, 200)
+    return () => clearTimeout(timeout)
+  }, [query, mode, dp])
+
+  // Result index layout: tasks, docs, captures, then the two create actions
+  const docStartIndex = filteredTasks.length
+  const captureStartIndex = docStartIndex + docResults.length
+  const createIndex = captureStartIndex + captureResults.length
+  const captureActionIndex = createIndex + 1
+  const totalItems = captureActionIndex + 1
 
   // Open/close
   const openBar = useCallback(() => {
@@ -147,6 +169,11 @@ export function CommandBar() {
   const handleOpenDoc = useCallback((docId: string) => {
     useDocsStore.getState().selectDoc(docId)
     useAppStore.getState().setCurrentPage('docs')
+    closeBar()
+  }, [closeBar])
+
+  const handleOpenCapture = useCallback((captureId: string) => {
+    useDetailStore.getState().openCapture(captureId)
     closeBar()
   }, [closeBar])
 
@@ -225,16 +252,16 @@ export function CommandBar() {
 
       if (e.key === 'Enter') {
         e.preventDefault()
-        const createIdx = filteredTasks.length
-        const captureIdx = filteredTasks.length + 1
         if (mode === 'capture') { handleCapture(); return }
         if (mode === 'task') { handleCreateTask(); return }
         if (selectedIndex < filteredTasks.length) handleComplete(filteredTasks[selectedIndex].id)
-        else if (selectedIndex === createIdx) handleCreateTask()
-        else if (selectedIndex === captureIdx) handleCapture()
+        else if (selectedIndex < captureStartIndex) handleOpenDoc(docResults[selectedIndex - docStartIndex].id)
+        else if (selectedIndex < createIndex) handleOpenCapture(captureResults[selectedIndex - captureStartIndex].id)
+        else if (selectedIndex === createIndex) handleCreateTask()
+        else if (selectedIndex === captureActionIndex) handleCapture()
       }
     },
-    [query, mode, totalItems, selectedIndex, filteredTasks, breakdownTask, breakdownLoading, handleComplete, handleBreakDown, handleBreakdownConfirm, handleCreateTask, handleCapture, closeBar],
+    [query, mode, totalItems, selectedIndex, filteredTasks, docResults, captureResults, docStartIndex, captureStartIndex, createIndex, captureActionIndex, breakdownTask, breakdownLoading, handleComplete, handleBreakDown, handleBreakdownConfirm, handleCreateTask, handleCapture, handleOpenDoc, handleOpenCapture, closeBar],
   )
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -295,12 +322,14 @@ export function CommandBar() {
               mode={mode}
               tasks={filteredTasks}
               docResults={docResults}
+              captureResults={captureResults}
               projects={projects}
               selectedIndex={selectedIndex}
               onComplete={handleComplete}
               onMove={handleMove}
               onBreakDown={handleBreakDown}
               onOpenDoc={handleOpenDoc}
+              onOpenCapture={handleOpenCapture}
               onCreateTask={handleCreateTask}
               onCapture={handleCapture}
               onSelect={setSelectedIndex}

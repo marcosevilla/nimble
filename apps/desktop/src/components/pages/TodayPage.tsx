@@ -27,7 +27,7 @@ function getGreeting(): { headline: string; subtitle: string } {
   const hour = new Date().getHours()
   if (hour < 12) return { headline: 'Good morning', subtitle: "Let's plan your day." }
   if (hour < 17) return { headline: 'Good afternoon', subtitle: "Pick up where you left off." }
-  return { headline: 'Good evening', subtitle: 'Quick end-of-day pass?' }
+  return { headline: 'Good evening', subtitle: "Here's where things stand." }
 }
 
 function ProgressBar({ completed, total }: { completed: number; total: number }) {

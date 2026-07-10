@@ -9,7 +9,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
-import type { LocalTask, Project, Document } from '@daily-triage/types'
+import type { LocalTask, Project, Document, Capture } from '@daily-triage/types'
 
 export type BarMode = 'search' | 'task' | 'capture' | 'breakdown' | 'doc'
 
@@ -18,12 +18,14 @@ interface CommandBarResultsProps {
   mode: BarMode
   tasks: LocalTask[]
   docResults: Document[]
+  captureResults: Capture[]
   projects: Project[]
   selectedIndex: number
   onComplete: (id: string) => void
   onMove: (id: string, projectId: string) => void
   onBreakDown: (task: LocalTask) => void
   onOpenDoc: (docId: string) => void
+  onOpenCapture: (captureId: string) => void
   onCreateTask: () => void
   onCapture: () => void
   onSelect: (index: number) => void
@@ -42,12 +44,14 @@ export function CommandBarResults({
   mode,
   tasks,
   docResults,
+  captureResults,
   projects,
   selectedIndex,
   onComplete,
   onMove,
   onBreakDown,
   onOpenDoc,
+  onOpenCapture,
   onCreateTask,
   onCapture,
   onSelect,
@@ -63,8 +67,9 @@ export function CommandBarResults({
   for (const p of projects) projectMap[p.id] = p
 
   const docStartIndex = tasks.length
-  const createIndex = tasks.length + docResults.length
-  const captureIndex = tasks.length + docResults.length + 1
+  const captureStartIndex = docStartIndex + docResults.length
+  const createIndex = captureStartIndex + captureResults.length
+  const captureIndex = createIndex + 1
 
   // Breakdown mode
   if (breakdownTask) {
@@ -133,6 +138,7 @@ export function CommandBarResults({
   const showCapture = mode !== 'task' && mode !== 'doc'
   const showTasks = mode !== 'task' && mode !== 'capture' && mode !== 'doc'
   const showDocs = mode === 'search' || mode === 'doc'
+  const showCaptures = mode === 'search'
 
   return (
     <div className="animate-in fade-in slide-in-from-top-1 duration-150">
@@ -190,8 +196,37 @@ export function CommandBarResults({
           </div>
         )}
 
+        {/* Note results */}
+        {showCaptures && captureResults.length > 0 && (
+          <div className="p-1">
+            {(tasks.length > 0 || docResults.length > 0) && <div className="mx-1 mb-1 border-t border-border/30" />}
+            <div className="px-2 py-1">
+              <span className="text-label text-muted-foreground/60">
+                Notes
+              </span>
+            </div>
+            {captureResults.map((capture, i) => {
+              const idx = captureStartIndex + i
+              return (
+                <button
+                  key={capture.id}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
+                    selectedIndex === idx ? 'bg-accent/40' : 'hover:bg-accent/20',
+                  )}
+                  onMouseEnter={() => onSelect(idx)}
+                  onClick={() => onOpenCapture(capture.id)}
+                >
+                  <PenLine className="size-3.5 shrink-0 text-muted-foreground/40" />
+                  <span className="flex-1 min-w-0 truncate">{capture.content}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         {/* Separator */}
-        {(tasks.length > 0 || docResults.length > 0) && (showCreate || showCapture) && (
+        {(tasks.length > 0 || docResults.length > 0 || captureResults.length > 0) && (showCreate || showCapture) && (
           <div className="mx-2 border-t border-border/30" />
         )}
 

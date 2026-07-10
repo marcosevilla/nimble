@@ -11,7 +11,7 @@ struct VersionInfo {
 pub async fn check_for_updates(current_version: &str) -> UpdateStatus {
     let client = reqwest::Client::new();
     match client
-        .get("https://raw.githubusercontent.com/marcosevilla/daily-triage/main/version.json")
+        .get("https://raw.githubusercontent.com/marcosevilla/todo/main/version.json")
         .timeout(std::time::Duration::from_secs(5))
         .send()
         .await
