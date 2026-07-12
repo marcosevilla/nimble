@@ -187,11 +187,11 @@ export function FolderTree() {
             {expandedFolders.has(folder.id) && (
               <div className="ml-4 space-y-0.5">
                 {(docsByFolder[folder.id] || []).map((doc) => (
-                  <button
+                  <div
                     key={doc.id}
                     onClick={() => selectDoc(doc.id)}
                     className={cn(
-                      'group/doc flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors',
+                      'group/doc flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left cursor-pointer transition-colors',
                       selectedDocId === doc.id
                         ? 'bg-accent/40 text-foreground'
                         : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
@@ -205,7 +205,7 @@ export function FolderTree() {
                     >
                       <Trash2 className="size-2.5" />
                     </button>
-                  </button>
+                  </div>
                 ))}
               </div>
             )}
@@ -220,11 +220,11 @@ export function FolderTree() {
             </div>
             <div className="space-y-0.5">
               {unfiled.map((doc) => (
-                <button
+                <div
                   key={doc.id}
                   onClick={() => selectDoc(doc.id)}
                   className={cn(
-                    'group/doc flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors',
+                    'group/doc flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left cursor-pointer transition-colors',
                     selectedDocId === doc.id
                       ? 'bg-accent/40 text-foreground'
                       : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
@@ -238,7 +238,7 @@ export function FolderTree() {
                   >
                     <Trash2 className="size-2.5" />
                   </button>
-                </button>
+                </div>
               ))}
             </div>
           </div>
