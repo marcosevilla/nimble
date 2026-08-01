@@ -172,6 +172,7 @@ export interface Capture {
   source: string
   converted_to_task_id: string | null
   routed_to: string | null
+  context: string | null
   created_at: string
 }
 

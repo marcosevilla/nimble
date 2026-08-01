@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import 'dialkit/styles.css'
 import App from './App.tsx'
+import { CaptureStrip } from '@/components/shared/CaptureStrip'
 import { createTauriProvider } from '@/services/tauri-provider'
 import { DataProviderRoot, setDataProvider } from '@/services/provider-context'
 import { useAppStore } from '@/stores/appStore'
@@ -20,10 +21,15 @@ if (import.meta.env.DEV) {
 const tauriProvider = createTauriProvider()
 setDataProvider(tauriProvider)
 
+// The frameless quick-capture window loads the same bundle with ?window=capture
+// and renders only the capture strip (see tauri.conf.json "capture" window)
+const isCaptureWindow =
+  new URLSearchParams(window.location.search).get('window') === 'capture'
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <DataProviderRoot provider={tauriProvider}>
-      <App />
+      {isCaptureWindow ? <CaptureStrip /> : <App />}
     </DataProviderRoot>
   </StrictMode>,
 )

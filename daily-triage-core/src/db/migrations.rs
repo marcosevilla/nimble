@@ -386,6 +386,13 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
                 ON projects(external_source, external_id)
         "#,
     },
+    Migration {
+        version: 16,
+        description: "Capture context: source app for selection captures",
+        sql: r#"
+            ALTER TABLE captures ADD COLUMN context TEXT
+        "#,
+    },
 ];
 
 pub async fn run_migrations(pool: &SqlitePool) -> crate::Result<()> {

@@ -25,11 +25,12 @@ pub async fn create_capture(
     app: AppHandle,
     content: String,
     source: Option<String>,
+    context: Option<String>,
 ) -> Result<Capture, String> {
     let pool = app.state::<SqlitePool>();
     let source = source.unwrap_or_else(|| "manual".to_string());
 
-    let capture = daily_triage_core::db::captures::create_capture(pool.inner(), &content, &source)
+    let capture = daily_triage_core::db::captures::create_capture(pool.inner(), &content, &source, context.as_deref())
         .await
         .map_err(|e| e.to_string())?;
 

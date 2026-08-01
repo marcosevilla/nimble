@@ -11,16 +11,16 @@ pub async fn get_captures(
     limit: i64,
     include_converted: bool,
 ) -> crate::Result<Vec<Capture>> {
-    let rows: Vec<(String, String, String, Option<String>, Option<String>, String)> = if include_converted {
+    let rows: Vec<(String, String, String, Option<String>, Option<String>, Option<String>, String)> = if include_converted {
         sqlx::query_as(
-            "SELECT id, content, source, converted_to_task_id, routed_to, created_at FROM captures ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, content, source, converted_to_task_id, routed_to, context, created_at FROM captures ORDER BY created_at DESC LIMIT ?",
         )
         .bind(limit)
         .fetch_all(pool)
         .await?
     } else {
         sqlx::query_as(
-            "SELECT id, content, source, converted_to_task_id, routed_to, created_at FROM captures WHERE converted_to_task_id IS NULL ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, content, source, converted_to_task_id, routed_to, context, created_at FROM captures WHERE converted_to_task_id IS NULL ORDER BY created_at DESC LIMIT ?",
         )
         .bind(limit)
         .fetch_all(pool)
@@ -29,12 +29,13 @@ pub async fn get_captures(
 
     Ok(rows
         .into_iter()
-        .map(|(id, content, source, converted_to_task_id, routed_to, created_at)| Capture {
+        .map(|(id, content, source, converted_to_task_id, routed_to, context, created_at)| Capture {
             id,
             content,
             source,
             converted_to_task_id,
             routed_to,
+            context,
             created_at,
         })
         .collect())
@@ -45,16 +46,18 @@ pub async fn create_capture(
     pool: &SqlitePool,
     content: &str,
     source: &str,
+    context: Option<&str>,
 ) -> crate::Result<Capture> {
     let id = Uuid::new_v4().to_string();
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     sqlx::query(
-        "INSERT INTO captures (id, content, source, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO captures (id, content, source, context, created_at) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(content)
     .bind(source)
+    .bind(context)
     .bind(&now)
     .execute(pool)
     .await?;
@@ -73,6 +76,7 @@ pub async fn create_capture(
         source: source.to_string(),
         converted_to_task_id: None,
         routed_to: None,
+        context: context.map(|s| s.to_string()),
         created_at: now,
     };
 
@@ -115,11 +119,11 @@ pub async fn mark_capture_converted(pool: &SqlitePool, capture_id: &str, task_id
 
     // Sync log: UPDATE
     let changed = serde_json::json!(["converted_to_task_id"]).to_string();
-    let row: Option<(String, String, String, Option<String>, Option<String>, String)> = sqlx::query_as(
-        "SELECT id, content, source, converted_to_task_id, routed_to, created_at FROM captures WHERE id = ?"
+    let row: Option<(String, String, String, Option<String>, Option<String>, Option<String>, String)> = sqlx::query_as(
+        "SELECT id, content, source, converted_to_task_id, routed_to, context, created_at FROM captures WHERE id = ?"
     ).bind(capture_id).fetch_optional(pool).await.ok().flatten();
-    if let Some((id, content, source, converted_to_task_id, routed_to, created_at)) = row {
-        let capture = Capture { id, content, source, converted_to_task_id, routed_to, created_at };
+    if let Some((id, content, source, converted_to_task_id, routed_to, context, created_at)) = row {
+        let capture = Capture { id, content, source, converted_to_task_id, routed_to, context, created_at };
         let snapshot = serde_json::to_string(&capture).unwrap_or_default();
         sync::append_sync_log(pool, "captures", capture_id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
     }
@@ -208,6 +212,7 @@ pub async fn save_routed_capture(
         source: "route".to_string(),
         converted_to_task_id: None,
         routed_to: Some(label.to_string()),
+        context: None,
         created_at: now,
     };
     let snapshot = serde_json::to_string(&capture).unwrap_or_default();

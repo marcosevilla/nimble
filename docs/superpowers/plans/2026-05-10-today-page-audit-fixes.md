@@ -6,7 +6,7 @@
 
 **Architecture:** Fixes are split into seven lanes. Five are independent and can ship without a design decision (A: no-guilt language, B: calendar error chrome, C: color tokens, E: button base, G: misc safety). Two depend on **Gate 0** — a composition decision about focal point and greeting placement that must be resolved before lanes D and F can execute (lane F's stagger / radius / animation choices are reactions to lane D's layout).
 
-**Tech Stack:** React 19, Tailwind v4, shadcn/ui (base-nova), Tauri 2.0 webview. No unit tests (per `daily-triage/CLAUDE.md`). Verification substitutes: `npm run build` (TS clean), Playwright MCP smoke at `http://localhost:5173/` with the DEV bypass `window.__stores.useAppStore.getState().setSetupComplete(true)`, and visual diff against `/Users/marcosevilla/Developer/personal-productivity-app/smoke-today-after-bypass.png`.
+**Tech Stack:** React 19, Tailwind v4, shadcn/ui (base-nova), Tauri 2.0 webview. No unit tests (per `daily-triage/CLAUDE.md`). Verification substitutes: `npm run build` (TS clean), Playwright MCP smoke at `http://localhost:5173/` with the DEV bypass `window.__stores.useAppStore.getState().setSetupComplete(true)`, and visual diff against `/Users/marcosevilla/Developer/marco-task-app/smoke-today-after-bypass.png`.
 
 ---
 
@@ -22,8 +22,8 @@ Run `superpowers:using-git-worktrees` skill. Two concurrent worktrees max for th
 
 ```bash
 # Create worktrees from main (run from repo root)
-git worktree add ../personal-productivity-app-audit-1 main
-git worktree add ../personal-productivity-app-audit-2 main
+git worktree add ../marco-task-app-audit-1 main
+git worktree add ../marco-task-app-audit-2 main
 ```
 
 ---

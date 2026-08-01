@@ -64,6 +64,7 @@ pub struct Capture {
     pub source: String,
     pub converted_to_task_id: Option<String>,
     pub routed_to: Option<String>,
+    pub context: Option<String>,
     pub created_at: String,
 }
 

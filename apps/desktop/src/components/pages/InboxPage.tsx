@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useMemo, useState, useRef } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import { useAppStore } from '@/stores/appStore'
 import { useLocalTasks } from '@/hooks/useLocalTasks'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
@@ -92,6 +93,12 @@ export function InboxPage() {
     const handler = () => refreshCaptures()
     window.addEventListener('tasks-changed', handler)
     return () => window.removeEventListener('tasks-changed', handler)
+  }, [refreshCaptures])
+
+  // Cross-window: refresh when the quick-capture strip saves a capture
+  useEffect(() => {
+    const unlisten = listen('captures-changed', () => refreshCaptures())
+    return () => { unlisten.then((fn) => fn()) }
   }, [refreshCaptures])
 
   // Auto-focus
@@ -388,6 +395,13 @@ function InboxNoteRow({
       >
         {capture.content}
       </button>
+
+      {/* Source app (selection captures) */}
+      {capture.context && (
+        <span className="shrink-0 text-meta text-muted-foreground/50">
+          from {capture.context}
+        </span>
+      )}
 
       {/* Routed badge */}
       {capture.routed_to && (

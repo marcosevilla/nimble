@@ -1,4 +1,5 @@
 mod commands;
+mod selection;
 // db and parsers modules re-export from daily-triage-core for backward compatibility
 #[allow(unused)]
 mod db;
@@ -39,12 +40,44 @@ fn toggle_window(app: &tauri::AppHandle) {
     }
 }
 
+/// When the capture strip was last summoned — blur-dismiss gets a grace
+/// period so a lost activation race can't close the strip as it appears
+static STRIP_SHOWN_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Show and focus the quick-capture strip
+pub(crate) fn show_capture_strip(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("capture") {
+        *STRIP_SHOWN_AT.lock().unwrap() = Some(std::time::Instant::now());
+        let _ = window.center();
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = window.emit("capture-strip-opened", ());
+    }
+}
+
+/// Toggle the quick-capture strip (global shortcut)
+fn toggle_capture_strip(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("capture") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+        } else {
+            show_capture_strip(app);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(
+            // Capture strip is positioned/shown programmatically — keep it out of saved state
+            tauri_plugin_window_state::Builder::new()
+                .with_denylist(&["capture"])
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -56,6 +89,13 @@ pub fn run() {
                         );
                         if shortcut == &cmd_shift_t {
                             toggle_window(app);
+                        }
+                        let opt_cmd_space = Shortcut::new(
+                            Some(Modifiers::SUPER | Modifiers::ALT),
+                            Code::Space,
+                        );
+                        if shortcut == &opt_cmd_space {
+                            toggle_capture_strip(app);
                         }
                     }
                 })
@@ -81,15 +121,25 @@ pub fn run() {
                 log::warn!("Failed to register global shortcut: {}", e);
             });
 
-            // --- Auto-launch on login (enable by default) ---
+            // --- Register global shortcut: Opt+Cmd+Space (quick-capture strip) ---
+            let opt_cmd_space = Shortcut::new(
+                Some(Modifiers::SUPER | Modifiers::ALT),
+                Code::Space,
+            );
+            app.global_shortcut().on_shortcut(opt_cmd_space, |_app, _shortcut, _event| {
+                // Handled by the plugin-level handler above
+            }).unwrap_or_else(|e| {
+                log::warn!("Failed to register capture shortcut: {}", e);
+            });
+
+            // --- Auto-launch on login ---
+            // Always re-enable: rewrites the LaunchAgent so it tracks the
+            // current bundle path even after the app is renamed or moved
             let autostart = app.autolaunch();
-            if !autostart.is_enabled().unwrap_or(false) {
-                let _ = autostart.enable();
-                log::info!("Auto-launch enabled");
-            }
+            let _ = autostart.enable();
 
             // --- System tray ---
-            let show_item = MenuItemBuilder::with_id("show", "Show Daily Triage")
+            let show_item = MenuItemBuilder::with_id("show", "Show Marco's Task App")
                 .build(app)?;
             let capture_item = MenuItemBuilder::with_id("capture", "Quick Capture...")
                 .build(app)?;
@@ -108,20 +158,17 @@ pub fn run() {
 
             TrayIconBuilder::new()
                 .icon(tray_icon)
+                // Template image: macOS recolors it to match the menu bar theme
+                .icon_as_template(true)
                 .menu(&tray_menu)
-                .tooltip("Daily Triage")
+                .tooltip("Marco's Task App")
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
                         "show" => {
                             show_window(app);
                         }
                         "capture" => {
-                            // Show window and navigate to inbox for quick capture
-                            show_window(app);
-                            // Emit event to frontend to open capture mode
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.emit("open-quick-capture", ());
-                            }
+                            show_capture_strip(app);
                         }
                         "quit" => {
                             app.exit(0);
@@ -176,13 +223,32 @@ pub fn run() {
                 app_handle.manage(pool);
             });
 
+            // --- Double-tap-Shift selection capture (needs the pool above) ---
+            selection::start(app.handle().clone());
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Hide on close instead of quitting — tray icon keeps the app alive
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            match event {
+                // Hide on close instead of quitting — tray icon keeps the app alive
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                // Capture strip dismisses when it loses focus (after a short
+                // grace period — losing an activation race right at show time
+                // must not close it)
+                WindowEvent::Focused(false) if window.label() == "capture" => {
+                    let recently_shown = STRIP_SHOWN_AT
+                        .lock()
+                        .unwrap()
+                        .map(|t| t.elapsed() < std::time::Duration::from_millis(500))
+                        .unwrap_or(false);
+                    if !recently_shown {
+                        let _ = window.hide();
+                    }
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
