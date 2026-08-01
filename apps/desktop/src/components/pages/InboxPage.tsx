@@ -239,7 +239,7 @@ export function InboxPage() {
       <div className="px-5 py-6 space-y-4 w-full">
       {/* Note input — command bar style */}
       <div className="flex h-10 items-center gap-2 rounded-xl border border-border/30 bg-muted/30 px-3">
-        <Search className="size-3.5 shrink-0 text-muted-foreground/30" />
+        <Search className="size-3.5 shrink-0 text-muted-foreground" />
         <input
           ref={inputRef}
           value={inputValue}
@@ -247,7 +247,7 @@ export function InboxPage() {
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit() } }}
           placeholder="Write a note... (/i idea, /q quote, /t task)"
           disabled={submitting}
-          className="flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground/40"
+          className="flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
         />
         {parsedRoute.route && parsedRoute.content && (
           <span
@@ -386,7 +386,7 @@ function InboxNoteRow({
       <SelectionCheckbox id={capture.id} type="capture" />
 
       {/* Note icon */}
-      <PenLine className="size-4 shrink-0 text-amber-500/60" />
+      <PenLine className="size-4 shrink-0 text-muted-foreground" />
 
       {/* Content */}
       <button
@@ -398,14 +398,14 @@ function InboxNoteRow({
 
       {/* Source app (selection captures) */}
       {capture.context && (
-        <span className="shrink-0 text-meta text-muted-foreground/50">
+        <span className="shrink-0 text-meta text-muted-foreground">
           from {capture.context}
         </span>
       )}
 
       {/* Routed badge */}
       {capture.routed_to && (
-        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-caption text-muted-foreground">
+        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-label text-muted-foreground">
           {capture.routed_to}
         </span>
       )}
@@ -414,14 +414,14 @@ function InboxNoteRow({
       <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
         <button
           onClick={() => onMoveToDoc(capture)}
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-label text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent/20"
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-label text-muted-foreground hover:text-foreground hover:bg-accent/20"
         >
           <FileText className="size-3" />
           Move to doc
         </button>
         <button
           onClick={onConvert}
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-label text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent/20"
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-label text-muted-foreground hover:text-foreground hover:bg-accent/20"
         >
           <ArrowRight className="size-3" />
           Convert to task
@@ -475,14 +475,14 @@ function MoveToDocPicker({
       <div className="w-72 rounded-xl border border-border/30 bg-popover p-3 shadow-xl animate-in fade-in slide-in-from-bottom-3 duration-200" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-2">
           <span className="text-meta text-muted-foreground">Move to doc</span>
-          <button onClick={onClose} className="text-muted-foreground/40 hover:text-muted-foreground text-meta">Esc</button>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-meta">Esc</button>
         </div>
 
         {/* Folder filter */}
         <div className="flex items-center gap-1 mb-2 flex-wrap">
           <button
             onClick={() => setSelectedFolderId(null)}
-            className={cn('rounded-md px-2 py-0.5 text-label transition-colors', !selectedFolderId ? 'bg-foreground text-background' : 'text-muted-foreground/60 hover:text-muted-foreground hover:bg-accent/20')}
+            className={cn('rounded-md px-2 py-0.5 text-label transition-colors', !selectedFolderId ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent/20')}
           >
             All
           </button>
@@ -490,7 +490,7 @@ function MoveToDocPicker({
             <button
               key={f.id}
               onClick={() => setSelectedFolderId(f.id)}
-              className={cn('rounded-md px-2 py-0.5 text-label transition-colors', selectedFolderId === f.id ? 'bg-foreground text-background' : 'text-muted-foreground/60 hover:text-muted-foreground hover:bg-accent/20')}
+              className={cn('rounded-md px-2 py-0.5 text-label transition-colors', selectedFolderId === f.id ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent/20')}
             >
               {f.name}
             </button>
@@ -500,9 +500,9 @@ function MoveToDocPicker({
         {/* Doc list */}
         <div className="max-h-48 overflow-y-auto space-y-0.5 [scrollbar-gutter:stable]">
           {loading ? (
-            <p className="text-meta text-muted-foreground/40 py-2 text-center">Loading...</p>
+            <p className="text-meta text-muted-foreground py-2 text-center">Loading...</p>
           ) : filteredDocs.length === 0 ? (
-            <p className="text-meta text-muted-foreground/40 py-2 text-center">No docs yet</p>
+            <p className="text-meta text-muted-foreground py-2 text-center">No docs yet</p>
           ) : (
             filteredDocs.map((doc) => (
               <button
@@ -510,7 +510,7 @@ function MoveToDocPicker({
                 onClick={() => handleSelect(doc.id)}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent/20 transition-colors"
               >
-                <FileText className="size-3 shrink-0 text-muted-foreground/40" />
+                <FileText className="size-3 shrink-0 text-muted-foreground" />
                 <span className="truncate">{doc.title || 'Untitled'}</span>
               </button>
             ))
@@ -519,7 +519,7 @@ function MoveToDocPicker({
 
         {/* Note preview */}
         <div className="mt-2 pt-2 border-t border-border/20">
-          <p className="text-label text-muted-foreground/40 truncate">"{capture.content}"</p>
+          <p className="text-label text-muted-foreground truncate">"{capture.content}"</p>
         </div>
       </div>
     </div>

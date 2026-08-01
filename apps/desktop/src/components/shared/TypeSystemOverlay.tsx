@@ -173,9 +173,9 @@ export function TypeSystemOverlay({ onClose }: { onClose: () => void }) {
           )}
         >
           <div className="flex items-center gap-2 min-w-0">
-            <GripHorizontal className="size-3.5 shrink-0 text-muted-foreground/60" />
+            <GripHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="text-label text-foreground">Type system</span>
-            <span className="text-caption text-muted-foreground/70 truncate">
+            <span className="text-label text-muted-foreground truncate">
               {inspecting ? 'Hover text to inspect · esc to exit' : '⌘⇧U · drag to move'}
             </span>
           </div>
@@ -187,10 +187,10 @@ export function TypeSystemOverlay({ onClose }: { onClose: () => void }) {
               }}
               onMouseDown={(e) => e.stopPropagation()}
               className={cn(
-                'flex items-center gap-1 rounded px-1.5 py-0.5 text-caption transition-colors',
+                'flex items-center gap-1 rounded px-1.5 py-0.5 text-label transition-colors',
                 inspecting
                   ? 'bg-accent-blue/15 text-accent-blue'
-                  : 'text-muted-foreground/70 hover:text-foreground hover:bg-accent/30',
+                  : 'text-muted-foreground hover:text-foreground hover:bg-accent/30',
               )}
               aria-pressed={inspecting}
               aria-label={inspecting ? 'Exit inspect mode' : 'Enter inspect mode'}
@@ -201,7 +201,7 @@ export function TypeSystemOverlay({ onClose }: { onClose: () => void }) {
             <button
               onClick={onClose}
               onMouseDown={(e) => e.stopPropagation()}
-              className="p-0.5 rounded text-muted-foreground/70 hover:text-foreground hover:bg-accent/30 transition-colors"
+              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors"
               aria-label="Close type system overlay"
             >
               <X className="size-3.5" />
@@ -213,10 +213,10 @@ export function TypeSystemOverlay({ onClose }: { onClose: () => void }) {
           {TYPO_TOKENS.map((t) => (
             <div key={t.name} className="flex flex-col gap-1.5 px-3 py-3">
               <div className="flex items-baseline gap-2 min-w-0">
-                <span className="font-mono text-caption text-accent-blue">
+                <span className="font-mono text-label text-accent-blue">
                   text-{t.name}
                 </span>
-                <span className="font-mono text-caption text-muted-foreground/60 truncate">
+                <span className="font-mono text-label text-muted-foreground truncate">
                   {t.size}px · {t.weight} · {formatTracking(t.tracking)}
                 </span>
               </div>
@@ -264,18 +264,18 @@ export function TypeSystemOverlay({ onClose }: { onClose: () => void }) {
           <div className="flex items-center gap-1.5">
             <span
               className={cn(
-                'font-mono text-caption',
+                'font-mono text-label',
                 hovered.token ? 'text-accent-blue' : 'text-muted-foreground italic',
               )}
             >
               {hovered.token ?? 'no token'}
             </span>
           </div>
-          <div className="mt-1 font-mono text-caption text-foreground/80">
+          <div className="mt-1 font-mono text-label text-foreground/80">
             {formatPx(hovered.size)} · {hovered.weight} · LH{' '}
             {formatLineHeight(hovered.lineHeight, hovered.size)}
           </div>
-          <div className="font-mono text-caption text-muted-foreground/70 truncate">
+          <div className="font-mono text-label text-muted-foreground truncate">
             {hovered.letterSpacing === 'normal' ? 'tr 0' : `tr ${hovered.letterSpacing}`} ·{' '}
             {hovered.family}
           </div>

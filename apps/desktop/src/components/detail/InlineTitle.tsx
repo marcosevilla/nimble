@@ -43,7 +43,7 @@ export function InlineTitle({ value, completed, onSave }: InlineTitleProps) {
         onChange={(e) => setDraft(e.target.value)}
         onBlur={save}
         onKeyDown={handleKeyDown}
-        className="w-full bg-transparent text-heading outline-none"
+        className="w-full bg-transparent text-title outline-none"
       />
     )
   }
@@ -52,7 +52,7 @@ export function InlineTitle({ value, completed, onSave }: InlineTitleProps) {
     <h1
       onClick={startEditing}
       className={cn(
-        'text-heading cursor-text hover:bg-accent/10 rounded-md -mx-1 px-1 transition-colors',
+        'text-title cursor-text hover:bg-accent/10 rounded-md -mx-1 px-1 transition-colors',
         completed && 'text-muted-foreground line-through',
       )}
     >

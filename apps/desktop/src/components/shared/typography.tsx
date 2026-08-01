@@ -34,7 +34,7 @@ const metaVariants = cva('text-meta', {
     tone: {
       muted: 'text-muted-foreground',
       default: 'text-foreground',
-      faint: 'text-muted-foreground/60',
+      faint: 'text-muted-foreground',
     },
   },
   defaultVariants: { tone: 'muted' },
@@ -49,12 +49,12 @@ export function Meta({ className, tone, as: Tag = 'span', ...props }: MetaProps)
   return <Tag className={cn(metaVariants({ tone }), className)} {...props} />
 }
 
-const captionVariants = cva('text-caption', {
+const captionVariants = cva('text-label', {
   variants: {
     tone: {
       muted: 'text-muted-foreground',
       default: 'text-foreground',
-      faint: 'text-muted-foreground/60',
+      faint: 'text-muted-foreground',
     },
   },
   defaultVariants: { tone: 'muted' },
@@ -103,11 +103,11 @@ export function SectionTitle({
   as: Tag = 'h3',
   ...props
 }: SectionTitleProps) {
-  return <Tag className={cn('text-heading-sm text-foreground', className)} {...props} />
+  return <Tag className={cn('text-title text-foreground', className)} {...props} />
 }
 
 type PageTitleProps = React.HTMLAttributes<HTMLHeadingElement>
 
 export function PageTitle({ className, ...props }: PageTitleProps) {
-  return <h1 className={cn('text-heading-sm truncate', className)} {...props} />
+  return <h1 className={cn('text-title truncate', className)} {...props} />
 }

@@ -78,7 +78,7 @@ export function DocEditor() {
 
   if (!currentDoc) {
     return (
-      <div className="flex flex-1 items-center justify-center text-muted-foreground/40">
+      <div className="flex flex-1 items-center justify-center text-muted-foreground">
         <p className="text-body">Select a document to start editing</p>
       </div>
     )
@@ -91,7 +91,7 @@ export function DocEditor() {
       <div className="mx-auto w-full max-w-2xl p-6 space-y-4">
         {/* Folder badge */}
         {folder && (
-          <span className="text-meta text-muted-foreground/50">{folder.name}</span>
+          <span className="text-meta text-muted-foreground">{folder.name}</span>
         )}
 
         {/* Title */}
@@ -101,7 +101,7 @@ export function DocEditor() {
           onBlur={handleTitleBlur}
           onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
           placeholder="Untitled"
-          className="w-full bg-transparent text-display outline-none placeholder:text-muted-foreground/30"
+          className="w-full bg-transparent text-display outline-none placeholder:text-muted-foreground"
         />
 
         {/* Editor */}
@@ -117,12 +117,12 @@ export function DocEditor() {
         {/* Notes section */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-label text-muted-foreground/50">
+            <h3 className="text-label text-muted-foreground">
               Notes
             </h3>
             <button
               onClick={() => setNoteInputVisible(true)}
-              className="flex items-center gap-1 text-meta text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+              className="flex items-center gap-1 text-meta text-muted-foreground hover:text-foreground transition-colors"
             >
               <Plus className="size-3" />
               Add
@@ -147,7 +147,7 @@ export function DocEditor() {
                   if (e.key === 'Escape') { setNoteInputVisible(false); setNoteInput('') }
                 }}
                 placeholder="Add a note..."
-                className="flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground/40 border-b border-border/20 py-1"
+                className="flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground border-b border-border/20 py-1"
                 autoFocus
               />
             </div>
@@ -156,7 +156,7 @@ export function DocEditor() {
           {!noteInputVisible && notes.length === 0 && (
             <p
               onClick={() => setNoteInputVisible(true)}
-              className="text-body text-muted-foreground/30 cursor-text hover:text-muted-foreground/50 transition-colors"
+              className="text-body text-muted-foreground cursor-text hover:text-muted-foreground transition-colors"
             >
               Add a note...
             </p>
@@ -164,7 +164,7 @@ export function DocEditor() {
         </div>
 
         {/* Metadata */}
-        <div className="text-label text-muted-foreground/30 space-y-0.5 pt-4">
+        <div className="text-label text-muted-foreground space-y-0.5 pt-4">
           <p>Created {new Date(currentDoc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
           <p>Updated {new Date(currentDoc.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
         </div>

@@ -86,9 +86,9 @@ export function FocusView() {
     return (
       <div className="flex flex-1 items-center justify-center animate-in fade-in duration-300">
         <div className="text-center space-y-6">
-          <Coffee className="size-10 mx-auto text-muted-foreground/40" />
+          <Coffee className="size-10 mx-auto text-muted-foreground" />
           <div>
-            <h2 className="text-heading">Take a break</h2>
+            <h2 className="text-title">Take a break</h2>
             <p className="text-body text-muted-foreground mt-1">
               Round {currentPomodoro - 1} of {config.totalPomodoros} complete
             </p>
@@ -140,7 +140,7 @@ export function FocusView() {
 
         {/* Task info */}
         <div className="space-y-1">
-          <h2 className="text-heading">{task.content}</h2>
+          <h2 className="text-title">{task.content}</h2>
           {task.description && (
             <p className="text-body text-muted-foreground">{task.description}</p>
           )}
@@ -185,14 +185,14 @@ export function FocusView() {
         <div className="flex items-center justify-center gap-3">
           <button
             onClick={() => setCompact(true)}
-            className="flex items-center gap-1 text-meta text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+            className="flex items-center gap-1 text-meta text-muted-foreground hover:text-foreground transition-colors"
           >
             <Minimize2 className="size-3" />
             Minimize
           </button>
           <button
             onClick={abandonFocus}
-            className="flex items-center gap-1 text-meta text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+            className="flex items-center gap-1 text-meta text-muted-foreground hover:text-foreground transition-colors"
           >
             <X className="size-3" />
             Stop

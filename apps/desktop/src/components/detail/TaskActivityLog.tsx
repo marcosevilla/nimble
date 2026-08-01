@@ -87,25 +87,25 @@ export function TaskActivityLog({ taskId }: { taskId: string }) {
 
   return (
     <div className="space-y-3">
-      <h3 className="text-label text-muted-foreground/60">
+      <h3 className="text-label text-muted-foreground">
         Activity
       </h3>
       {Object.entries(grouped).map(([date, items]) => (
         <div key={date}>
-          <p className="text-label text-muted-foreground/40 mb-1">{date}</p>
+          <p className="text-label text-muted-foreground mb-1">{date}</p>
           {items.map((entry) => {
             const meta = ACTION_META[entry.action_type] ?? { label: entry.action_type, icon: Zap, color: 'text-muted-foreground' }
             const Icon = meta.icon
             const desc = getDescription(entry)
             return (
               <div key={entry.id} className="flex items-center gap-2 py-1">
-                <span className="w-14 shrink-0 text-right text-label tabular-nums text-muted-foreground/50">
+                <span className="w-14 shrink-0 text-right text-label tabular-nums text-muted-foreground">
                   {formatTime(entry.created_at)}
                 </span>
                 <Icon className={cn('size-3 shrink-0', meta.color)} />
                 <Meta>
                   {meta.label}
-                  {desc && <span className="ml-1 text-muted-foreground/60">— {desc}</span>}
+                  {desc && <span className="ml-1 text-muted-foreground">— {desc}</span>}
                 </Meta>
               </div>
             )

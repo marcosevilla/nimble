@@ -17,7 +17,6 @@ import { BriefDisplay } from '@/components/shared/BriefDisplay'
 import { DateStrip } from '@/components/shared/DateStrip'
 import { HabitsSection } from '@/components/goals/HabitsSection'
 import { Check, Coffee } from 'lucide-react'
-import { format } from 'date-fns'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Meta } from '@/components/shared/typography'
 
@@ -230,8 +229,6 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
   const [priorities, setPriorities] = useState<Priority[] | null>(null)
   const [brief, setBrief] = useState<string | null | undefined>(undefined) // undefined = loading
   const { tasks: todoistTasks, snoozeTask } = useTodoist()
-  const now = new Date()
-  const dateStr = format(now, 'EEEE, MMMM d')
 
   useEffect(() => {
     dp.dailyState.readDailyBrief().then(setBrief).catch(() => setBrief(null))
@@ -263,13 +260,13 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
 
   return (
     <>
-      <PageHeader title="Today" meta={dateStr} />
+      <PageHeader title="Today" />
       <div className="px-5 py-6 w-full flex justify-center">
         <div className="w-full max-w-[520px] space-y-4">
           {/* Greeting — demoted to first content block */}
           {(() => { const g = getGreeting(); return (
             <div className="py-4">
-              <h2 className="text-heading text-balance">
+              <h2 className="text-title text-balance">
                 {g.headline}
               </h2>
             </div>
@@ -403,21 +400,16 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
     onOpen: handleOpen,
   })
 
-  const now = new Date()
-  const dateStr = format(now, 'EEEE, MMMM d')
   const remaining = total - completed
 
   return (
     <>
-      <PageHeader
-        title="Today"
-        meta={dateStr}
-      />
+      <PageHeader title="Today" />
       <div className="px-5 py-6 space-y-4 w-full">
         {/* Greeting — demoted to first content block */}
         {(() => { const g = getGreeting(); return (
           <div className="mb-2 space-y-1">
-            <h2 className="text-heading text-balance">{g.headline}</h2>
+            <h2 className="text-title text-balance">{g.headline}</h2>
             {total > 0 ? (
               <p className="text-body text-muted-foreground [text-wrap:pretty]">
                 {remaining === 0 ? 'All done for today.' : `${remaining} item${remaining === 1 ? '' : 's'} remaining`}

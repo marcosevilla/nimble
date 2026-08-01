@@ -107,7 +107,7 @@ export function ProjectSidebar({
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border/20">
-        <span className="text-label text-muted-foreground/60">Projects</span>
+        <span className="text-label text-muted-foreground">Projects</span>
         <div className="flex items-center gap-0.5">
           <IconButton
             onClick={() => setNewProjectInput(true)}
@@ -138,9 +138,9 @@ export function ProjectSidebar({
               : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
           )}
         >
-          <List className="size-3.5 shrink-0 text-muted-foreground/50" />
+          <List className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="flex-1 text-body truncate">All Tasks</span>
-          <span className="text-label text-muted-foreground/50">{totalActive}</span>
+          <span className="text-label text-muted-foreground">{totalActive}</span>
         </button>
 
         {/* Divider */}
@@ -183,13 +183,13 @@ export function ProjectSidebar({
                 style={{ backgroundColor: project.color }}
               />
               <span className="flex-1 text-body truncate">{project.name}</span>
-              <span className="text-label text-muted-foreground/50 group-hover:hidden">{count}</span>
+              <span className="text-label text-muted-foreground group-hover:hidden">{count}</span>
 
               {/* Hover actions */}
               <div className="hidden items-center gap-0.5 group-hover:flex" onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={() => setEditingProject(project)}
-                  className="flex size-4 items-center justify-center rounded text-muted-foreground/30 hover:text-muted-foreground"
+                  className="flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
                   title="Edit project"
                 >
                   <Pencil className="size-2.5" />
@@ -245,7 +245,7 @@ export function ProjectSidebar({
         <div className="border-t border-border/20 p-1.5">
           <button
             onClick={() => setNewProjectInput(true)}
-            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-meta text-muted-foreground/30 hover:text-muted-foreground hover:bg-accent/10 transition-colors"
+            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-meta text-muted-foreground hover:text-foreground hover:bg-accent/10 transition-colors"
           >
             <Plus className="size-3" />
             New project

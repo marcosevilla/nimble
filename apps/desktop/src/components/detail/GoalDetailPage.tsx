@@ -132,7 +132,7 @@ export function GoalDetailPage() {
             <PanelRight className="size-4" />
           </IconButton>
           <Popover>
-            <PopoverTrigger className="flex size-7 items-center justify-center rounded-md text-muted-foreground/30 hover:text-muted-foreground hover:bg-accent/20 transition-colors">
+            <PopoverTrigger className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/20 transition-colors">
               <MoreHorizontal className="size-4" />
             </PopoverTrigger>
             <PopoverContent side="bottom" align="end" sideOffset={4} className="w-44 gap-0 p-1">
@@ -265,7 +265,7 @@ function LifeAreaPicker({
           </>
         ) : (
           <>
-            <Circle className="size-3 text-muted-foreground/40" />
+            <Circle className="size-3 text-muted-foreground" />
             No life area
           </>
         )}
@@ -278,7 +278,7 @@ function LifeAreaPicker({
             !area ? 'bg-accent/40' : 'hover:bg-accent/20',
           )}
         >
-          <Circle className="size-3 text-muted-foreground/40" />
+          <Circle className="size-3 text-muted-foreground" />
           None
         </button>
         {lifeAreas.map((a) => (
@@ -437,7 +437,7 @@ function MilestonesSection({
                   () => dp.goals.deleteMilestone(m.id),
                   'Failed to delete milestone',
                 )}
-                className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all"
+                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
                 aria-label={`Delete milestone ${m.name}`}
               >
                 <Trash2 className="size-3.5" />
@@ -458,13 +458,13 @@ function MilestonesSection({
           }}
           onBlur={() => { if (!input) setInputFocused(false) }}
           placeholder="Add a milestone..."
-          className="w-full bg-transparent text-body outline-none placeholder:text-muted-foreground/40 py-1 px-2"
+          className="w-full bg-transparent text-body outline-none placeholder:text-muted-foreground py-1 px-2"
           autoFocus
         />
       ) : (
         <p
           onClick={() => setInputFocused(true)}
-          className="text-body text-muted-foreground/40 cursor-text hover:text-muted-foreground/60 transition-colors py-1 px-2"
+          className="text-body text-muted-foreground cursor-text hover:text-muted-foreground transition-colors py-1 px-2"
         >
           Add a milestone...
         </p>

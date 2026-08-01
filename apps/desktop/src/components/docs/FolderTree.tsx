@@ -137,7 +137,7 @@ export function FolderTree() {
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border/20">
-        <span className="text-label text-muted-foreground/60">Docs</span>
+        <span className="text-label text-muted-foreground">Docs</span>
         <div className="flex items-center gap-0.5">
           <IconButton
             onClick={() => handleCreateDoc(selectedFolderId ?? undefined)}
@@ -163,14 +163,14 @@ export function FolderTree() {
             {/* Folder header */}
             <div className="group flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-accent/10 transition-colors">
               <button onClick={() => toggleFolder(folder.id)} className="shrink-0">
-                <ChevronRight className={cn('size-3 text-muted-foreground/40 transition-transform', expandedFolders.has(folder.id) && 'rotate-90')} />
+                <ChevronRight className={cn('size-3 text-muted-foreground transition-transform', expandedFolders.has(folder.id) && 'rotate-90')} />
               </button>
-              <FolderOpen className="size-3.5 shrink-0 text-muted-foreground/50" />
+              <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="flex-1 text-meta truncate">{folder.name}</span>
               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                   onClick={() => handleCreateDoc(folder.id)}
-                  className="flex size-4 items-center justify-center rounded text-muted-foreground/30 hover:text-muted-foreground"
+                  className="flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
                 >
                   <Plus className="size-2.5" />
                 </button>
@@ -197,7 +197,7 @@ export function FolderTree() {
                         : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
                     )}
                   >
-                    <FileText className="size-3 shrink-0 text-muted-foreground/40" />
+                    <FileText className="size-3 shrink-0 text-muted-foreground" />
                     <span className="flex-1 text-meta truncate">{doc.title || 'Untitled'}</span>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id) }}
@@ -216,7 +216,7 @@ export function FolderTree() {
         {unfiled.length > 0 && (
           <div>
             <div className="flex items-center gap-1 px-1.5 py-1">
-              <span className="text-label text-muted-foreground/30">Unfiled</span>
+              <span className="text-label text-muted-foreground">Unfiled</span>
             </div>
             <div className="space-y-0.5">
               {unfiled.map((doc) => (
@@ -230,7 +230,7 @@ export function FolderTree() {
                       : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
                   )}
                 >
-                  <FileText className="size-3 shrink-0 text-muted-foreground/40" />
+                  <FileText className="size-3 shrink-0 text-muted-foreground" />
                   <span className="flex-1 text-meta truncate">{doc.title || 'Untitled'}</span>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id) }}
@@ -256,14 +256,14 @@ export function FolderTree() {
               }}
               onBlur={() => { if (!newFolderName.trim()) setNewFolderInput(false) }}
               placeholder="Folder name..."
-              className="w-full bg-transparent text-meta outline-none placeholder:text-muted-foreground/30 border-b border-border/20 py-0.5"
+              className="w-full bg-transparent text-meta outline-none placeholder:text-muted-foreground border-b border-border/20 py-0.5"
               autoFocus
             />
           </div>
         ) : (
           <button
             onClick={() => setNewFolderInput(true)}
-            className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-meta text-muted-foreground/30 hover:text-muted-foreground hover:bg-accent/10 transition-colors"
+            className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-meta text-muted-foreground hover:text-foreground hover:bg-accent/10 transition-colors"
           >
             <Plus className="size-3" />
             New folder

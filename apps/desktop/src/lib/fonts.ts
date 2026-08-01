@@ -53,8 +53,8 @@ export const FONT_OPTIONS: FontOption[] = [
   },
 ]
 
-export const DEFAULT_HEADING_FONT: ProductFont = 'plus-jakarta-sans'
-export const DEFAULT_BODY_FONT: ProductFont = 'inter'
+export const DEFAULT_HEADING_FONT: ProductFont = 'geist'
+export const DEFAULT_BODY_FONT: ProductFont = 'geist'
 
 export function getFontStack(value: ProductFont): string {
   return (

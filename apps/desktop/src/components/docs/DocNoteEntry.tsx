@@ -16,7 +16,7 @@ export function DocNoteEntry({ note, onDelete }: DocNoteEntryProps) {
     <div className="group flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-accent/10 transition-colors">
       <div className="flex-1 min-w-0">
         <p className="text-body">{note.content}</p>
-        <p className="text-label text-muted-foreground/40 mt-0.5">{formatTime(note.created_at)}</p>
+        <p className="text-label text-muted-foreground mt-0.5">{formatTime(note.created_at)}</p>
       </div>
       <button
         onClick={() => onDelete(note.id)}

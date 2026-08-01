@@ -27,27 +27,27 @@
     --font-sans:    'Geist Variable', ui-sans-serif, system-ui, sans-serif;
     --font-mono:    'Geist Mono Variable', ui-monospace, 'SF Mono', monospace;
 
-    /* Canonical type scale — 10 tokens, sentence case throughout.
+    /* Canonical type scale — 8 tokens (7 + timer), sentence case throughout.
        Tailwind v4 generates text-<name> utilities from these pairs.
-       Spec: docs/superpowers/specs/2026-04-18-typography-system-design.md */
-    --text-caption:      0.625rem;    /* 10 — micro-badges, overflow counts */
-    --text-caption--line-height: 1.2;
-    --text-label:        0.6875rem;   /* 11 — section labels, chips */
-    --text-label--line-height: 1.15;
+       Linear pass 2026-08-01: 5 sizes (11/12/13/15/20 + 48 timer), weights
+       400/500/600. body (13) vs meta (12) are distinguished by COLOR
+       (foreground vs muted-foreground), never by size alone.
+       Spec: Figma "Refactor Plan — Linear Pass" (Design System page) +
+       docs/figma-design-critique-2026-08-01.md */
+    --text-label:        0.6875rem;   /* 11 — badges, kbd hints, section labels, counts */
+    --text-label--line-height: 1.3;
     --text-meta:         0.75rem;     /* 12 — timestamps, due dates, secondary */
-    --text-meta--line-height: 1.35;
-    --text-body:         0.875rem;    /* 14 — primary body, rows, task titles */
-    --text-body--line-height: 1.4286;
-    --text-body-strong:  0.875rem;    /* 14 — emphasis variant (replaces font-medium stacks) */
-    --text-body-strong--line-height: 1.4286;
-    --text-heading-sm:   0.9375rem;   /* 15 — page titles, dialog titles, editor H3 */
-    --text-heading-sm--line-height: 1.3;
-    --text-heading:      1rem;        /* 16 — greeting, section emphasis, editor H2 */
-    --text-heading--line-height: 1.25;
+    --text-meta--line-height: 1.4;
+    --text-meta-strong:  0.75rem;     /* 12 — emphasized meta (day pill, seg active) */
+    --text-meta-strong--line-height: 1.4;
+    --text-body:         0.8125rem;   /* 13 — primary body, rows, task titles */
+    --text-body--line-height: 1.45;
+    --text-body-strong:  0.8125rem;   /* 13 — emphasis variant (replaces font-medium stacks) */
+    --text-body-strong--line-height: 1.45;
+    --text-title:        0.9375rem;   /* 15 — page titles, dialog titles, greeting, editor H2 */
+    --text-title--line-height: 1.3;
     --text-display:      1.25rem;     /* 20 — editor H1, celebration moments */
-    --text-display--line-height: 1.15;
-    --text-display-xl:   1.625rem;    /* 26 — focus celebrations */
-    --text-display-xl--line-height: 1.05;
+    --text-display--line-height: 1.2;
     --text-timer:        3rem;        /* 48 — FocusView timer */
     --text-timer--line-height: 1;
 }
@@ -146,11 +146,6 @@
      No token uses text-transform: uppercase or positive letter-spacing —
      sentence case throughout. Emphasis is a weight shift (body -> body-
      strong), never an inline font-medium stack. */
-  .text-caption {
-    font-family: var(--typo-caption-family, var(--font-sans));
-    font-weight: var(--typo-caption-weight, 500);
-    letter-spacing: var(--typo-caption-tracking, 0);
-  }
   .text-label {
     font-family: var(--typo-label-family, var(--font-sans));
     font-weight: var(--typo-label-weight, 500);
@@ -169,32 +164,22 @@
   .text-body {
     font-family: var(--typo-body-family, var(--font-sans));
     font-weight: var(--typo-body-weight, 400);
-    letter-spacing: var(--typo-body-tracking, -0.006em);
+    letter-spacing: var(--typo-body-tracking, -0.005em);
   }
   .text-body-strong {
     font-family: var(--typo-body-strong-family, var(--font-sans));
     font-weight: var(--typo-body-strong-weight, 500);
-    letter-spacing: var(--typo-body-strong-tracking, -0.006em);
+    letter-spacing: var(--typo-body-strong-tracking, -0.005em);
   }
-  .text-heading-sm {
-    font-family: var(--typo-heading-sm-family, var(--font-heading));
-    font-weight: var(--typo-heading-sm-weight, 550);
-    letter-spacing: var(--typo-heading-sm-tracking, -0.015em);
-  }
-  .text-heading {
-    font-family: var(--typo-heading-family, var(--font-heading));
-    font-weight: var(--typo-heading-weight, 550);
-    letter-spacing: var(--typo-heading-tracking, -0.018em);
+  .text-title {
+    font-family: var(--typo-title-family, var(--font-heading));
+    font-weight: var(--typo-title-weight, 600);
+    letter-spacing: var(--typo-title-tracking, -0.01em);
   }
   .text-display {
     font-family: var(--typo-display-family, var(--font-heading));
-    font-weight: var(--typo-display-weight, 550);
-    letter-spacing: var(--typo-display-tracking, -0.022em);
-  }
-  .text-display-xl {
-    font-family: var(--typo-display-xl-family, var(--font-heading));
-    font-weight: var(--typo-display-xl-weight, 550);
-    letter-spacing: var(--typo-display-xl-tracking, -0.028em);
+    font-weight: var(--typo-display-weight, 600);
+    letter-spacing: var(--typo-display-tracking, -0.015em);
   }
   .text-timer {
     font-family: var(--typo-timer-family, var(--font-mono));
@@ -209,18 +194,15 @@
    is set on <html> by the tuner; one style is highlighted at a time.
    Tiptap h1/h2/h3 mirror display/heading/heading-sm — highlighting the
    token also highlights the corresponding editor heading. */
-[data-highlight-type="caption"] .text-caption,
 [data-highlight-type="label"] .text-label,
 [data-highlight-type="meta"] .text-meta,
 [data-highlight-type="body"] .text-body,
 [data-highlight-type="body-strong"] .text-body-strong,
-[data-highlight-type="heading-sm"] .text-heading-sm,
-[data-highlight-type="heading-sm"] .tiptap-editor h3,
-[data-highlight-type="heading"] .text-heading,
-[data-highlight-type="heading"] .tiptap-editor h2,
+[data-highlight-type="body-strong"] .tiptap-editor h3,
+[data-highlight-type="title"] .text-title,
+[data-highlight-type="title"] .tiptap-editor h2,
 [data-highlight-type="display"] .text-display,
 [data-highlight-type="display"] .tiptap-editor h1,
-[data-highlight-type="display-xl"] .text-display-xl,
 [data-highlight-type="timer"] .text-timer {
   outline: 2px dashed oklch(from var(--accent) l c h / 0.9);
   outline-offset: 3px;
@@ -289,35 +271,36 @@
   margin: 0.5em 0;
 }
 /* Editor headings mirror the full design-system tokens, including the
-   TypographyTuner-editable --typo-*-* overrides. Note's H1 visually matches
-   the app's text-display class, H2 matches text-heading, H3 matches
-   text-heading-sm — and tuning any of those classes in the panel updates
-   both the chrome AND the editor in lockstep. */
+   TypographyTuner-editable --typo-*-* overrides. Linear-pass map:
+   Note's H1 visually matches the app's text-display class, H2 matches
+   text-title, H3 matches text-body-strong — and tuning any of those
+   classes in the panel updates both the chrome AND the editor in
+   lockstep. */
 .tiptap-editor h1 {
   font-family: var(--typo-display-family, var(--font-heading));
   font-size: var(--text-display);
   line-height: var(--text-display--line-height);
-  font-weight: var(--typo-display-weight, 550);
-  letter-spacing: var(--typo-display-tracking, -0.022em);
+  font-weight: var(--typo-display-weight, 600);
+  letter-spacing: var(--typo-display-tracking, -0.015em);
   text-transform: var(--typo-display-case, none);
   margin: 1em 0 0.5em;
 }
 .tiptap-editor h2 {
-  font-family: var(--typo-heading-family, var(--font-heading));
-  font-size: var(--text-heading);
-  line-height: var(--text-heading--line-height);
-  font-weight: var(--typo-heading-weight, 550);
-  letter-spacing: var(--typo-heading-tracking, -0.018em);
-  text-transform: var(--typo-heading-case, none);
+  font-family: var(--typo-title-family, var(--font-heading));
+  font-size: var(--text-title);
+  line-height: var(--text-title--line-height);
+  font-weight: var(--typo-title-weight, 600);
+  letter-spacing: var(--typo-title-tracking, -0.01em);
+  text-transform: var(--typo-title-case, none);
   margin: 0.75em 0 0.4em;
 }
 .tiptap-editor h3 {
-  font-family: var(--typo-heading-sm-family, var(--font-heading));
-  font-size: var(--text-heading-sm);
-  line-height: var(--text-heading-sm--line-height);
-  font-weight: var(--typo-heading-sm-weight, 550);
-  letter-spacing: var(--typo-heading-sm-tracking, -0.015em);
-  text-transform: var(--typo-heading-sm-case, none);
+  font-family: var(--typo-body-strong-family, var(--font-sans));
+  font-size: var(--text-body-strong);
+  line-height: var(--text-body-strong--line-height);
+  font-weight: var(--typo-body-strong-weight, 500);
+  letter-spacing: var(--typo-body-strong-tracking, -0.005em);
+  text-transform: var(--typo-body-strong-case, none);
   margin: 0.5em 0 0.3em;
 }
 .tiptap-editor ul,

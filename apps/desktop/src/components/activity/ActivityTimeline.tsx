@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   Check, Plus, Trash2, Pencil, Play, Square, SkipForward,
   FolderInput, Sparkles, Zap, Eye, Lightbulb, ArrowRightLeft,
+  Target, Flag, Repeat, FileText, Folder,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -21,15 +22,20 @@ const ACTION_META: Record<string, ActionMeta> = {
   task_created: { label: 'Created task', icon: Plus, color: 'text-green-500' },
   task_completed: { label: 'Completed task', icon: Check, color: 'text-green-500' },
   task_uncompleted: { label: 'Reopened task', icon: ArrowRightLeft, color: 'text-orange-500' },
-  task_deleted: { label: 'Deleted task', icon: Trash2, color: 'text-red-500/60' },
+  task_deleted: { label: 'Deleted task', icon: Trash2, color: 'text-red-500' },
   task_updated: { label: 'Updated task', icon: Pencil, color: 'text-accent-blue' },
   status_changed: { label: 'Status changed', icon: ArrowRightLeft, color: 'text-accent-blue' },
   task_moved: { label: 'Moved task', icon: FolderInput, color: 'text-accent-blue' },
   task_reordered: { label: 'Reordered tasks', icon: ArrowRightLeft, color: 'text-muted-foreground' },
   project_created: { label: 'Created project', icon: Plus, color: 'text-indigo-500' },
-  project_deleted: { label: 'Deleted project', icon: Trash2, color: 'text-red-500/60' },
+  project_deleted: { label: 'Deleted project', icon: Trash2, color: 'text-red-500' },
   priorities_generated: { label: 'Generated priorities', icon: Sparkles, color: 'text-purple-500' },
   item_captured: { label: 'Saved note', icon: Lightbulb, color: 'text-amber-500' },
+  capture_created: { label: 'Captured a note', icon: Lightbulb, color: 'text-amber-500' },
+  capture_converted: { label: 'Converted note to task', icon: FolderInput, color: 'text-accent-blue' },
+  capture_routed: { label: 'Routed a note', icon: FolderInput, color: 'text-amber-500' },
+  capture_route_created: { label: 'Added capture route', icon: Plus, color: 'text-amber-500' },
+  capture_route_deleted: { label: 'Removed capture route', icon: Trash2, color: 'text-red-500' },
   focus_started: { label: 'Started focus', icon: Play, color: 'text-accent-blue' },
   focus_completed: { label: 'Completed focus', icon: Check, color: 'text-green-500' },
   focus_paused: { label: 'Paused focus', icon: Square, color: 'text-muted-foreground' },
@@ -38,9 +44,29 @@ const ACTION_META: Record<string, ActionMeta> = {
   focus_skipped: { label: 'Skipped task', icon: SkipForward, color: 'text-muted-foreground' },
   task_breakdown_requested: { label: 'AI breakdown', icon: Sparkles, color: 'text-purple-500' },
   task_breakdown_applied: { label: 'Applied breakdown', icon: Sparkles, color: 'text-purple-500' },
-  capture_converted: { label: 'Converted note to task', icon: FolderInput, color: 'text-accent-blue' },
-  app_opened: { label: 'Opened app', icon: Eye, color: 'text-muted-foreground/40' },
-  page_viewed: { label: 'Viewed page', icon: Eye, color: 'text-muted-foreground/40' },
+  goal_created: { label: 'Created goal', icon: Target, color: 'text-indigo-500' },
+  goal_updated: { label: 'Updated goal', icon: Pencil, color: 'text-indigo-500' },
+  goal_deleted: { label: 'Deleted goal', icon: Trash2, color: 'text-red-500' },
+  milestone_created: { label: 'Added milestone', icon: Flag, color: 'text-indigo-500' },
+  milestone_completed: { label: 'Completed milestone', icon: Check, color: 'text-green-500' },
+  milestone_deleted: { label: 'Deleted milestone', icon: Trash2, color: 'text-red-500' },
+  habit_created: { label: 'Created habit', icon: Plus, color: 'text-teal-500' },
+  habit_logged: { label: 'Logged a habit', icon: Repeat, color: 'text-teal-500' },
+  habit_deleted: { label: 'Deleted habit', icon: Trash2, color: 'text-red-500' },
+  doc_created: { label: 'Created doc', icon: FileText, color: 'text-accent-blue' },
+  doc_updated: { label: 'Updated doc', icon: Pencil, color: 'text-accent-blue' },
+  doc_deleted: { label: 'Deleted doc', icon: Trash2, color: 'text-red-500' },
+  folder_created: { label: 'Created folder', icon: Folder, color: 'text-accent-blue' },
+  todoist_migrated: { label: 'Imported from Todoist', icon: FolderInput, color: 'text-accent-blue' },
+  vault_import: { label: 'Imported from vault', icon: FolderInput, color: 'text-accent-blue' },
+  app_opened: { label: 'Opened app', icon: Eye, color: 'text-muted-foreground' },
+  page_viewed: { label: 'Viewed page', icon: Eye, color: 'text-muted-foreground' },
+}
+
+/** Fallback for unknown action types: snake_case → sentence case ("thing_happened" → "Thing happened"). */
+function prettifyActionType(actionType: string): string {
+  const words = actionType.split('_').filter(Boolean).join(' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
 const NOISE_ACTIONS = new Set(['app_opened', 'page_viewed'])
@@ -72,7 +98,7 @@ function getDescription(entry: ActivityEntry): string | null {
   return null
 }
 
-// ── Summary bar ──
+// ── Summary row ──
 
 function SummaryBar({ summaries }: { summaries: ActivitySummary[] }) {
   const meaningful = summaries.filter((s) => !NOISE_ACTIONS.has(s.action_type))
@@ -83,22 +109,15 @@ function SummaryBar({ summaries }: { summaries: ActivitySummary[] }) {
   const focused = summaries.find((s) => s.action_type === 'focus_completed')?.count ?? 0
   const created = summaries.find((s) => s.action_type === 'task_created')?.count ?? 0
 
-  return (
-    <div className="flex items-center gap-4 rounded-lg border border-border/30 bg-muted/20 px-4 py-3">
-      <Stat label="Actions" value={total} />
-      {completed > 0 && <Stat label="Completed" value={completed} />}
-      {focused > 0 && <Stat label="Focus sessions" value={focused} />}
-      {created > 0 && <Stat label="Created" value={created} />}
-    </div>
-  )
-}
+  const parts = [`${total} ${total === 1 ? 'action' : 'actions'}`]
+  if (completed > 0) parts.push(`${completed} completed`)
+  if (focused > 0) parts.push(`${focused} focus ${focused === 1 ? 'session' : 'sessions'}`)
+  if (created > 0) parts.push(`${created} created`)
 
-function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="text-center">
-      <p className="text-heading tabular-nums">{value}</p>
-      <p className="text-label text-muted-foreground">{label}</p>
-    </div>
+    <p className="text-meta text-muted-foreground tabular-nums">
+      {parts.join(' · ')}
+    </p>
   )
 }
 
@@ -106,7 +125,7 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 function TimelineEntry({ entry }: { entry: ActivityEntry }) {
   const meta = ACTION_META[entry.action_type] ?? {
-    label: entry.action_type,
+    label: prettifyActionType(entry.action_type),
     icon: Zap,
     color: 'text-muted-foreground',
   }
@@ -117,7 +136,7 @@ function TimelineEntry({ entry }: { entry: ActivityEntry }) {
   return (
     <div className={cn('flex items-start gap-3 py-1.5', isNoise && 'opacity-40')}>
       {/* Time */}
-      <span className="w-16 shrink-0 text-right text-label tabular-nums text-muted-foreground/60 pt-0.5">
+      <span className="w-16 shrink-0 text-right text-label tabular-nums text-muted-foreground pt-0.5">
         {formatTime(entry.created_at)}
       </span>
 
@@ -172,7 +191,7 @@ export function ActivityTimeline() {
   if (loading) {
     return (
       <div className="space-y-3">
-        <Skeleton className="h-16 rounded-lg" />
+        <Skeleton className="h-4 w-48" />
         {[...Array(6)].map((_, i) => (
           <Skeleton key={i} className="h-6" />
         ))}
@@ -197,12 +216,12 @@ export function ActivityTimeline() {
 
       {/* Filter toggle */}
       <div className="flex items-center justify-between">
-        <h3 className="text-label text-muted-foreground/60">
+        <h3 className="text-label text-muted-foreground">
           Timeline
         </h3>
         <button
           onClick={() => setShowNoise(!showNoise)}
-          className="text-label text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+          className="text-label text-muted-foreground hover:text-foreground transition-colors"
         >
           {showNoise ? 'Hide noise' : 'Show all'}
         </button>

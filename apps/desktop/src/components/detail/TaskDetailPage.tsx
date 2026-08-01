@@ -141,7 +141,7 @@ export function TaskDetailPage() {
             <PanelRight className="size-4" />
           </IconButton>
           <Popover>
-            <PopoverTrigger className="flex size-7 items-center justify-center rounded-md text-muted-foreground/30 hover:text-muted-foreground hover:bg-accent/20 transition-colors">
+            <PopoverTrigger className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/20 transition-colors">
               <MoreHorizontal className="size-4" />
             </PopoverTrigger>
             <PopoverContent side="bottom" align="end" sideOffset={4} className="w-44 gap-0 p-1">
@@ -261,17 +261,17 @@ export function TaskDetailPage() {
                 }}
                 onBlur={() => { if (!subInput) setSubInputFocused(false) }}
                 placeholder="Add a subtask..."
-                className="w-full bg-transparent text-body outline-none placeholder:text-muted-foreground/40 py-1"
+                className="w-full bg-transparent text-body outline-none placeholder:text-muted-foreground py-1"
                 autoFocus
               />
-              <p className="text-label text-muted-foreground/30">
-                or break down with AI <kbd className="rounded bg-muted/40 px-1 py-0.5 font-mono text-caption">{'\u2318'}B</kbd>
+              <p className="text-label text-muted-foreground">
+                or break down with AI <kbd className="rounded bg-muted/40 px-1 py-0.5 font-mono text-label">{'\u2318'}B</kbd>
               </p>
             </div>
           ) : (
             <p
               onClick={() => setSubInputFocused(true)}
-              className="text-body text-muted-foreground/40 cursor-text hover:text-muted-foreground/60 transition-colors py-1"
+              className="text-body text-muted-foreground cursor-text hover:text-muted-foreground transition-colors py-1"
             >
               Add a subtask...
             </p>
@@ -335,7 +335,7 @@ function LinkedDocSection({ task, linkedDocTitle }: { task: LocalTaskType; linke
   if (task.linked_doc_id && linkedDocTitle) {
     return (
       <div className="flex items-center gap-2">
-        <FileText className="size-3 shrink-0 text-muted-foreground/40" />
+        <FileText className="size-3 shrink-0 text-muted-foreground" />
         <button
           onClick={() => {
             useDocsStore.getState().selectDoc(task.linked_doc_id!)
@@ -345,7 +345,7 @@ function LinkedDocSection({ task, linkedDocTitle }: { task: LocalTaskType; linke
         >
           {linkedDocTitle}
         </button>
-        <button onClick={handleUnlink} className="text-muted-foreground/30 hover:text-muted-foreground">
+        <button onClick={handleUnlink} className="text-muted-foreground hover:text-foreground">
           <XIcon className="size-3" />
         </button>
       </div>
@@ -360,7 +360,7 @@ function LinkedDocSection({ task, linkedDocTitle }: { task: LocalTaskType; linke
           onChange={(e) => setSearchQuery(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Escape') { setShowPicker(false); setSearchQuery('') } }}
           placeholder="Search docs..."
-          className="w-full bg-transparent text-body outline-none border-b border-border/20 py-1 placeholder:text-muted-foreground/40"
+          className="w-full bg-transparent text-body outline-none border-b border-border/20 py-1 placeholder:text-muted-foreground"
           autoFocus
         />
         <div className="max-h-32 overflow-y-auto space-y-0.5">
@@ -370,12 +370,12 @@ function LinkedDocSection({ task, linkedDocTitle }: { task: LocalTaskType; linke
               onClick={() => handleLink(doc.id)}
               className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-body hover:bg-accent/20 transition-colors"
             >
-              <FileText className="size-3 shrink-0 text-muted-foreground/40" />
+              <FileText className="size-3 shrink-0 text-muted-foreground" />
               <span className="truncate">{doc.title || 'Untitled'}</span>
             </button>
           ))}
           {filtered.length === 0 && (
-            <p className="text-meta text-muted-foreground/40 py-1">No docs found</p>
+            <p className="text-meta text-muted-foreground py-1">No docs found</p>
           )}
         </div>
       </div>
@@ -385,7 +385,7 @@ function LinkedDocSection({ task, linkedDocTitle }: { task: LocalTaskType; linke
   return (
     <p
       onClick={() => setShowPicker(true)}
-      className="text-meta text-muted-foreground/30 cursor-pointer hover:text-muted-foreground/50 transition-colors"
+      className="text-meta text-muted-foreground cursor-pointer hover:text-muted-foreground transition-colors"
     >
       Link a doc...
     </p>

@@ -77,7 +77,7 @@ function DayNavigationHeader({
       <div className="flex items-center gap-1">
         <button
           onClick={onPrev}
-          className="flex size-6 items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-accent/30 transition-colors"
+          className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors"
           title="Previous day"
         >
           <ChevronLeft className="size-3.5" />
@@ -96,7 +96,7 @@ function DayNavigationHeader({
 
         <button
           onClick={onNext}
-          className="flex size-6 items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-accent/30 transition-colors"
+          className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors"
           title="Next day"
         >
           <ChevronRight className="size-3.5" />
@@ -126,7 +126,7 @@ function AllDayStrip({ events }: { events: CalendarEvent[] }) {
         </div>
       ))}
       {overflow > 0 && (
-        <span className="text-label text-muted-foreground/60 pl-2">
+        <span className="text-label text-muted-foreground pl-2">
           +{overflow} more
         </span>
       )}
@@ -158,8 +158,9 @@ function CurrentTimeIndicator({ startHour }: { startHour: number }) {
       style={{ top: offset }}
     >
       <div className="relative flex items-center">
-        <div className="size-[7px] rounded-full bg-red-500 -ml-[3px]" />
-        <div className="flex-1 h-px bg-red-500/70" />
+        {/* now-line red is intentionally not a semantic token — see Figma Refactor Plan §3.7 */}
+        <div className="size-2 rounded-full bg-[#de1f1f] shrink-0" />
+        <div className="flex-1 h-[1.5px] bg-[#de1f1f] -ml-1" />
       </div>
     </div>
   )
@@ -278,7 +279,7 @@ function EventBlock({
           </p>
         )}
         {!isShort && !isNarrow && event.location && !event.meeting_url && (
-          <p className="text-caption text-muted-foreground/60 truncate">
+          <p className="text-label text-muted-foreground truncate">
             {event.location}
           </p>
         )}
@@ -292,7 +293,7 @@ function EventBlock({
         <Button
           variant="secondary"
           size="sm"
-          className="absolute bottom-0.5 right-0.5 h-5 px-1.5 text-caption opacity-90"
+          className="absolute bottom-0.5 right-0.5 h-5 px-1.5 text-label opacity-90"
           onClick={(e) => {
             e.stopPropagation()
             dp.system.openUrl(event.meeting_url!)
@@ -370,7 +371,7 @@ function TimeGrid({
           return (
             <div key={hour} className="absolute left-0 right-0" style={{ top: y }}>
               <div className="flex items-start">
-                <span className="text-label tabular-nums text-muted-foreground/40 leading-none -mt-[5px]" style={{ width: TIME_LABEL_WIDTH }}>
+                <span className="text-label tabular-nums text-muted-foreground leading-none -mt-[5px]" style={{ width: TIME_LABEL_WIDTH }}>
                   {label}
                 </span>
                 <div className="flex-1 border-t border-border/40" />
@@ -405,7 +406,7 @@ function EmptyDayState({ dateStr, isToday }: { dateStr: string; isToday: boolean
 
   return (
     <div className="flex flex-col items-center justify-center py-8 text-center">
-      <p className="text-meta text-muted-foreground/50">{message}</p>
+      <p className="text-meta text-muted-foreground">{message}</p>
     </div>
   )
 }

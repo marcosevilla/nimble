@@ -111,7 +111,7 @@ export function CaptureStrip() {
           <Check className="size-3.5 shrink-0 text-primary" />
           <span className="flex-1 truncate text-body text-muted-foreground">{flash.content}</span>
           {flash.context && (
-            <span className="shrink-0 text-meta text-muted-foreground/50">from {flash.context}</span>
+            <span className="shrink-0 text-meta text-muted-foreground">from {flash.context}</span>
           )}
         </div>
       </div>
@@ -124,7 +124,7 @@ export function CaptureStrip() {
         {saved ? (
           <Check className="mt-0.5 size-3.5 shrink-0 text-primary" />
         ) : (
-          <Plus className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
+          <Plus className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
         )}
         <textarea
           ref={textareaRef}
@@ -135,14 +135,14 @@ export function CaptureStrip() {
           onKeyDown={handleKeyDown}
           placeholder="Capture anything…"
           spellCheck={false}
-          className="flex-1 resize-none bg-transparent text-body outline-none placeholder:text-muted-foreground/40"
+          className="flex-1 resize-none bg-transparent text-body outline-none placeholder:text-muted-foreground"
         />
         {error ? (
           <span className="mt-0.5 shrink-0 text-meta text-destructive">
             Couldn't save — ⏎ to retry
           </span>
         ) : (
-          <kbd className="mt-0.5 shrink-0 rounded border border-border/30 px-1.5 py-0.5 text-label font-mono text-muted-foreground/50">
+          <kbd className="mt-0.5 shrink-0 rounded border border-border/30 px-1.5 py-0.5 text-label font-mono text-muted-foreground">
             ⏎
           </kbd>
         )}

@@ -42,7 +42,7 @@ export function CollapsibleSection({
           {icon}
           <BodyStrong>{title}</BodyStrong>
           {count !== undefined && (
-            <span className="text-meta text-muted-foreground/70">{count}</span>
+            <span className="text-meta text-muted-foreground">{count}</span>
           )}
         </CollapsibleTrigger>
         {action && (

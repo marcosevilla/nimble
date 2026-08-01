@@ -53,7 +53,7 @@ export function InlineDescription({ value, onSave }: InlineDescriptionProps) {
           onBlur={save}
           onKeyDown={handleKeyDown}
           placeholder="Add a description..."
-          className="w-full resize-none bg-transparent text-body text-foreground/80 leading-relaxed outline-none placeholder:text-muted-foreground/40"
+          className="w-full resize-none bg-transparent text-body text-muted-foreground leading-relaxed outline-none placeholder:text-muted-foreground"
           rows={2}
         />
       </>
@@ -68,9 +68,9 @@ export function InlineDescription({ value, onSave }: InlineDescriptionProps) {
         className="text-body leading-relaxed cursor-text hover:bg-accent/10 rounded-md -mx-1 px-1 transition-colors min-h-[24px]"
       >
         {value ? (
-          <span className="text-foreground/80">{value}</span>
+          <span className="text-muted-foreground">{value}</span>
         ) : (
-          <span className="text-muted-foreground/40">Add a description...</span>
+          <span className="text-muted-foreground">Add a description...</span>
         )}
       </p>
     </>

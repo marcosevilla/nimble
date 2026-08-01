@@ -52,7 +52,7 @@ function ProjectBadge({ name, color }: { name: string; color?: string }) {
 export function SubtaskBadge() {
   return (
     <CornerDownRight
-      className="size-3 shrink-0 text-muted-foreground/50"
+      className="size-3 shrink-0 text-muted-foreground"
       aria-label="Subtask"
     />
   )

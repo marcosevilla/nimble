@@ -93,7 +93,7 @@ export function FocusCelebration() {
         </div>
 
         {/* Task name */}
-        <p className="text-heading line-through text-muted-foreground animate-in fade-in duration-500">
+        <p className="text-title line-through text-muted-foreground animate-in fade-in duration-500">
           {task?.content}
         </p>
 
@@ -106,7 +106,7 @@ export function FocusCelebration() {
 
         {/* Next task preview */}
         {nextTask && (
-          <p className="text-meta text-muted-foreground/60 animate-in fade-in duration-700">
+          <p className="text-meta text-muted-foreground animate-in fade-in duration-700">
             Next: {nextTask.content}
           </p>
         )}

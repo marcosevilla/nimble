@@ -5,7 +5,7 @@ export const GOAL_STATUSES: { value: GoalStatus; label: string; color: string }[
   { value: 'active', label: 'Active', color: 'text-amber-500' },
   { value: 'paused', label: 'Paused', color: 'text-blue-400' },
   { value: 'achieved', label: 'Achieved', color: 'text-green-500' },
-  { value: 'abandoned', label: 'Abandoned', color: 'text-muted-foreground/50' },
+  { value: 'abandoned', label: 'Abandoned', color: 'text-muted-foreground' },
 ]
 
 export function statusLabel(status: GoalStatus): string {

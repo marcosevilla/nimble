@@ -81,7 +81,7 @@ export function CommandBarResults({
               <span className="text-label text-muted-foreground">
                 Breaking down: <span className="text-foreground">{breakdownTask.content}</span>
               </span>
-              <button onClick={onBreakdownCancel} className="text-muted-foreground/40 hover:text-muted-foreground">
+              <button onClick={onBreakdownCancel} className="text-muted-foreground hover:text-foreground">
                 <X className="size-3.5" />
               </button>
             </div>
@@ -95,7 +95,7 @@ export function CommandBarResults({
                 <div className="space-y-1">
                   {breakdownItems.map((item, i) => (
                     <div key={i} className="flex items-center gap-1.5">
-                      <span className="text-meta text-muted-foreground/40 w-4 text-right shrink-0">{i + 1}</span>
+                      <span className="text-meta text-muted-foreground w-4 text-right shrink-0">{i + 1}</span>
                       <input
                         type="text"
                         value={item}
@@ -104,7 +104,7 @@ export function CommandBarResults({
                       />
                       <button
                         onClick={() => onBreakdownRemove(i)}
-                        className="text-muted-foreground/30 hover:text-destructive shrink-0"
+                        className="text-muted-foreground hover:text-destructive shrink-0"
                       >
                         <X className="size-3" />
                       </button>
@@ -147,7 +147,7 @@ export function CommandBarResults({
         {showTasks && tasks.length > 0 && (
           <div className="max-h-52 overflow-y-auto p-1">
             <div className="px-2 py-1">
-              <span className="text-label text-muted-foreground/60">
+              <span className="text-label text-muted-foreground">
                 Tasks
               </span>
             </div>
@@ -172,7 +172,7 @@ export function CommandBarResults({
           <div className="p-1">
             {tasks.length > 0 && <div className="mx-1 mb-1 border-t border-border/30" />}
             <div className="px-2 py-1">
-              <span className="text-label text-muted-foreground/60">
+              <span className="text-label text-muted-foreground">
                 Docs
               </span>
             </div>
@@ -188,7 +188,7 @@ export function CommandBarResults({
                   onMouseEnter={() => onSelect(idx)}
                   onClick={() => onOpenDoc(doc.id)}
                 >
-                  <FileText className="size-3.5 shrink-0 text-muted-foreground/40" />
+                  <FileText className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="flex-1 min-w-0 truncate">{doc.title || 'Untitled'}</span>
                 </button>
               )
@@ -201,7 +201,7 @@ export function CommandBarResults({
           <div className="p-1">
             {(tasks.length > 0 || docResults.length > 0) && <div className="mx-1 mb-1 border-t border-border/30" />}
             <div className="px-2 py-1">
-              <span className="text-label text-muted-foreground/60">
+              <span className="text-label text-muted-foreground">
                 Notes
               </span>
             </div>
@@ -217,7 +217,7 @@ export function CommandBarResults({
                   onMouseEnter={() => onSelect(idx)}
                   onClick={() => onOpenCapture(capture.id)}
                 >
-                  <PenLine className="size-3.5 shrink-0 text-muted-foreground/40" />
+                  <PenLine className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="flex-1 min-w-0 truncate">{capture.content}</span>
                 </button>
               )
@@ -323,7 +323,7 @@ function TaskResultRow({
           <FocusPlayMenu task={task} />
           <ActionButton icon={Sparkles} hint="⌥B" title="Break down" onClick={onBreakDown} className="text-purple-400/70 hover:text-purple-400" />
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-accent/30 text-muted-foreground/50 hover:text-muted-foreground">
+            <DropdownMenuTrigger className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-accent/30 text-muted-foreground hover:text-foreground">
               <Tooltip>
                 <TooltipTrigger className="flex size-6 items-center justify-center">
                   <FolderInput className="size-3.5" />

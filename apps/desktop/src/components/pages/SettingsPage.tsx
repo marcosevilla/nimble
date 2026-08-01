@@ -490,7 +490,7 @@ function StatusColorsSection() {
           </div>
         ))}
       </div>
-      <p className="text-label text-muted-foreground/50">
+      <p className="text-label text-muted-foreground">
         Color customization coming soon. These are the current defaults.
       </p>
     </section>
@@ -760,7 +760,7 @@ function CaptureRoutesSection() {
               <Label className="text-body-strong">Linked Doc</Label>
               <DropdownMenu>
                 <DropdownMenuTrigger className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-body hover:bg-accent/10 transition-colors">
-                  <span className={cn(formDocId ? 'text-foreground' : 'text-muted-foreground/50')}>
+                  <span className={cn(formDocId ? 'text-foreground' : 'text-muted-foreground')}>
                     {formDocId ? docs.find((d) => d.id === formDocId)?.title ?? 'Unknown' : 'Auto-create on first use'}
                   </span>
                   <ChevronDown className="size-3 text-muted-foreground" />
@@ -771,7 +771,7 @@ function CaptureRoutesSection() {
                   </DropdownMenuItem>
                   {docs.map((doc) => (
                     <DropdownMenuItem key={doc.id} onClick={() => setFormDocId(doc.id)}>
-                      <FileText className="size-3 mr-2 text-muted-foreground/40" />
+                      <FileText className="size-3 mr-2 text-muted-foreground" />
                       {doc.title || 'Untitled'}
                     </DropdownMenuItem>
                   ))}
@@ -1299,13 +1299,18 @@ export function SettingsPage() {
         {/* Mode selector */}
         <div className="space-y-1.5">
           <SectionLabel as="div">Mode</SectionLabel>
-          <div className="flex items-center gap-1 rounded-lg border p-1">
+          <div className="flex items-center gap-1 rounded-lg bg-secondary p-1">
             {(['light', 'dark', 'system'] as const).map((value) => (
               <Button
                 key={value}
-                variant={theme === value ? 'default' : 'outline'}
+                variant="ghost"
                 size="sm"
-                className="flex-1 capitalize"
+                className={cn(
+                  'flex-1 capitalize',
+                  theme === value
+                    ? 'bg-card text-foreground shadow-xs hover:bg-card'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
                 onClick={() => setTheme(value)}
               >
                 {value}
@@ -1340,7 +1345,7 @@ export function SettingsPage() {
               </button>
             ))}
           </div>
-          <p className="text-label text-muted-foreground/50">
+          <p className="text-label text-muted-foreground">
             {ACCENT_THEMES.find((t) => t.value === accent)?.label ?? 'Warm'} theme
           </p>
         </div>
@@ -1351,7 +1356,7 @@ export function SettingsPage() {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="heading-font" className="text-label text-muted-foreground/70">
+              <Label htmlFor="heading-font" className="text-label text-muted-foreground">
                 Heading
               </Label>
               <Select
@@ -1376,7 +1381,7 @@ export function SettingsPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="body-font" className="text-label text-muted-foreground/70">
+              <Label htmlFor="body-font" className="text-label text-muted-foreground">
                 Body
               </Label>
               <Select
@@ -1406,7 +1411,7 @@ export function SettingsPage() {
               When setHeadingFont/setBodyFont updates :root, the preview follows
               automatically. One source of truth, no manual stack reconstruction. */}
           <div className="rounded-lg border p-3 space-y-1">
-            <p className="text-heading-sm">The quick brown fox jumps</p>
+            <p className="text-title">The quick brown fox jumps</p>
             <p className="text-body">
               Over the lazy dog. Body text for UI labels and content.
             </p>

@@ -23,7 +23,7 @@ export interface StatusConfig {
 }
 
 export const STATUSES: StatusConfig[] = [
-  { value: 'backlog', label: 'Backlog', icon: Circle, color: 'text-muted-foreground/50', iconColor: 'text-muted-foreground/50' },
+  { value: 'backlog', label: 'Backlog', icon: Circle, color: 'text-muted-foreground', iconColor: 'text-muted-foreground' },
   { value: 'todo', label: 'Todo', icon: CircleDot, color: 'text-blue-500', iconColor: 'text-blue-500' },
   { value: 'in_progress', label: 'In Progress', icon: Loader, color: 'text-amber-500', iconColor: 'text-amber-500' },
   { value: 'blocked', label: 'Blocked', icon: Ban, color: 'text-red-500', iconColor: 'text-red-500' },

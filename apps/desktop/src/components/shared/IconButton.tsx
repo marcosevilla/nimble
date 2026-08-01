@@ -16,9 +16,9 @@ const sizeClass: Record<IconButtonSize, string> = {
 }
 
 const toneClass: Record<IconButtonTone, string> = {
-  muted: 'text-muted-foreground/40 hover:text-muted-foreground',
+  muted: 'text-muted-foreground hover:text-foreground',
   destructive: 'text-destructive/40 hover:text-destructive',
-  subtle: 'text-muted-foreground/30 hover:text-muted-foreground',
+  subtle: 'text-muted-foreground hover:text-foreground',
 }
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(

@@ -20,16 +20,13 @@ const customTwMerge = extendTailwindMerge({
       'font-size': [
         {
           text: [
-            'caption',
             'label',
             'meta',
             'meta-strong',
             'body',
             'body-strong',
-            'heading-sm',
-            'heading',
+            'title',
             'display',
-            'display-xl',
             'timer',
           ],
         },

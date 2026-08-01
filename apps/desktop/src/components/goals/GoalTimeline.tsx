@@ -154,7 +154,7 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
             style={{ left: todayX, height: HEADER_HEIGHT + timelineGoals.length * ROW_HEIGHT }}
           >
             <div className="w-px h-full bg-amber-500/60" />
-            <div className="absolute top-1 -translate-x-1/2 bg-amber-500 text-caption font-semibold text-white px-1.5 py-0.5 rounded-full whitespace-nowrap">
+            <div className="absolute top-1 -translate-x-1/2 bg-amber-500 text-label font-semibold text-white px-1.5 py-0.5 rounded-full whitespace-nowrap">
               {/* font-semibold kept for legibility on colored pill */}
               Today
             </div>

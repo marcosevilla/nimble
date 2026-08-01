@@ -33,7 +33,7 @@ export function PageHeader({
         {backAction && (
           <button
             onClick={backAction.onClick}
-            className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 -ml-1 text-meta text-muted-foreground/60 transition-colors hover:bg-accent/20 hover:text-muted-foreground"
+            className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 -ml-1 text-meta text-muted-foreground transition-colors hover:bg-accent/20 hover:text-muted-foreground"
           >
             <ArrowLeft className="size-3" />
             {backAction.label}
@@ -44,7 +44,7 @@ export function PageHeader({
           className="flex flex-1 items-baseline gap-2 min-w-0"
           data-tauri-drag-region
         >
-          <h1 className="text-heading-sm text-balance truncate">{title}</h1>
+          <h1 className="text-title text-balance truncate">{title}</h1>
           {meta && (
             <span className="text-meta text-muted-foreground relative top-px shrink-0">
               {meta}

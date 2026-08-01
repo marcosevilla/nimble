@@ -68,9 +68,9 @@ const MentionList = forwardRef<MentionListRef, SuggestionProps<MentionItem>>((pr
           )}
         >
           {item.kind === 'task' ? (
-            <CheckSquare className="size-3 shrink-0 text-muted-foreground/40" />
+            <CheckSquare className="size-3 shrink-0 text-muted-foreground" />
           ) : (
-            <FileText className="size-3 shrink-0 text-muted-foreground/40" />
+            <FileText className="size-3 shrink-0 text-muted-foreground" />
           )}
           <span className="truncate">{item.label}</span>
         </button>

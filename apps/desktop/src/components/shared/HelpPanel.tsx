@@ -179,7 +179,7 @@ export function HelpPanel() {
         }}
         className={cn(
           'fixed bottom-4 right-4 z-30 flex size-9 items-center justify-center rounded-full transition-all duration-200',
-          'bg-muted/60 text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground hover:shadow-md',
+          'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-muted-foreground hover:shadow-md',
           'backdrop-blur-sm border border-border/20',
           open && 'bg-muted text-muted-foreground shadow-md',
           'before:absolute before:inset-[-2px] before:content-[\'\'] before:rounded-full',
@@ -211,7 +211,7 @@ export function HelpPanel() {
                   <TabsTrigger value="roadmap" className="gap-1.5 rounded-t-lg rounded-b-none px-3 py-2 text-meta">
                     <Map className="size-3" />
                     Roadmap
-                    <span className="text-label text-muted-foreground/50 tabular-nums">{doneCount}/{totalCount}</span>
+                    <span className="text-label text-muted-foreground tabular-nums">{doneCount}/{totalCount}</span>
                   </TabsTrigger>
                 </TabsList>
               </div>
@@ -240,14 +240,14 @@ function ShortcutsTab() {
     <div className="space-y-4">
       {SHORTCUT_SECTIONS.map((section) => (
         <div key={section.title}>
-          <Label as="h3" className="mb-1.5 text-muted-foreground/50">
+          <Label as="h3" className="mb-1.5 text-muted-foreground">
             {section.title}
           </Label>
           <div className="space-y-1">
             {section.shortcuts.map((shortcut) => (
               <div key={shortcut.key} className="flex items-center justify-between py-0.5">
                 <Meta>{shortcut.action}</Meta>
-                <kbd className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-label text-foreground/70">
+                <kbd className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-label text-muted-foreground">
                   {shortcut.key}
                 </kbd>
               </div>
@@ -276,12 +276,12 @@ function RoadmapTab({ showDone, setShowDone }: { showDone: boolean; setShowDone:
     <div className="space-y-4">
       {/* Toggle */}
       <div className="flex items-center justify-between">
-        <span className="text-label text-muted-foreground/50">
+        <span className="text-label text-muted-foreground">
           {ROADMAP.filter((r) => !r.done).length} remaining
         </span>
         <button
           onClick={() => setShowDone(!showDone)}
-          className="text-label text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+          className="text-label text-muted-foreground hover:text-foreground transition-colors"
         >
           {showDone ? 'Hide completed' : 'Show completed'}
         </button>
@@ -291,7 +291,7 @@ function RoadmapTab({ showDone, setShowDone }: { showDone: boolean; setShowDone:
         <div key={phase}>
           <h3 className={cn(
             'mb-1.5 text-label',
-            phase === 'Completed' ? 'text-green-500/50' : 'text-muted-foreground/50',
+            phase === 'Completed' ? 'text-green-500/50' : 'text-muted-foreground',
           )}>
             {phase}
           </h3>
@@ -309,7 +309,7 @@ function RoadmapTab({ showDone, setShowDone }: { showDone: boolean; setShowDone:
                   )}>
                     {item.title}
                   </p>
-                  <p className="text-label text-muted-foreground/50">
+                  <p className="text-label text-muted-foreground">
                     {item.description}
                   </p>
                 </div>

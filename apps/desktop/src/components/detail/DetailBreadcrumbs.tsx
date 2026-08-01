@@ -28,7 +28,7 @@ export function DetailBreadcrumbs() {
 
       {breadcrumbs.length > 0 && (
         <>
-          <ChevronRight className="size-3 text-muted-foreground/40 shrink-0" />
+          <ChevronRight className="size-3 text-muted-foreground shrink-0" />
           {breadcrumbs.map((crumb, i) => (
             <div key={`${crumb.type}-${crumb.id}`} className="flex items-center gap-1 min-w-0">
               <button
@@ -37,7 +37,7 @@ export function DetailBreadcrumbs() {
               >
                 <BreadcrumbLabel type={crumb.type} id={crumb.id} />
               </button>
-              <ChevronRight className="size-3 text-muted-foreground/40 shrink-0" />
+              <ChevronRight className="size-3 text-muted-foreground shrink-0" />
             </div>
           ))}
         </>

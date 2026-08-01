@@ -82,14 +82,14 @@ export function DateStrip({ briefDates, selected, onSelect }: DateStripProps) {
               className={cn(
                 'flex flex-col items-center gap-1 rounded-lg px-3 py-2 min-w-[44px] transition-all duration-150',
                 isSelected
-                  ? 'bg-foreground text-background'
+                  ? 'bg-card text-foreground ring-1 ring-border shadow-xs'
                   : isToday
                     ? 'bg-accent-blue/10 text-accent-blue'
-                    : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/20',
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/20',
               )}
             >
               <span className="text-label">{weekday}</span>
-              <span className="text-heading tabular-nums">{day}</span>
+              <span className="text-title tabular-nums">{day}</span>
               {hasBrief && !isSelected && (
                 <span className="size-1 rounded-full bg-accent-blue/60" />
               )}

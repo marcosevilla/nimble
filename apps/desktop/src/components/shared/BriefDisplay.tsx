@@ -58,10 +58,10 @@ function Section({ section }: { section: BriefSection }) {
         className="flex w-full items-center gap-2 py-2.5 text-left group"
       >
         <ChevronRight className={cn(
-          'size-3 shrink-0 text-muted-foreground/40 transition-transform duration-150',
+          'size-3 shrink-0 text-muted-foreground transition-transform duration-150',
           expanded && 'rotate-90',
         )} />
-        <span className="text-label text-muted-foreground/60 group-hover:text-muted-foreground transition-colors">
+        <span className="text-label text-muted-foreground group-hover:text-muted-foreground transition-colors">
           {section.title}
         </span>
       </button>
@@ -141,7 +141,7 @@ function MarkdownContent({ content }: { content: string }) {
           {checked ? (
             <Check className="size-3.5 shrink-0 text-green-500" />
           ) : (
-            <Square className="size-3.5 shrink-0 text-muted-foreground/30" />
+            <Square className="size-3.5 shrink-0 text-muted-foreground" />
           )}
           <span className={cn('text-body', checked && 'text-muted-foreground line-through')}>
             {renderInline(text)}
@@ -160,7 +160,7 @@ function MarkdownContent({ content }: { content: string }) {
           {checked ? (
             <Check className="size-3.5 shrink-0 text-green-500" />
           ) : (
-            <Square className="size-3.5 shrink-0 text-muted-foreground/30" />
+            <Square className="size-3.5 shrink-0 text-muted-foreground" />
           )}
           <span className={cn('text-body', checked && 'text-muted-foreground line-through')}>
             {renderInline(text)}
@@ -175,7 +175,7 @@ function MarkdownContent({ content }: { content: string }) {
       const text = line.replace(/^\s*- /, '')
       elements.push(
         <div key={key++} className="flex items-start gap-2 py-0.5 pl-1">
-          <span className="text-muted-foreground/30 mt-1 text-meta">•</span>
+          <span className="text-muted-foreground mt-1 text-meta">•</span>
           <span className="text-body">{renderInline(text)}</span>
         </div>
       )
@@ -198,7 +198,7 @@ function MarkdownContent({ content }: { content: string }) {
     // Italic paragraph (*text*)
     if (line.startsWith('*') && line.endsWith('*') && !line.startsWith('**')) {
       elements.push(
-        <p key={key++} className="text-body text-muted-foreground/70 italic">
+        <p key={key++} className="text-body text-muted-foreground italic">
           {line.slice(1, -1)}
         </p>
       )
@@ -257,7 +257,7 @@ function MarkdownTable({ lines }: { lines: string[] }) {
     <div className="my-1 text-meta">
       <div className="grid gap-x-4" style={{ gridTemplateColumns: `repeat(${header.length}, auto)` }}>
         {header.map((cell, i) => (
-          <span key={i} className="font-medium text-muted-foreground/50 py-0.5">
+          <span key={i} className="font-medium text-muted-foreground py-0.5">
             {cell}
           </span>
         ))}
@@ -282,7 +282,7 @@ function CollapsibleBlock({ title, content }: { title: string; content: string }
     <div className="mt-1">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-meta text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+        className="flex items-center gap-1.5 text-meta text-muted-foreground hover:text-foreground transition-colors"
       >
         <ChevronRight className={cn('size-2.5 transition-transform', open && 'rotate-90')} />
         {title}
@@ -308,7 +308,7 @@ export function BriefDisplay({ markdown }: BriefDisplayProps) {
   return (
     <div>
       {title && (
-        <p className="text-meta text-muted-foreground/50 mb-2">{title}</p>
+        <p className="text-meta text-muted-foreground mb-2">{title}</p>
       )}
       <div>
         {sections.map((section, i) => (

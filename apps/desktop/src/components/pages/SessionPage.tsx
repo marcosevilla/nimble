@@ -156,7 +156,7 @@ function SessionCard({ entry }: { entry: SessionEntry }) {
           {entry.bullets.map((bullet, i) => (
             <>
               {/* leading-relaxed: deliberate prose override — session journal entry */}
-              <p key={i} className="text-meta text-foreground/80 leading-relaxed">
+              <p key={i} className="text-meta text-muted-foreground leading-relaxed">
                 • {renderInline(bullet)}
               </p>
             </>
@@ -169,7 +169,7 @@ function SessionCard({ entry }: { entry: SessionEntry }) {
           {entry.refs && (
             <>
               {/* leading-relaxed: deliberate prose override — continuation copy */}
-              <p className="mt-1 text-label text-muted-foreground/70 leading-relaxed">
+              <p className="mt-1 text-label text-muted-foreground leading-relaxed">
                 {renderInline(entry.refs)}
               </p>
             </>
@@ -259,7 +259,7 @@ export function SessionPage() {
   return (
     <>
       <PageHeader title="Activity" />
-      <div className="max-w-3xl mx-auto p-6 w-full">
+      <div className="w-full max-w-3xl px-5 py-6">
         <Tabs defaultValue="timeline">
           <TabsList>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>

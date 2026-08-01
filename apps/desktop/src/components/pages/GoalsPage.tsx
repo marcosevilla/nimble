@@ -5,7 +5,6 @@ import { useDataProvider } from '@/services/provider-context'
 import type { GoalWithProgress, GoalStatus, LifeArea } from '@daily-triage/types'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -33,7 +32,6 @@ import {
   Plus,
   Download,
   Target,
-  Calendar,
 } from 'lucide-react'
 import { GoalTimeline } from '@/components/goals/GoalTimeline'
 import { PageHeader } from '@/components/shared/PageHeader'
@@ -67,22 +65,26 @@ function GoalCard({
         {/* Top row: life area chip + status */}
         <div className="flex items-center justify-between">
           {area ? (
-            <span
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-label"
-              style={{
-                backgroundColor: `${area.color}15`,
-                color: area.color,
-              }}
-            >
-              <span className="text-meta">{area.icon}</span>
+            <span className="inline-flex items-center gap-1.5 text-meta-strong text-foreground">
+              <span
+                className="size-1.5 rounded-full shrink-0"
+                style={{ backgroundColor: area.color }}
+              />
               {area.name}
             </span>
           ) : (
             <span />
           )}
-          <Badge variant="secondary" className={cn('text-label', statusColor(goal.status))}>
+          <span
+            className={cn(
+              'text-meta',
+              goal.status === 'active'
+                ? 'text-muted-foreground'
+                : statusColor(goal.status),
+            )}
+          >
             {statusLabel(goal.status)}
-          </Badge>
+          </span>
         </div>
 
         {/* Goal name */}
@@ -120,8 +122,7 @@ function GoalCard({
             </span>
           )}
           {goal.target_date && (
-            <span className="ml-auto flex items-center gap-1">
-              <Calendar className="size-3" />
+            <span className="ml-auto">
               {new Date(goal.target_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             </span>
           )}
@@ -440,7 +441,7 @@ export function GoalsPage() {
         </TooltipTrigger>
         <TooltipContent>Import from Obsidian vault</TooltipContent>
       </Tooltip>
-      <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+      <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
         <Plus className="size-3.5" />
         New Goal
       </Button>
@@ -454,12 +455,12 @@ export function GoalsPage() {
             className={cn(
               'rounded-md px-2 py-1 text-meta transition-colors',
               areaFilter === null
-                ? 'bg-foreground text-background'
-                : 'text-muted-foreground/60 hover:text-muted-foreground hover:bg-accent/20',
+                ? 'bg-secondary text-secondary-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/20',
             )}
           >
             All
-            <span className="ml-1 text-label opacity-60">{goals.length}</span>
+            <span className="ml-1 text-label text-muted-foreground">{goals.length}</span>
           </button>
           {lifeAreas.map((area) => {
             const count = areaCounts[area.id] || 0
@@ -471,8 +472,8 @@ export function GoalsPage() {
                 className={cn(
                   'flex items-center gap-1 rounded-md px-2 py-1 text-meta transition-colors',
                   areaFilter === area.id
-                    ? 'bg-foreground text-background'
-                    : 'text-muted-foreground/60 hover:text-muted-foreground hover:bg-accent/20',
+                    ? 'bg-secondary text-secondary-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/20',
                 )}
               >
                 <span
@@ -480,7 +481,7 @@ export function GoalsPage() {
                   style={{ backgroundColor: area.color }}
                 />
                 {area.name}
-                <span className="text-label opacity-60">{count}</span>
+                <span className="text-label text-muted-foreground">{count}</span>
               </button>
             )
           })}
@@ -499,12 +500,12 @@ export function GoalsPage() {
       {/* Content */}
       {filteredGoals.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 space-y-4">
-          <Target className="size-10 text-muted-foreground/30" />
+          <Target className="size-10 text-muted-foreground" />
           <div className="text-center space-y-1">
             <p className="text-body text-muted-foreground">
               No goals yet. Import from Obsidian or create your first goal.
             </p>
-            <p className="text-meta text-muted-foreground/60">
+            <p className="text-meta text-muted-foreground">
               Goals help you track long-term progress across life areas.
             </p>
           </div>

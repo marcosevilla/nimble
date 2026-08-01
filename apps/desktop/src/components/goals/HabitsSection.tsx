@@ -135,16 +135,12 @@ function HabitCircle({
       <Tooltip>
         <TooltipTrigger
           className={cn(
-            'relative size-10 rounded-full flex items-center justify-center text-heading transition-all duration-200 cursor-pointer select-none',
+            'relative size-10 rounded-full flex items-center justify-center text-title transition-all duration-200 cursor-pointer select-none border border-border bg-card',
             completed
-              ? 'ring-2 scale-105'
-              : 'ring-1 ring-border/30 hover:ring-border/60 opacity-50 hover:opacity-80',
+              ? 'scale-105'
+              : 'opacity-50 hover:opacity-80 hover:bg-accent/50',
             holding && 'scale-95',
           )}
-          style={{
-            backgroundColor: completed ? `${color}20` : 'transparent',
-            outlineColor: completed ? color : undefined,
-          }}
           onMouseDown={startHold}
           onMouseUp={cancelHold}
           onMouseLeave={cancelHold}
@@ -169,10 +165,7 @@ function HabitCircle({
           <span className="select-none">{displayIcon}</span>
           {completed && (
             // font-bold kept for legibility of checkmark on colored bg overlay
-            <span
-              className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full flex items-center justify-center text-caption font-bold text-white"
-              style={{ backgroundColor: color }}
-            >
+            <span className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full flex items-center justify-center text-label font-bold text-success-fg bg-success">
               ✓
             </span>
           )}
@@ -279,7 +272,7 @@ function HabitHeatmap({ data }: { data: HabitHeatmapEntry[] }) {
           {monthLabels.map((m, i) => (
             <span
               key={i}
-              className="text-caption text-muted-foreground absolute"
+              className="text-label text-muted-foreground absolute"
               style={{ left: m.col * (CELL_SIZE + CELL_GAP) }}
             >
               {m.label}
@@ -379,7 +372,7 @@ export function HabitsSection() {
           <h3 className="text-body-strong">Habits</h3>
         </div>
         <div className="flex items-center gap-3">
-          <p className="text-meta text-muted-foreground/60">
+          <p className="text-meta text-muted-foreground">
             Track a small daily action — any effort counts.
           </p>
           <AddHabitPopover
@@ -429,7 +422,7 @@ export function HabitsSection() {
         ))}
         <AddHabitPopover
           onCreated={loadHabits}
-          triggerClassName="size-10 rounded-full flex items-center justify-center ring-1 ring-dashed ring-border/40 text-muted-foreground/40 hover:text-muted-foreground hover:ring-border/70 transition-all"
+          triggerClassName="size-10 rounded-full flex items-center justify-center ring-1 ring-dashed ring-border/40 text-muted-foreground hover:text-foreground hover:ring-border/70 transition-all"
         >
           <Plus className="size-4" />
         </AddHabitPopover>
@@ -547,7 +540,7 @@ function ManageHabitsPopover({ habits, onChanged }: { habits: HabitWithStats[]; 
     <>
       <Popover>
         <PopoverTrigger
-          className="flex size-5 items-center justify-center rounded-md text-muted-foreground/30 hover:text-muted-foreground hover:bg-accent/20 transition-colors"
+          className="flex size-5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/20 transition-colors"
           aria-label="Manage habits"
         >
           <Settings2 className="size-3" />
@@ -616,7 +609,7 @@ function ManageHabitRow({
       />
       <button
         onClick={onDelete}
-        className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all"
+        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
         aria-label={`Delete habit ${habit.name}`}
       >
         <Trash2 className="size-3.5" />

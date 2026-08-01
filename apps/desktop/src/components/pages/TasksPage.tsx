@@ -36,7 +36,7 @@ function TaskCreator({
 
   return (
     <div className="flex items-center gap-2 py-1 pl-2">
-      <Plus className="size-3.5 text-muted-foreground/40 shrink-0" />
+      <Plus className="size-3.5 text-muted-foreground shrink-0" />
       <Input
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -147,12 +147,12 @@ function AllTasksView({
         className={cn(
           'rounded-md px-2 py-1 text-meta transition-colors',
           statusFilter === 'all'
-            ? 'bg-foreground text-background'
-            : 'text-muted-foreground/60 hover:text-muted-foreground hover:bg-accent/20',
+            ? 'bg-secondary text-secondary-foreground'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent/20',
         )}
       >
         All
-        <span className="ml-1 text-label opacity-60">{statusCounts.all || 0}</span>
+        <span className="ml-1 text-label text-muted-foreground">{statusCounts.all || 0}</span>
       </button>
       {STATUSES.map((s) => {
         const SIcon = s.icon
@@ -165,13 +165,13 @@ function AllTasksView({
             className={cn(
               'flex items-center gap-1 rounded-md px-2 py-1 text-meta transition-colors',
               statusFilter === s.value
-                ? 'bg-foreground text-background'
-                : 'text-muted-foreground/60 hover:text-muted-foreground hover:bg-accent/20',
+                ? 'bg-secondary text-secondary-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/20',
             )}
           >
-            <SIcon className={cn('size-3', statusFilter === s.value ? '' : s.iconColor)} />
+            <SIcon className={cn('size-3', s.iconColor)} />
             {s.label}
-            <span className="text-label opacity-60">{count}</span>
+            <span className="text-label text-muted-foreground">{count}</span>
           </button>
         )
       })}

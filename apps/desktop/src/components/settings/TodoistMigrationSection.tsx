@@ -118,7 +118,7 @@ export function TodoistMigrationSection() {
               created={preview.tasks_to_create}
               already={preview.tasks_already_migrated}
             />
-            <div className="flex flex-wrap gap-x-3 gap-y-1 text-label text-muted-foreground/80 pt-1 border-t border-border/20">
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-label text-muted-foreground pt-1 border-t border-border/20">
               <span>{preview.sections_count} section{preview.sections_count !== 1 ? 's' : ''}</span>
               <span>{preview.tasks_with_labels} with labels</span>
               <span>{preview.tasks_recurring} recurring</span>
@@ -126,10 +126,10 @@ export function TodoistMigrationSection() {
             </div>
             {preview.project_names_preview.length > 0 && (
               <details className="pt-1">
-                <summary className="text-label text-muted-foreground/60 cursor-pointer hover:text-muted-foreground">
+                <summary className="text-label text-muted-foreground cursor-pointer hover:text-muted-foreground">
                   Preview project names ({preview.project_names_preview.length})
                 </summary>
-                <ul className="mt-2 space-y-0.5 text-label text-muted-foreground/80 max-h-40 overflow-y-auto">
+                <ul className="mt-2 space-y-0.5 text-label text-muted-foreground max-h-40 overflow-y-auto">
                   {preview.project_names_preview.map((name) => (
                     <li key={name} className="truncate">{name}</li>
                   ))}
@@ -250,7 +250,7 @@ function PreviewRow({
           {created} to import
         </span>
         {already > 0 && (
-          <span className="text-muted-foreground/60 ml-3">
+          <span className="text-muted-foreground ml-3">
             {already} already migrated
           </span>
         )}
@@ -280,7 +280,7 @@ function OptionToggle({
       />
       <div className="flex-1 min-w-0 space-y-0.5">
         <p className="text-body">{label}</p>
-        <p className="text-label text-muted-foreground/70">{hint}</p>
+        <p className="text-label text-muted-foreground">{hint}</p>
       </div>
     </label>
   )

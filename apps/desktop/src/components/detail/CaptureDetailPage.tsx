@@ -115,9 +115,9 @@ export function CaptureDetailPage() {
 
       {/* Content */}
       <div className="space-y-2">
-        {/* leading-relaxed is a deliberate prose override on text-heading — captures are read like a journal entry, 1.25 feels too tight */}
-        <p className="text-heading leading-relaxed">{capture.content}</p>
-        <div className="flex items-center gap-3 text-meta text-muted-foreground/50">
+        {/* leading-relaxed is a deliberate prose override on text-title — captures are read like a journal entry, 1.25 feels too tight */}
+        <p className="text-title leading-relaxed">{capture.content}</p>
+        <div className="flex items-center gap-3 text-meta text-muted-foreground">
           <span>{formatTime(capture.created_at)}</span>
           {capture.source !== 'manual' && capture.source !== 'inbox' && (
             <span className="rounded-md bg-muted/40 px-1.5 py-0.5">via {capture.source}</span>

@@ -73,7 +73,7 @@ function SortableTaskItem({
       <button
         {...attributes}
         {...listeners}
-        className="absolute -left-5 top-2.5 z-20 shrink-0 cursor-grab text-muted-foreground/40 opacity-0 transition-opacity hover:text-muted-foreground/60 active:cursor-grabbing group-hover/drag:opacity-100"
+        className="absolute -left-5 top-2.5 z-20 shrink-0 cursor-grab text-muted-foreground opacity-0 transition-opacity hover:text-muted-foreground active:cursor-grabbing group-hover/drag:opacity-100"
         aria-label="Drag to reorder"
       >
         <GripVertical className="size-3.5" />
