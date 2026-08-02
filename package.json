@@ -1,5 +1,8 @@
 {
   "name": "daily-triage",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"]
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "update-app": "bash tools/update-app.sh"
+  }
 }
