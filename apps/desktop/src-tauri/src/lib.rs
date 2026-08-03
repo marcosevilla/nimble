@@ -44,6 +44,14 @@ fn toggle_window(app: &tauri::AppHandle) {
 /// period so a lost activation race can't close the strip as it appears
 static STRIP_SHOWN_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
+/// Payload for the `capture-strip-prefill` event, sent when a grabbed
+/// selection lands shortly after the strip opened
+#[derive(Clone, serde::Serialize)]
+struct CaptureStripPrefill {
+    text: String,
+    context: Option<String>,
+}
+
 /// Show and focus the quick-capture strip
 pub(crate) fn show_capture_strip(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("capture") {
@@ -55,15 +63,78 @@ pub(crate) fn show_capture_strip(app: &tauri::AppHandle) {
     }
 }
 
+/// Summon the strip. The AX selection read is synchronous and runs BEFORE
+/// the window shows (the source app must still be frontmost); the show +
+/// set_focus stays tied to the triggering user event, which macOS requires
+/// to honor the activation.
+fn summon_capture_strip(app: &tauri::AppHandle) {
+    let grabbed = selection::grab_selection();
+    show_capture_strip(app);
+    if let Some(grabbed) = grabbed {
+        if let Some(window) = app.get_webview_window("capture") {
+            let _ = window.emit(
+                "capture-strip-prefill",
+                CaptureStripPrefill { text: grabbed.text, context: grabbed.context },
+            );
+        }
+    }
+}
+
 /// Toggle the quick-capture strip (global shortcut)
 fn toggle_capture_strip(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("capture") {
         if window.is_visible().unwrap_or(false) {
-            let _ = window.hide();
+            dismiss_capture_strip_inner(app);
         } else {
-            show_capture_strip(app);
+            summon_capture_strip(app);
         }
     }
+}
+
+/// Dismiss the capture strip without disturbing window order.
+///
+/// Summoning the strip activated this app; hiding the strip's window while the
+/// app is still active makes AppKit promote the main window to key, dragging
+/// it to the front. Deactivating FIRST hands focus back to whichever app was
+/// active before the strip appeared, so hiding promotes nothing.
+///
+/// Must run on the main thread (NSApplication + window ops).
+pub(crate) fn dismiss_capture_strip_inner(app: &tauri::AppHandle) {
+    let main_focused = app
+        .get_webview_window("main")
+        .map(|w| w.is_focused().unwrap_or(false))
+        .unwrap_or(false);
+    // If the user deliberately moved into the main window, leave focus there
+    if !main_focused {
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            let ns_app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+            if ns_app.isActive() {
+                ns_app.deactivate();
+            }
+        }
+    }
+    if let Some(window) = app.get_webview_window("capture") {
+        let _ = window.hide();
+    }
+}
+
+/// Frontend-facing dismiss (Esc, post-save, ghost-guard) — routes through
+/// the focus-preserving path instead of a bare window.hide(). The reason is
+/// logged with the window's focus state so unexpected dismissals are
+/// diagnosable from the production log.
+#[tauri::command]
+fn dismiss_capture_strip(app: tauri::AppHandle, reason: Option<String>) {
+    let win_focused = app
+        .get_webview_window("capture")
+        .map(|w| w.is_focused().unwrap_or(false))
+        .unwrap_or(false);
+    log::info!(
+        "capture strip dismissed ({}) — window focused: {}",
+        reason.as_deref().unwrap_or("unspecified"),
+        win_focused
+    );
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || dismiss_capture_strip_inner(&app2));
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -102,13 +173,13 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // Logging in ALL builds — the shift-shift permission failure went
+            // invisible for a day because release builds had no logger
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .build(),
+            )?;
 
             // --- Register global shortcut: Cmd+Shift+T ---
             let cmd_shift_t = Shortcut::new(
@@ -168,7 +239,7 @@ pub fn run() {
                             show_window(app);
                         }
                         "capture" => {
-                            show_capture_strip(app);
+                            summon_capture_strip(app);
                         }
                         "quit" => {
                             app.exit(0);
@@ -223,9 +294,6 @@ pub fn run() {
                 app_handle.manage(pool);
             });
 
-            // --- Double-tap-Shift selection capture (needs the pool above) ---
-            selection::start(app.handle().clone());
-
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -244,14 +312,16 @@ pub fn run() {
                         .unwrap()
                         .map(|t| t.elapsed() < std::time::Duration::from_millis(500))
                         .unwrap_or(false);
-                    if !recently_shown {
-                        let _ = window.hide();
+                    if !recently_shown && window.is_visible().unwrap_or(false) {
+                        log::info!("capture strip blurred — dismissing");
+                        dismiss_capture_strip_inner(&window.app_handle().clone());
                     }
                 }
                 _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
+            dismiss_capture_strip,
             settings::check_setup_complete,
             settings::get_setting,
             settings::set_setting,

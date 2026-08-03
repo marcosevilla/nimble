@@ -364,8 +364,8 @@ export async function getCaptures(limit?: number, includeConverted?: boolean): P
   return invoke<Capture[]>('get_captures', { limit, includeConverted })
 }
 
-export async function createCapture(content: string, source?: string): Promise<Capture> {
-  return invoke<Capture>('create_capture', { content, source })
+export async function createCapture(content: string, source?: string, context?: string): Promise<Capture> {
+  return invoke<Capture>('create_capture', { content, source, context })
 }
 
 export async function convertCaptureToTask(captureId: string, projectId?: string): Promise<LocalTask> {
@@ -378,6 +378,13 @@ export async function deleteCapture(id: string): Promise<void> {
 
 export async function importObsidianCaptures(): Promise<number> {
   return invoke<number>('import_obsidian_captures')
+}
+
+/** Hide the quick-capture strip via the focus-preserving Rust path —
+ *  a bare window.hide() makes AppKit drag the main window to the front.
+ *  The reason is logged in Rust for diagnosing unexpected dismissals. */
+export async function dismissCaptureStrip(reason?: string): Promise<void> {
+  return invoke<void>('dismiss_capture_strip', { reason })
 }
 
 // ── Capture Routes ──

@@ -28,8 +28,8 @@
         "label": "capture",
         "title": "Quick Capture",
         "url": "/?window=capture",
-        "width": 600,
-        "height": 110,
+        "width": 760,
+        "height": 146,
         "resizable": false,
         "decorations": false,
         "transparent": true,
@@ -48,6 +48,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "macOS": {
+      "signingIdentity": "Marco Task App Dev"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -122,7 +122,7 @@ export interface DataProvider {
 
   captures: {
     list(limit?: number, includeConverted?: boolean): Promise<Capture[]>
-    create(content: string, source?: string): Promise<Capture>
+    create(content: string, source?: string, context?: string): Promise<Capture>
     convertToTask(captureId: string, projectId?: string): Promise<LocalTask>
     delete(id: string): Promise<void>
     // Legacy quick captures (Obsidian)
