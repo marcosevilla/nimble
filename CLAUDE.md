@@ -109,6 +109,15 @@ daily-triage/
 - Don't add guilt-inducing UI (streaks, "you've been away" messages)
 - Don't use `<button>` inside `<TooltipTrigger>` — causes nested button crash in Tauri webview
 
+## Known Gotchas
+- Todoist API pagination cursors are base64-ish opaque tokens containing `+`, `/`, `=` — appending them to a URL via naive string concat mangles `+` into a space and breaks the next request (symptom: an exactly-500-task cap from Todoist's v1 API). Always build these URLs with `reqwest::Url::parse(...).query_pairs_mut().append_pair()`.
+- React flex truncation requires `min-w-0` on EVERY ancestor in the flex chain, not just the truncating element — missing it on `<main>` (a flex-1 child inside overflow-y-auto) lets intrinsic content width silently push the whole page wide into horizontal scroll. Add `overflow-x-hidden` on the scroll container as a belt-and-suspenders guarantee.
+- Mobile: `min-h-dvh` + `overflow-y-auto` does not enable scrolling if inner content uses `flex-1` without a constrained parent height. Use `h-dvh` + `flex flex-col` on the outer container so `flex-1` children get bounded remaining space.
+- shadcn Checkbox className overrides (e.g. `data-checked:bg-white`) don't reliably beat the internal `data-checked:bg-primary` on dark backgrounds. Build a custom checkbox button for dark UIs instead.
+- Expo in this monorepo requires `metro.config.js` (with `watchFolders` + `nodeModulesPaths` pointing to the monorepo root) and `babel.config.js` (`babel-preset-expo`). Without both, the app renders a blank white screen with no error.
+- Before deriving layout from a screenshot or reference capture, verify which UI state it shows — Daily Triage renders different layouts for the guided morning flow (Today page, first open, centered ~520px) vs. the dashboard (review complete). Take final dimensions from `getBoundingClientRect`, not image estimates.
+- When working from screenshots of this app, verify the dark 44px circle bottom-right isn't the Agentation dev toolbar (collapsed) — it's a dev-only overlay, not real app UI.
+
 ## Architecture: DataProvider Abstraction
 - `DataProvider` interface (`services/data-provider.ts`) decouples frontend from Tauri invoke
 - Desktop: `TauriProvider` delegates to `services/tauri.ts` invoke wrappers
