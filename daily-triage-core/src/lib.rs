@@ -5,6 +5,7 @@ pub mod parsers;
 #[cfg(test)]
 pub mod test_util;
 pub mod types;
+pub mod vault;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
