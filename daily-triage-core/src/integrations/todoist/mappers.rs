@@ -70,13 +70,33 @@ pub fn due_args(new_due_date: Option<&str>, base_due: Option<&serde_json::Value>
         (Some(d), Some(base))
             if base.get("is_recurring").and_then(|v| v.as_bool()).unwrap_or(false) =>
         {
-            let string = base.get("string").and_then(|v| v.as_str()).unwrap_or_default();
-            serde_json::json!({ "due": { "string": string, "date": d } })
+            // Recurrence lives entirely in the `string` field (e.g. "every day").
+            // If the base's string is missing/null/empty we have nothing to
+            // preserve — fall through to the plain-date branch rather than
+            // sending an empty string that could corrupt the remote recurrence.
+            match base.get("string").and_then(|v| v.as_str()) {
+                Some(string) if !string.is_empty() => {
+                    serde_json::json!({ "due": { "string": string, "date": d } })
+                }
+                _ => serde_json::json!({ "due": { "date": d } }),
+            }
         }
         (Some(d), _) => serde_json::json!({ "due": { "date": d } }),
     }
 }
 
+/// Parses a local-clock timestamp ("YYYY-MM-DD HH:MM:SS", no offset) and
+/// converts it to UTC using the system's local timezone.
+///
+/// `.single()` deliberately returns `None` when the naive time is ambiguous
+/// (fall-back DST transition, two matching UTC instants) or nonexistent
+/// (spring-forward DST transition, no matching UTC instant) — we don't guess.
+/// Callers (see `merge::merge_task`) treat a missing local timestamp as "no
+/// reliable local time to compare," which — combined with `remote_wins_conflicts`
+/// defaulting to `true` whenever either side's timestamp is absent — means
+/// remote wins by default in that edge case. That's the accepted design for
+/// this single-user LWW app: an unresolvable local clock reading should not
+/// block remote data from applying.
 pub fn local_ts_to_utc(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     let naive = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").ok()?;
     chrono::Local
@@ -134,6 +154,14 @@ mod tests {
     #[test]
     fn non_recurring_reschedule_sends_plain_date() {
         let base_due = json!({"date": "2026-08-04", "string": "Aug 4", "is_recurring": false});
+        let args = due_args(Some("2026-08-10"), Some(&base_due));
+        assert_eq!(args["due"]["date"], "2026-08-10");
+        assert!(args["due"].get("string").is_none());
+    }
+
+    #[test]
+    fn recurring_with_missing_string_falls_back_to_plain_date() {
+        let base_due = json!({"date": "2026-08-04", "string": null, "is_recurring": true});
         let args = due_args(Some("2026-08-10"), Some(&base_due));
         assert_eq!(args["due"]["date"], "2026-08-10");
         assert!(args["due"].get("string").is_none());

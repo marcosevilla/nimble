@@ -143,6 +143,36 @@ mod tests {
     }
 
     #[test]
+    fn missing_local_timestamp_cedes_conflict_to_remote() {
+        // Pins the observable contract behind local_ts_to_utc's DST-ambiguous /
+        // nonexistent-time None (see its doc comment): when we have no reliable
+        // local timestamp to compare, a same-field conflict resolves to remote
+        // rather than blocking the sync. The test environment's TZ isn't
+        // controlled, so we pin this structurally via merge_task's inputs
+        // instead of forcing an actual DST transition through the parser.
+        let base = snap("a", None, 1);
+        let local = snap("local-edit", None, 1);
+        let remote = snap("remote-edit", None, 1);
+        let some_remote_ts = crate::integrations::todoist::mappers::rfc3339_to_utc("2026-08-04T11:00:00Z");
+        let plan = merge_task(&local, Some(&base), &remote, None, some_remote_ts);
+        assert_eq!(plan.content.as_deref(), Some("remote-edit"));
+    }
+
+    #[test]
+    fn convergent_edit_applies_remote_as_data_preserving_no_op() {
+        // Both sides changed the same field to the same value (e.g. two
+        // clients independently made the identical edit). local == remote but
+        // both differ from base — pick's (true, true) arm still resolves via
+        // remote_wins_conflicts and applies remote, which is a no-op in
+        // content but confirms the conflict arm doesn't special-case equality.
+        let base = snap("a", None, 1);
+        let local = snap("same-edit", None, 1);
+        let remote = snap("same-edit", None, 1);
+        let plan = merge_task(&local, Some(&base), &remote, None, None);
+        assert_eq!(plan.content.as_deref(), Some("same-edit"));
+    }
+
+    #[test]
     fn remote_completion_applies() {
         let base = snap("a", None, 1);
         let mut remote = base.clone();
