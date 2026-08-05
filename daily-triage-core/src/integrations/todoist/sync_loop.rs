@@ -297,9 +297,27 @@ pub fn build_commands(
     (cmds, unbuildable)
 }
 
+/// Pure helper for the I3 progress guard: given the command_uuids of the rows
+/// sent in a batch and the `sync_status` map from the response, returns the
+/// number that resolved (present in the map, regardless of ok/error). If a
+/// response omits every uuid — e.g. a malformed or empty `sync_status` — this
+/// returns 0, which `push_outbox` uses to break out of its loop instead of
+/// re-fetching and re-sending the same unchanged batch forever.
+fn count_resolved(sent_command_uuids: &[&str], sync_status: &HashMap<String, serde_json::Value>) -> usize {
+    sent_command_uuids
+        .iter()
+        .filter(|uuid| sync_status.contains_key(**uuid))
+        .count()
+}
+
 /// Drains the outbox in batches of up to 100 rows, sending each batch as a
 /// single `/sync` request. Returns the number of outbox rows confirmed done.
 pub async fn push_outbox(pool: &SqlitePool, token: &str) -> crate::Result<usize> {
+    // Crash/startup recovery: rows stuck 'sending' from a previous run that
+    // never got a response get a chance to be retried (idempotent via the
+    // command_uuid persisted at enqueue time).
+    outbox::reset_stuck_sending(pool).await?;
+
     let mut confirmed = 0usize;
     loop {
         let rows = outbox::pending_batch(pool, 100).await?;
@@ -308,6 +326,8 @@ pub async fn push_outbox(pool: &SqlitePool, token: &str) -> crate::Result<usize>
         }
         let ctx = load_push_ctx(pool, &rows).await?;
         let (cmds, unbuildable) = build_commands(&rows, &ctx);
+        let unbuildable_ids: std::collections::HashSet<&str> =
+            unbuildable.iter().map(|(id, _)| id.as_str()).collect();
         for (row_id, reason) in &unbuildable {
             // Never-synced deletes and no-op moves are successes (nothing to do
             // remotely), not errors — drop them rather than erroring forever.
@@ -320,8 +340,40 @@ pub async fn push_outbox(pool: &SqlitePool, token: &str) -> crate::Result<usize>
         if cmds.is_empty() {
             continue;
         }
-        let resp = client::sync(token, &serde_json::json!({"commands": cmds})).await?;
+
+        // Mark the rows about to be sent as 'sending' *before* the HTTP call
+        // (I1): a local edit that arrives while this batch is in flight can no
+        // longer coalesce into it (enqueue's coalescer only targets 'pending'
+        // rows) — it creates a fresh pending op instead, so it can never be
+        // silently discarded when this batch's response retires the sent row.
+        let sending_ids: Vec<String> = rows
+            .iter()
+            .filter(|r| !unbuildable_ids.contains(r.id.as_str()))
+            .map(|r| r.id.clone())
+            .collect();
+        outbox::mark_sending(pool, &sending_ids).await?;
+
+        let resp = match client::sync(token, &serde_json::json!({"commands": cmds})).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                // Request never completed — revert to 'pending' so the next
+                // sync cycle retries these rows instead of leaving them stuck.
+                outbox::mark_pending(pool, &sending_ids).await?;
+                return Err(e);
+            }
+        };
+
+        let sent_command_uuids: Vec<&str> = rows
+            .iter()
+            .filter(|r| !unbuildable_ids.contains(r.id.as_str()))
+            .map(|r| r.command_uuid.as_str())
+            .collect();
+        let resolved = count_resolved(&sent_command_uuids, &resp.sync_status);
+
         for row in &rows {
+            if unbuildable_ids.contains(row.id.as_str()) {
+                continue;
+            }
             let Some(status) = resp.sync_status.get(&row.command_uuid) else { continue };
             if client::command_ok(status) {
                 if row.op == "create" {
@@ -343,6 +395,16 @@ pub async fn push_outbox(pool: &SqlitePool, token: &str) -> crate::Result<usize>
             } else {
                 outbox::mark_error(pool, &row.id, &status.to_string()).await?;
             }
+        }
+
+        // I3 progress guard: if the response resolved none of the rows we sent
+        // (e.g. it omitted every persisted command_uuid), stop instead of
+        // re-fetching and re-sending the same unchanged batch forever while
+        // holding the sync lock. Leave the unresolved rows — reverted to
+        // 'pending' — for the next sync cycle to retry.
+        if resolved == 0 {
+            outbox::mark_pending(pool, &sending_ids).await?;
+            break;
         }
     }
     Ok(confirmed)
@@ -819,6 +881,29 @@ mod push_tests {
         assert!(bad.is_empty());
         assert_eq!(cmds[0]["type"], "item_move");
         assert_eq!(cmds[0]["args"]["project_id"], "EXT-P2");
+    }
+
+    // I3 regression: push_outbox's progress guard relies on count_resolved to
+    // detect a response that resolved nothing, so it can break instead of
+    // looping forever re-sending the same batch. This can't easily be
+    // exercised end-to-end without a mock Todoist HTTP server (client::sync
+    // hits a hardcoded URL with no test seam), so we test the pure counting
+    // logic that decides the guard directly.
+    #[test]
+    fn count_resolved_is_zero_when_response_omits_every_uuid() {
+        let sent = vec!["uuid-a", "uuid-b"];
+        let sync_status: HashMap<String, serde_json::Value> = HashMap::new();
+        assert_eq!(count_resolved(&sent, &sync_status), 0);
+    }
+
+    #[test]
+    fn count_resolved_counts_present_uuids_regardless_of_ok_or_error() {
+        let sent = vec!["uuid-a", "uuid-b", "uuid-c"];
+        let mut sync_status: HashMap<String, serde_json::Value> = HashMap::new();
+        sync_status.insert("uuid-a".to_string(), json!("ok"));
+        sync_status.insert("uuid-b".to_string(), json!({"error": "Item not found"}));
+        // uuid-c is absent — e.g. Todoist silently dropped it from the response
+        assert_eq!(count_resolved(&sent, &sync_status), 2);
     }
 }
 
