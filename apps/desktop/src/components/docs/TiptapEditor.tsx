@@ -14,7 +14,17 @@ import { Wikilink } from './WikilinkExtension'
 
 interface TiptapEditorProps {
   content: string
-  onChange: (html: string) => void
+  /**
+   * Omit to render read-only. Its absence is the single source of truth for
+   * editability: the editor is created with `editable: false`, no `onUpdate`
+   * handler is installed, and nothing is flushed on unmount — so there is no
+   * callback a change could reach even if one were somehow produced.
+   *
+   * Vault notes rely on this: `tiptap-markdown` does not round-trip Obsidian's
+   * dialect losslessly (frontmatter, wikilinks, embeds, checkboxes, callouts),
+   * so serialising one back to disk would corrupt it.
+   */
+  onChange?: (html: string) => void
   placeholder?: string
   format?: 'html' | 'markdown'
   /** When provided, `[[wikilinks]]` become clickable and route here. */
@@ -90,11 +100,13 @@ MentionList.displayName = 'MentionList'
 export function TiptapEditor({ content, onChange, placeholder = 'Start writing...', format, onWikilinkClick }: TiptapEditorProps) {
   const dp = useDataProvider()
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const editable = !!onChange
 
   const serialize = (editor: Editor) =>
     format === 'markdown' ? editor.storage.markdown.getMarkdown() : editor.getHTML()
 
   const editor = useEditor({
+    editable,
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
@@ -103,7 +115,8 @@ export function TiptapEditor({ content, onChange, placeholder = 'Start writing..
         openOnClick: false,
         HTMLAttributes: { class: 'text-accent-blue underline cursor-pointer' },
       }),
-      Placeholder.configure({ placeholder }),
+      // A read-only pane has nowhere to start writing — no placeholder.
+      ...(editable ? [Placeholder.configure({ placeholder })] : []),
       ...(format === 'markdown'
         ? [Markdown.configure({ html: false, linkify: true, breaks: false })]
         : []),
@@ -187,12 +200,14 @@ export function TiptapEditor({ content, onChange, placeholder = 'Start writing..
         class: 'tiptap-editor outline-none min-h-[200px] text-body leading-relaxed',
       },
     },
-    onUpdate: ({ editor }) => {
-      clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => {
-        onChange(serialize(editor))
-      }, 1000)
-    },
+    onUpdate: onChange
+      ? ({ editor }) => {
+          clearTimeout(debounceRef.current)
+          debounceRef.current = setTimeout(() => {
+            onChange(serialize(editor))
+          }, 1000)
+        }
+      : undefined,
   })
 
   useEffect(() => {
@@ -202,6 +217,7 @@ export function TiptapEditor({ content, onChange, placeholder = 'Start writing..
   }, [content, editor])
 
   useEffect(() => {
+    if (!onChange) return
     return () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current)
