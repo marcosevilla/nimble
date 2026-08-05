@@ -41,6 +41,7 @@ import type { ProductFont } from '@/lib/fonts'
 import { IconButton } from '@/components/shared/IconButton'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Label as SectionLabel, Meta, SectionTitle } from '@/components/shared/typography'
+import { TodoistSyncSection } from '@/components/settings/TodoistSyncSection'
 import { TodoistMigrationSection } from '@/components/settings/TodoistMigrationSection'
 import { DocsMigrationSection } from '@/components/settings/DocsMigrationSection'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
@@ -1241,6 +1242,11 @@ export function SettingsPage() {
             </a>
           </li>
           <li>
+            <a href="#todoist-sync" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
+              Todoist sync
+            </a>
+          </li>
+          <li>
             <a href="#import-todoist" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
               Import from Todoist
             </a>
@@ -1447,6 +1453,17 @@ export function SettingsPage() {
             />
           ))}
         </div>
+      </section>
+
+      <Separator />
+
+      {/* Todoist sync */}
+      <section id="todoist-sync" className="space-y-4 scroll-mt-6">
+        <SectionHeader
+          title="Todoist sync"
+          description="Two-way sync between local tasks and Todoist, running automatically once turned on."
+        />
+        <TodoistSyncSection />
       </section>
 
       <Separator />
