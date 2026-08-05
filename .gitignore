@@ -13,3 +13,4 @@ target/
 *.orig.*
 web-build/
 .vite/
+.claude/worktrees/
