@@ -41,7 +41,7 @@ This plan implements spec **Part 2** end-to-end on the Mac, plus the **desktop h
 - Timestamps: `datetime('now','localtime')`-style strings (`YYYY-MM-DD HH:MM:SS`) for `updated_at` / `deleted_at`, matching every other table. File mtimes are stored as RFC3339 (they come from the filesystem, not SQLite).
 - UI copy stays neutral and guilt-free: no "overdue", no streaks, no scolding. Sync/scan failures read as "will retry".
 - Use `cn()` for conditional classes; import shadcn primitives from `@/components/ui/`; skeletons over spinners.
-- Rust tests: `cargo test -p daily-triage-core`. Desktop types: `cd apps/desktop && npx tsc --noEmit`. Both must be clean before every commit.
+- Rust tests: `cargo test -p daily-triage-core`. Desktop types: `cd apps/desktop && npm run build` — **not** `npx tsc --noEmit`. `apps/desktop/tsconfig.json` is a solution-style config (`"files": []` plus project references), so a bare `tsc --noEmit` resolves it, checks **zero** files, and exits 0 no matter how broken the code is. Only `tsc -b` (which `npm run build` runs) descends into `tsconfig.app.json` and actually type-checks `src/`. Discovered during Task 14 — every earlier "tsc clean" in this plan was a no-op. Both commands must be clean before every commit.
 - Commit messages use `feat:` / `fix:` / `refactor:` prefixes, one commit per task.
 
 ---
@@ -4120,6 +4120,8 @@ In `daily-triage/CLAUDE.md`:
 4. In **Known Gotchas**, add:
 
 ```
+- `npx tsc --noEmit` in `apps/desktop` type-checks NOTHING. `tsconfig.json` there is solution-style (`"files": []` + project references), so the bare command resolves it, checks zero files, and exits 0 regardless of how broken `src/` is. Use `npm run build` (which runs `tsc -b`, descending into `tsconfig.app.json`) as the real type check. This silently hid a production-build failure across two plans.
+- `tiptap-markdown@0.9.0` ships no module augmentation for Tiptap's `Storage` interface, so `editor.storage.markdown` has no type. The repo supplies its own ambient declaration under `apps/desktop/src/types/` — don't "fix" a future error there with `as any`; that call produces the markdown written to real vault files.
 - `run_migrations` splits each migration's SQL on `;`, so a statement containing an internal semicolon (`CREATE TRIGGER ... BEGIN ...; END`) is shredded into invalid fragments. Keep migrations to single-statement-per-semicolon SQL.
 - Obsidian vault writes go through `vault::writer`, never `tokio::fs::write` directly — it hash-checks against what the app last read and diverts to a `(conflict <timestamp>).md` copy instead of overwriting an edit made in Obsidian.
 ```
