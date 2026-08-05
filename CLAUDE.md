@@ -66,7 +66,7 @@ daily-triage/
 - SQLite managed via sqlx (desktop Rust) and expo-sqlite (mobile TypeScript)
 - Versioned migration system in `daily-triage-core/src/db/migrations.rs` (Rust) and `apps/mobile/services/database.ts` (TypeScript mirror)
 - Both platforms share the same schema — keep migrations in sync
-- Current version: **17** (v1-13: core schema + v14: sync_log table + device_id + v15: external_id/external_source tracking on local_tasks/projects + v16: capture context column + v17: todoist_outbox, integration_sync_state, and remote_updated_at/synced_snapshot columns for two-way sync)
+- Current version: **18** (v1-13: core schema + v14: sync_log table + device_id + v15: external_id/external_source tracking on local_tasks/projects + v16: capture context column + v17: todoist_outbox, integration_sync_state, and remote_updated_at/synced_snapshot columns for two-way sync + v18: vault_notes/vault_links/vault_tags + device-local vault_fts (FTS5))
 - `schema_version` table tracks what's been applied
 
 ## Key Tables
@@ -87,6 +87,10 @@ daily-triage/
 - `integration_sync_state` — per-provider sync token, last sync/error timestamps, enabled flag (Mac-local, not synced)
 - `calendar_events` / `calendar_feeds` — cached calendar data with 7-day window caching
 - `sync_log` — change tracking for cross-device sync (table_name, row_id, operation, snapshot, device_id, timestamp)
+- `vault_notes` — indexed Obsidian notes (vault-relative path, content, frontmatter JSON, blake3 hash, soft-delete). Files on disk are the source of truth; this table is a derived index that also syncs.
+- `vault_links` — wikilink/embed edges between notes (deterministic ids, replaced on re-index)
+- `vault_tags` — inline + frontmatter tags per note (deterministic ids, replaced on re-index)
+- `vault_fts` — FTS5 index over note title+content. Device-local, never synced, written by `vault::index`, not by SQL triggers (the migration runner splits on `;`)
 
 ## Task Status Workflow
 - Statuses: `backlog` → `todo` → `in_progress` → `blocked` → `complete`
@@ -121,6 +125,10 @@ daily-triage/
 - Before deriving layout from a screenshot or reference capture, verify which UI state it shows — Daily Triage renders different layouts for the guided morning flow (Today page, first open, centered ~520px) vs. the dashboard (review complete). Take final dimensions from `getBoundingClientRect`, not image estimates.
 - When working from screenshots of this app, verify the dark 44px circle bottom-right isn't the Agentation dev toolbar (collapsed) — it's a dev-only overlay, not real app UI.
 - `services/data-provider.ts` is type-only at runtime — importing a value (e.g. `getDataProvider`) from it passes tsc but throws "Importing binding name not found" at module eval and blanks the whole app. Runtime provider access comes from `@/services/provider-context`.
+- `npx tsc --noEmit` in `apps/desktop` type-checks NOTHING. `tsconfig.json` there is solution-style (`"files": []` + project references), so the bare command resolves it, checks zero files, and exits 0 regardless of how broken `src/` is. Use `npm run build` (which runs `tsc -b`, descending into `tsconfig.app.json`) as the real type check. This silently hid a production-build failure across two plans.
+- `tiptap-markdown@0.9.0` ships no module augmentation for Tiptap's `Storage` interface, so `editor.storage.markdown` has no type. The repo supplies its own ambient declaration under `apps/desktop/src/types/` — don't "fix" a future error there with `as any`; that call produces the markdown written to real vault files.
+- `run_migrations` splits each migration's SQL on `;`, so a statement containing an internal semicolon (`CREATE TRIGGER ... BEGIN ...; END`) is shredded into invalid fragments. Keep migrations to single-statement-per-semicolon SQL.
+- Obsidian vault writes go through `vault::writer`, never `tokio::fs::write` directly — it hash-checks against what the app last read and diverts to a `(conflict <timestamp>).md` copy instead of overwriting an edit made in Obsidian.
 
 ## Architecture: DataProvider Abstraction
 - `DataProvider` interface (`services/data-provider.ts`) decouples frontend from Tauri invoke
@@ -136,6 +144,8 @@ daily-triage/
 - "Seed Existing Data" command backfills sync_log for pre-existing data
 - Turso URL format: `libsql://<db>-<org>.turso.io` (auto-normalized to https)
 - Remote schema initialization runs once (creates all 16 tables on Turso)
+- Vault tables replicate through the same sync_log pipeline; `vault_fts`, `todoist_outbox`, and `integration_sync_state` stay device/Mac-local
+- Remote schema upgrades are gated per version by a `turso_schema_v<N>_upgraded` setting, since `initialize_remote` only runs once per database
 
 ## Current State
 
