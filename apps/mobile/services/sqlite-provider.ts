@@ -586,5 +586,11 @@ export function createSqliteProvider(): DataProvider {
         );
       },
     },
+
+    todoistSync: {
+      syncNow: async () => ({ skipped: 'mobile', pushed: 0, created: 0, updated: 0, deleted: 0, projects_upserted: 0 }),
+      status: async () => ({ enabled: false, connected: false, last_sync_at: null, last_error: null, pending_ops: 0, error_ops: 0, errors: [] }),
+      setEnabled: async () => {},
+    },
   };
 }

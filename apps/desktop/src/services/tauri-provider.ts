@@ -165,5 +165,11 @@ export function createTauriProvider(): DataProvider {
       initializeRemote: tauri.syncInitializeRemote,
       seedExisting: tauri.syncSeedExisting,
     },
+
+    todoistSync: {
+      syncNow: tauri.todoistSyncNow,
+      status: tauri.getTodoistSyncStatus,
+      setEnabled: tauri.setTodoistSyncEnabled,
+    },
   }
 }

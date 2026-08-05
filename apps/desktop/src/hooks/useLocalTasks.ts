@@ -1,12 +1,29 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useDataProvider } from '@/services/provider-context'
+import { useDataProvider, getDataProvider } from '@/services/provider-context'
 import type { LocalTask, Project } from '@daily-triage/types'
 import { toast } from 'sonner'
 
 // Simple event bus so all useLocalTasks instances refetch on any mutation
 const TASKS_CHANGED = 'tasks-changed'
+
+// Debounced Todoist push after local mutations: batches rapid-fire edits
+// (e.g. typing, bulk reorders) into a single sync instead of one per
+// keystroke. Quiet by design on failure — the outbox persists the pending
+// ops, so the next trigger (interval/focus/another mutation) retries.
+let todoistSyncTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleTodoistPush() {
+  if (todoistSyncTimer) clearTimeout(todoistSyncTimer)
+  todoistSyncTimer = setTimeout(() => {
+    todoistSyncTimer = null
+    getDataProvider().todoistSync.syncNow().catch(() => {
+      // quiet by design: outbox persists, next trigger retries
+    })
+  }, 10_000)
+}
+
 export function emitTasksChanged() {
   window.dispatchEvent(new Event(TASKS_CHANGED))
+  scheduleTodoistPush()
 }
 
 export function useLocalTasks(opts?: { projectId?: string; dueDate?: string; includeCompleted?: boolean }) {

@@ -1,5 +1,6 @@
 mod commands;
 mod selection;
+mod sync_runner;
 // db and parsers modules re-export from daily-triage-core for backward compatibility
 #[allow(unused)]
 mod db;
@@ -16,7 +17,7 @@ use tauri::{
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-use commands::{activity, ai, calendar, capture_routes, captures, demo, docs, focus, goals, habits, import, local_tasks, obsidian, open_url, priorities, progress, projects, settings, sync, todoist, updater};
+use commands::{activity, ai, calendar, capture_routes, captures, demo, docs, focus, goals, habits, import, local_tasks, obsidian, open_url, priorities, progress, projects, settings, sync, todoist, todoist_sync, updater};
 
 /// Show and focus the main window
 fn show_window(app: &tauri::AppHandle) {
@@ -294,6 +295,21 @@ pub fn run() {
                 app_handle.manage(pool);
             });
 
+            // --- Todoist background sync: 5-minute interval, min 60s apart ---
+            // First tick fires immediately (tokio::time::interval semantics),
+            // covering an on-launch sync without a separate code path.
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    loop {
+                        interval.tick().await; // first tick fires immediately → covers on-launch sync
+                        crate::sync_runner::run_if_due_and_emit(&handle, 60).await;
+                    }
+                });
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -317,6 +333,17 @@ pub fn run() {
                         dismiss_capture_strip_inner(&window.app_handle().clone());
                     }
                 }
+                // Window regaining focus is a good moment to catch up on
+                // Todoist sync (e.g. changes made on mobile/web while this
+                // window was backgrounded) — gated by the same min-interval
+                // as the background loop so refocusing repeatedly can't spam
+                // the API.
+                WindowEvent::Focused(true) => {
+                    let app = window.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::sync_runner::run_if_due_and_emit(&app, 60).await;
+                    });
+                }
                 _ => {}
             }
         })
@@ -336,6 +363,9 @@ pub fn run() {
             todoist::preview_todoist_migration,
             todoist::migrate_todoist,
             todoist::migrated_todoist_ids,
+            todoist_sync::todoist_sync_now,
+            todoist_sync::get_todoist_sync_status,
+            todoist_sync::set_todoist_sync_enabled,
             calendar::fetch_calendar_events,
             calendar::get_cached_calendar_events,
             calendar::get_calendar_feeds,

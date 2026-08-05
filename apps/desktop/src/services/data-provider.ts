@@ -47,6 +47,8 @@ import type {
   TodoistMigrationOptions,
   TodoistMigrationPreview,
   TodoistMigrationResult,
+  SyncReport,
+  TodoistSyncStatus,
 } from '@daily-triage/types'
 
 // Re-export all types so consumers can import from data-provider instead of tauri
@@ -89,6 +91,8 @@ export type {
   HabitHeatmapEntry,
   ImportSummary,
   SyncStatus,
+  SyncReport,
+  TodoistSyncStatus,
 }
 
 export interface DataProvider {
@@ -341,5 +345,11 @@ export interface DataProvider {
     testConnection(tursoUrl: string, tursoToken: string): Promise<void>
     initializeRemote(): Promise<void>
     seedExisting(): Promise<number>
+  }
+
+  todoistSync: {
+    syncNow(): Promise<SyncReport>
+    status(): Promise<TodoistSyncStatus>
+    setEnabled(enabled: boolean): Promise<void>
   }
 }

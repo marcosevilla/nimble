@@ -42,6 +42,8 @@ export type {
   TodoistMigrationOptions,
   TodoistMigrationPreview,
   TodoistMigrationResult,
+  SyncReport,
+  TodoistSyncStatus,
 } from '@daily-triage/types'
 
 import type {
@@ -83,6 +85,8 @@ import type {
   HabitHeatmapEntry,
   ImportSummary,
   SyncStatus,
+  SyncReport,
+  TodoistSyncStatus,
 } from '@daily-triage/types'
 
 // ── Settings ──
@@ -746,6 +750,20 @@ export async function syncInitializeRemote(): Promise<void> {
 
 export async function syncSeedExisting(): Promise<number> {
   return invoke<number>('sync_seed_existing')
+}
+
+// ── Todoist Sync ──
+
+export async function todoistSyncNow(): Promise<SyncReport> {
+  return invoke<SyncReport>('todoist_sync_now')
+}
+
+export async function getTodoistSyncStatus(): Promise<TodoistSyncStatus> {
+  return invoke<TodoistSyncStatus>('get_todoist_sync_status')
+}
+
+export async function setTodoistSyncEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>('set_todoist_sync_enabled', { enabled })
 }
 
 // ── Demo Mode ──

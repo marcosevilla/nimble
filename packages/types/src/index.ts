@@ -389,3 +389,24 @@ export interface SyncResult {
   pushed: number
   pulled: number
 }
+
+// ── Todoist Sync ──
+
+export interface SyncReport {
+  skipped: string | null
+  pushed: number
+  created: number
+  updated: number
+  deleted: number
+  projects_upserted: number
+}
+
+export interface TodoistSyncStatus {
+  enabled: boolean
+  connected: boolean
+  last_sync_at: string | null
+  last_error: string | null
+  pending_ops: number
+  error_ops: number
+  errors: [string, string, string][]
+}

@@ -40,6 +40,8 @@ import type {
   HabitHeatmapEntry,
   ImportSummary,
   SyncStatus,
+  SyncReport,
+  TodoistSyncStatus,
 } from '@daily-triage/types';
 
 export interface DataProvider {
@@ -301,5 +303,11 @@ export interface DataProvider {
     pull(): Promise<number>;
     getStatus(): Promise<SyncStatus>;
     configure(tursoUrl: string, tursoToken: string): Promise<void>;
+  };
+
+  todoistSync: {
+    syncNow(): Promise<SyncReport>;
+    status(): Promise<TodoistSyncStatus>;
+    setEnabled(enabled: boolean): Promise<void>;
   };
 }
