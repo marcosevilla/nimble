@@ -12,6 +12,7 @@ export function DocsPage() {
   const setFolderTreeCollapsed = useDocsStore((s) => s.setFolderTreeCollapsed)
   const refresh = useDocsStore((s) => s.refresh)
   const currentDoc = useDocsStore((s) => s.currentDoc)
+  const currentVaultNote = useDocsStore((s) => s.currentVaultNote)
 
   // Load data on mount
   useEffect(() => {
@@ -45,7 +46,7 @@ export function DocsPage() {
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
         <PageHeader
           title="Docs"
-          meta={currentDoc ? currentDoc.title : undefined}
+          meta={currentVaultNote ? currentVaultNote.title : currentDoc ? currentDoc.title : undefined}
         />
         <DocEditor />
       </div>

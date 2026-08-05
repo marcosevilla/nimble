@@ -3,6 +3,7 @@ import { useDocsStore } from '@/stores/docsStore'
 import { useDataProvider } from '@/services/provider-context'
 import { TiptapEditor } from './TiptapEditor'
 import { DocNoteEntry } from './DocNoteEntry'
+import { VaultNoteEditor } from './VaultNoteEditor'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DocNote } from '@daily-triage/types'
@@ -22,6 +23,7 @@ export function invalidateDocsFormatCache() {
 export function DocEditor() {
   const dp = useDataProvider()
   const currentDoc = useDocsStore((s) => s.currentDoc)
+  const currentVaultNote = useDocsStore((s) => s.currentVaultNote)
   const folders = useDocsStore((s) => s.folders)
   const refresh = useDocsStore((s) => s.refresh)
 
@@ -92,6 +94,11 @@ export function DocEditor() {
       toast.error(`Failed to delete note: ${e}`)
     }
   }, [dp])
+
+  // A vault note is selected — file-backed editing takes over the pane.
+  if (currentVaultNote) {
+    return <VaultNoteEditor />
+  }
 
   if (!currentDoc) {
     return (
