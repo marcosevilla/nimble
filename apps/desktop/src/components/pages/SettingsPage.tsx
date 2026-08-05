@@ -42,6 +42,7 @@ import { IconButton } from '@/components/shared/IconButton'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Label as SectionLabel, Meta, SectionTitle } from '@/components/shared/typography'
 import { TodoistMigrationSection } from '@/components/settings/TodoistMigrationSection'
+import { DocsMigrationSection } from '@/components/settings/DocsMigrationSection'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
 
 // ── Types ──
@@ -1245,6 +1246,11 @@ export function SettingsPage() {
             </a>
           </li>
           <li>
+            <a href="#docs-format" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
+              Docs storage format
+            </a>
+          </li>
+          <li>
             <a href="#focus" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
               Focus Mode
             </a>
@@ -1452,6 +1458,17 @@ export function SettingsPage() {
           description="One-time migration of your Todoist projects and tasks into the local database. Re-runs upsert in place."
         />
         <TodoistMigrationSection />
+      </section>
+
+      <Separator />
+
+      {/* Docs storage format */}
+      <section id="docs-format" className="space-y-4 scroll-mt-6">
+        <SectionHeader
+          title="Docs storage format"
+          description="Converts all docs from HTML to markdown. A backup of the database is saved first. Run the preview to see which docs contain formatting that may simplify during conversion."
+        />
+        <DocsMigrationSection />
       </section>
 
       <Separator />

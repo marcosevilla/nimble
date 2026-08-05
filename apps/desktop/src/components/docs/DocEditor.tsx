@@ -6,6 +6,18 @@ import { DocNoteEntry } from './DocNoteEntry'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DocNote } from '@daily-triage/types'
+import { getSetting } from '@/services/tauri'
+
+let cachedFormat: 'html' | 'markdown' | null = null
+async function getDocsFormat(): Promise<'html' | 'markdown'> {
+  if (cachedFormat) return cachedFormat
+  const v = await getSetting('docs_content_format')
+  cachedFormat = v === 'markdown' ? 'markdown' : 'html'
+  return cachedFormat
+}
+export function invalidateDocsFormatCache() {
+  cachedFormat = null
+}
 
 export function DocEditor() {
   const dp = useDataProvider()
@@ -17,6 +29,11 @@ export function DocEditor() {
   const [notes, setNotes] = useState<DocNote[]>([])
   const [noteInput, setNoteInput] = useState('')
   const [noteInputVisible, setNoteInputVisible] = useState(false)
+  const [format, setFormat] = useState<'html' | 'markdown' | null>(null)
+
+  useEffect(() => {
+    getDocsFormat().then(setFormat)
+  }, [])
 
   // Sync title when doc changes
   useEffect(() => {
@@ -105,11 +122,15 @@ export function DocEditor() {
         />
 
         {/* Editor */}
-        <TiptapEditor
-          content={currentDoc.content}
-          onChange={handleContentChange}
-          placeholder="Start writing..."
-        />
+        {format && (
+          <TiptapEditor
+            key={format}
+            content={currentDoc.content}
+            onChange={handleContentChange}
+            placeholder="Start writing..."
+            format={format}
+          />
+        )}
 
         {/* Separator */}
         <div className="border-t border-border/20 pt-4" />

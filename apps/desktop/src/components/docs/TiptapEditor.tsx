@@ -1,8 +1,9 @@
-import { useEditor, EditorContent, ReactRenderer } from '@tiptap/react'
+import { useEditor, EditorContent, ReactRenderer, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
 import Mention from '@tiptap/extension-mention'
+import { Markdown } from 'tiptap-markdown'
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react'
 import { useDataProvider } from '@/services/provider-context'
 import { cn } from '@/lib/utils'
@@ -14,6 +15,7 @@ interface TiptapEditorProps {
   content: string
   onChange: (html: string) => void
   placeholder?: string
+  format?: 'html' | 'markdown'
 }
 
 // ── Mention item type (tasks + docs) ──
@@ -82,9 +84,12 @@ MentionList.displayName = 'MentionList'
 
 // ── Main editor ──
 
-export function TiptapEditor({ content, onChange, placeholder = 'Start writing...' }: TiptapEditorProps) {
+export function TiptapEditor({ content, onChange, placeholder = 'Start writing...', format }: TiptapEditorProps) {
   const dp = useDataProvider()
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const serialize = (editor: Editor) =>
+    format === 'markdown' ? editor.storage.markdown.getMarkdown() : editor.getHTML()
 
   const editor = useEditor({
     extensions: [
@@ -96,6 +101,9 @@ export function TiptapEditor({ content, onChange, placeholder = 'Start writing..
         HTMLAttributes: { class: 'text-accent-blue underline cursor-pointer' },
       }),
       Placeholder.configure({ placeholder }),
+      ...(format === 'markdown'
+        ? [Markdown.configure({ html: false, linkify: true, breaks: false })]
+        : []),
       Mention.configure({
         HTMLAttributes: {
           class: 'mention-tag',
@@ -178,13 +186,13 @@ export function TiptapEditor({ content, onChange, placeholder = 'Start writing..
     onUpdate: ({ editor }) => {
       clearTimeout(debounceRef.current)
       debounceRef.current = setTimeout(() => {
-        onChange(editor.getHTML())
+        onChange(serialize(editor))
       }, 1000)
     },
   })
 
   useEffect(() => {
-    if (editor && content !== editor.getHTML()) {
+    if (editor && content !== serialize(editor)) {
       editor.commands.setContent(content, { emitUpdate: false })
     }
   }, [content, editor])
@@ -193,7 +201,7 @@ export function TiptapEditor({ content, onChange, placeholder = 'Start writing..
     return () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current)
-        if (editor) onChange(editor.getHTML())
+        if (editor) onChange(serialize(editor))
       }
     }
   }, [editor, onChange])
