@@ -389,7 +389,22 @@ pub async fn migrate_docs_to_markdown(
     // 3. Flip the format setting. `set_setting` only takes a pool (no
     // transaction handle), so this happens immediately after commit rather
     // than inside the transaction above — see docs.rs task-3 report for why.
-    set_setting(pool, "docs_content_format", "markdown").await?;
+    //
+    // This is an intentional, narrow non-atomic window: if `set_setting`
+    // fails here, `documents.content` is already committed as markdown but
+    // `docs_content_format` still reads absent/"html". The function is
+    // idempotent (rows that no longer start with '<' are skipped), so
+    // simply re-running the migration finishes the job — but only if the
+    // caller knows to retry, since a bare `Err` looks identical to "nothing
+    // happened". Surface a distinct, actionable message so that doesn't
+    // get misread as a total failure.
+    if let Err(e) = set_setting(pool, "docs_content_format", "markdown").await {
+        return Err(crate::Error::Other(format!(
+            "{converted} document(s) were converted to markdown, but the docs_content_format \
+             flag failed to persist ({e}). Run the migration again to finish — already-converted \
+             documents will be skipped automatically."
+        )));
+    }
 
     // 4. Sync-log the converted docs so Turso propagates the new content
     for id in touched {
@@ -451,6 +466,30 @@ mod md_migration_tests {
         assert_eq!(result.converted, 1);
         assert!(std::path::Path::new(&result.backup_path).exists());
 
+        // The backup must capture PRE-migration state (backup-before-convert),
+        // not just be some file that happens to exist. Open it read-only as
+        // its own pool and check the document still has its original HTML.
+        {
+            use sqlx::sqlite::SqlitePoolOptions;
+            let backup_url = format!("sqlite://{}?mode=ro", result.backup_path);
+            let backup_pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect(&backup_url)
+                .await
+                .expect("open backup db read-only");
+            let backup_content: String =
+                sqlx::query_scalar("SELECT content FROM documents WHERE id = ?")
+                    .bind(&doc.id)
+                    .fetch_one(&backup_pool)
+                    .await
+                    .expect("read document from backup");
+            assert!(
+                backup_content.contains("<h2>Head</h2>"),
+                "backup must contain pre-migration HTML, got: {backup_content}"
+            );
+            backup_pool.close().await;
+        }
+
         let after = super::get_document(&pool, &doc.id).await.unwrap().unwrap();
         assert!(after.content.contains("## Head"));
         assert!(!after.content.contains('<'));
@@ -466,5 +505,37 @@ mod md_migration_tests {
         assert_eq!(again.converted, 0);
         let _ = std::fs::remove_file(&backup);
         let _ = std::fs::remove_file(&backup2);
+    }
+
+    // Finding 1 fix coverage: if the post-commit `set_setting` call fails,
+    // `migrate_docs_to_markdown` must (a) have already durably converted the
+    // documents and (b) surface a distinct, actionable error rather than a
+    // generic one indistinguishable from "nothing happened". Sabotage the
+    // `settings` table so VACUUM INTO and the documents UPDATE (neither of
+    // which touch `settings`) still succeed, but the post-commit flag flip
+    // fails — this exercises the exact non-atomic window called out above.
+    #[tokio::test]
+    async fn migrate_surfaces_actionable_error_when_setting_flip_fails() {
+        let (pool, _db_path) = file_pool().await;
+        let doc = super::create_document(&pool, "Doc", None).await.unwrap();
+        super::update_document(&pool, &doc.id, None, Some("<p>hi</p>"), None)
+            .await
+            .unwrap();
+
+        sqlx::query("DROP TABLE settings").execute(&pool).await.unwrap();
+
+        let backup = std::env::temp_dir().join(format!("dt-test-backup-{}.db", uuid::Uuid::new_v4()));
+        let err = super::migrate_docs_to_markdown(&pool, backup.to_str().unwrap())
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("converted"), "error should mention the conversion happened: {msg}");
+        assert!(msg.contains("again"), "error should tell the caller to retry: {msg}");
+
+        // Despite the Err, the document must already be durably converted.
+        let after = super::get_document(&pool, &doc.id).await.unwrap().unwrap();
+        assert!(!after.content.contains('<'), "content should already be converted: {}", after.content);
+
+        let _ = std::fs::remove_file(&backup);
     }
 }
