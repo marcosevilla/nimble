@@ -120,6 +120,7 @@ daily-triage/
 - Expo in this monorepo requires `metro.config.js` (with `watchFolders` + `nodeModulesPaths` pointing to the monorepo root) and `babel.config.js` (`babel-preset-expo`). Without both, the app renders a blank white screen with no error.
 - Before deriving layout from a screenshot or reference capture, verify which UI state it shows — Daily Triage renders different layouts for the guided morning flow (Today page, first open, centered ~520px) vs. the dashboard (review complete). Take final dimensions from `getBoundingClientRect`, not image estimates.
 - When working from screenshots of this app, verify the dark 44px circle bottom-right isn't the Agentation dev toolbar (collapsed) — it's a dev-only overlay, not real app UI.
+- `services/data-provider.ts` is type-only at runtime — importing a value (e.g. `getDataProvider`) from it passes tsc but throws "Importing binding name not found" at module eval and blanks the whole app. Runtime provider access comes from `@/services/provider-context`.
 
 ## Architecture: DataProvider Abstraction
 - `DataProvider` interface (`services/data-provider.ts`) decouples frontend from Tauri invoke
