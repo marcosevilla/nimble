@@ -1,8 +1,8 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useDocsStore } from '@/stores/docsStore'
 import { useDataProvider } from '@/services/provider-context'
 import { cn } from '@/lib/utils'
-import { ChevronRight, Plus, FolderOpen, Folder, FileText, Trash2, PanelLeftClose, Vault } from 'lucide-react'
+import { ChevronRight, ChevronsDownUp, Plus, FolderOpen, Folder, FileText, Trash2, PanelLeftClose, Vault } from 'lucide-react'
 import { toast } from 'sonner'
 import { IconButton } from '@/components/shared/IconButton'
 import { DocsSearch } from './DocsSearch'
@@ -25,6 +25,15 @@ export function FolderTree() {
   const vaultExpanded = useDocsStore((s) => s.vaultExpanded)
   const setVaultExpanded = useDocsStore((s) => s.setVaultExpanded)
   const [expandedVaultFolders, setExpandedVaultFolders] = useState<Set<string>>(new Set())
+  const vaultTree = useMemo(() => buildVaultTree(vaultNotes), [vaultNotes])
+  const toggleVaultFolder = useCallback((path: string) => {
+    setExpandedVaultFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
 
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(folders.map((f) => f.id)))
   const [newFolderInput, setNewFolderInput] = useState(false)
@@ -256,63 +265,36 @@ export function FolderTree() {
         {/* Vault notes */}
         {vaultNotes.length > 0 && (
           <div className="pt-2">
-            <button
-              onClick={() => setVaultExpanded(!vaultExpanded)}
-              className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 hover:bg-accent/10 transition-colors"
-            >
-              <ChevronRight className={cn('size-3 text-muted-foreground transition-transform', vaultExpanded && 'rotate-90')} />
-              <Vault className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="flex-1 text-left text-label text-muted-foreground">Vault</span>
-              <span className="text-label text-muted-foreground">{vaultNotes.length}</span>
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => setVaultExpanded(!vaultExpanded)}
+                className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 hover:bg-accent/10 transition-colors"
+              >
+                <ChevronRight className={cn('size-3 text-muted-foreground transition-transform', vaultExpanded && 'rotate-90')} />
+                <Vault className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="flex-1 text-left text-label text-muted-foreground">Vault</span>
+                <span className="text-label text-muted-foreground">{vaultNotes.length}</span>
+              </button>
+              {vaultExpanded && expandedVaultFolders.size > 0 && (
+                <IconButton
+                  onClick={() => setExpandedVaultFolders(new Set())}
+                  size="sm"
+                  title="Collapse all folders"
+                >
+                  <ChevronsDownUp className="size-3" />
+                </IconButton>
+              )}
+            </div>
 
             {vaultExpanded && (
               <div className="ml-4 space-y-0.5">
-                {groupVaultNotes(vaultNotes).map(({ folder, notes }) => {
-                  const isOpen = folder === '' || expandedVaultFolders.has(folder)
-                  return (
-                    <div key={folder || '__root__'}>
-                      {folder !== '' && (
-                        <button
-                          onClick={() =>
-                            setExpandedVaultFolders((prev) => {
-                              const next = new Set(prev)
-                              if (next.has(folder)) next.delete(folder)
-                              else next.add(folder)
-                              return next
-                            })
-                          }
-                          title={folder}
-                          className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 hover:bg-accent/10 transition-colors"
-                        >
-                          <ChevronRight className={cn('size-3 text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
-                          <Folder className="size-3.5 shrink-0 text-muted-foreground" />
-                          <span className="flex-1 text-left text-meta truncate">{folder}</span>
-                        </button>
-                      )}
-                      {isOpen && (
-                        <div className={cn('space-y-0.5', folder !== '' && 'ml-4')}>
-                          {notes.map((note) => (
-                            <div
-                              key={note.id}
-                              onClick={() => selectVaultNote(note.path)}
-                              title={note.path}
-                              className={cn(
-                                'flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left cursor-pointer transition-colors',
-                                selectedVaultPath === note.path
-                                  ? 'bg-accent/40 text-foreground'
-                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
-                              )}
-                            >
-                              <FileText className="size-3 shrink-0 text-muted-foreground" />
-                              <span className="flex-1 text-meta truncate">{note.title || note.path}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+                <VaultBranch
+                  node={vaultTree}
+                  expanded={expandedVaultFolders}
+                  onToggle={toggleVaultFolder}
+                  selectedPath={selectedVaultPath}
+                  onSelect={selectVaultNote}
+                />
               </div>
             )}
           </div>
@@ -357,23 +339,114 @@ export function FolderTree() {
   )
 }
 
-export interface VaultFolderGroup {
-  /** Vault-relative folder path; '' is the vault root. */
-  folder: string
+/** One level of the vault tree: subfolders first (like Obsidian), then notes. */
+function VaultBranch({
+  node,
+  expanded,
+  onToggle,
+  selectedPath,
+  onSelect,
+}: {
+  node: VaultTreeNode
+  expanded: Set<string>
+  onToggle: (path: string) => void
+  selectedPath: string | null
+  onSelect: (path: string) => void
+}) {
+  return (
+    <>
+      {node.children.map((child) => {
+        const isOpen = expanded.has(child.path)
+        return (
+          <div key={child.path}>
+            <button
+              onClick={() => onToggle(child.path)}
+              title={child.path}
+              className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 hover:bg-accent/10 transition-colors"
+            >
+              <ChevronRight className={cn('size-3 text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
+              <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="flex-1 text-left text-meta truncate">{child.name}</span>
+            </button>
+            {isOpen && (
+              <div className="ml-4 space-y-0.5">
+                <VaultBranch
+                  node={child}
+                  expanded={expanded}
+                  onToggle={onToggle}
+                  selectedPath={selectedPath}
+                  onSelect={onSelect}
+                />
+              </div>
+            )}
+          </div>
+        )
+      })}
+      {node.notes.map((note) => (
+        <div
+          key={note.id}
+          onClick={() => onSelect(note.path)}
+          title={note.path}
+          className={cn(
+            'flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left cursor-pointer transition-colors',
+            selectedPath === note.path
+              ? 'bg-accent/40 text-foreground'
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
+          )}
+        >
+          <FileText className="size-3 shrink-0 text-muted-foreground" />
+          <span className="flex-1 text-meta truncate">{note.title || note.path}</span>
+        </div>
+      ))}
+    </>
+  )
+}
+
+export interface VaultTreeNode {
+  /** Last path segment, shown as the folder label. */
+  name: string
+  /** Full vault-relative folder path — the key for expand/collapse state. */
+  path: string
+  children: VaultTreeNode[]
+  /** Notes directly in this folder (not in subfolders). */
   notes: VaultNoteSummary[]
 }
 
-/** Group vault notes by their immediate parent folder, root first then A–Z. */
-export function groupVaultNotes(notes: VaultNoteSummary[]): VaultFolderGroup[] {
-  const byFolder = new Map<string, VaultNoteSummary[]>()
+/**
+ * Build a nested folder tree mirroring the vault's real hierarchy —
+ * `journal/reflections/note.md` nests under `journal` → `reflections`
+ * instead of one flat `journal/reflections` group. Returns the root:
+ * its `notes` are vault-root notes, its `children` the top-level folders.
+ * Folders and notes sort A–Z at every level.
+ */
+export function buildVaultTree(notes: VaultNoteSummary[]): VaultTreeNode {
+  const root: VaultTreeNode = { name: '', path: '', children: [], notes: [] }
+  const byPath = new Map<string, VaultTreeNode>([['', root]])
+
+  const folderFor = (path: string): VaultTreeNode => {
+    const existing = byPath.get(path)
+    if (existing) return existing
+    const slash = path.lastIndexOf('/')
+    const parent = folderFor(slash === -1 ? '' : path.slice(0, slash))
+    const node: VaultTreeNode = {
+      name: slash === -1 ? path : path.slice(slash + 1),
+      path,
+      children: [],
+      notes: [],
+    }
+    parent.children.push(node)
+    byPath.set(path, node)
+    return node
+  }
+
   for (const note of notes) {
     const slash = note.path.lastIndexOf('/')
-    const folder = slash === -1 ? '' : note.path.slice(0, slash)
-    const bucket = byFolder.get(folder)
-    if (bucket) bucket.push(note)
-    else byFolder.set(folder, [note])
+    folderFor(slash === -1 ? '' : note.path.slice(0, slash)).notes.push(note)
   }
-  return [...byFolder.entries()]
-    .sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))
-    .map(([folder, notes]) => ({ folder, notes }))
+
+  for (const node of byPath.values()) {
+    node.children.sort((a, b) => a.name.localeCompare(b.name))
+    node.notes.sort((a, b) => (a.title || a.path).localeCompare(b.title || b.path))
+  }
+  return root
 }
