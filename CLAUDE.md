@@ -143,7 +143,7 @@ daily-triage/
 - Pull: fetch remote entries, apply with LWW conflict resolution (skip if local is newer)
 - "Seed Existing Data" command backfills sync_log for pre-existing data
 - Turso URL format: `libsql://<db>-<org>.turso.io` (auto-normalized to https)
-- Remote schema initialization runs once (creates all 16 tables on Turso)
+- Remote schema initialization runs once, creating every synced table on Turso (the list lives in `initialize_remote` in `daily-triage-core/src/db/sync.rs`)
 - Vault tables replicate through the same sync_log pipeline; `vault_fts`, `todoist_outbox`, and `integration_sync_state` stay device/Mac-local
 - Remote schema upgrades are gated per version by a `turso_schema_v<N>_upgraded` setting, since `initialize_remote` only runs once per database
 
