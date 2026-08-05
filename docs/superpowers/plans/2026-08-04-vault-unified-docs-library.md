@@ -980,6 +980,30 @@ pub async fn upsert_note(
     let parsed = parse_note(path, content);
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
+    // Log BEFORE writing the row, and propagate the error rather than
+    // swallowing it. The scanner skips any file whose stored hash matches the
+    // file on disk, so a row written with its new hash but no sync_log entry
+    // would be treated as up to date forever and never replicate. Logging
+    // first means a failed append leaves the old hash in place and the next
+    // scan retries the note. The reverse failure — logged, then the write
+    // fails — is benign: the snapshot carries the correct content, and the
+    // next scan re-indexes because the stored hash is still stale.
+    let row = VaultNoteRow {
+        id: id.clone(),
+        path: path.to_string(),
+        title: parsed.title.clone(),
+        content: content.to_string(),
+        frontmatter_json: parsed.frontmatter_json.clone(),
+        mtime: mtime.map(|s| s.to_string()),
+        size,
+        hash: Some(hash.to_string()),
+        updated_at: now.clone(),
+        deleted_at: None,
+    };
+    let snapshot = serde_json::to_string(&row).unwrap_or_default();
+    let op = if is_new { "INSERT" } else { "UPDATE" };
+    sync::append_sync_log(pool, "vault_notes", &id, op, None, Some(&snapshot)).await?;
+
     sqlx::query(
         "INSERT INTO vault_notes
             (id, path, title, content, frontmatter_json, mtime, size, hash, updated_at, deleted_at)
@@ -1009,24 +1033,6 @@ pub async fn upsert_note(
     replace_links(pool, &id, &parsed.links).await?;
     replace_tags(pool, &id, &parsed.tags).await?;
     refresh_fts(pool, &id, &parsed.title, content).await?;
-
-    let row = VaultNoteRow {
-        id: id.clone(),
-        path: path.to_string(),
-        title: parsed.title,
-        content: content.to_string(),
-        frontmatter_json: parsed.frontmatter_json,
-        mtime: mtime.map(|s| s.to_string()),
-        size,
-        hash: Some(hash.to_string()),
-        updated_at: now,
-        deleted_at: None,
-    };
-    let snapshot = serde_json::to_string(&row).unwrap_or_default();
-    let op = if is_new { "INSERT" } else { "UPDATE" };
-    sync::append_sync_log(pool, "vault_notes", &id, op, None, Some(&snapshot))
-        .await
-        .ok();
 
     Ok(id)
 }
@@ -1117,19 +1123,33 @@ pub async fn search(pool: &SqlitePool, query: &str, limit: i64) -> crate::Result
         .collect())
 }
 
-/// Notes that link to the given note, matched on full path or filename stem
-/// (Obsidian wikilinks usually name the stem, not the path).
+/// Notes that link to the given note. A wikilink target is stored verbatim
+/// minus its fragment, so the same note can be referenced three ways:
+/// `[[a/Beta.md]]` (full path), `[[a/Beta]]` (extension-less path — Obsidian's
+/// "absolute path in vault" form), and `[[Beta]]` (filename stem, the common
+/// case). Match all three, plus the note's title, so this stays symmetric with
+/// `resolve_link` — a link that resolves forward must resolve backward.
 pub async fn backlinks(pool: &SqlitePool, path: &str) -> crate::Result<Vec<VaultNoteSummary>> {
     let stem = crate::vault::parser::title_from_path(path);
+    let without_ext = path.trim_end_matches(".md").to_string();
+    let title: Option<String> =
+        sqlx::query_scalar("SELECT title FROM vault_notes WHERE path = ? AND deleted_at IS NULL")
+            .bind(path)
+            .fetch_optional(pool)
+            .await?;
+
     let rows: Vec<(String, String, String, String)> = sqlx::query_as(
         "SELECT DISTINCT n.id, n.path, n.title, n.updated_at
          FROM vault_links l
          JOIN vault_notes n ON n.id = l.from_note_id
-         WHERE (l.to_path = ? OR l.to_path = ?) AND n.deleted_at IS NULL
+         WHERE (l.to_path = ? OR l.to_path = ? OR l.to_path = ? OR l.to_path = ?)
+           AND n.deleted_at IS NULL
          ORDER BY n.path",
     )
     .bind(path)
+    .bind(&without_ext)
     .bind(&stem)
+    .bind(title.as_deref().unwrap_or(""))
     .fetch_all(pool)
     .await?;
     Ok(rows
