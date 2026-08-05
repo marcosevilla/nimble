@@ -143,6 +143,30 @@ pub async fn upsert_note(
     let parsed = parse_note(path, content);
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
+    // Log BEFORE writing the row, and propagate the error rather than
+    // swallowing it. The scanner skips any file whose stored hash matches the
+    // file on disk, so a row written with its new hash but no sync_log entry
+    // would be treated as up to date forever and never replicate. Logging
+    // first means a failed append leaves the old hash in place and the next
+    // scan retries the note. The reverse failure — logged, then the write
+    // fails — is benign: the snapshot carries the correct content, and the
+    // next scan re-indexes because the stored hash is still stale.
+    let row = VaultNoteRow {
+        id: id.clone(),
+        path: path.to_string(),
+        title: parsed.title.clone(),
+        content: content.to_string(),
+        frontmatter_json: parsed.frontmatter_json.clone(),
+        mtime: mtime.map(|s| s.to_string()),
+        size,
+        hash: Some(hash.to_string()),
+        updated_at: now.clone(),
+        deleted_at: None,
+    };
+    let snapshot = serde_json::to_string(&row).unwrap_or_default();
+    let op = if is_new { "INSERT" } else { "UPDATE" };
+    sync::append_sync_log(pool, "vault_notes", &id, op, None, Some(&snapshot)).await?;
+
     sqlx::query(
         "INSERT INTO vault_notes
             (id, path, title, content, frontmatter_json, mtime, size, hash, updated_at, deleted_at)
@@ -172,24 +196,6 @@ pub async fn upsert_note(
     replace_links(pool, &id, &parsed.links).await?;
     replace_tags(pool, &id, &parsed.tags).await?;
     refresh_fts(pool, &id, &parsed.title, content).await?;
-
-    let row = VaultNoteRow {
-        id: id.clone(),
-        path: path.to_string(),
-        title: parsed.title,
-        content: content.to_string(),
-        frontmatter_json: parsed.frontmatter_json,
-        mtime: mtime.map(|s| s.to_string()),
-        size,
-        hash: Some(hash.to_string()),
-        updated_at: now,
-        deleted_at: None,
-    };
-    let snapshot = serde_json::to_string(&row).unwrap_or_default();
-    let op = if is_new { "INSERT" } else { "UPDATE" };
-    sync::append_sync_log(pool, "vault_notes", &id, op, None, Some(&snapshot))
-        .await
-        .ok();
 
     Ok(id)
 }
@@ -280,19 +286,33 @@ pub async fn search(pool: &SqlitePool, query: &str, limit: i64) -> crate::Result
         .collect())
 }
 
-/// Notes that link to the given note, matched on full path or filename stem
-/// (Obsidian wikilinks usually name the stem, not the path).
+/// Notes that link to the given note. A wikilink target is stored verbatim
+/// minus its fragment, so the same note can be referenced three ways:
+/// `[[a/Beta.md]]` (full path), `[[a/Beta]]` (extension-less path — Obsidian's
+/// "absolute path in vault" form), and `[[Beta]]` (filename stem, the common
+/// case). Match all three, plus the note's title, so this stays symmetric with
+/// `resolve_link` — a link that resolves forward must resolve backward.
 pub async fn backlinks(pool: &SqlitePool, path: &str) -> crate::Result<Vec<VaultNoteSummary>> {
     let stem = crate::vault::parser::title_from_path(path);
+    let without_ext = path.trim_end_matches(".md").to_string();
+    let title: Option<String> =
+        sqlx::query_scalar("SELECT title FROM vault_notes WHERE path = ? AND deleted_at IS NULL")
+            .bind(path)
+            .fetch_optional(pool)
+            .await?;
+
     let rows: Vec<(String, String, String, String)> = sqlx::query_as(
         "SELECT DISTINCT n.id, n.path, n.title, n.updated_at
          FROM vault_links l
          JOIN vault_notes n ON n.id = l.from_note_id
-         WHERE (l.to_path = ? OR l.to_path = ?) AND n.deleted_at IS NULL
+         WHERE (l.to_path = ? OR l.to_path = ? OR l.to_path = ? OR l.to_path = ?)
+           AND n.deleted_at IS NULL
          ORDER BY n.path",
     )
     .bind(path)
+    .bind(&without_ext)
     .bind(&stem)
+    .bind(title.as_deref().unwrap_or(""))
     .fetch_all(pool)
     .await?;
     Ok(rows
@@ -565,6 +585,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(links, 0);
+
+        let fts_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM vault_fts WHERE note_id = ?")
+            .bind(&id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(fts_rows, 0, "tombstoned note must leave no FTS row");
     }
 
     #[tokio::test]
@@ -612,5 +639,117 @@ mod tests {
         let back = backlinks(&pool, "a/Beta.md").await.unwrap();
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].path, "a/Alpha.md");
+    }
+
+    #[tokio::test]
+    async fn backlinks_matches_extensionless_full_path_wikilinks() {
+        // Obsidian's "absolute path in vault" wikilink form: [[a/Beta]], not
+        // [[Beta]] or [[a/Beta.md]]. The parser stores the target verbatim
+        // minus its fragment, so vault_links.to_path is "a/Beta" here.
+        let pool = test_pool().await;
+        upsert_note(&pool, "a/Gamma.md", "Links to [[a/Beta]].", None, 10, "h1")
+            .await
+            .unwrap();
+        upsert_note(&pool, "a/Beta.md", "# Beta\n\nbody", None, 20, "h2").await.unwrap();
+
+        let back = backlinks(&pool, "a/Beta.md").await.unwrap();
+        assert_eq!(back.len(), 1, "full-path-without-extension link must resolve backward: {back:?}");
+        assert_eq!(back[0].path, "a/Gamma.md");
+    }
+
+    #[tokio::test]
+    async fn upsert_note_logs_before_writing_so_a_failed_append_leaves_no_stray_row() {
+        let pool = test_pool().await;
+
+        // Establish a baseline indexed note with a known hash.
+        upsert_note(&pool, "a/Alpha.md", BODY, None, 120, "hash1").await.unwrap();
+
+        // Simulate append_sync_log failing by dropping the table it writes to.
+        sqlx::query("DROP TABLE sync_log").execute(&pool).await.unwrap();
+
+        // A brand-new path: the append must fail before any vault_notes row exists.
+        let new_note_err = upsert_note(&pool, "a/NeverIndexed.md", "body", None, 5, "hashX").await;
+        assert!(new_note_err.is_err(), "append failure must propagate as Err");
+        // Restore sync_log to inspect state without erroring on the query itself.
+        sqlx::query(
+            "CREATE TABLE sync_log (
+                id TEXT PRIMARY KEY, table_name TEXT NOT NULL, row_id TEXT NOT NULL,
+                operation TEXT NOT NULL, changed_columns TEXT, snapshot TEXT,
+                device_id TEXT NOT NULL, timestamp TEXT NOT NULL, synced INTEGER DEFAULT 0
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            get_note_by_path(&pool, "a/NeverIndexed.md").await.unwrap().is_none(),
+            "a logging failure on a brand-new note must leave no vault_notes row"
+        );
+
+        // Re-index the existing note with a new hash; drop sync_log again so the
+        // append fails, and confirm the OLD hash survives (so the next scan retries).
+        sqlx::query("DROP TABLE sync_log").execute(&pool).await.unwrap();
+        let reindex_err = upsert_note(&pool, "a/Alpha.md", "changed body", None, 999, "hash2").await;
+        assert!(reindex_err.is_err(), "append failure on a re-index must propagate as Err");
+        sqlx::query(
+            "CREATE TABLE sync_log (
+                id TEXT PRIMARY KEY, table_name TEXT NOT NULL, row_id TEXT NOT NULL,
+                operation TEXT NOT NULL, changed_columns TEXT, snapshot TEXT,
+                device_id TEXT NOT NULL, timestamp TEXT NOT NULL, synced INTEGER DEFAULT 0
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = get_note_by_path(&pool, "a/Alpha.md").await.unwrap().unwrap();
+        assert_eq!(row.hash.as_deref(), Some("hash1"), "stale hash must survive so the scanner retries");
+    }
+
+    #[tokio::test]
+    async fn on_turso_row_applied_reconciles_fts_for_live_tombstoned_and_missing_rows() {
+        let pool = test_pool().await;
+
+        // Ignores non-vault_notes table names outright.
+        on_turso_row_applied(&pool, "local_tasks", "irrelevant").await;
+
+        // (a) A live row arriving via replication (raw SQL, as a Turso pull
+        // would apply it — bypassing upsert_note) gets its FTS entry created.
+        sqlx::query(
+            "INSERT INTO vault_notes (id, path, title, content, updated_at)
+             VALUES ('remote1', 'r/One.md', 'Remote One', 'remote body', '2026-08-05 00:00:00')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        on_turso_row_applied(&pool, "vault_notes", "remote1").await;
+        let live_fts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM vault_fts WHERE note_id = 'remote1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(live_fts, 1, "live replicated row must get an FTS entry");
+
+        // (b) The same row tombstoned via replication loses its FTS entry.
+        sqlx::query("UPDATE vault_notes SET deleted_at = '2026-08-05 00:01:00' WHERE id = 'remote1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        on_turso_row_applied(&pool, "vault_notes", "remote1").await;
+        let tombstoned_fts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM vault_fts WHERE note_id = 'remote1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(tombstoned_fts, 0, "tombstoned replicated row must lose its FTS entry");
+
+        // (c) An id with no vault_notes row at all removes any stale FTS entry.
+        sqlx::query("INSERT INTO vault_fts (note_id, title, content) VALUES ('ghost', 'Ghost', 'stale')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        on_turso_row_applied(&pool, "vault_notes", "ghost").await;
+        let ghost_fts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM vault_fts WHERE note_id = 'ghost'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(ghost_fts, 0, "a missing row must remove any stale FTS entry");
     }
 }
