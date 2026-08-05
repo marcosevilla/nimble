@@ -95,7 +95,7 @@ pub async fn get_note(pool: &SqlitePool, id: &str) -> crate::Result<Option<Vault
     Ok(row.map(row_to_note))
 }
 
-/// Live (non-tombstoned) notes, newest first.
+/// Live (non-tombstoned) notes, ordered by vault path.
 pub async fn list_notes(pool: &SqlitePool) -> crate::Result<Vec<VaultNoteSummary>> {
     let rows: Vec<(String, String, String, String)> = sqlx::query_as(
         "SELECT id, path, title, updated_at FROM vault_notes
@@ -229,20 +229,19 @@ pub async fn soft_delete_note(pool: &SqlitePool, path: &str) -> crate::Result<()
     }
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    sqlx::query("UPDATE vault_notes SET deleted_at = ?, updated_at = ? WHERE id = ?")
-        .bind(&now)
-        .bind(&now)
-        .bind(&existing.id)
-        .execute(pool)
-        .await?;
-
-    clear_derived(pool, &existing.id).await?;
-
     let row = VaultNoteRow {
         deleted_at: Some(now.clone()),
-        updated_at: now,
+        updated_at: now.clone(),
         ..existing
     };
+
+    // Log BEFORE tombstoning, and propagate the error — same ordering as
+    // `upsert_note`, and for the same reason. `deleted_at` is content-bearing:
+    // if the row were tombstoned first and the append then failed, the deletion
+    // would never replicate, and the early return above means no future scan
+    // would ever retry it. Logging first leaves the note live on a failed
+    // append, so the next scan tombstones it again and the deletion still
+    // reaches the other devices.
     let snapshot = serde_json::to_string(&row).unwrap_or_default();
     sync::append_sync_log(
         pool,
@@ -252,8 +251,16 @@ pub async fn soft_delete_note(pool: &SqlitePool, path: &str) -> crate::Result<()
         Some(r#"["deleted_at"]"#),
         Some(&snapshot),
     )
-    .await
-    .ok();
+    .await?;
+
+    sqlx::query("UPDATE vault_notes SET deleted_at = ?, updated_at = ? WHERE id = ?")
+        .bind(&now)
+        .bind(&now)
+        .bind(&row.id)
+        .execute(pool)
+        .await?;
+
+    clear_derived(pool, &row.id).await?;
 
     Ok(())
 }
@@ -321,6 +328,17 @@ pub async fn backlinks(pool: &SqlitePool, path: &str) -> crate::Result<Vec<Vault
         .collect())
 }
 
+/// Escape a value bound into a `LIKE` pattern so its own `%` and `_` are
+/// literal. Without this, `[[foo_bar]]` builds the pattern `%/foo_bar.md`,
+/// whose `_` is a single-character wildcard that happily matches
+/// `a/fooXbar.md`. The escape character itself is escaped first.
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 /// Resolve a wikilink target to a note: exact path first, then filename stem,
 /// then title. `None` means an unresolved link (UI offers to create the note).
 pub async fn resolve_link(pool: &SqlitePool, to_path: &str) -> crate::Result<Option<VaultNoteSummary>> {
@@ -330,18 +348,25 @@ pub async fn resolve_link(pool: &SqlitePool, to_path: &str) -> crate::Result<Opt
         format!("{to_path}.md")
     };
     let stem = crate::vault::parser::title_from_path(to_path);
+    let suffix_pattern = format!("%/{}", escape_like(&with_ext));
 
+    // An exact path match always wins, whatever its length — `[[a/Beta]]` names
+    // one note, and a shorter unrelated note whose *title* happens to be "Beta"
+    // must not outrank it. Shortest path only breaks ties among the fuzzier
+    // stem/title matches, which is Obsidian-ish enough for this vault.
     let row: Option<(String, String, String, String)> = sqlx::query_as(
         "SELECT id, path, title, updated_at FROM vault_notes
          WHERE deleted_at IS NULL
-           AND (path = ? OR path = ? OR path LIKE ? OR title = ?)
-         ORDER BY LENGTH(path)
+           AND (path = ? OR path = ? OR path LIKE ? ESCAPE '\\' OR title = ?)
+         ORDER BY CASE WHEN path = ? OR path = ? THEN 0 ELSE 1 END, LENGTH(path)
          LIMIT 1",
     )
     .bind(to_path)
     .bind(&with_ext)
-    .bind(format!("%/{with_ext}"))
+    .bind(&suffix_pattern)
     .bind(&stem)
+    .bind(to_path)
+    .bind(&with_ext)
     .fetch_optional(pool)
     .await?;
 
@@ -703,6 +728,99 @@ mod tests {
         .unwrap();
         let row = get_note_by_path(&pool, "a/Alpha.md").await.unwrap().unwrap();
         assert_eq!(row.hash.as_deref(), Some("hash1"), "stale hash must survive so the scanner retries");
+    }
+
+    /// `soft_delete_note` mirrors `upsert_note`: log first, propagate the
+    /// failure, then write. `deleted_at` is content-bearing, and the
+    /// "already tombstoned" early return means a swallowed append failure would
+    /// never be retried — the deletion would stay local forever.
+    #[tokio::test]
+    async fn soft_delete_logs_before_tombstoning_so_a_failed_append_leaves_the_note_live() {
+        let pool = test_pool().await;
+        upsert_note(&pool, "a/Alpha.md", BODY, None, 120, "hash1").await.unwrap();
+
+        // Simulate append_sync_log failing by dropping the table it writes to.
+        sqlx::query("DROP TABLE sync_log").execute(&pool).await.unwrap();
+
+        let err = soft_delete_note(&pool, "a/Alpha.md").await;
+        assert!(err.is_err(), "append failure must propagate as Err, not be swallowed");
+
+        // Restore sync_log so the inspection queries below don't fail themselves.
+        sqlx::query(
+            "CREATE TABLE sync_log (
+                id TEXT PRIMARY KEY, table_name TEXT NOT NULL, row_id TEXT NOT NULL,
+                operation TEXT NOT NULL, changed_columns TEXT, snapshot TEXT,
+                device_id TEXT NOT NULL, timestamp TEXT NOT NULL, synced INTEGER DEFAULT 0
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let row = get_note_by_path(&pool, "a/Alpha.md").await.unwrap().unwrap();
+        assert!(
+            row.deleted_at.is_none(),
+            "a logging failure must leave the note live so the next scan retries the deletion"
+        );
+        assert_eq!(list_notes(&pool).await.unwrap().len(), 1, "note is still listed");
+    }
+
+    /// `touch_stat` is the one deliberate carve-out from "every content-bearing
+    /// mutation appends to sync_log": it only refreshes the scanner's stat
+    /// pre-check columns for a file whose bytes did not change. It sits on the
+    /// scanner's hot path, so it must stay silent.
+    #[tokio::test]
+    async fn touch_stat_updates_stat_columns_and_appends_no_sync_log_entry() {
+        let pool = test_pool().await;
+        upsert_note(&pool, "a/Alpha.md", BODY, Some("2026-08-04T10:00:00Z"), 120, "hash1")
+            .await
+            .unwrap();
+
+        let before: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sync_log WHERE table_name = 'vault_notes'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(before, 1, "the upsert itself logs exactly once");
+
+        touch_stat(&pool, "a/Alpha.md", Some("2026-08-05T11:22:33Z"), 999).await.unwrap();
+
+        let after: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sync_log WHERE table_name = 'vault_notes'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(after, before, "touch_stat must generate no sync traffic");
+
+        let row = get_note_by_path(&pool, "a/Alpha.md").await.unwrap().unwrap();
+        assert_eq!(row.mtime.as_deref(), Some("2026-08-05T11:22:33Z"), "mtime refreshed");
+        assert_eq!(row.size, 999, "size refreshed");
+        assert_eq!(row.hash.as_deref(), Some("hash1"), "content columns untouched");
+    }
+
+    #[tokio::test]
+    async fn resolve_link_escapes_like_wildcards_and_prefers_an_exact_path() {
+        let pool = test_pool().await;
+
+        // `_` in a note name must be literal. The decoy has the shorter path, so
+        // under an unescaped LIKE it would win on `ORDER BY LENGTH(path)`.
+        upsert_note(&pool, "a/fooXbar.md", "# fooXbar\n", None, 10, "h1").await.unwrap();
+        upsert_note(&pool, "deep/foo_bar.md", "# foo_bar\n", None, 10, "h2").await.unwrap();
+        let hit = resolve_link(&pool, "foo_bar").await.unwrap().expect("resolves");
+        assert_eq!(hit.path, "deep/foo_bar.md", "`_` must not act as a wildcard");
+
+        // `%` likewise.
+        upsert_note(&pool, "a/100percent.md", "# pct\n", None, 10, "h3").await.unwrap();
+        assert!(
+            resolve_link(&pool, "100%").await.unwrap().is_none(),
+            "`%` must not act as a wildcard"
+        );
+
+        // An exact path beats a shorter note whose title merely matches the stem.
+        upsert_note(&pool, "Beta.md", "# Beta\n", None, 10, "h4").await.unwrap();
+        upsert_note(&pool, "a/Beta.md", "# Beta\n", None, 10, "h5").await.unwrap();
+        let exact = resolve_link(&pool, "a/Beta").await.unwrap().expect("resolves");
+        assert_eq!(exact.path, "a/Beta.md", "an exact path must outrank a shorter title match");
     }
 
     #[tokio::test]

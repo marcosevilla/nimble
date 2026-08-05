@@ -21,6 +21,10 @@ pub struct ScanReport {
     pub removed: usize,
     /// Files skipped this pass (unreadable, dataless, non-UTF-8).
     pub skipped: usize,
+    /// Directory-level walk failures (permissions, a cloud unmount, EIO). Any
+    /// of these means the walk did not see the whole vault, so its silence
+    /// about a note proves nothing — the tombstone phase is skipped.
+    pub walk_errors: usize,
 }
 
 pub fn hash_content(content: &str) -> String {
@@ -53,8 +57,14 @@ fn mtime_string(md: &std::fs::Metadata) -> Option<String> {
 ///
 /// Cheap path: a file whose size *and* mtime match the index is not read at
 /// all. Otherwise the file is read and hashed; only a changed hash triggers a
-/// re-parse. Per-file errors are logged and counted, never fatal — one
-/// unreadable note must not break the scan.
+/// re-parse.
+///
+/// A file that cannot be stat'd or read is logged, counted in `skipped` and
+/// passed over — one unreadable note must not break the scan. An *indexing*
+/// failure is different: `upsert_note`/`touch_stat` propagate with `?`, so a
+/// database or sync_log error aborts the whole scan. That is deliberate, and
+/// safe: the early return happens before the tombstone phase, so an aborted
+/// scan never deletes anything.
 pub async fn full_scan(pool: &SqlitePool, cfg: &VaultConfig) -> crate::Result<ScanReport> {
     if !cfg.root.is_dir() {
         return Err(crate::Error::Other(format!(
@@ -67,7 +77,21 @@ pub async fn full_scan(pool: &SqlitePool, cfg: &VaultConfig) -> crate::Result<Sc
     let known = index::indexed_files(pool).await?;
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for entry in WalkDir::new(&cfg.root).follow_links(false).into_iter().filter_map(|e| e.ok()) {
+    for result in WalkDir::new(&cfg.root).follow_links(false) {
+        // A directory that fails to enumerate yields none of its files. Dropping
+        // that error silently would let the reconcile loop below conclude every
+        // note under it is gone, so count it and let the tombstone guard see it.
+        let entry = match result {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!(
+                    "vault scan: cannot walk {} — {e}",
+                    e.path().map(|p| p.display().to_string()).unwrap_or_else(|| cfg.root.display().to_string())
+                );
+                report.walk_errors += 1;
+                continue;
+            }
+        };
         if !entry.file_type().is_file() {
             continue;
         }
@@ -128,11 +152,30 @@ pub async fn full_scan(pool: &SqlitePool, cfg: &VaultConfig) -> crate::Result<Sc
         report.indexed += 1;
     }
 
-    for path in known.keys() {
-        if !seen.contains(path) {
-            index::soft_delete_note(pool, path).await?;
-            report.removed += 1;
+    // The tombstone phase argues from absence: a known path the walk never saw
+    // must be gone. That argument only holds if the walk actually saw the whole
+    // vault. Two conditions say it did not — a directory that failed to
+    // enumerate, and a walk that found no markdown at all while the index holds
+    // notes (a mistyped vault path pointing at a real-but-wrong directory).
+    // Either would otherwise tombstone every indexed note in one pass and
+    // replicate that to every device.
+    let walk_is_trustworthy = report.walk_errors == 0 && !(report.scanned == 0 && !known.is_empty());
+
+    if walk_is_trustworthy {
+        for path in known.keys() {
+            if !seen.contains(path) {
+                index::soft_delete_note(pool, path).await?;
+                report.removed += 1;
+            }
         }
+    } else {
+        log::warn!(
+            "vault scan: not removing anything this pass — {} walk error(s), {} file(s) seen, \
+             {} note(s) already indexed. The walk can't prove a note is gone, so no tombstones.",
+            report.walk_errors,
+            report.scanned,
+            known.len()
+        );
     }
 
     Ok(report)
@@ -275,6 +318,120 @@ mod tests {
         assert_eq!(report.indexed, 1);
         assert_eq!(report.skipped, 1, "{report:?}");
 
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A file rewritten with byte-identical content gets a new mtime, so the
+    /// cheap stat pre-check misses and the file is read — but its hash still
+    /// matches, which must take the `touch_stat` branch: no re-index, no sync
+    /// traffic, just refreshed stat columns so the next scan is cheap again.
+    #[tokio::test]
+    async fn identical_rewrite_touches_stat_without_reindexing() {
+        let pool = test_pool().await;
+        let (root, cfg) = temp_vault();
+        let path = root.join("A.md");
+        std::fs::write(&path, "# A\n\nsame bytes\n").unwrap();
+
+        let first = full_scan(&pool, &cfg).await.unwrap();
+        assert_eq!(first.indexed, 1, "{first:?}");
+        let before = crate::vault::index::get_note_by_path(&pool, "A.md")
+            .await
+            .unwrap()
+            .unwrap();
+        let log_before: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sync_log WHERE table_name = 'vault_notes'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        // Same bytes, deterministically different mtime — set explicitly rather
+        // than relying on filesystem timestamp resolution.
+        std::fs::write(&path, "# A\n\nsame bytes\n").unwrap();
+        let f = std::fs::File::options().write(true).open(&path).unwrap();
+        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(30))
+            .unwrap();
+        drop(f);
+
+        let second = full_scan(&pool, &cfg).await.unwrap();
+        assert_eq!(second.unchanged, 1, "identical bytes must count as unchanged: {second:?}");
+        assert_eq!(second.indexed, 0, "identical bytes must not re-index: {second:?}");
+        assert_eq!(second.removed, 0);
+
+        let after = crate::vault::index::get_note_by_path(&pool, "A.md")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(after.mtime, before.mtime, "touch_stat must refresh the stat columns");
+        assert_eq!(after.hash, before.hash);
+
+        let log_after: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sync_log WHERE table_name = 'vault_notes'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(log_after, log_before, "a no-op edit must generate no sync traffic");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A subtree that cannot be enumerated yields none of its files. Without a
+    /// guard the reconcile loop reads that silence as "every note under it was
+    /// deleted" and tombstones the lot — replicating the loss to every device.
+    /// A mistyped vault path pointing at a real-but-wrong directory is the same
+    /// failure with `scanned == 0`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_walk_error_must_not_tombstone_the_vault() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let pool = test_pool().await;
+        let (root, cfg) = temp_vault();
+        let locked = root.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::write(locked.join("A.md"), "# A").unwrap();
+        std::fs::write(locked.join("B.md"), "# B").unwrap();
+
+        let first = full_scan(&pool, &cfg).await.unwrap();
+        assert_eq!(first.indexed, 2, "{first:?}");
+
+        // Make the subtree unenumerable.
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Guard against running as root (or any context where mode 0o000 is
+        // still readable) — there the walk would succeed and the assertions
+        // below would pass for the wrong reason. Same behavioural probe as
+        // `cheap_path_precheck_skips_reading_stat_unchanged_files`.
+        if std::fs::read_dir(&locked).is_ok() {
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::remove_dir_all(&root).ok();
+            eprintln!(
+                "a_walk_error_must_not_tombstone_the_vault: \
+                 permissions are not enforced (likely running as root) — test is meaningless here, skipping"
+            );
+            return;
+        }
+
+        let second = full_scan(&pool, &cfg).await.unwrap();
+        assert!(second.walk_errors > 0, "the failed subtree must be counted: {second:?}");
+        assert_eq!(second.scanned, 0, "no file under the locked dir is visible: {second:?}");
+        assert_eq!(
+            second.removed, 0,
+            "a walk that couldn't see the vault must tombstone nothing: {second:?}"
+        );
+
+        let live: Vec<String> = crate::vault::index::list_notes(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.path)
+            .collect();
+        assert_eq!(
+            live,
+            vec!["locked/A.md".to_string(), "locked/B.md".to_string()],
+            "both notes must still be live"
+        );
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::remove_dir_all(&root).ok();
     }
 

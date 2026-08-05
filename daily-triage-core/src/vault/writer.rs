@@ -56,6 +56,10 @@ async fn read_disk_hash(abs: &Path) -> crate::Result<Option<String>> {
 /// Divergence never overwrites: the app's version lands in
 /// `<stem> (conflict <timestamp>).md` beside the original and the caller
 /// surfaces a non-blocking banner. The watcher then re-indexes both files.
+///
+/// `expected_hash: None` means "this file does not exist yet". It is **not** a
+/// force flag: if the file is on disk, the write is refused rather than
+/// clobbering a note whose version we cannot prove we started from.
 pub async fn write_note(
     cfg: &VaultConfig,
     rel: &str,
@@ -64,6 +68,17 @@ pub async fn write_note(
 ) -> crate::Result<WriteOutcome> {
     let abs = resolve(cfg, rel)?;
     let disk_hash = read_disk_hash(&abs).await?;
+
+    if disk_hash.is_some() && expected_hash.is_none() {
+        // Latent today — every indexed row carries a hash — but a
+        // mobile-originated or replayed write reaching here with no hash must
+        // not become an unconditional overwrite of one of Marco's notes.
+        return Err(crate::Error::Other(format!(
+            "Refusing to overwrite {rel}: no expected hash, so there is nothing to \
+             compare against what's on disk. A hash-less write is only valid when creating a \
+             note that doesn't exist yet."
+        )));
+    }
 
     if let (Some(expected), Some(actual)) = (expected_hash, disk_hash.as_deref()) {
         if expected != actual {
@@ -229,12 +244,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_expected_hash_writes_unconditionally() {
+    async fn no_expected_hash_refuses_to_overwrite_an_existing_file() {
         let cfg = temp_vault();
         std::fs::write(cfg.root.join("A.md"), "old").unwrap();
-        let outcome = write_note(&cfg, "A.md", "forced", None).await.unwrap();
+
+        // A caller with no expected hash cannot prove which version it edited,
+        // so an existing note must be left exactly as it is.
+        let err = write_note(&cfg, "A.md", "forced", None).await.unwrap_err();
+        assert!(err.to_string().contains("Refusing to overwrite"), "got: {err}");
+        assert_eq!(std::fs::read_to_string(cfg.root.join("A.md")).unwrap(), "old");
+
+        // The None path stays valid for genuine creation — nothing on disk.
+        let outcome = write_note(&cfg, "New.md", "fresh", None).await.unwrap();
         assert!(matches!(outcome, WriteOutcome::Written { .. }));
-        assert_eq!(std::fs::read_to_string(cfg.root.join("A.md")).unwrap(), "forced");
+        assert_eq!(std::fs::read_to_string(cfg.root.join("New.md")).unwrap(), "fresh");
+
         std::fs::remove_dir_all(&cfg.root).ok();
     }
 

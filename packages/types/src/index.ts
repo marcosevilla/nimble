@@ -256,6 +256,11 @@ export interface VaultScanReport {
   unchanged: number
   removed: number
   skipped: number
+  /**
+   * Directory-level walk failures. Any of these means the scan couldn't see the
+   * whole vault, so it tombstoned nothing that pass.
+   */
+  walk_errors: number
 }
 
 export interface VaultStatus {
