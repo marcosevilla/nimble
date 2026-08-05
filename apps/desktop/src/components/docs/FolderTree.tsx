@@ -282,6 +282,7 @@ export function FolderTree() {
                               return next
                             })
                           }
+                          title={folder}
                           className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 hover:bg-accent/10 transition-colors"
                         >
                           <ChevronRight className={cn('size-3 text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
