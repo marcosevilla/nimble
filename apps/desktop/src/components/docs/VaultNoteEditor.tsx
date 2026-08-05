@@ -124,6 +124,49 @@ export function VaultNoteEditor() {
     }
   }, [note, dp])
 
+  const handleWikilink = useCallback(async (raw: string) => {
+    if (!note) return
+    // Strip alias and heading/block fragment: `Note#Section|alias` → `Note`
+    const target = raw.split('|')[0].split('#')[0].trim()
+    if (!target) return
+
+    try {
+      const hit = await dp.vault.resolveLink(target)
+      if (hit) {
+        selectVaultNote(hit.path)
+        return
+      }
+    } catch {
+      // fall through to the create offer
+    }
+
+    // Unresolved: offer to create it. A bare name lands beside the current
+    // note; a name with slashes is treated as vault-relative.
+    const folder = note.path.includes('/')
+      ? note.path.slice(0, note.path.lastIndexOf('/'))
+      : ''
+    const newPath = target.includes('/')
+      ? `${target}.md`
+      : folder
+        ? `${folder}/${target}.md`
+        : `${target}.md`
+
+    toast(`No note called "${target}" yet.`, {
+      action: {
+        label: 'Create it',
+        onClick: async () => {
+          try {
+            const created = await dp.vault.createNote(newPath, `# ${target}\n\n`)
+            await refresh()
+            selectVaultNote(created.path)
+          } catch (e) {
+            toast.error(`Couldn't create note — ${e}`)
+          }
+        },
+      },
+    })
+  }, [note, dp, selectVaultNote, refresh])
+
   if (!note) return null
 
   return (
@@ -163,6 +206,7 @@ export function VaultNoteEditor() {
           onChange={handleChange}
           format="markdown"
           placeholder="Write…"
+          onWikilinkClick={handleWikilink}
         />
       </div>
 

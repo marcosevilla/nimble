@@ -10,12 +10,15 @@ import { cn } from '@/lib/utils'
 import type { SuggestionProps, SuggestionKeyDownProps } from '@tiptap/suggestion'
 import tippy, { type Instance } from 'tippy.js'
 import { CheckSquare, FileText } from 'lucide-react'
+import { Wikilink } from './WikilinkExtension'
 
 interface TiptapEditorProps {
   content: string
   onChange: (html: string) => void
   placeholder?: string
   format?: 'html' | 'markdown'
+  /** When provided, `[[wikilinks]]` become clickable and route here. */
+  onWikilinkClick?: (target: string) => void
 }
 
 // ── Mention item type (tasks + docs) ──
@@ -84,7 +87,7 @@ MentionList.displayName = 'MentionList'
 
 // ── Main editor ──
 
-export function TiptapEditor({ content, onChange, placeholder = 'Start writing...', format }: TiptapEditorProps) {
+export function TiptapEditor({ content, onChange, placeholder = 'Start writing...', format, onWikilinkClick }: TiptapEditorProps) {
   const dp = useDataProvider()
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -175,6 +178,7 @@ export function TiptapEditor({ content, onChange, placeholder = 'Start writing..
         },
         renderText: ({ node }) => `@${node.attrs.label ?? node.attrs.id}`,
       }),
+      ...(onWikilinkClick ? [Wikilink.configure({ onClick: onWikilinkClick })] : []),
     ],
     content,
     editorProps: {
