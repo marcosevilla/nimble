@@ -93,13 +93,23 @@ fn turso_text_or_null(val: &Option<String>) -> serde_json::Value {
     }
 }
 
+/// Hard ceiling on a single Turso HTTP round trip. Without it a stalled
+/// connection hangs the sync task forever (no default timeout in reqwest),
+/// which is the other way a large push kills sync. Two minutes is generous for
+/// the largest batch this module will send (see `MAX_BATCH_BYTES`) even on a
+/// poor connection, while still guaranteeing the call returns.
+const TURSO_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Send a pipeline request to Turso and return the parsed response.
 async fn turso_pipeline(
     turso_url: &str,
     turso_token: &str,
     requests: Vec<serde_json::Value>,
 ) -> crate::Result<serde_json::Value> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(TURSO_REQUEST_TIMEOUT)
+        .build()
+        .map_err(|e| crate::Error::Api(format!("Turso client build failed: {}", e)))?;
     // Normalize the URL: convert libsql:// to https:// for the HTTP API
     let base_url = turso_url
         .trim_end_matches('/')
@@ -628,36 +638,96 @@ fn build_data_mutation_requests(
     }
 }
 
-/// Push unsynced local entries to Turso via its HTTP API.
-/// For each entry, pushes both the sync_log record and the actual data mutation.
-/// Returns the count of entries pushed.
-pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<u64> {
-    // Guard against C1: on an already-initialized remote, ensure the columns
-    // this branch added (external_id, external_source, remote_updated_at,
-    // synced_snapshot, captures.context) exist before we try to write them.
-    ensure_remote_schema_upgraded(pool, turso_url, turso_token).await?;
+/// One unsynced `sync_log` row as selected by `push`:
+/// `(id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp)`.
+type PushEntry = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+);
 
-    // v18: the vault tables may not exist on a remote initialized earlier.
-    ensure_remote_vault_schema(pool, turso_url, turso_token).await?;
+/// Max entries in one Turso pipeline request.
+///
+/// Each entry contributes two statements (the data mutation and the sync_log
+/// insert), so 200 entries is ~400 statements plus the `close` — well inside
+/// what libSQL accepts in one pipeline, and few enough round trips that a
+/// normal push (a handful of entries) still goes out in a single request.
+const MAX_BATCH_ENTRIES: usize = 200;
 
-    // Fetch all unsynced entries
-    let entries: Vec<(String, String, String, String, Option<String>, Option<String>, String, String)> =
-        sqlx::query_as(
-            "SELECT id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp
-             FROM sync_log WHERE synced = 0 ORDER BY timestamp"
-        )
-        .fetch_all(pool)
-        .await?;
+/// Max approximate payload bytes in one Turso pipeline request.
+///
+/// The entry count alone is not a safe bound: a vault note's snapshot carries
+/// the note's full text and travels **twice** per entry, so a few long journal
+/// notes can blow past a request-size limit long before 200 entries do. 2 MiB
+/// keeps every POST comfortably under Turso's request ceiling and bounded in
+/// time; the first push after seeding the vault (~17–25 MB) becomes a dozen-odd
+/// requests whose progress is committed one batch at a time instead of one
+/// oversized request that fails and permanently wedges sync.
+const MAX_BATCH_BYTES: usize = 2 * 1024 * 1024;
 
-    if entries.is_empty() {
-        return Ok(0);
+/// Approximate wire size of one entry, used only for batching decisions.
+/// The snapshot is counted twice because it is sent twice — once inside the
+/// data mutation's args and once inside the sync_log insert's args.
+fn entry_payload_bytes(entry: &PushEntry) -> usize {
+    let (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp) = entry;
+    let snapshot_len = snapshot.as_ref().map(|s| s.len()).unwrap_or(0);
+    id.len()
+        + table_name.len()
+        + row_id.len()
+        + operation.len()
+        + changed_columns.as_ref().map(|s| s.len()).unwrap_or(0)
+        + snapshot_len * 2
+        + device_id.len()
+        + timestamp.len()
+}
+
+/// Split entry sizes (in order) into batches bounded by **both**
+/// `MAX_BATCH_ENTRIES` and `MAX_BATCH_BYTES`, returning the entry count of each
+/// batch. Pure so the boundary rules are testable without touching the network.
+///
+/// A single entry larger than `MAX_BATCH_BYTES` still goes out on its own —
+/// emitting an empty batch instead would drop it and loop forever.
+fn plan_batches(sizes: &[usize]) -> Vec<usize> {
+    let mut batches: Vec<usize> = Vec::new();
+    let mut count = 0usize;
+    let mut bytes = 0usize;
+
+    for &size in sizes {
+        if count > 0 && (count + 1 > MAX_BATCH_ENTRIES || bytes + size > MAX_BATCH_BYTES) {
+            batches.push(count);
+            count = 0;
+            bytes = 0;
+        }
+        count += 1;
+        bytes += size;
     }
 
-    // Build batch of statements for Turso
-    let mut statements: Vec<serde_json::Value> = Vec::new();
-    let mut pushed_ids: Vec<String> = Vec::new();
+    if count > 0 {
+        batches.push(count);
+    }
+    batches
+}
 
-    for (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp) in &entries {
+/// Send one batch of entries to Turso and, only once the POST returned 2xx,
+/// mark exactly those entries `synced = 1`. Returns how many were marked.
+///
+/// Marking per batch (rather than after the whole run) is what makes progress
+/// survive a mid-run failure: a batch that landed stays landed, and the next
+/// push resumes from the first unsynced entry instead of restarting.
+async fn push_batch(
+    pool: &SqlitePool,
+    turso_url: &str,
+    turso_token: &str,
+    entries: &[PushEntry],
+) -> crate::Result<u64> {
+    let mut statements: Vec<serde_json::Value> = Vec::new();
+
+    for (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp) in entries {
         // 1. Apply the actual data mutation on Turso's copy of the table
         let mutation_requests = build_data_mutation_requests(table_name, row_id, operation, snapshot);
         statements.extend(mutation_requests);
@@ -676,8 +746,6 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
                 turso_text(timestamp),
             ],
         ));
-
-        pushed_ids.push(id.clone());
     }
 
     // Add a "close" to end the pipeline
@@ -701,26 +769,97 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
         }
     }
 
-    // Mark local entries as synced
-    let count = pushed_ids.len() as u64;
-    for id in &pushed_ids {
+    // Mark this batch's entries as synced before the caller sends the next one.
+    for (id, ..) in entries {
         sqlx::query("UPDATE sync_log SET synced = 1 WHERE id = ?")
             .bind(id)
             .execute(pool)
             .await?;
     }
 
-    // Update last_push_timestamp
-    let now = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-    sqlx::query(
-        "INSERT INTO settings (key, value, updated_at) VALUES ('last_push_timestamp', ?, datetime('now'))
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')"
+    Ok(entries.len() as u64)
+}
+
+/// Push unsynced local entries to Turso via its HTTP API.
+/// For each entry, pushes both the sync_log record and the actual data mutation.
+/// Sends them in batches bounded by entry count and payload size, committing
+/// each batch's `synced` flags before the next goes out. Returns the count of
+/// entries pushed; on a batch failure it stops and returns the error, leaving
+/// the batches that already landed marked synced.
+pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<u64> {
+    // Guard against C1: on an already-initialized remote, ensure the columns
+    // this branch added (external_id, external_source, remote_updated_at,
+    // synced_snapshot, captures.context) exist before we try to write them.
+    ensure_remote_schema_upgraded(pool, turso_url, turso_token).await?;
+
+    // v18: the vault tables may not exist on a remote initialized earlier.
+    ensure_remote_vault_schema(pool, turso_url, turso_token).await?;
+
+    // Fetch all unsynced entries
+    let entries: Vec<PushEntry> = sqlx::query_as(
+        "SELECT id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp
+         FROM sync_log WHERE synced = 0 ORDER BY timestamp"
     )
-    .bind(&now)
-    .execute(pool)
+    .fetch_all(pool)
     .await?;
 
-    Ok(count)
+    if entries.is_empty() {
+        return Ok(0);
+    }
+
+    // Split into batches. A push that fits both bounds — the common case —
+    // plans exactly one batch, so it behaves identically to an unchunked push.
+    let sizes: Vec<usize> = entries.iter().map(entry_payload_bytes).collect();
+    let batches = plan_batches(&sizes);
+    if batches.len() > 1 {
+        log::info!(
+            "Turso push: {} unsynced entries split into {} batches",
+            entries.len(),
+            batches.len()
+        );
+    }
+
+    let mut pushed: u64 = 0;
+    let mut offset = 0usize;
+    let mut failure: Option<crate::Error> = None;
+
+    for batch_len in batches {
+        let chunk = &entries[offset..offset + batch_len];
+        offset += batch_len;
+        match push_batch(pool, turso_url, turso_token, chunk).await {
+            Ok(n) => pushed += n,
+            Err(e) => {
+                // Stop here, but keep what already landed: those batches are
+                // marked synced, so the next push resumes instead of retrying
+                // the whole (possibly oversized) set from the start.
+                log::warn!(
+                    "Turso push failed after {} of {} entries: {}",
+                    pushed,
+                    entries.len(),
+                    e
+                );
+                failure = Some(e);
+                break;
+            }
+        }
+    }
+
+    // Update last_push_timestamp only if something actually reached Turso.
+    if pushed > 0 {
+        let now = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        sqlx::query(
+            "INSERT INTO settings (key, value, updated_at) VALUES ('last_push_timestamp', ?, datetime('now'))
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')"
+        )
+        .bind(&now)
+        .execute(pool)
+        .await?;
+    }
+
+    match failure {
+        Some(e) => Err(e),
+        None => Ok(pushed),
+    }
 }
 
 // ── Pull ──
@@ -1168,6 +1307,105 @@ pub async fn get_pending_entries(pool: &SqlitePool) -> crate::Result<Vec<SyncLog
             synced: synced != 0,
         }
     }).collect())
+}
+
+#[cfg(test)]
+mod push_batching_tests {
+    use super::{
+        entry_payload_bytes, plan_batches, PushEntry, MAX_BATCH_BYTES, MAX_BATCH_ENTRIES,
+    };
+
+    fn entry(snapshot_len: usize) -> PushEntry {
+        (
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            None,
+            Some("x".repeat(snapshot_len)),
+            String::new(),
+            String::new(),
+        )
+    }
+
+    #[test]
+    fn nothing_to_push_plans_no_batches() {
+        assert!(plan_batches(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_small_push_stays_a_single_batch() {
+        // The common case must not change semantics: one request, as before.
+        let sizes = vec![100usize; 12];
+        assert_eq!(plan_batches(&sizes), vec![12]);
+    }
+
+    #[test]
+    fn entry_count_bound_splits_at_the_limit_not_before() {
+        let exact = vec![1usize; MAX_BATCH_ENTRIES];
+        assert_eq!(plan_batches(&exact), vec![MAX_BATCH_ENTRIES]);
+
+        let one_over = vec![1usize; MAX_BATCH_ENTRIES + 1];
+        assert_eq!(plan_batches(&one_over), vec![MAX_BATCH_ENTRIES, 1]);
+
+        let two_and_a_bit = vec![1usize; MAX_BATCH_ENTRIES * 2 + 3];
+        assert_eq!(
+            plan_batches(&two_and_a_bit),
+            vec![MAX_BATCH_ENTRIES, MAX_BATCH_ENTRIES, 3]
+        );
+    }
+
+    #[test]
+    fn byte_bound_splits_before_the_entry_bound_when_entries_are_large() {
+        // Three entries at 40% of the byte ceiling: two fit, the third starts a
+        // new batch, even though the entry count is nowhere near its limit.
+        let big = MAX_BATCH_BYTES * 2 / 5;
+        assert_eq!(plan_batches(&[big, big, big]), vec![2, 1]);
+
+        // Exactly filling the ceiling is allowed; one byte more is not.
+        let half = MAX_BATCH_BYTES / 2;
+        assert_eq!(plan_batches(&[half, MAX_BATCH_BYTES - half]), vec![2]);
+        assert_eq!(plan_batches(&[half, MAX_BATCH_BYTES - half + 1]), vec![1, 1]);
+    }
+
+    #[test]
+    fn an_oversized_entry_goes_out_alone_rather_than_being_dropped() {
+        // A single journal note bigger than the whole byte budget must still be
+        // pushed — never silently skipped, never an empty batch (which would
+        // make the caller loop forever).
+        let plan = plan_batches(&[10, MAX_BATCH_BYTES * 3, 10]);
+        assert_eq!(plan, vec![1, 1, 1]);
+        assert_eq!(plan.iter().sum::<usize>(), 3, "every entry is accounted for");
+        assert!(plan.iter().all(|&n| n > 0), "no empty batches: {plan:?}");
+    }
+
+    #[test]
+    fn every_entry_lands_in_exactly_one_batch() {
+        let sizes: Vec<usize> = (0..1000).map(|i| (i * 7919) % 50_000).collect();
+        let plan = plan_batches(&sizes);
+        assert_eq!(plan.iter().sum::<usize>(), sizes.len());
+        assert!(plan.iter().all(|&n| n <= MAX_BATCH_ENTRIES));
+
+        // And each planned batch respects the byte bound unless it is a lone
+        // oversized entry.
+        let mut offset = 0usize;
+        for len in plan {
+            let bytes: usize = sizes[offset..offset + len].iter().sum();
+            assert!(
+                bytes <= MAX_BATCH_BYTES || len == 1,
+                "batch of {len} entries is {bytes} bytes"
+            );
+            offset += len;
+        }
+    }
+
+    #[test]
+    fn snapshot_is_counted_twice_because_it_is_sent_twice() {
+        // The snapshot rides along in both the data mutation and the sync_log
+        // insert; a size bound that counted it once would under-measure by ~2x.
+        let e = entry(1000);
+        assert_eq!(entry_payload_bytes(&e), 2000);
+    }
 }
 
 #[cfg(test)]
