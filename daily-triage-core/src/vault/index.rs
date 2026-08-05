@@ -709,8 +709,38 @@ mod tests {
     async fn on_turso_row_applied_reconciles_fts_for_live_tombstoned_and_missing_rows() {
         let pool = test_pool().await;
 
-        // Ignores non-vault_notes table names outright.
-        on_turso_row_applied(&pool, "local_tasks", "irrelevant").await;
+        // Ignores non-vault_notes table names outright. Prove it with a real
+        // assertion: index a note normally (one vault_fts row), tombstone it
+        // with raw SQL only (soft_delete_note would clear vault_fts itself, so
+        // this deliberately leaves the FTS row stale), then call
+        // on_turso_row_applied with the WRONG table name and confirm nothing
+        // changed — the guard short-circuited before reconcile_fts ran.
+        let guard_id = upsert_note(&pool, "g/Guarded.md", "guarded body", None, 10, "hg")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE vault_notes SET deleted_at = '2026-08-05 00:00:00' WHERE id = ?")
+            .bind(&guard_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        on_turso_row_applied(&pool, "local_tasks", &guard_id).await;
+        let guard_fts_before: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM vault_fts WHERE note_id = ?")
+                .bind(&guard_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(guard_fts_before, 1, "wrong table name must be a no-op — stale FTS row untouched");
+
+        // Same input, correct table name: now it does reconcile.
+        on_turso_row_applied(&pool, "vault_notes", &guard_id).await;
+        let guard_fts_after: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM vault_fts WHERE note_id = ?")
+                .bind(&guard_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(guard_fts_after, 0, "correct table name must reconcile the tombstoned row");
 
         // (a) A live row arriving via replication (raw SQL, as a Turso pull
         // would apply it — bypassing upsert_note) gets its FTS entry created.
