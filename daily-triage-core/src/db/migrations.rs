@@ -426,6 +426,44 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             ALTER TABLE projects ADD COLUMN synced_snapshot TEXT
         ",
     },
+    Migration {
+        version: 18,
+        description: "Obsidian vault index: notes, links, tags, device-local FTS",
+        sql: "
+            CREATE TABLE IF NOT EXISTS vault_notes (
+                id TEXT PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                frontmatter_json TEXT,
+                mtime TEXT,
+                size INTEGER NOT NULL DEFAULT 0,
+                hash TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                deleted_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_vault_notes_deleted ON vault_notes(deleted_at);
+            CREATE INDEX IF NOT EXISTS idx_vault_notes_updated ON vault_notes(updated_at);
+            CREATE TABLE IF NOT EXISTS vault_links (
+                id TEXT PRIMARY KEY,
+                from_note_id TEXT NOT NULL,
+                to_path TEXT NOT NULL,
+                link_type TEXT NOT NULL DEFAULT 'wikilink',
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_vault_links_from ON vault_links(from_note_id);
+            CREATE INDEX IF NOT EXISTS idx_vault_links_to ON vault_links(to_path);
+            CREATE TABLE IF NOT EXISTS vault_tags (
+                id TEXT PRIMARY KEY,
+                note_id TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_vault_tags_note ON vault_tags(note_id);
+            CREATE INDEX IF NOT EXISTS idx_vault_tags_tag ON vault_tags(tag);
+            CREATE VIRTUAL TABLE IF NOT EXISTS vault_fts USING fts5(note_id UNINDEXED, title, content)
+        ",
+    },
 ];
 
 pub async fn run_migrations(pool: &SqlitePool) -> crate::Result<()> {
@@ -479,4 +517,47 @@ pub async fn run_migrations(pool: &SqlitePool) -> crate::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod v18_tests {
+    use crate::test_util::test_pool;
+
+    #[tokio::test]
+    async fn vault_tables_and_fts_exist_after_migrations() {
+        let pool = test_pool().await;
+
+        for table in ["vault_notes", "vault_links", "vault_tags"] {
+            let found: Option<(String,)> = sqlx::query_as(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            )
+            .bind(table)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+            assert!(found.is_some(), "missing table {table}");
+        }
+
+        // FTS5 virtual table is device-local but must exist on desktop.
+        sqlx::query("INSERT INTO vault_fts (note_id, title, content) VALUES ('n1', 'Alpha', 'body text')")
+            .execute(&pool)
+            .await
+            .expect("insert into vault_fts");
+        let hits: Vec<(String,)> =
+            sqlx::query_as("SELECT note_id FROM vault_fts WHERE vault_fts MATCH 'body'")
+                .fetch_all(&pool)
+                .await
+                .expect("fts query");
+        assert_eq!(hits.len(), 1);
+
+        // path is unique — two notes may not claim the same file
+        sqlx::query("INSERT INTO vault_notes (id, path, title, content) VALUES ('a', 'x.md', 'X', '')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let dup = sqlx::query("INSERT INTO vault_notes (id, path, title, content) VALUES ('b', 'x.md', 'X', '')")
+            .execute(&pool)
+            .await;
+        assert!(dup.is_err(), "path must be UNIQUE");
+    }
 }

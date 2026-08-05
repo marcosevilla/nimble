@@ -2,7 +2,7 @@
 name = "daily-triage-core"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.90.0"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -18,3 +18,8 @@ futures = "0.3"
 log = "0.4"
 thiserror = "2"
 htmd = "0.5.5"
+turbovault-parser = "1.6"
+notify = "8.2"
+notify-debouncer-full = "0.6"
+blake3 = "1.8"
+walkdir = "2.5"
