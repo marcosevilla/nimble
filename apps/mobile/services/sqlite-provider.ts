@@ -153,7 +153,16 @@ export function createSqliteProvider(): DataProvider {
           [id, name, color, position, now]
         );
 
-        const project: Project = { id, name, color, position };
+        const project: Project = {
+          id,
+          name,
+          color,
+          position,
+          external_id: null,
+          external_source: null,
+          remote_updated_at: null,
+          synced_snapshot: null,
+        };
         appendSyncLog('projects', id, 'INSERT', null, project as unknown as Record<string, unknown>);
         return project;
       },
@@ -239,6 +248,10 @@ export function createSqliteProvider(): DataProvider {
           position,
           created_at: now,
           updated_at: now,
+          external_id: null,
+          external_source: null,
+          remote_updated_at: null,
+          synced_snapshot: null,
         };
 
         appendSyncLog('local_tasks', id, 'INSERT', null, task as unknown as Record<string, unknown>);
