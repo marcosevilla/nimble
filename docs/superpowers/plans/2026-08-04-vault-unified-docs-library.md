@@ -3780,6 +3780,20 @@ git commit -m "feat: one search across native docs and vault notes"
 - Consumes: `@tiptap/core` `Extension`, `@tiptap/pm/state`, `@tiptap/pm/view` (`@tiptap/pm` ^3.21.0 is already a dependency), `dp.vault.resolveLink`, `dp.vault.createNote`.
 - Produces: `Wikilink` Tiptap extension with a `onClick(target: string)` option; `TiptapEditor` gains an optional `onWikilinkClick?: (target: string) => void` prop (native docs pass nothing and are unaffected).
 
+- [ ] **Step 0: Fix the pre-existing production-build failure in this same file**
+
+`npm run build` is currently broken — on this branch *and* on `main` — with exactly one error:
+
+```
+src/components/docs/TiptapEditor.tsx(92,44): error TS2339: Property 'markdown' does not exist on type 'Storage'.
+```
+
+Line 92 is `format === 'markdown' ? editor.storage.markdown.getMarkdown() : editor.getHTML()`. `tiptap-markdown` declares a module augmentation adding `markdown` to Tiptap's `Storage` interface; that augmentation is not reaching the build. It predates this plan (introduced with `tiptap-markdown` in plan 1) and went unnoticed because every verification step so far uses `tsc --noEmit`, which passes — `npm run build` runs `tsc -b`, which uses `tsconfig.app.json` and does not.
+
+Fix it properly rather than casting to `any`: diagnose why the augmentation isn't visible under `tsc -b` (likely a `types`/`include` narrowing in `tsconfig.app.json`, or the augmentation living in a file the app project doesn't pull in) and make the declaration reachable. A `@ts-expect-error` or an `as any` is not acceptable here — it would hide a real type error in the one call that converts the editor's content to the markdown that gets written to the user's vault files.
+
+Verify with `cd apps/desktop && npm run build` — it must complete, not just type-check. This is the step that makes Task 15's build verification meaningful.
+
 - [ ] **Step 1: Write the extension**
 
 Create `apps/desktop/src/components/docs/WikilinkExtension.ts`:
