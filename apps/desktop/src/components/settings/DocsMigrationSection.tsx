@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { getDataProvider } from '@/services/data-provider'
+import { getDataProvider } from '@/services/provider-context'
 import { invalidateDocsFormatCache } from '@/components/docs/DocEditor'
 import type { DocsMdPreview, DocsMdResult } from '@daily-triage/types'
 import { Button } from '@/components/ui/button'
