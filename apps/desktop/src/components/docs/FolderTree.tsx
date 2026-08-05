@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { ChevronRight, Plus, FolderOpen, Folder, FileText, Trash2, PanelLeftClose, Vault } from 'lucide-react'
 import { toast } from 'sonner'
 import { IconButton } from '@/components/shared/IconButton'
+import { DocsSearch } from './DocsSearch'
 import type { Document, VaultNoteSummary } from '@daily-triage/types'
 
 export function FolderTree() {
@@ -161,6 +162,8 @@ export function FolderTree() {
           </IconButton>
         </div>
       </div>
+
+      <DocsSearch />
 
       {/* Folder list */}
       <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
