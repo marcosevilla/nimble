@@ -36,7 +36,7 @@ daily-triage/
 │   └── types/                (shared TypeScript types — @daily-triage/types)
 ├── daily-triage-core/        (Rust library crate — all business logic)
 │   ├── src/db/               (tasks, projects, captures, goals, habits, docs, sync, etc.)
-│   ├── src/api/              (todoist, anthropic, calendar, updater)
+│   ├── src/api/              (todoist_migration, anthropic, calendar, updater)
 │   ├── src/parsers/          (ical, markdown)
 │   └── src/types.rs          (all domain types)
 ├── docs/                     (architecture docs, research)
@@ -52,6 +52,7 @@ daily-triage/
 - Zustand stores for global state (app, focus, detail). Local state for ephemeral UI.
 - `emitTasksChanged()` event bus to sync all `useLocalTasks` instances after mutations
 - Activity logging via `crate::db::activity::log_activity()` — fire-and-forget, never fails user-facing commands
+- Task/project mutations must go through `db/tasks.rs` / `db/projects.rs` CRUD fns (they feed sync_log AND the Todoist outbox observer) — never raw SQL from commands
 
 ## Adding a Rust Command
 1. Add the business logic function in `daily-triage-core/src/db/<domain>.rs`
@@ -65,7 +66,7 @@ daily-triage/
 - SQLite managed via sqlx (desktop Rust) and expo-sqlite (mobile TypeScript)
 - Versioned migration system in `daily-triage-core/src/db/migrations.rs` (Rust) and `apps/mobile/services/database.ts` (TypeScript mirror)
 - Both platforms share the same schema — keep migrations in sync
-- Current version: **14** (v1-13: core schema + v14: sync_log table + device_id)
+- Current version: **17** (v1-13: core schema + v14: sync_log table + device_id + v15: external_id/external_source tracking on local_tasks/projects + v16: capture context column + v17: todoist_outbox, integration_sync_state, and remote_updated_at/synced_snapshot columns for two-way sync)
 - `schema_version` table tracks what's been applied
 
 ## Key Tables
@@ -81,7 +82,9 @@ daily-triage/
 - `habits` — daily repeatable actions (name, category, icon, color)
 - `habit_logs` — daily check-off records (habit_id, date, intensity 1-5)
 - `daily_state` — per-day energy level, cached AI priorities, focus session state
-- `todoist_tasks` — cached Todoist tasks
+- `todoist_tasks` — legacy cache — UI retired, table dropped in a future migration
+- `todoist_outbox` — pending local→Todoist mutations (create/update/delete ops, status, retries) driving the two-way sync push (Mac-local, not synced)
+- `integration_sync_state` — per-provider sync token, last sync/error timestamps, enabled flag (Mac-local, not synced)
 - `calendar_events` / `calendar_feeds` — cached calendar data with 7-day window caching
 - `sync_log` — change tracking for cross-device sync (table_name, row_id, operation, snapshot, device_id, timestamp)
 

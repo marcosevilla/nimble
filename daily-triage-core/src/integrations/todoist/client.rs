@@ -90,7 +90,6 @@ pub async fn sync(token: &str, body: &serde_json::Value) -> crate::Result<SyncRe
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        // Use the same error construction as complete_todoist_task in api/todoist.rs
         return Err(crate::Error::Api(format!("todoist sync HTTP {status}: {text}")));
     }
     resp.json::<SyncResponse>()

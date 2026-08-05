@@ -1,8 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
-import { useTodoist } from '@/hooks/useTodoist'
 import { SortableTaskList } from '@/components/tasks/SortableTaskList'
-import { TaskRow } from '@/components/todoist/TaskRow'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Input } from '@/components/ui/input'
@@ -14,7 +12,7 @@ import { ProjectDetailPage } from '@/components/tasks/ProjectDetailPage'
 import { IconButton } from '@/components/shared/IconButton'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { useLayoutStore } from '@/stores/layoutStore'
-import type { TaskStatus, LocalTask, TodoistTaskRow } from '@daily-triage/types'
+import type { TaskStatus, LocalTask } from '@daily-triage/types'
 
 // ── Inline Task Creator ──
 
@@ -121,9 +119,6 @@ function AllTasksView({
   handleAddSubtask,
   remove,
   refresh,
-  todoistTasks,
-  todoistLoading,
-  snoozeTodoist,
 }: {
   projects: import('@daily-triage/types').Project[]
   filteredTasks: LocalTask[]
@@ -136,9 +131,6 @@ function AllTasksView({
   handleAddSubtask: (parentId: string, content: string) => void
   remove: (id: string) => void
   refresh: () => void
-  todoistTasks: TodoistTaskRow[]
-  todoistLoading: boolean
-  snoozeTodoist: (id: string) => void
 }) {
   const filterPills = (
     <>
@@ -211,27 +203,6 @@ function AllTasksView({
             />
           ))
         )}
-
-        {/* Todoist — read-only, collapsed by default */}
-        {!todoistLoading && todoistTasks.length > 0 && (
-          <CollapsibleSection
-            title="Todoist"
-            count={todoistTasks.length}
-            defaultOpen={false}
-            variant="nested"
-            icon={<span className="size-2.5 rounded-full shrink-0 bg-red-500" />}
-          >
-            <div className="divide-y divide-border/20">
-              {todoistTasks.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  onSnooze={snoozeTodoist}
-                />
-              ))}
-            </div>
-          </CollapsibleSection>
-        )}
         </div>
       </div>
     </div>
@@ -243,7 +214,6 @@ function AllTasksView({
 export function TasksPage() {
   const { projects, loading: projectsLoading, addProject, renameProject, updateProjectColor, removeProject } = useProjects()
   const { tasks, loading: tasksLoading, addTask, remove, refresh } = useLocalTasks()
-  const { tasks: todoistTasks, loading: todoistLoading, snoozeTask: snoozeTodoist } = useTodoist()
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all')
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
 
@@ -377,9 +347,6 @@ export function TasksPage() {
           handleAddSubtask={handleAddSubtask}
           remove={remove}
           refresh={refresh}
-          todoistTasks={todoistTasks}
-          todoistLoading={todoistLoading}
-          snoozeTodoist={snoozeTodoist}
         />
       )}
     </div>

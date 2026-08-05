@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '@/stores/appStore'
+import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { useDataProvider } from '@/services/provider-context'
 import type { Priority } from '@daily-triage/types'
 import { Button } from '@/components/ui/button'
@@ -31,12 +32,15 @@ function buildCalendarSummary(events: { summary: string; start_time: string; end
     .join('\n')
 }
 
-function buildTasksSummary(tasks: { content: string; project_name: string | null; priority: number; due_date: string | null }[]): string {
+function buildTasksSummary(
+  tasks: { content: string; project_id: string; priority: number }[],
+  projectNames: Record<string, string>,
+): string {
   if (tasks.length === 0) return 'No tasks due today.'
   return tasks
     .map((t) => {
       const pri = t.priority >= 3 ? ' [HIGH]' : ''
-      const proj = t.project_name ? ` (${t.project_name})` : ''
+      const proj = projectNames[t.project_id] ? ` (${projectNames[t.project_id]})` : ''
       return `- ${t.content}${proj}${pri}`
     })
     .join('\n')
@@ -81,8 +85,15 @@ interface PrioritiesSectionProps {
 export function PrioritiesSection({ onGenerated, initialPriorities, compact }: PrioritiesSectionProps) {
   const dp = useDataProvider()
   const calendarEvents = useAppStore((s) => s.calendarEvents)
-  const todoistTasks = useAppStore((s) => s.todoistTasks)
   const obsidianToday = useAppStore((s) => s.obsidianToday)
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const { tasks: tasksDueToday } = useLocalTasks({ dueDate: today })
+  const { projects } = useProjects()
+  const projectNames = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const p of projects) map[p.id] = p.name
+    return map
+  }, [projects])
 
   const [energy, setEnergy] = useState<EnergyLevel | null>(null)
   const [priorities, setPriorities] = useState<Priority[] | null>(initialPriorities ?? null)
@@ -103,7 +114,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, compact }: P
       const result = await dp.dailyState.generatePriorities(
         level,
         buildCalendarSummary(calendarEvents),
-        buildTasksSummary(todoistTasks),
+        buildTasksSummary(tasksDueToday, projectNames),
         buildObsidianSummary(obsidianToday),
       )
       setPriorities(result)
@@ -119,7 +130,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, compact }: P
     } finally {
       setLoading(false)
     }
-  }, [calendarEvents, todoistTasks, obsidianToday, onGenerated, dp])
+  }, [calendarEvents, tasksDueToday, projectNames, obsidianToday, onGenerated, dp])
 
   const regenerate = useCallback(() => {
     if (energy) generate(energy)

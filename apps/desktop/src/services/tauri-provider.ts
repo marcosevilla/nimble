@@ -25,10 +25,6 @@ export function createTauriProvider(): DataProvider {
     },
 
     todoist: {
-      fetchTasks: tauri.fetchTodoistTasks,
-      refreshTasks: tauri.refreshTodoistTasks,
-      completeTask: tauri.completeTodoistTask,
-      snoozeTask: tauri.snoozeTodoistTask,
       previewMigration: tauri.previewTodoistMigration,
       migrate: tauri.migrateTodoist,
       migratedIds: tauri.migratedTodoistIds,

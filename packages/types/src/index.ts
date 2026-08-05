@@ -26,36 +26,6 @@ export interface ParsedTodayMd {
   habits_bonus: CheckboxItem[]
 }
 
-// ── Todoist ──
-
-/** Store-ready type with boolean conversions (from TodoistTaskRow) */
-export interface TodoistTask {
-  id: string
-  content: string
-  description: string | null
-  project_id: string | null
-  project_name: string | null
-  priority: number
-  due_date: string | null
-  due_is_recurring: boolean
-  is_completed: boolean
-  todoist_url: string | null
-}
-
-/** Raw row type from SQLite/Rust (integers for booleans) */
-export interface TodoistTaskRow {
-  id: string
-  content: string
-  description: string | null
-  project_id: string | null
-  project_name: string | null
-  priority: number
-  due_date: string | null
-  due_is_recurring: number
-  is_completed: number
-  todoist_url: string | null
-}
-
 // ── Calendar ──
 
 export interface CalendarEvent {

@@ -66,13 +66,6 @@ export function createSqliteProvider(): DataProvider {
       importCaptures: () => stub('obsidian.importCaptures'),
     },
 
-    todoist: {
-      fetchTasks: () => stub('todoist.fetchTasks'),
-      refreshTasks: () => stub('todoist.refreshTasks'),
-      completeTask: () => stub('todoist.completeTask'),
-      snoozeTask: () => stub('todoist.snoozeTask'),
-    },
-
     calendar: {
       fetchEvents: () => stub('calendar.fetchEvents'),
       getCachedEvents: () => stub('calendar.getCachedEvents'),

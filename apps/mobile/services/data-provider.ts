@@ -7,7 +7,6 @@
 import type {
   Setting,
   ParsedTodayMd,
-  TodoistTaskRow,
   CalendarEvent,
   CalendarFeed,
   QuickCapture,
@@ -57,13 +56,6 @@ export interface DataProvider {
     readTodayMd(): Promise<ParsedTodayMd>;
     toggleCheckbox(fileName: string, lineNumber: number): Promise<ParsedTodayMd>;
     importCaptures(): Promise<number>;
-  };
-
-  todoist: {
-    fetchTasks(): Promise<TodoistTaskRow[]>;
-    refreshTasks(): Promise<TodoistTaskRow[]>;
-    completeTask(taskId: string): Promise<void>;
-    snoozeTask(taskId: string): Promise<void>;
   };
 
   calendar: {

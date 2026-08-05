@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CalendarEvent, TodoistTask } from '@daily-triage/types'
+import type { CalendarEvent } from '@daily-triage/types'
 
 export type Page = 'today' | 'tasks' | 'inbox' | 'docs' | 'goals' | 'session' | 'settings'
 
@@ -15,9 +15,6 @@ interface AppState {
   // Data
   calendarEvents: CalendarEvent[]
   setCalendarEvents: (events: CalendarEvent[]) => void
-
-  todoistTasks: TodoistTask[]
-  setTodoistTasks: (tasks: TodoistTask[]) => void
 
   obsidianToday: string | null
   setObsidianToday: (content: string | null) => void
@@ -36,9 +33,6 @@ export const useAppStore = create<AppState>((set) => ({
 
   calendarEvents: [],
   setCalendarEvents: (events) => set({ calendarEvents: events }),
-
-  todoistTasks: [],
-  setTodoistTasks: (tasks) => set({ todoistTasks: tasks }),
 
   obsidianToday: null,
   setObsidianToday: (content) => set({ obsidianToday: content }),

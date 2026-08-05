@@ -11,7 +11,6 @@
 import type {
   Setting,
   ParsedTodayMd,
-  TodoistTaskRow,
   CalendarEvent,
   CalendarFeed,
   QuickCapture,
@@ -55,7 +54,6 @@ import type {
 export type {
   Setting,
   ParsedTodayMd,
-  TodoistTaskRow,
   TodoistMigrationOptions,
   TodoistMigrationPreview,
   TodoistMigrationResult,
@@ -111,10 +109,6 @@ export interface DataProvider {
   }
 
   todoist: {
-    fetchTasks(): Promise<TodoistTaskRow[]>
-    refreshTasks(): Promise<TodoistTaskRow[]>
-    completeTask(taskId: string): Promise<void>
-    snoozeTask(taskId: string): Promise<void>
     previewMigration(): Promise<TodoistMigrationPreview>
     migrate(options: TodoistMigrationOptions): Promise<TodoistMigrationResult>
     migratedIds(): Promise<string[]>

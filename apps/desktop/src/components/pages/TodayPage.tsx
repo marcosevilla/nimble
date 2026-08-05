@@ -1,18 +1,15 @@
 import { useMemo, useState, useCallback, useEffect } from 'react'
-import { TaskRow } from '@/components/todoist/TaskRow'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
-import { useTodoist } from '@/hooks/useTodoist'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { LocalTaskRow } from '@/components/tasks/LocalTaskRow'
 import { PrioritiesSection } from '@/components/priorities/PrioritiesSection'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { useObsidian } from '@/hooks/useObsidian'
-import { useTaskNavigation } from '@/hooks/useTaskNavigation'
 import { useCalendar } from '@/hooks/useCalendar'
 import { cn } from '@/lib/utils'
 import { useDataProvider } from '@/services/provider-context'
-import type { Priority, TodoistTaskRow } from '@daily-triage/types'
+import type { Priority } from '@daily-triage/types'
 import { BriefDisplay } from '@/components/shared/BriefDisplay'
 import { DateStrip } from '@/components/shared/DateStrip'
 import { HabitsSection } from '@/components/goals/HabitsSection'
@@ -48,39 +45,6 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
     </div>
   )
 }
-
-// ── Urgency Grouping ──
-
-interface UrgencyGroup {
-  key: string
-  title: string
-  tasks: TodoistTaskRow[]
-  defaultOpen: boolean
-}
-
-function groupByUrgency(tasks: TodoistTaskRow[]): UrgencyGroup[] {
-  const today = new Date().toISOString().slice(0, 10)
-  const stillOpen: TodoistTaskRow[] = []
-  const highPriority: TodoistTaskRow[] = []
-  const dueToday: TodoistTaskRow[] = []
-  const quickWins: TodoistTaskRow[] = []
-
-  for (const task of tasks) {
-    const isCarriedOver = task.due_date != null && task.due_date < today
-    if (isCarriedOver) stillOpen.push(task)
-    else if (task.priority >= 3) highPriority.push(task)
-    else if (task.content.length < 50 && task.priority <= 2) quickWins.push(task)
-    else dueToday.push(task)
-  }
-
-  const groups: UrgencyGroup[] = []
-  if (stillOpen.length > 0) groups.push({ key: 'still-open', title: 'Still open', tasks: stillOpen, defaultOpen: true })
-  if (highPriority.length > 0) groups.push({ key: 'high', title: 'High priority', tasks: highPriority, defaultOpen: true })
-  if (dueToday.length > 0) groups.push({ key: 'today', title: 'Due today', tasks: dueToday, defaultOpen: true })
-  if (quickWins.length > 0) groups.push({ key: 'quick', title: 'Quick wins', tasks: quickWins, defaultOpen: false })
-  return groups
-}
-
 
 // ── Review Step Components ──
 
@@ -183,44 +147,6 @@ function CalendarGlance() {
   )
 }
 
-function TriageSection({
-  todoistTasks,
-  onSnooze,
-}: {
-  todoistTasks: TodoistTaskRow[]
-  onSnooze: (id: string) => void
-}) {
-  const carriedOver = todoistTasks.filter((t) => {
-    const today = new Date().toISOString().slice(0, 10)
-    return t.due_date != null && t.due_date < today
-  })
-  const highPriority = todoistTasks.filter((t) => t.priority >= 3)
-  const stillOpen = [...carriedOver, ...highPriority.filter((t) => !carriedOver.includes(t))]
-
-  if (stillOpen.length === 0) {
-    return (
-      <p className="text-body text-muted-foreground">
-        Nothing left to triage.
-      </p>
-    )
-  }
-
-  return (
-    <div className="space-y-1">
-      <Meta as="p" className="mb-2">
-        {stillOpen.length} still open — clear or carry forward.
-      </Meta>
-      {stillOpen.map((task) => (
-        <TaskRow
-          key={task.id}
-          task={task}
-          onSnooze={onSnooze}
-        />
-      ))}
-    </div>
-  )
-}
-
 // ── Review Mode ──
 
 function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => void }) {
@@ -228,7 +154,6 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
   const [step, setStep] = useState(1)
   const [priorities, setPriorities] = useState<Priority[] | null>(null)
   const [brief, setBrief] = useState<string | null | undefined>(undefined) // undefined = loading
-  const { tasks: todoistTasks, snoozeTask } = useTodoist()
 
   useEffect(() => {
     dp.dailyState.readDailyBrief().then(setBrief).catch(() => setBrief(null))
@@ -242,8 +167,8 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
       if (target?.matches('input, textarea, [contenteditable="true"]')) return
       e.preventDefault()
       if (step === 1) setStep(2)
-      else if (step === 3 && priorities) onComplete(priorities)
-      // Step 2 advances via PrioritiesSection's own button — leave it alone
+      else if (step === 2 && priorities) onComplete(priorities)
+      // Step 2 also advances via PrioritiesSection's own button — leave it alone
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -251,7 +176,6 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
 
   const handlePrioritiesGenerated = useCallback((p: Priority[]) => {
     setPriorities(p)
-    setStep(3)
   }, [])
 
   const handleFinish = useCallback(() => {
@@ -300,22 +224,16 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
         </ReviewStep>
 
         {/* Step 2: Energy + Priorities */}
-        <ReviewStep step={2} title="Set your energy & get priorities" active={step === 2} completed={step > 2}>
+        <ReviewStep step={2} title="Set your energy & get priorities" active={step === 2} completed={false}>
           <PrioritiesSection onGenerated={handlePrioritiesGenerated} compact />
-        </ReviewStep>
-
-        {/* Step 3: Triage */}
-        <ReviewStep step={3} title="Quick triage" active={step === 3} completed={step > 3}>
-          <TriageSection
-            todoistTasks={todoistTasks}
-            onSnooze={snoozeTask}
-          />
-          <div className="flex justify-end mt-3">
-            <Button size="sm" onClick={handleFinish} className="gap-1.5">
-              <Check className="size-3.5" /> Ready to go
-              <span className="ml-1 inline-flex items-center justify-center rounded bg-foreground/10 px-1 text-meta tabular-nums">↵</span>
-            </Button>
-          </div>
+          {priorities && (
+            <div className="flex justify-end mt-3">
+              <Button size="sm" onClick={handleFinish} className="gap-1.5">
+                <Check className="size-3.5" /> Ready to go
+                <span className="ml-1 inline-flex items-center justify-center rounded bg-foreground/10 px-1 text-meta tabular-nums">↵</span>
+              </Button>
+            </div>
+          )}
         </ReviewStep>
         </div>
       </div>
@@ -327,7 +245,6 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
 
 function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | null }) {
   const dp = useDataProvider()
-  const { tasks: todoistTasks, completeTask, snoozeTask } = useTodoist()
   const { todayData } = useObsidian()
   const today = new Date().toISOString().slice(0, 10)
 
@@ -381,24 +298,7 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
   const obsidianTotal = todayData?.tasks.length ?? 0
   const localCompleted = localTasks.filter((t) => t.completed && !t.parent_id).length
   const completed = obsidianChecked + localCompleted
-  const total = obsidianTotal + topLevelLocal.length + todoistTasks.length
-
-  const urgencyGroups = useMemo(() => groupByUrgency(todoistTasks), [todoistTasks])
-  const flatTaskIds = useMemo(() => urgencyGroups.flatMap((g) => g.tasks.map((t) => t.id)), [urgencyGroups])
-
-  const handleOpen = useCallback(
-    (taskId: string) => {
-      const task = todoistTasks.find((t) => t.id === taskId)
-      if (task?.todoist_url) dp.system.openUrl(task.todoist_url)
-    },
-    [todoistTasks, dp],
-  )
-
-  useTaskNavigation(flatTaskIds, {
-    onComplete: completeTask,
-    onSnooze: snoozeTask,
-    onOpen: handleOpen,
-  })
+  const total = obsidianTotal + topLevelLocal.length
 
   const remaining = total - completed
 
@@ -466,20 +366,6 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
                     onAddSubtask={handleAddSubtask}
                     onUpdated={refreshLocal}
                   />
-                </div>
-              )
-            })}
-          </div>
-        </CollapsibleSection>
-      )}
-
-      {todoistTasks.length > 0 && (
-        <CollapsibleSection title="Todoist" count={todoistTasks.length} defaultOpen={false}>
-          <div className="divide-y divide-border/30">
-            {todoistTasks.map((task) => {
-              return (
-                <div key={task.id}>
-                  <TaskRow task={task} onSnooze={snoozeTask} />
                 </div>
               )
             })}

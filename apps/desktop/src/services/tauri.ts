@@ -5,8 +5,6 @@ export type {
   Setting,
   CheckboxItem,
   ParsedTodayMd,
-  TodoistTask,
-  TodoistTaskRow,
   CalendarEvent,
   CalendarFeed,
   QuickCapture,
@@ -49,7 +47,6 @@ export type {
 import type {
   Setting,
   ParsedTodayMd,
-  TodoistTaskRow,
   TodoistMigrationOptions,
   TodoistMigrationPreview,
   TodoistMigrationResult,
@@ -128,22 +125,6 @@ export async function toggleObsidianCheckbox(
 }
 
 // ── Todoist ──
-
-export async function fetchTodoistTasks(): Promise<TodoistTaskRow[]> {
-  return invoke<TodoistTaskRow[]>('fetch_todoist_tasks')
-}
-
-export async function refreshTodoistTasks(): Promise<TodoistTaskRow[]> {
-  return invoke<TodoistTaskRow[]>('refresh_todoist_tasks')
-}
-
-export async function completeTodoistTask(taskId: string): Promise<void> {
-  return invoke<void>('complete_todoist_task', { taskId })
-}
-
-export async function snoozeTodoistTask(taskId: string): Promise<void> {
-  return invoke<void>('snooze_todoist_task', { taskId })
-}
 
 export async function previewTodoistMigration(): Promise<TodoistMigrationPreview> {
   return invoke<TodoistMigrationPreview>('preview_todoist_migration')
