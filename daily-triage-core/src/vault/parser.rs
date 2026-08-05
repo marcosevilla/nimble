@@ -36,10 +36,16 @@ pub fn title_from_path(rel_path: &str) -> String {
 pub fn parse_note(rel_path: &str, content: &str) -> ParsedNote {
     let parsed = ParsedContent::parse(content);
 
-    let frontmatter_json = parsed
-        .frontmatter
-        .as_ref()
-        .and_then(|fm| serde_json::to_string(&fm.data).ok());
+    // `fm.data` is a `HashMap`, whose iteration order is randomized per
+    // process — serializing it directly would give the same note a different
+    // `frontmatter_json` string on every app restart, and a different one on
+    // each device. Collect into a `BTreeMap` first so the column is stable and
+    // comparable.
+    let frontmatter_json = parsed.frontmatter.as_ref().and_then(|fm| {
+        let ordered: std::collections::BTreeMap<&String, &serde_json::Value> =
+            fm.data.iter().collect();
+        serde_json::to_string(&ordered).ok()
+    });
 
     let title = parsed
         .frontmatter
@@ -150,5 +156,28 @@ mod tests {
         assert_eq!(value["title"], "My Real Title");
 
         assert!(parse_note("a/b.md", "no frontmatter here").frontmatter_json.is_none());
+    }
+
+    #[test]
+    fn frontmatter_json_key_order_is_stable() {
+        // The upstream frontmatter map is a HashMap; without an explicit
+        // ordering the same note would serialize differently run to run.
+        let wide = "---\nzeta: 1\nalpha: 2\nmiddle: 3\ntitle: T\ntags: [x]\n---\n\nbody\n";
+        let first = parse_note("a/b.md", wide).frontmatter_json.expect("json");
+        for _ in 0..8 {
+            assert_eq!(parse_note("a/b.md", wide).frontmatter_json.as_deref(), Some(first.as_str()));
+        }
+        assert!(first.starts_with(r#"{"alpha":"#), "keys should be sorted: {first}");
+    }
+
+    #[test]
+    fn blank_title_levels_fall_through() {
+        // Requirement: an empty or whitespace-only value at one precedence
+        // level falls through to the next.
+        let blank_fm = "---\ntitle: \"   \"\n---\n\n# H1 Wins\n\nbody";
+        assert_eq!(parse_note("a/b.md", blank_fm).title, "H1 Wins");
+
+        let blank_both = "---\ntitle: \"\"\n---\n\n#    \n\nbody";
+        assert_eq!(parse_note("journal/Fallback Name.md", blank_both).title, "Fallback Name");
     }
 }
