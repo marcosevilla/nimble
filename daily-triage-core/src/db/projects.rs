@@ -74,6 +74,13 @@ pub async fn create_project(
     let snapshot = serde_json::to_string(&project).unwrap_or_default();
     sync::append_sync_log(pool, "projects", &project.id, "INSERT", None, Some(&snapshot)).await.ok();
 
+    // Todoist mutation observer: best-effort
+    crate::integrations::todoist::observer::on_project_mutation(
+        pool,
+        crate::integrations::todoist::observer::ProjectMutation::Created(&project),
+    )
+    .await;
+
     Ok(project)
 }
 
@@ -110,6 +117,15 @@ pub async fn update_project(
             let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
             let snapshot = serde_json::to_string(&project).unwrap_or_default();
             sync::append_sync_log(pool, "projects", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
+
+            // Todoist mutation observer: best-effort, only when the name itself changed
+            if fields_changed.contains(&"name") {
+                crate::integrations::todoist::observer::on_project_mutation(
+                    pool,
+                    crate::integrations::todoist::observer::ProjectMutation::Renamed(&project),
+                )
+                .await;
+            }
         }
     }
 
@@ -120,6 +136,12 @@ pub async fn delete_project(pool: &SqlitePool, id: &str) -> crate::Result<()> {
     if id == "inbox" {
         return Err(crate::Error::Other("Cannot delete the Inbox project".to_string()));
     }
+
+    // Fetch the full project before deleting, so the observer can enqueue a
+    // delete op (and read external_id) after the row is gone.
+    let pre_delete_project: Option<Project> = sqlx::query_as::<_, Project>(
+        "SELECT id, name, color, position, external_id, external_source, remote_updated_at, synced_snapshot FROM projects WHERE id = ?"
+    ).bind(id).fetch_optional(pool).await.ok().flatten();
 
     // Move tasks to Inbox before deleting
     sqlx::query("UPDATE local_tasks SET project_id = 'inbox' WHERE project_id = ?")
@@ -142,6 +164,15 @@ pub async fn delete_project(pool: &SqlitePool, id: &str) -> crate::Result<()> {
         None,
     )
     .await;
+
+    // Todoist mutation observer: best-effort
+    if let Some(project) = &pre_delete_project {
+        crate::integrations::todoist::observer::on_project_mutation(
+            pool,
+            crate::integrations::todoist::observer::ProjectMutation::Deleted { project },
+        )
+        .await;
+    }
 
     Ok(())
 }

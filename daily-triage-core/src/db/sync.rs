@@ -632,11 +632,34 @@ pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
             continue;
         }
 
+        // For local_tasks deletes, capture external_id BEFORE the row dies so the
+        // observer can still enqueue a Todoist delete op referencing it.
+        let pre_delete_external_id: Option<String> = if operation == "DELETE" && table_name == "local_tasks" {
+            sqlx::query_scalar("SELECT external_id FROM local_tasks WHERE id = ?")
+                .bind(&row_id)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten()
+        } else {
+            None
+        };
+
         // Apply the change locally
         if let Err(e) = apply_remote_change(pool, &table_name, &row_id, &operation, snapshot.as_deref()).await {
             log::warn!("Failed to apply remote change {}: {}", entry_id, e);
             continue;
         }
+
+        // Todoist mutation observer: best-effort, mirrors phone-originated changes
+        crate::integrations::todoist::observer::on_turso_row_applied(
+            pool,
+            &table_name,
+            &row_id,
+            pre_delete_external_id,
+            operation == "DELETE",
+        )
+        .await;
 
         // Record entry in local sync_log as already synced (so we don't push it back)
         let _ = sqlx::query(

@@ -31,7 +31,7 @@ impl FromRow<'_, SqliteRow> for LocalTask {
     }
 }
 
-const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot";
+pub(crate) const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot";
 
 /// Reorder tasks within a project -- receives ordered list of task IDs
 pub async fn reorder_local_tasks(pool: &SqlitePool, task_ids: &[String]) -> crate::Result<()> {
@@ -193,6 +193,13 @@ pub async fn create_local_task(
     let snapshot = serde_json::to_string(&task).unwrap_or_default();
     sync::append_sync_log(pool, "local_tasks", &task.id, "INSERT", None, Some(&snapshot)).await.ok();
 
+    // Todoist mutation observer: best-effort, enqueues an outbox create op if adapter active
+    crate::integrations::todoist::observer::on_task_mutation(
+        pool,
+        crate::integrations::todoist::observer::TaskMutation::Created(&task),
+    )
+    .await;
+
     Ok(task)
 }
 
@@ -285,6 +292,17 @@ pub async fn update_local_task(
         let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
         let snapshot = serde_json::to_string(&task).unwrap_or_default();
         sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
+
+        // Todoist mutation observer: best-effort
+        let fields_changed_owned: Vec<String> = fields_changed.iter().map(|f| f.to_string()).collect();
+        crate::integrations::todoist::observer::on_task_mutation(
+            pool,
+            crate::integrations::todoist::observer::TaskMutation::Updated {
+                task: &task,
+                fields_changed: &fields_changed_owned,
+            },
+        )
+        .await;
     }
 
     Ok(task)
@@ -305,6 +323,16 @@ pub async fn update_task_status(
     .fetch_optional(pool)
     .await?;
     let old = old_status.map(|r| r.0).unwrap_or_default();
+
+    // Capture completed flag before mutation, for the observer's close/reopen decision
+    let was_completed: bool = sqlx::query_scalar::<_, i64>(
+        "SELECT completed FROM local_tasks WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .map(|c| c != 0)
+    .unwrap_or(false);
 
     // Update status + completed flag
     let is_complete = status == "complete";
@@ -356,16 +384,35 @@ pub async fn update_task_status(
             .await
             .ok()
             .flatten();
-    if let Some(task) = row {
+    if let Some(task) = &row {
         let changed = serde_json::json!(["status", "completed", "completed_at"]).to_string();
         let snapshot = serde_json::to_string(&task).unwrap_or_default();
         sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
+    }
+
+    // Todoist mutation observer: best-effort
+    if let Some(task) = &row {
+        crate::integrations::todoist::observer::on_task_mutation(
+            pool,
+            crate::integrations::todoist::observer::TaskMutation::StatusChanged { task, was_completed },
+        )
+        .await;
     }
 
     Ok(())
 }
 
 pub async fn delete_local_task(pool: &SqlitePool, id: &str) -> crate::Result<()> {
+    // Fetch the full task before deleting, so the observer can enqueue a delete op
+    // (and read external_id) after the row is gone.
+    let pre_delete_task: Option<LocalTask> =
+        sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+
     // Log sync for subtask deletes
     let subtask_ids: Vec<(String,)> = sqlx::query_as("SELECT id FROM local_tasks WHERE parent_id = ?")
         .bind(id)
@@ -397,6 +444,15 @@ pub async fn delete_local_task(pool: &SqlitePool, id: &str) -> crate::Result<()>
         None,
     )
     .await;
+
+    // Todoist mutation observer: best-effort
+    if let Some(task) = &pre_delete_task {
+        crate::integrations::todoist::observer::on_task_mutation(
+            pool,
+            crate::integrations::todoist::observer::TaskMutation::Deleted { task },
+        )
+        .await;
+    }
 
     Ok(())
 }
