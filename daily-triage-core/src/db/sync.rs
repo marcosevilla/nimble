@@ -168,7 +168,12 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     .await?;
 
     if initialized.is_some() {
-        return Ok(());
+        // Remote tables already exist from an earlier version of this app.
+        // The CREATE TABLE statements below never run again, so columns added
+        // since the remote's first initialization (external_id, external_source,
+        // remote_updated_at, synced_snapshot, captures.context) must be added
+        // out-of-band via idempotent ALTERs. Safe to call on every invocation.
+        return upgrade_remote_schema(turso_url, turso_token).await;
     }
 
     // All CREATE TABLE statements for synced tables
@@ -194,7 +199,11 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             linked_doc_id TEXT,
             position INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            external_id TEXT,
+            external_source TEXT,
+            remote_updated_at TEXT,
+            synced_snapshot TEXT
         )",
         // projects
         "CREATE TABLE IF NOT EXISTS projects (
@@ -204,7 +213,11 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             position INTEGER NOT NULL DEFAULT 0,
             goal_id TEXT,
             milestone_id TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            external_id TEXT,
+            external_source TEXT,
+            remote_updated_at TEXT,
+            synced_snapshot TEXT
         )",
         // captures
         "CREATE TABLE IF NOT EXISTS captures (
@@ -213,7 +226,8 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             source TEXT NOT NULL DEFAULT 'manual',
             converted_to_task_id TEXT,
             routed_to TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            context TEXT
         )",
         // goals
         "CREATE TABLE IF NOT EXISTS goals (
@@ -371,6 +385,81 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     Ok(())
 }
 
+/// Idempotent remote-schema upgrade: adds columns that were introduced after a
+/// remote may have already been initialized. libSQL has no `ADD COLUMN IF NOT
+/// EXISTS`, so this tolerates "duplicate column name" errors from Turso and
+/// only warns on anything else.
+async fn upgrade_remote_schema(turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let alter_statements = [
+        "ALTER TABLE local_tasks ADD COLUMN external_id TEXT",
+        "ALTER TABLE local_tasks ADD COLUMN external_source TEXT",
+        "ALTER TABLE local_tasks ADD COLUMN remote_updated_at TEXT",
+        "ALTER TABLE local_tasks ADD COLUMN synced_snapshot TEXT",
+        "ALTER TABLE projects ADD COLUMN external_id TEXT",
+        "ALTER TABLE projects ADD COLUMN external_source TEXT",
+        "ALTER TABLE projects ADD COLUMN remote_updated_at TEXT",
+        "ALTER TABLE projects ADD COLUMN synced_snapshot TEXT",
+        "ALTER TABLE captures ADD COLUMN context TEXT",
+    ];
+
+    let mut requests: Vec<serde_json::Value> = alter_statements
+        .iter()
+        .map(|sql| turso_execute(sql, vec![]))
+        .collect();
+    requests.push(serde_json::json!({ "type": "close" }));
+
+    let body = turso_pipeline(turso_url, turso_token, requests).await?;
+
+    if let Some(results) = body.get("results").and_then(|v| v.as_array()) {
+        for (i, result) in results.iter().enumerate() {
+            if let Some("error") = result.get("type").and_then(|v| v.as_str()) {
+                let err_msg = result
+                    .pointer("/error/message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error");
+                // "duplicate column name" means the ALTER already landed on a
+                // previous run — expected and safe to ignore.
+                if !err_msg.to_lowercase().contains("duplicate column") {
+                    log::warn!("Turso schema upgrade statement {} failed: {}", i, err_msg);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Ensure the remote has the current column set before pushing data mutations
+/// that reference them. Gated by a local setting so this only hits Turso once
+/// per device rather than on every push; if the attempt fails outright (e.g.
+/// network error) the setting is never marked, so the next push retries it.
+async fn ensure_remote_schema_upgraded(
+    pool: &SqlitePool,
+    turso_url: &str,
+    turso_token: &str,
+) -> crate::Result<()> {
+    let done: Option<(String,)> = sqlx::query_as(
+        "SELECT value FROM settings WHERE key = 'turso_schema_v17_upgraded'",
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    if done.is_some() {
+        return Ok(());
+    }
+
+    upgrade_remote_schema(turso_url, turso_token).await?;
+
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_at) VALUES ('turso_schema_v17_upgraded', '1', datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')"
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 // ── Push ──
 
 /// Build INSERT OR REPLACE statements from a snapshot JSON for a given table.
@@ -455,6 +544,11 @@ fn build_data_mutation_requests(
 /// For each entry, pushes both the sync_log record and the actual data mutation.
 /// Returns the count of entries pushed.
 pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<u64> {
+    // Guard against C1: on an already-initialized remote, ensure the columns
+    // this branch added (external_id, external_source, remote_updated_at,
+    // synced_snapshot, captures.context) exist before we try to write them.
+    ensure_remote_schema_upgraded(pool, turso_url, turso_token).await?;
+
     // Fetch all unsynced entries
     let entries: Vec<(String, String, String, String, Option<String>, Option<String>, String, String)> =
         sqlx::query_as(
