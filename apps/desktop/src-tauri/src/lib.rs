@@ -1,6 +1,7 @@
 mod commands;
 mod selection;
 mod sync_runner;
+mod vault_runner;
 // db and parsers modules re-export from daily-triage-core for backward compatibility
 #[allow(unused)]
 mod db;
@@ -17,7 +18,7 @@ use tauri::{
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-use commands::{activity, ai, calendar, capture_routes, captures, demo, docs, focus, goals, habits, import, local_tasks, obsidian, open_url, priorities, progress, projects, settings, sync, todoist, todoist_sync, updater};
+use commands::{activity, ai, calendar, capture_routes, captures, demo, docs, focus, goals, habits, import, local_tasks, obsidian, open_url, priorities, progress, projects, settings, sync, todoist, todoist_sync, updater, vault};
 
 /// Show and focus the main window
 fn show_window(app: &tauri::AppHandle) {
@@ -295,6 +296,15 @@ pub fn run() {
                 app_handle.manage(pool);
             });
 
+            // --- Obsidian vault: launch scan, then debounced watch ---
+            app.manage(crate::vault_runner::VaultWatchState(std::sync::Mutex::new(None)));
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::vault_runner::start(&handle).await;
+                });
+            }
+
             // --- Todoist background sync: 5-minute interval, min 60s apart ---
             // First tick fires immediately (tokio::time::interval semantics),
             // covering an on-launch sync without a separate code path.
@@ -409,6 +419,16 @@ pub fn run() {
             docs::reorder_doc_notes,
             docs::preview_docs_markdown_migration,
             docs::migrate_docs_to_markdown,
+            vault::vault_status,
+            vault::vault_rescan,
+            vault::vault_list_notes,
+            vault::vault_get_note,
+            vault::vault_search,
+            vault::vault_backlinks,
+            vault::vault_resolve_link,
+            vault::vault_save_note,
+            vault::vault_create_note,
+            vault::vault_open_in_obsidian,
             captures::get_captures,
             captures::create_capture,
             captures::convert_capture_to_task,

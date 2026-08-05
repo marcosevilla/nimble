@@ -92,6 +92,19 @@ export function createTauriProvider(): DataProvider {
       migrateToMarkdown: tauri.migrateDocsToMarkdown,
     },
 
+    vault: {
+      status: tauri.vaultStatus,
+      rescan: tauri.vaultRescan,
+      listNotes: tauri.vaultListNotes,
+      getNote: tauri.vaultGetNote,
+      search: tauri.vaultSearch,
+      backlinks: tauri.vaultBacklinks,
+      resolveLink: tauri.vaultResolveLink,
+      saveNote: tauri.vaultSaveNote,
+      createNote: tauri.vaultCreateNote,
+      openInObsidian: tauri.vaultOpenInObsidian,
+    },
+
     activity: {
       log: tauri.logActivity,
       getLog: tauri.getActivityLog,

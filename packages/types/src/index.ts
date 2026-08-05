@@ -221,6 +221,57 @@ export interface DocsMdResult {
   backup_path: string
 }
 
+// ── Obsidian vault ──
+
+export interface VaultNoteSummary {
+  id: string
+  path: string
+  title: string
+  updated_at: string
+}
+
+export interface VaultNoteDetail {
+  id: string
+  path: string
+  title: string
+  content: string
+  frontmatter_json: string | null
+  mtime: string | null
+  size: number
+  hash: string | null
+  updated_at: string
+  deleted_at: string | null
+}
+
+export interface VaultSearchHit {
+  id: string
+  path: string
+  title: string
+  snippet: string
+}
+
+export interface VaultScanReport {
+  scanned: number
+  indexed: number
+  unchanged: number
+  removed: number
+  skipped: number
+}
+
+export interface VaultStatus {
+  configured: boolean
+  root: string | null
+  note_count: number
+  last_scan_at: string | null
+  last_error: string | null
+  excludes: string[]
+}
+
+/** Discriminated on `kind` by the Rust `WriteOutcome` enum. */
+export type VaultSaveResult =
+  | { kind: 'written'; hash: string }
+  | { kind: 'conflict'; conflict_path: string; disk_hash: string }
+
 // ── Focus Mode ──
 
 export interface FocusState {

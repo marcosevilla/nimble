@@ -31,6 +31,12 @@ import type {
   DocNote,
   DocsMdPreview,
   DocsMdResult,
+  VaultNoteSummary,
+  VaultNoteDetail,
+  VaultSearchHit,
+  VaultScanReport,
+  VaultStatus,
+  VaultSaveResult,
   FocusState,
   Goal,
   GoalWithProgress,
@@ -77,6 +83,12 @@ export type {
   DocNote,
   DocsMdPreview,
   DocsMdResult,
+  VaultNoteSummary,
+  VaultNoteDetail,
+  VaultSearchHit,
+  VaultScanReport,
+  VaultStatus,
+  VaultSaveResult,
   FocusState,
   Goal,
   GoalWithProgress,
@@ -210,6 +222,19 @@ export interface DataProvider {
     reorderNotes(noteIds: string[]): Promise<void>
     previewMarkdownMigration(): Promise<DocsMdPreview>
     migrateToMarkdown(): Promise<DocsMdResult>
+  }
+
+  vault: {
+    status(): Promise<VaultStatus>
+    rescan(): Promise<VaultScanReport | null>
+    listNotes(): Promise<VaultNoteSummary[]>
+    getNote(path: string): Promise<VaultNoteDetail | null>
+    search(query: string, limit?: number): Promise<VaultSearchHit[]>
+    backlinks(path: string): Promise<VaultNoteSummary[]>
+    resolveLink(toPath: string): Promise<VaultNoteSummary | null>
+    saveNote(path: string, content: string, expectedHash?: string | null): Promise<VaultSaveResult>
+    createNote(path: string, content?: string): Promise<VaultNoteDetail>
+    openInObsidian(path: string): Promise<void>
   }
 
   activity: {

@@ -93,6 +93,91 @@ pub fn rel_path(root: &Path, abs: &Path) -> Option<String> {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VaultStatus {
+    pub configured: bool,
+    pub root: Option<String>,
+    pub note_count: i64,
+    pub last_scan_at: Option<String>,
+    pub last_error: Option<String>,
+    pub excludes: Vec<String>,
+}
+
+/// Everything the settings panel needs in one round-trip. Never errors on an
+/// unconfigured vault — that's a normal, quiet state.
+pub async fn status(pool: &SqlitePool) -> crate::Result<VaultStatus> {
+    let cfg = load_config(pool).await?;
+    let note_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM vault_notes WHERE deleted_at IS NULL")
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
+    let last_scan_at = crate::db::settings::get_setting(pool, "vault_last_scan_at").await?;
+    let last_error = crate::db::settings::get_setting(pool, "vault_last_scan_error").await?;
+
+    Ok(VaultStatus {
+        configured: cfg.is_some(),
+        root: cfg.as_ref().map(|c| c.root.to_string_lossy().to_string()),
+        note_count,
+        last_scan_at,
+        last_error,
+        excludes: cfg.map(|c| c.excludes).unwrap_or_else(|| {
+            DEFAULT_EXCLUDES.iter().map(|s| s.to_string()).collect()
+        }),
+    })
+}
+
+/// Scan the vault and record the outcome in settings so the UI can show a
+/// neutral status line. Returns `Ok(None)` when no vault is configured.
+pub async fn scan_now(pool: &SqlitePool) -> crate::Result<Option<scanner::ScanReport>> {
+    let Some(cfg) = load_config(pool).await? else { return Ok(None) };
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+    match scanner::full_scan(pool, &cfg).await {
+        Ok(report) => {
+            crate::db::settings::set_setting(pool, "vault_last_scan_at", &now).await.ok();
+            crate::db::settings::set_setting(pool, "vault_last_scan_error", "").await.ok();
+            Ok(Some(report))
+        }
+        Err(e) => {
+            crate::db::settings::set_setting(pool, "vault_last_scan_error", &e.to_string())
+                .await
+                .ok();
+            Err(e)
+        }
+    }
+}
+
+/// `obsidian://open?vault=<vault folder name>&file=<note path without .md>`
+pub fn obsidian_uri(cfg: &VaultConfig, rel: &str) -> String {
+    let vault_name = cfg
+        .root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let file = rel.trim_end_matches(".md");
+    format!(
+        "obsidian://open?vault={}&file={}",
+        urlencode(&vault_name),
+        urlencode(file)
+    )
+}
+
+/// Minimal percent-encoding for the two URI components we build. Avoids adding
+/// a dependency for one call site.
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod config_tests {
     use super::*;
@@ -125,6 +210,19 @@ mod config_tests {
             Some("journal/a.md")
         );
         assert_eq!(rel_path(root, std::path::Path::new("/etc/passwd")), None);
+    }
+
+    #[test]
+    fn obsidian_uri_encodes_vault_and_path() {
+        let cfg = VaultConfig {
+            root: std::path::PathBuf::from("/Users/marco/Obsidian/marco wits"),
+            excludes: vec![],
+        };
+        let uri = obsidian_uri(&cfg, "journal/briefs/Brief 2026-08-04.md");
+        assert_eq!(
+            uri,
+            "obsidian://open?vault=marco%20wits&file=journal%2Fbriefs%2FBrief%202026-08-04"
+        );
     }
 
     #[tokio::test]

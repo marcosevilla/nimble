@@ -20,3 +20,4 @@ pub mod sync;
 pub mod todoist;
 pub mod todoist_sync;
 pub mod updater;
+pub mod vault;

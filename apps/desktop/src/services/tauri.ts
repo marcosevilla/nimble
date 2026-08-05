@@ -25,6 +25,12 @@ export type {
   DocNote,
   DocsMdPreview,
   DocsMdResult,
+  VaultNoteSummary,
+  VaultNoteDetail,
+  VaultSearchHit,
+  VaultScanReport,
+  VaultStatus,
+  VaultSaveResult,
   FocusState,
   GoalStatus,
   Goal,
@@ -70,6 +76,12 @@ import type {
   DocNote,
   DocsMdPreview,
   DocsMdResult,
+  VaultNoteSummary,
+  VaultNoteDetail,
+  VaultSearchHit,
+  VaultScanReport,
+  VaultStatus,
+  VaultSaveResult,
   FocusState,
   GoalStatus,
   Goal,
@@ -492,6 +504,52 @@ export async function previewDocsMarkdownMigration(): Promise<DocsMdPreview> {
 
 export async function migrateDocsToMarkdown(): Promise<DocsMdResult> {
   return invoke<DocsMdResult>('migrate_docs_to_markdown')
+}
+
+// ── Obsidian vault ──
+
+export async function vaultStatus(): Promise<VaultStatus> {
+  return invoke<VaultStatus>('vault_status')
+}
+
+export async function vaultRescan(): Promise<VaultScanReport | null> {
+  return invoke<VaultScanReport | null>('vault_rescan')
+}
+
+export async function vaultListNotes(): Promise<VaultNoteSummary[]> {
+  return invoke<VaultNoteSummary[]>('vault_list_notes')
+}
+
+export async function vaultGetNote(path: string): Promise<VaultNoteDetail | null> {
+  return invoke<VaultNoteDetail | null>('vault_get_note', { path })
+}
+
+export async function vaultSearch(query: string, limit?: number): Promise<VaultSearchHit[]> {
+  return invoke<VaultSearchHit[]>('vault_search', { query, limit })
+}
+
+export async function vaultBacklinks(path: string): Promise<VaultNoteSummary[]> {
+  return invoke<VaultNoteSummary[]>('vault_backlinks', { path })
+}
+
+export async function vaultResolveLink(toPath: string): Promise<VaultNoteSummary | null> {
+  return invoke<VaultNoteSummary | null>('vault_resolve_link', { toPath })
+}
+
+export async function vaultSaveNote(
+  path: string,
+  content: string,
+  expectedHash?: string | null,
+): Promise<VaultSaveResult> {
+  return invoke<VaultSaveResult>('vault_save_note', { path, content, expectedHash })
+}
+
+export async function vaultCreateNote(path: string, content?: string): Promise<VaultNoteDetail> {
+  return invoke<VaultNoteDetail>('vault_create_note', { path, content })
+}
+
+export async function vaultOpenInObsidian(path: string): Promise<void> {
+  return invoke<void>('vault_open_in_obsidian', { path })
 }
 
 // ── AI ──
