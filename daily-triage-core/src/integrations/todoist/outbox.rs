@@ -19,25 +19,28 @@ pub async fn enqueue(
     payload: serde_json::Value,
 ) -> crate::Result<()> {
     if op == "delete" {
+        let mut tx = pool.begin().await?;
         let had_create: Option<(String,)> = sqlx::query_as(
             "SELECT id FROM todoist_outbox WHERE local_id = ? AND status = 'pending' AND op = 'create'",
         )
         .bind(local_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await?;
         sqlx::query("DELETE FROM todoist_outbox WHERE local_id = ? AND status = 'pending'")
             .bind(local_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
         if had_create.is_some() {
             return Ok(()); // row never existed remotely — nothing to delete there
         }
     } else if op == "update" {
+        let mut tx = pool.begin().await?;
         let existing: Option<(String, String)> = sqlx::query_as(
             "SELECT id, payload_json FROM todoist_outbox WHERE local_id = ? AND status = 'pending' AND op IN ('create','update') ORDER BY rowid DESC LIMIT 1",
         )
         .bind(local_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await?;
         if let Some((row_id, payload_json)) = existing {
             let mut merged: serde_json::Value =
@@ -50,10 +53,12 @@ pub async fn enqueue(
             sqlx::query("UPDATE todoist_outbox SET payload_json = ?, updated_at = datetime('now','localtime') WHERE id = ?")
                 .bind(merged.to_string())
                 .bind(row_id)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await?;
+            tx.commit().await?;
             return Ok(());
         }
+        tx.commit().await?;
     }
     let temp_id = if op == "create" { Some(uuid::Uuid::new_v4().to_string()) } else { None };
     sqlx::query(
@@ -137,7 +142,7 @@ pub async fn error_list(pool: &SqlitePool) -> crate::Result<Vec<(String, String,
 }
 
 pub async fn prune_done(pool: &SqlitePool) -> crate::Result<()> {
-    sqlx::query("DELETE FROM todoist_outbox WHERE status = 'done' AND created_at < datetime('now', '-7 days', 'localtime')")
+    sqlx::query("DELETE FROM todoist_outbox WHERE status = 'done' AND updated_at < datetime('now', '-7 days', 'localtime')")
         .execute(pool)
         .await?;
     Ok(())
@@ -207,5 +212,49 @@ mod tests {
         enqueue(&pool, "task", "t1", "close", json!({})).await.unwrap();
         let batch = pending_batch(&pool, 100).await.unwrap();
         assert!(!batch[0].command_uuid.is_empty());
+    }
+
+    #[tokio::test]
+    async fn prune_done_respects_7_day_audit_window_on_updated_at() {
+        let pool = test_pool().await;
+        // Insert a done row with created_at 10 days ago but updated_at now
+        sqlx::query(
+            "INSERT INTO todoist_outbox (id, local_id, object_type, op, payload_json, command_uuid, status, created_at, updated_at)
+             VALUES (?, ?, 'task', 'update', '{}', ?, 'done', datetime('now', '-10 days', 'localtime'), datetime('now', 'localtime'))"
+        )
+        .bind("old-created-recent-updated")
+        .bind("t1")
+        .bind(uuid::Uuid::new_v4().to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Insert a done row with both timestamps 10 days ago
+        sqlx::query(
+            "INSERT INTO todoist_outbox (id, local_id, object_type, op, payload_json, command_uuid, status, created_at, updated_at)
+             VALUES (?, ?, 'task', 'update', '{}', ?, 'done', datetime('now', '-10 days', 'localtime'), datetime('now', '-10 days', 'localtime'))"
+        )
+        .bind("old-created-old-updated")
+        .bind("t2")
+        .bind(uuid::Uuid::new_v4().to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        prune_done(&pool).await.unwrap();
+
+        // Row with recent updated_at should survive
+        let survived: Option<(String,)> = sqlx::query_as("SELECT id FROM todoist_outbox WHERE id = 'old-created-recent-updated'")
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+        assert!(survived.is_some(), "Row with recent updated_at should survive pruning");
+
+        // Row with old updated_at should be deleted
+        let deleted: Option<(String,)> = sqlx::query_as("SELECT id FROM todoist_outbox WHERE id = 'old-created-old-updated'")
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+        assert!(deleted.is_none(), "Row with old updated_at should be deleted");
     }
 }
