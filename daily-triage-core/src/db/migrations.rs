@@ -393,6 +393,39 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             ALTER TABLE captures ADD COLUMN context TEXT
         "#,
     },
+    Migration {
+        version: 17,
+        description: "todoist two-way sync: outbox, integration state, per-row sync metadata",
+        sql: "
+            CREATE TABLE IF NOT EXISTS todoist_outbox (
+                id TEXT PRIMARY KEY,
+                local_id TEXT NOT NULL,
+                object_type TEXT NOT NULL,
+                op TEXT NOT NULL,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                command_uuid TEXT NOT NULL,
+                temp_id TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                error TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_todoist_outbox_status ON todoist_outbox(status);
+            CREATE INDEX IF NOT EXISTS idx_todoist_outbox_local ON todoist_outbox(local_id, status);
+            CREATE TABLE IF NOT EXISTS integration_sync_state (
+                provider TEXT PRIMARY KEY,
+                sync_token TEXT,
+                last_sync_at TEXT,
+                last_full_sync_at TEXT,
+                last_error TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1
+            );
+            ALTER TABLE local_tasks ADD COLUMN remote_updated_at TEXT;
+            ALTER TABLE local_tasks ADD COLUMN synced_snapshot TEXT;
+            ALTER TABLE projects ADD COLUMN remote_updated_at TEXT;
+            ALTER TABLE projects ADD COLUMN synced_snapshot TEXT
+        ",
+    },
 ];
 
 pub async fn run_migrations(pool: &SqlitePool) -> crate::Result<()> {

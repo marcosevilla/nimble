@@ -25,11 +25,13 @@ impl FromRow<'_, SqliteRow> for LocalTask {
             updated_at: row.try_get("updated_at")?,
             external_id: row.try_get("external_id")?,
             external_source: row.try_get("external_source")?,
+            remote_updated_at: row.try_get("remote_updated_at")?,
+            synced_snapshot: row.try_get("synced_snapshot")?,
         })
     }
 }
 
-const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source";
+const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot";
 
 /// Reorder tasks within a project -- receives ordered list of task IDs
 pub async fn reorder_local_tasks(pool: &SqlitePool, task_ids: &[String]) -> crate::Result<()> {
@@ -430,5 +432,23 @@ mod tests {
         let all = super::get_local_tasks(&pool, None, None, false).await.unwrap();
         let fetched = all.iter().find(|t| t.id == task.id).unwrap();
         assert_eq!(fetched.external_id.as_deref(), Some("6X7rM8997g3RQmvh"));
+    }
+
+    #[tokio::test]
+    async fn v17_sync_metadata_roundtrips() {
+        let pool = test_pool().await;
+        // tables exist
+        sqlx::query("SELECT id, local_id, object_type, op, payload_json, command_uuid, temp_id, status, error FROM todoist_outbox")
+            .fetch_all(&pool).await.unwrap();
+        sqlx::query("SELECT provider, sync_token, last_sync_at, last_full_sync_at, last_error, enabled FROM integration_sync_state")
+            .fetch_all(&pool).await.unwrap();
+        // columns visible through the struct
+        let task = super::create_local_task(&pool, "t", None, None, None, None, None).await.unwrap();
+        sqlx::query("UPDATE local_tasks SET synced_snapshot = '{}', remote_updated_at = '2026-08-04T00:00:00Z' WHERE id = ?")
+            .bind(&task.id).execute(&pool).await.unwrap();
+        let all = super::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let t = all.iter().find(|x| x.id == task.id).unwrap();
+        assert_eq!(t.synced_snapshot.as_deref(), Some("{}"));
+        assert_eq!(t.remote_updated_at.as_deref(), Some("2026-08-04T00:00:00Z"));
     }
 }

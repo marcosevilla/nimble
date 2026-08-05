@@ -348,6 +348,35 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_sync_log_table_row ON sync_log(table_name, row_id);
     `,
   },
+  {
+    version: 15,
+    description: 'External source tracking for imported data (Todoist, etc.)',
+    sql: `
+      ALTER TABLE local_tasks ADD COLUMN external_id TEXT;
+      ALTER TABLE local_tasks ADD COLUMN external_source TEXT;
+      ALTER TABLE projects ADD COLUMN external_id TEXT;
+      ALTER TABLE projects ADD COLUMN external_source TEXT;
+      CREATE INDEX IF NOT EXISTS idx_local_tasks_external ON local_tasks(external_source, external_id);
+      CREATE INDEX IF NOT EXISTS idx_projects_external ON projects(external_source, external_id);
+    `,
+  },
+  {
+    version: 16,
+    description: 'Capture context: source app for selection captures',
+    sql: `
+      ALTER TABLE captures ADD COLUMN context TEXT;
+    `,
+  },
+  {
+    version: 17,
+    description: 'todoist two-way sync: outbox, integration state, per-row sync metadata',
+    sql: `
+      ALTER TABLE local_tasks ADD COLUMN remote_updated_at TEXT;
+      ALTER TABLE local_tasks ADD COLUMN synced_snapshot TEXT;
+      ALTER TABLE projects ADD COLUMN remote_updated_at TEXT;
+      ALTER TABLE projects ADD COLUMN synced_snapshot TEXT;
+    `,
+  },
 ];
 
 let _db: Database | null = null;

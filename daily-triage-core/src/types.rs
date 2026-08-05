@@ -18,6 +18,8 @@ pub struct Project {
     pub position: i64,
     pub external_id: Option<String>,
     pub external_source: Option<String>,
+    pub remote_updated_at: Option<String>,
+    pub synced_snapshot: Option<String>,
 }
 
 // ── Local Tasks ──
@@ -40,6 +42,8 @@ pub struct LocalTask {
     pub updated_at: String,
     pub external_id: Option<String>,
     pub external_source: Option<String>,
+    pub remote_updated_at: Option<String>,
+    pub synced_snapshot: Option<String>,
 }
 
 // ── Activity ──

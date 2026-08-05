@@ -15,13 +15,15 @@ impl FromRow<'_, SqliteRow> for Project {
             position: row.try_get("position")?,
             external_id: row.try_get("external_id")?,
             external_source: row.try_get("external_source")?,
+            remote_updated_at: row.try_get("remote_updated_at")?,
+            synced_snapshot: row.try_get("synced_snapshot")?,
         })
     }
 }
 
 pub async fn get_projects(pool: &SqlitePool) -> crate::Result<Vec<Project>> {
     let rows: Vec<Project> = sqlx::query_as::<_, Project>(
-        "SELECT id, name, color, position, external_id, external_source FROM projects ORDER BY position, created_at",
+        "SELECT id, name, color, position, external_id, external_source, remote_updated_at, synced_snapshot FROM projects ORDER BY position, created_at",
     )
     .fetch_all(pool)
     .await?;
@@ -64,6 +66,8 @@ pub async fn create_project(
         position: max_pos + 1,
         external_id: None,
         external_source: None,
+        remote_updated_at: None,
+        synced_snapshot: None,
     };
 
     // Sync log: INSERT
@@ -100,7 +104,7 @@ pub async fn update_project(
     // Sync log: UPDATE
     if !fields_changed.is_empty() {
         let row: Option<Project> = sqlx::query_as::<_, Project>(
-            "SELECT id, name, color, position, external_id, external_source FROM projects WHERE id = ?"
+            "SELECT id, name, color, position, external_id, external_source, remote_updated_at, synced_snapshot FROM projects WHERE id = ?"
         ).bind(id).fetch_optional(pool).await.ok().flatten();
         if let Some(project) = row {
             let changed = serde_json::to_string(&fields_changed).unwrap_or_default();

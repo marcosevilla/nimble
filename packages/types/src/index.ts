@@ -111,6 +111,8 @@ export interface Project {
   position: number
   external_id: string | null
   external_source: string | null
+  remote_updated_at: string | null
+  synced_snapshot: string | null
 }
 
 // ── Local Tasks ──
@@ -134,6 +136,8 @@ export interface LocalTask {
   updated_at: string
   external_id: string | null
   external_source: string | null
+  remote_updated_at: string | null
+  synced_snapshot: string | null
 }
 
 // ── Updater ──
