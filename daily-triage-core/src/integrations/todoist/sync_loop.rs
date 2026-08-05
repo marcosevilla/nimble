@@ -1,6 +1,7 @@
-use crate::integrations::todoist::{client, mappers, outbox};
+use crate::integrations::todoist::{client, mappers, merge, outbox};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 /// Push-side context: resolves local ids referenced by outbox rows to the
 /// Todoist-facing identifiers a command needs (external id, in-batch temp_id,
@@ -347,6 +348,312 @@ pub async fn push_outbox(pool: &SqlitePool, token: &str) -> crate::Result<usize>
     Ok(confirmed)
 }
 
+#[derive(Debug, Default, serde::Serialize)]
+pub struct SyncReport {
+    pub skipped: Option<String>, // "disabled" | "already running"
+    pub pushed: usize,
+    pub created: usize, // native tasks created from pull
+    pub updated: usize,
+    pub deleted: usize,
+    pub projects_upserted: usize,
+}
+
+impl SyncReport {
+    pub fn changed_anything(&self) -> bool {
+        self.created + self.updated + self.deleted + self.projects_upserted > 0
+    }
+}
+
+static SYNC_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+async fn find_task_by_external(
+    ex: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    external_id: &str,
+) -> Result<Option<crate::types::LocalTask>, sqlx::Error> {
+    sqlx::query_as(&format!(
+        "SELECT {} FROM local_tasks WHERE external_source = 'todoist' AND external_id = ?",
+        crate::db::tasks::SELECT_COLS
+    ))
+    .bind(external_id)
+    .fetch_optional(ex)
+    .await
+}
+
+/// Transactional pull apply: projects -> sections (pseudo-projects) -> items
+/// (two-pass, so a child that arrives before its parent still links up), then
+/// persists the new sync_token in the SAME transaction as the applied deltas.
+/// All writes here are direct SQL against `local_tasks`/`projects` — never the
+/// `db::tasks`/`db::projects` CRUD helpers — because those helpers fire the
+/// Todoist mutation observer, which would re-enqueue outbox ops for changes
+/// that originated from Todoist itself (an echo/infinite-loop risk). Direct
+/// SQL sidesteps the observer entirely.
+pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate::Result<SyncReport> {
+    let mut report = SyncReport::default();
+    let mut tx = pool.begin().await?;
+    // (local_task_id, snapshot) pairs to sync_log AFTER commit
+    let mut logged: Vec<(String, &'static str)> = Vec::new();
+
+    // 1. projects
+    for p in &resp.projects {
+        if p.is_deleted.unwrap_or(false) || p.is_archived.unwrap_or(false) {
+            continue; // keep local project; tasks were reassigned/removed via item deltas
+        }
+        let existing: Option<(String,)> = sqlx::query_as(
+            "SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?",
+        )
+        .bind(&p.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        match existing {
+            Some((local_id,)) => {
+                sqlx::query("UPDATE projects SET name = ? WHERE id = ? AND name != ?")
+                    .bind(&p.name).bind(&local_id).bind(&p.name)
+                    .execute(&mut *tx).await?;
+            }
+            None if p.inbox_project.unwrap_or(false) => {
+                sqlx::query("UPDATE projects SET external_id = ?, external_source = 'todoist' WHERE id = 'inbox'")
+                    .bind(&p.id).execute(&mut *tx).await?;
+            }
+            None => {
+                let max: (i64,) = sqlx::query_as("SELECT COALESCE(MAX(position), 0) + 1 FROM projects")
+                    .fetch_one(&mut *tx).await?;
+                sqlx::query("INSERT INTO projects (id, name, color, position, external_id, external_source) VALUES (?, ?, '#8b8b8b', ?, ?, 'todoist')")
+                    .bind(uuid::Uuid::new_v4().to_string())
+                    .bind(&p.name)
+                    .bind(max.0)
+                    .bind(&p.id)
+                    .execute(&mut *tx).await?;
+                report.projects_upserted += 1;
+            }
+        }
+    }
+
+    // 2. sections -> pseudo-projects "Parent / Section"
+    for s in &resp.sections {
+        if s.is_deleted.unwrap_or(false) { continue; }
+        let pseudo_ext = format!("section:{}", s.id);
+        let exists: Option<(String,)> = sqlx::query_as(
+            "SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?",
+        ).bind(&pseudo_ext).fetch_optional(&mut *tx).await?;
+        if exists.is_none() {
+            let parent_name: Option<(String,)> = sqlx::query_as(
+                "SELECT name FROM projects WHERE external_source = 'todoist' AND external_id = ?",
+            ).bind(&s.project_id).fetch_optional(&mut *tx).await?;
+            let name = match parent_name {
+                Some((p,)) => format!("{p} / {}", s.name),
+                None => s.name.clone(),
+            };
+            let max: (i64,) = sqlx::query_as("SELECT COALESCE(MAX(position), 0) + 1 FROM projects")
+                .fetch_one(&mut *tx).await?;
+            sqlx::query("INSERT INTO projects (id, name, color, position, external_id, external_source) VALUES (?, ?, '#8b8b8b', ?, ?, 'todoist')")
+                .bind(uuid::Uuid::new_v4().to_string()).bind(&name).bind(max.0).bind(&pseudo_ext)
+                .execute(&mut *tx).await?;
+            report.projects_upserted += 1;
+        }
+    }
+
+    // 3. items -- pass 1
+    let mut parent_links: Vec<(String, String)> = Vec::new(); // (child_external, parent_external)
+    for item in &resp.items {
+        let local = find_task_by_external(&mut *tx, &item.id).await?;
+        if item.is_deleted.unwrap_or(false) {
+            if let Some(t) = local {
+                sqlx::query("DELETE FROM local_tasks WHERE id = ?").bind(&t.id).execute(&mut *tx).await?;
+                logged.push((t.id, "DELETE"));
+                report.deleted += 1;
+            }
+            continue;
+        }
+        let remote = mappers::item_to_snapshot(item);
+        match local {
+            None => {
+                if remote.checked { continue; } // don't resurrect completed history
+                let project_local: Option<(String,)> = match &remote.project_external_id {
+                    Some(ext) => sqlx::query_as("SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?")
+                        .bind(ext).fetch_optional(&mut *tx).await?,
+                    None => None,
+                };
+                let project_id = project_local.map(|(id,)| id).unwrap_or_else(|| "inbox".to_string());
+                let max: (i64,) = sqlx::query_as("SELECT COALESCE(MAX(position), 0) + 1 FROM local_tasks WHERE project_id = ?")
+                    .bind(&project_id).fetch_one(&mut *tx).await?;
+                let new_id = uuid::Uuid::new_v4().to_string();
+                sqlx::query(
+                    "INSERT INTO local_tasks (id, content, description, project_id, priority, due_date, completed, status, position, external_id, external_source, remote_updated_at, synced_snapshot)
+                     VALUES (?, ?, ?, ?, ?, ?, 0, 'todo', ?, ?, 'todoist', ?, ?)",
+                )
+                .bind(&new_id)
+                .bind(&remote.content)
+                .bind(if remote.description.is_empty() { None } else { Some(remote.description.clone()) })
+                .bind(&project_id)
+                .bind(remote.priority)
+                .bind(&remote.due_date)
+                .bind(max.0)
+                .bind(&item.id)
+                .bind(&item.updated_at)
+                .bind(serde_json::to_string(&remote).unwrap_or_default())
+                .execute(&mut *tx)
+                .await?;
+                if let Some(parent_ext) = &remote.parent_external_id {
+                    parent_links.push((item.id.clone(), parent_ext.clone()));
+                }
+                logged.push((new_id, "INSERT"));
+                report.created += 1;
+            }
+            Some(local_task) => {
+                let base: Option<mappers::TaskSnapshot> = local_task
+                    .synced_snapshot
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str(s).ok());
+                if base.as_ref() == Some(&remote) { continue; } // echo
+                let project_ext_of_local: Option<String> = sqlx::query_as::<_, (Option<String>,)>(
+                    "SELECT external_id FROM projects WHERE id = ?",
+                )
+                .bind(&local_task.project_id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .and_then(|(e,)| e);
+                let local_snap = mappers::local_to_snapshot(&local_task, project_ext_of_local, None, base.as_ref());
+                let plan = merge::merge_task(
+                    &local_snap,
+                    base.as_ref(),
+                    &remote,
+                    mappers::local_ts_to_utc(&local_task.updated_at),
+                    item.updated_at.as_deref().and_then(mappers::rfc3339_to_utc),
+                );
+                if let Some(c) = &plan.content {
+                    sqlx::query("UPDATE local_tasks SET content = ? WHERE id = ?").bind(c).bind(&local_task.id).execute(&mut *tx).await?;
+                }
+                if let Some(d) = &plan.description {
+                    sqlx::query("UPDATE local_tasks SET description = ? WHERE id = ?")
+                        .bind(if d.is_empty() { None::<String> } else { Some(d.clone()) }).bind(&local_task.id).execute(&mut *tx).await?;
+                }
+                if let Some(due) = &plan.due_date {
+                    sqlx::query("UPDATE local_tasks SET due_date = ? WHERE id = ?").bind(due).bind(&local_task.id).execute(&mut *tx).await?;
+                }
+                if let Some(p) = plan.priority {
+                    sqlx::query("UPDATE local_tasks SET priority = ? WHERE id = ?").bind(p).bind(&local_task.id).execute(&mut *tx).await?;
+                }
+                if let Some(ext) = &plan.project_external_id {
+                    let target: Option<(String,)> = sqlx::query_as("SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?")
+                        .bind(ext).fetch_optional(&mut *tx).await?;
+                    if let Some((pid,)) = target {
+                        sqlx::query("UPDATE local_tasks SET project_id = ? WHERE id = ?").bind(&pid).bind(&local_task.id).execute(&mut *tx).await?;
+                    }
+                }
+                if let Some(completed) = plan.completed {
+                    if completed {
+                        sqlx::query("UPDATE local_tasks SET completed = 1, status = 'complete', completed_at = datetime('now','localtime') WHERE id = ?")
+                            .bind(&local_task.id).execute(&mut *tx).await?;
+                    } else {
+                        sqlx::query("UPDATE local_tasks SET completed = 0, status = 'todo', completed_at = NULL WHERE id = ?")
+                            .bind(&local_task.id).execute(&mut *tx).await?;
+                    }
+                }
+                sqlx::query("UPDATE local_tasks SET synced_snapshot = ?, remote_updated_at = ?, updated_at = datetime('now','localtime') WHERE id = ?")
+                    .bind(serde_json::to_string(&remote).unwrap_or_default())
+                    .bind(&item.updated_at)
+                    .bind(&local_task.id)
+                    .execute(&mut *tx)
+                    .await?;
+                if !plan.is_empty() {
+                    logged.push((local_task.id.clone(), "UPDATE"));
+                    report.updated += 1;
+                }
+            }
+        }
+    }
+
+    // 4. items -- pass 2: resolve parents
+    for (child_ext, parent_ext) in parent_links {
+        sqlx::query(
+            "UPDATE local_tasks SET parent_id = (SELECT id FROM local_tasks WHERE external_source = 'todoist' AND external_id = ?)
+             WHERE external_source = 'todoist' AND external_id = ?",
+        )
+        .bind(&parent_ext)
+        .bind(&child_ext)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // 5. token -- same transaction as the applied deltas
+    if let Some(token) = &resp.sync_token {
+        sqlx::query("INSERT OR IGNORE INTO integration_sync_state (provider) VALUES ('todoist')")
+            .execute(&mut *tx).await?;
+        sqlx::query("UPDATE integration_sync_state SET sync_token = ?, last_sync_at = datetime('now','localtime'), last_error = NULL WHERE provider = 'todoist'")
+            .bind(token).execute(&mut *tx).await?;
+        if resp.full_sync.unwrap_or(false) {
+            sqlx::query("UPDATE integration_sync_state SET last_full_sync_at = datetime('now','localtime') WHERE provider = 'todoist'")
+                .execute(&mut *tx).await?;
+        }
+    }
+    tx.commit().await?;
+
+    // 6. after commit: sync_log so Turso propagates (fire-and-forget, matches codebase pattern)
+    for (row_id, op) in logged {
+        let snapshot = if op == "DELETE" {
+            None
+        } else {
+            match sqlx::query_as::<_, crate::types::LocalTask>(&format!(
+                "SELECT {} FROM local_tasks WHERE id = ?", crate::db::tasks::SELECT_COLS
+            )).bind(&row_id).fetch_optional(pool).await {
+                Ok(Some(t)) => serde_json::to_string(&t).ok(),
+                _ => None,
+            }
+        };
+        crate::db::sync::append_sync_log(pool, "local_tasks", &row_id, op, None, snapshot.as_deref())
+            .await
+            .ok();
+    }
+    Ok(report)
+}
+
+pub async fn run_sync(pool: &SqlitePool) -> crate::Result<SyncReport> {
+    let lock = SYNC_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
+    let Ok(_guard) = lock.try_lock() else {
+        return Ok(SyncReport { skipped: Some("already running".into()), ..Default::default() });
+    };
+    let Some(token) = crate::integrations::adapter_token_if_active(pool).await? else {
+        return Ok(SyncReport { skipped: Some("disabled".into()), ..Default::default() });
+    };
+    outbox::prune_done(pool).await.ok();
+
+    let result: crate::Result<SyncReport> = async {
+        let pushed = push_outbox(pool, &token).await?;
+        let state = crate::integrations::ensure_state(pool, "todoist").await?;
+        let sync_token = state.sync_token.unwrap_or_else(|| "*".to_string());
+        let resp = client::sync(&token, &serde_json::json!({
+            "sync_token": sync_token,
+            "resource_types": ["items", "projects", "sections", "completed_info"],
+        })).await?;
+        let mut report = apply_pull(pool, &resp).await?;
+        report.pushed = pushed;
+        Ok(report)
+    }.await;
+
+    if let Err(e) = &result {
+        sqlx::query("UPDATE integration_sync_state SET last_error = ? WHERE provider = 'todoist'")
+            .bind(e.to_string())
+            .execute(pool)
+            .await
+            .ok();
+    }
+    result
+}
+
+pub async fn run_sync_if_due(pool: &SqlitePool, min_interval_secs: i64) -> crate::Result<SyncReport> {
+    let (pending, _) = outbox::counts(pool).await?;
+    if pending == 0 {
+        if let Some(state) = crate::integrations::get_state(pool, "todoist").await? {
+            if let Some(last) = state.last_sync_at.as_deref().and_then(mappers::local_ts_to_utc) {
+                if (chrono::Utc::now() - last).num_seconds() < min_interval_secs {
+                    return Ok(SyncReport { skipped: Some("recently synced".into()), ..Default::default() });
+                }
+            }
+        }
+    }
+    run_sync(pool).await
+}
+
 #[cfg(test)]
 mod push_tests {
     use super::*;
@@ -456,5 +763,155 @@ mod push_tests {
         assert!(bad.is_empty());
         assert_eq!(cmds[0]["type"], "item_move");
         assert_eq!(cmds[0]["args"]["project_id"], "EXT-P2");
+    }
+}
+
+#[cfg(test)]
+mod pull_tests {
+    use super::*;
+    use crate::integrations::todoist::client::SyncResponse;
+    use crate::test_util::test_pool;
+    use serde_json::json;
+
+    fn resp(v: serde_json::Value) -> SyncResponse {
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[tokio::test]
+    async fn new_remote_item_creates_native_task() {
+        let pool = test_pool().await;
+        let r = resp(json!({
+            "sync_token": "T1",
+            "projects": [{"id": "P1", "name": "Errands"}],
+            "items": [{
+                "id": "R1", "content": "Buy milk", "description": "2%",
+                "project_id": "P1", "priority": 2, "checked": false, "is_deleted": false,
+                "updated_at": "2026-08-04T10:00:00Z",
+                "due": {"date": "2026-08-06", "string": "Aug 6", "is_recurring": false}
+            }]
+        }));
+        let report = apply_pull(&pool, &r).await.unwrap();
+        assert_eq!(report.created, 1);
+        assert_eq!(report.projects_upserted, 1);
+
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let t = tasks.iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert_eq!(t.content, "Buy milk");
+        assert_eq!(t.due_date.as_deref(), Some("2026-08-06"));
+        assert!(t.synced_snapshot.is_some());
+
+        // project created + linked
+        let projects = crate::db::projects::get_projects(&pool).await.unwrap();
+        let p = projects.iter().find(|p| p.external_id.as_deref() == Some("P1")).unwrap();
+        assert_eq!(t.project_id, p.id);
+
+        // token persisted
+        let state = crate::integrations::get_state(&pool, "todoist").await.unwrap().unwrap();
+        assert_eq!(state.sync_token.as_deref(), Some("T1"));
+    }
+
+    #[tokio::test]
+    async fn echo_of_stored_snapshot_is_skipped() {
+        let pool = test_pool().await;
+        let item = json!({"id": "R1", "content": "same", "priority": 1, "checked": false, "is_deleted": false});
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [item.clone()]}))).await.unwrap();
+        let second = apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [item]}))).await.unwrap();
+        assert_eq!(second.created, 0);
+        assert_eq!(second.updated, 0);
+    }
+
+    #[tokio::test]
+    async fn remote_deletion_removes_local_row() {
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [
+            {"id": "R1", "content": "x", "checked": false, "is_deleted": false}
+        ]}))).await.unwrap();
+        let report = apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [
+            {"id": "R1", "content": "x", "checked": false, "is_deleted": true}
+        ]}))).await.unwrap();
+        assert_eq!(report.deleted, 1);
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, true).await.unwrap();
+        assert!(!tasks.iter().any(|t| t.external_id.as_deref() == Some("R1")));
+    }
+
+    #[tokio::test]
+    async fn remote_completion_completes_local_task() {
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [
+            {"id": "R1", "content": "x", "checked": false, "is_deleted": false}
+        ]}))).await.unwrap();
+        apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [
+            {"id": "R1", "content": "x", "checked": true, "is_deleted": false,
+             "updated_at": "2026-08-04T12:00:00Z"}
+        ]}))).await.unwrap();
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, true).await.unwrap();
+        let t = tasks.iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert!(t.completed);
+        assert_eq!(t.status, "complete");
+    }
+
+    #[tokio::test]
+    async fn subtask_parent_resolved_in_second_pass() {
+        let pool = test_pool().await;
+        // child arrives BEFORE parent in the same delta
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [
+            {"id": "C1", "content": "child", "parent_id": "PA1", "checked": false, "is_deleted": false},
+            {"id": "PA1", "content": "parent", "checked": false, "is_deleted": false}
+        ]}))).await.unwrap();
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let parent = tasks.iter().find(|t| t.external_id.as_deref() == Some("PA1")).unwrap();
+        let child = tasks.iter().find(|t| t.external_id.as_deref() == Some("C1")).unwrap();
+        assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn section_delta_creates_pseudo_project() {
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({
+            "sync_token": "T1",
+            "projects": [{"id": "P1", "name": "Work"}],
+            "sections": [{"id": "S1", "project_id": "P1", "name": "Soon"}]
+        }))).await.unwrap();
+        let projects = crate::db::projects::get_projects(&pool).await.unwrap();
+        let pseudo = projects.iter().find(|p| p.external_id.as_deref() == Some("section:S1")).unwrap();
+        assert_eq!(pseudo.name, "Work / Soon");
+    }
+
+    #[tokio::test]
+    async fn pull_apply_never_enqueues_outbox_ops() {
+        // CRITICAL echo-prevention (carried from Task 9's review): applying a
+        // pulled remote change must never re-enqueue an outbox op, or a
+        // create -> pull -> push -> pull cycle would loop forever. Activate
+        // the adapter as production would, then run a create, an update
+        // (with a completion flip), and a create+delete through apply_pull —
+        // the outbox must stay empty throughout because apply_pull writes
+        // with direct SQL and never calls the db::tasks/db::projects helpers
+        // that fire the Todoist mutation observer.
+        let pool = test_pool().await;
+        crate::integrations::ensure_state(&pool, "todoist").await.unwrap();
+        crate::db::settings::set_setting(&pool, "todoist_api_token", "tok").await.unwrap();
+
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [
+            {"id": "R1", "content": "x", "checked": false, "is_deleted": false}
+        ]}))).await.unwrap();
+        assert!(outbox::pending_batch(&pool, 100).await.unwrap().is_empty());
+
+        apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [
+            {"id": "R1", "content": "y", "checked": true, "is_deleted": false,
+             "updated_at": "2026-08-04T12:00:00Z"}
+        ]}))).await.unwrap();
+        assert!(outbox::pending_batch(&pool, 100).await.unwrap().is_empty());
+
+        apply_pull(&pool, &resp(json!({"sync_token": "T3", "items": [
+            {"id": "R2", "content": "z", "checked": false, "is_deleted": false}
+        ]}))).await.unwrap();
+        apply_pull(&pool, &resp(json!({"sync_token": "T4", "items": [
+            {"id": "R2", "content": "z", "checked": false, "is_deleted": true}
+        ]}))).await.unwrap();
+
+        assert!(
+            outbox::pending_batch(&pool, 100).await.unwrap().is_empty(),
+            "apply_pull must never enqueue outbox ops for remote-originated changes"
+        );
     }
 }
