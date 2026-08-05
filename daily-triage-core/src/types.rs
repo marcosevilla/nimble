@@ -16,6 +16,8 @@ pub struct Project {
     pub name: String,
     pub color: String,
     pub position: i64,
+    pub external_id: Option<String>,
+    pub external_source: Option<String>,
 }
 
 // ── Local Tasks ──
@@ -36,6 +38,8 @@ pub struct LocalTask {
     pub position: i64,
     pub created_at: String,
     pub updated_at: String,
+    pub external_id: Option<String>,
+    pub external_source: Option<String>,
 }
 
 // ── Activity ──

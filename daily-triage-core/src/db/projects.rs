@@ -1,26 +1,32 @@
-use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteRow;
+use sqlx::{FromRow, Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::db::activity;
 use crate::db::sync;
 use crate::types::Project;
 
+impl FromRow<'_, SqliteRow> for Project {
+    fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
+        Ok(Project {
+            id: row.try_get("id")?,
+            name: row.try_get("name")?,
+            color: row.try_get("color")?,
+            position: row.try_get("position")?,
+            external_id: row.try_get("external_id")?,
+            external_source: row.try_get("external_source")?,
+        })
+    }
+}
+
 pub async fn get_projects(pool: &SqlitePool) -> crate::Result<Vec<Project>> {
-    let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
-        "SELECT id, name, color, position FROM projects ORDER BY position, created_at",
+    let rows: Vec<Project> = sqlx::query_as::<_, Project>(
+        "SELECT id, name, color, position, external_id, external_source FROM projects ORDER BY position, created_at",
     )
     .fetch_all(pool)
     .await?;
 
-    Ok(rows
-        .into_iter()
-        .map(|(id, name, color, position)| Project {
-            id,
-            name,
-            color,
-            position,
-        })
-        .collect())
+    Ok(rows)
 }
 
 pub async fn create_project(
@@ -56,6 +62,8 @@ pub async fn create_project(
         name: name.to_string(),
         color: color.to_string(),
         position: max_pos + 1,
+        external_id: None,
+        external_source: None,
     };
 
     // Sync log: INSERT
@@ -91,11 +99,10 @@ pub async fn update_project(
 
     // Sync log: UPDATE
     if !fields_changed.is_empty() {
-        let row: Option<(String, String, String, i64)> = sqlx::query_as(
-            "SELECT id, name, color, position FROM projects WHERE id = ?"
+        let row: Option<Project> = sqlx::query_as::<_, Project>(
+            "SELECT id, name, color, position, external_id, external_source FROM projects WHERE id = ?"
         ).bind(id).fetch_optional(pool).await.ok().flatten();
-        if let Some((pid, pname, pcolor, pposition)) = row {
-            let project = Project { id: pid, name: pname, color: pcolor, position: pposition };
+        if let Some(project) = row {
             let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
             let snapshot = serde_json::to_string(&project).unwrap_or_default();
             sync::append_sync_log(pool, "projects", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
@@ -133,4 +140,27 @@ pub async fn delete_project(pool: &SqlitePool, id: &str) -> crate::Result<()> {
     .await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_util::test_pool;
+
+    #[tokio::test]
+    async fn projects_expose_external_columns() {
+        let pool = test_pool().await;
+        let p = super::create_project(&pool, "Errands", "#ff0000").await.unwrap();
+        assert_eq!(p.external_id, None);
+
+        sqlx::query("UPDATE projects SET external_id = 'abc123', external_source = 'todoist' WHERE id = ?")
+            .bind(&p.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let all = super::get_projects(&pool).await.unwrap();
+        let fetched = all.iter().find(|x| x.id == p.id).unwrap();
+        assert_eq!(fetched.external_id.as_deref(), Some("abc123"));
+        assert_eq!(fetched.external_source.as_deref(), Some("todoist"));
+    }
 }

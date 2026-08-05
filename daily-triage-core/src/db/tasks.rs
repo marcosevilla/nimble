@@ -1,47 +1,35 @@
-use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteRow;
+use sqlx::{FromRow, Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::db::activity;
 use crate::db::sync;
 use crate::types::LocalTask;
 
-fn row_to_task(
-    row: (
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        String,
-        i64,
-        Option<String>,
-        i64,
-        Option<String>,
-        String,
-        Option<String>,
-        i64,
-        String,
-        String,
-    ),
-) -> LocalTask {
-    LocalTask {
-        id: row.0,
-        parent_id: row.1,
-        content: row.2,
-        description: row.3,
-        project_id: row.4,
-        priority: row.5,
-        due_date: row.6,
-        completed: row.7 != 0,
-        completed_at: row.8,
-        status: row.9,
-        linked_doc_id: row.10,
-        position: row.11,
-        created_at: row.12,
-        updated_at: row.13,
+impl FromRow<'_, SqliteRow> for LocalTask {
+    fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
+        Ok(LocalTask {
+            id: row.try_get("id")?,
+            parent_id: row.try_get("parent_id")?,
+            content: row.try_get("content")?,
+            description: row.try_get("description")?,
+            project_id: row.try_get("project_id")?,
+            priority: row.try_get("priority")?,
+            due_date: row.try_get("due_date")?,
+            completed: row.try_get::<i64, _>("completed")? != 0,
+            completed_at: row.try_get("completed_at")?,
+            status: row.try_get("status")?,
+            linked_doc_id: row.try_get("linked_doc_id")?,
+            position: row.try_get("position")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+            external_id: row.try_get("external_id")?,
+            external_source: row.try_get("external_source")?,
+        })
     }
 }
 
-const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, completed, completed_at, status, linked_doc_id, position, created_at, updated_at";
+const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source";
 
 /// Reorder tasks within a project -- receives ordered list of task IDs
 pub async fn reorder_local_tasks(pool: &SqlitePool, task_ids: &[String]) -> crate::Result<()> {
@@ -54,15 +42,14 @@ pub async fn reorder_local_tasks(pool: &SqlitePool, task_ids: &[String]) -> crat
 
         // Sync log: each reordered task is an UPDATE
         let changed = serde_json::json!(["position"]).to_string();
-        let row: Option<(String, Option<String>, String, Option<String>, String, i64, Option<String>, i64, Option<String>, String, Option<String>, i64, String, String)> =
-            sqlx::query_as(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+        let row: Option<LocalTask> =
+            sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
                 .bind(id)
                 .fetch_optional(pool)
                 .await
                 .ok()
                 .flatten();
-        if let Some(r) = row {
-            let task = row_to_task(r);
+        if let Some(task) = row {
             let snapshot = serde_json::to_string(&task).unwrap_or_default();
             sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
         }
@@ -125,33 +112,18 @@ pub async fn get_local_tasks(
 
     let bind_val: Option<&str> = project_id.or(due_date);
 
-    let rows: Vec<(
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        String,
-        i64,
-        Option<String>,
-        i64,
-        Option<String>,
-        String,
-        Option<String>,
-        i64,
-        String,
-        String,
-    )> = if let Some(val) = bind_val {
-        sqlx::query_as(&query)
+    let rows: Vec<LocalTask> = if let Some(val) = bind_val {
+        sqlx::query_as::<_, LocalTask>(&query)
             .bind(val)
             .fetch_all(pool)
             .await?
     } else {
-        sqlx::query_as(&query)
+        sqlx::query_as::<_, LocalTask>(&query)
             .fetch_all(pool)
             .await?
     };
 
-    Ok(rows.into_iter().map(row_to_task).collect())
+    Ok(rows)
 }
 
 pub async fn create_local_task(
@@ -210,27 +182,10 @@ pub async fn create_local_task(
     .await;
 
     // Fetch and return the created task
-    let row: (
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        String,
-        i64,
-        Option<String>,
-        i64,
-        Option<String>,
-        String,
-        Option<String>,
-        i64,
-        String,
-        String,
-    ) = sqlx::query_as(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+    let task: LocalTask = sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
         .bind(&id)
         .fetch_one(pool)
         .await?;
-
-    let task = row_to_task(row);
 
     // Sync log: INSERT
     let snapshot = serde_json::to_string(&task).unwrap_or_default();
@@ -318,27 +273,10 @@ pub async fn update_local_task(
         .await;
     }
 
-    let row: (
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        String,
-        i64,
-        Option<String>,
-        i64,
-        Option<String>,
-        String,
-        Option<String>,
-        i64,
-        String,
-        String,
-    ) = sqlx::query_as(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+    let task: LocalTask = sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
         .bind(id)
         .fetch_one(pool)
         .await?;
-
-    let task = row_to_task(row);
 
     // Sync log: UPDATE with changed columns
     if !fields_changed.is_empty() {
@@ -409,15 +347,14 @@ pub async fn update_task_status(
     .await;
 
     // Sync log: UPDATE for status change
-    let row: Option<(String, Option<String>, String, Option<String>, String, i64, Option<String>, i64, Option<String>, String, Option<String>, i64, String, String)> =
-        sqlx::query_as(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+    let row: Option<LocalTask> =
+        sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
             .bind(id)
             .fetch_optional(pool)
             .await
             .ok()
             .flatten();
-    if let Some(r) = row {
-        let task = row_to_task(r);
+    if let Some(task) = row {
         let changed = serde_json::json!(["status", "completed", "completed_at"]).to_string();
         let snapshot = serde_json::to_string(&task).unwrap_or_default();
         sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
@@ -460,4 +397,38 @@ pub async fn delete_local_task(pool: &SqlitePool, id: &str) -> crate::Result<()>
     .await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_util::test_pool;
+
+    #[tokio::test]
+    async fn external_link_survives_task_edits() {
+        let pool = test_pool().await;
+        let task = super::create_local_task(&pool, "Buy milk", None, None, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(task.external_id, None);
+        assert_eq!(task.external_source, None);
+
+        sqlx::query("UPDATE local_tasks SET external_id = ?, external_source = 'todoist' WHERE id = ?")
+            .bind("6X7rM8997g3RQmvh")
+            .bind(&task.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let updated = super::update_local_task(
+            &pool, &task.id, Some("Buy oat milk"), None, None, None, None, false, None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.external_id.as_deref(), Some("6X7rM8997g3RQmvh"));
+        assert_eq!(updated.external_source.as_deref(), Some("todoist"));
+
+        let all = super::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let fetched = all.iter().find(|t| t.id == task.id).unwrap();
+        assert_eq!(fetched.external_id.as_deref(), Some("6X7rM8997g3RQmvh"));
+    }
 }

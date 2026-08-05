@@ -1,6 +1,8 @@
 pub mod api;
 pub mod db;
 pub mod parsers;
+#[cfg(test)]
+pub mod test_util;
 pub mod types;
 
 #[derive(Debug, thiserror::Error)]

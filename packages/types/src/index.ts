@@ -109,6 +109,8 @@ export interface Project {
   name: string
   color: string
   position: number
+  external_id: string | null
+  external_source: string | null
 }
 
 // ── Local Tasks ──
@@ -130,6 +132,8 @@ export interface LocalTask {
   position: number
   created_at: string
   updated_at: string
+  external_id: string | null
+  external_source: string | null
 }
 
 // ── Updater ──
