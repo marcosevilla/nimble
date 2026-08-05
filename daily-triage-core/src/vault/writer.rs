@@ -32,8 +32,22 @@ fn resolve(cfg: &VaultConfig, rel: &str) -> crate::Result<PathBuf> {
     Ok(cfg.root.join(rel))
 }
 
-async fn read_disk_hash(abs: &Path) -> Option<String> {
-    tokio::fs::read_to_string(abs).await.ok().map(|c| hash_content(&c))
+/// Hash of whatever is currently on disk.
+///
+/// `Ok(None)` means the file genuinely does not exist — safe to create.
+/// `Err` means it exists but could not be read: an iCloud-evicted (dataless)
+/// note, a permissions problem, or non-UTF-8 content. That case must never
+/// collapse into `None`: the caller's divergence check would not fire and it
+/// would overwrite a note whose contents we were unable to compare.
+async fn read_disk_hash(abs: &Path) -> crate::Result<Option<String>> {
+    match tokio::fs::read_to_string(abs).await {
+        Ok(c) => Ok(Some(hash_content(&c))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(crate::Error::Other(format!(
+            "Can't read {} to check for outside edits ({e}) — refusing to overwrite it.",
+            abs.display()
+        ))),
+    }
 }
 
 /// Write `content` to a vault note, atomically (temp file + rename) and only
@@ -49,15 +63,36 @@ pub async fn write_note(
     expected_hash: Option<&str>,
 ) -> crate::Result<WriteOutcome> {
     let abs = resolve(cfg, rel)?;
-    let disk_hash = read_disk_hash(&abs).await;
+    let disk_hash = read_disk_hash(&abs).await?;
 
     if let (Some(expected), Some(actual)) = (expected_hash, disk_hash.as_deref()) {
         if expected != actual {
+            // The conflict copy is created exclusively and its name is
+            // disambiguated on collision: the timestamp has one-second
+            // resolution, and a plain rename would silently destroy an earlier
+            // conflict copy — the file holding the user's other unsaved version.
             let stem = rel.trim_end_matches(".md");
-            let stamp = chrono::Local::now().format("%Y-%m-%d %H%M%S");
-            let conflict_rel = format!("{stem} (conflict {stamp}).md");
-            let conflict_abs = cfg.root.join(&conflict_rel);
-            atomic_write(&conflict_abs, content).await?;
+            let stamp = chrono::Local::now().format("%Y-%m-%d %H%M%S").to_string();
+            let mut attempt = 1;
+            let conflict_rel = loop {
+                let candidate = if attempt == 1 {
+                    format!("{stem} (conflict {stamp}).md")
+                } else {
+                    format!("{stem} (conflict {stamp} {attempt}).md")
+                };
+                match write_new(&cfg.root.join(&candidate), content).await {
+                    Ok(()) => break candidate,
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        attempt += 1;
+                        if attempt > 50 {
+                            return Err(crate::Error::Other(format!(
+                                "Too many conflict copies of {rel} in the same second"
+                            )));
+                        }
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            };
             log::warn!("vault write conflict on {rel} — app copy saved as {conflict_rel}");
             return Ok(WriteOutcome::Conflict {
                 conflict_path: conflict_rel,
@@ -74,14 +109,13 @@ pub async fn write_note(
 /// already exists — creation never clobbers.
 pub async fn create_note(cfg: &VaultConfig, rel: &str, content: &str) -> crate::Result<String> {
     let abs = resolve(cfg, rel)?;
-    if abs.exists() {
-        return Err(crate::Error::Other(format!("Note already exists: {rel}")));
+    match write_new(&abs, content).await {
+        Ok(()) => Ok(hash_content(content)),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            Err(crate::Error::Other(format!("Note already exists: {rel}")))
+        }
+        Err(e) => Err(e.into()),
     }
-    if let Some(parent) = abs.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    atomic_write(&abs, content).await?;
-    Ok(hash_content(content))
 }
 
 /// Write via a temp file in the same directory followed by a rename, so a
@@ -106,6 +140,25 @@ async fn atomic_write(abs: &Path, content: &str) -> crate::Result<()> {
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(e.into());
     }
+    Ok(())
+}
+
+/// Create a file that must not already exist, failing with
+/// `ErrorKind::AlreadyExists` if it does. Exclusive creation is atomic in the
+/// filesystem, unlike an `exists()` check followed by a write — which loses to
+/// anything that creates the file in between (Obsidian, a sync daemon).
+async fn write_new(abs: &Path, content: &str) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    if let Some(parent) = abs.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(abs)
+        .await?;
+    file.write_all(content.as_bytes()).await?;
+    file.flush().await?;
     Ok(())
 }
 
@@ -195,6 +248,47 @@ mod tests {
         assert!(create_note(&cfg, "journal/new/Note.md", "x").await.is_err(), "no clobber");
         assert!(create_note(&cfg, "../escape.md", "x").await.is_err(), "no path escape");
         assert!(create_note(&cfg, "notes/thing.txt", "x").await.is_err(), "markdown only");
+
+        std::fs::remove_dir_all(&cfg.root).ok();
+    }
+
+    #[tokio::test]
+    async fn unreadable_file_is_never_overwritten() {
+        let cfg = temp_vault();
+        let path = cfg.root.join("A.md");
+        let original: [u8; 3] = [0xff, 0xfe, 0xfd];
+        std::fs::write(&path, original).unwrap();
+
+        let err = write_note(&cfg, "A.md", "app version", Some("some-stale-hash"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("refusing to overwrite"), "got: {err}");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+
+        assert!(write_note(&cfg, "A.md", "app version", None).await.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+
+        std::fs::remove_dir_all(&cfg.root).ok();
+    }
+
+    #[tokio::test]
+    async fn same_second_conflicts_do_not_destroy_each_other() {
+        let cfg = temp_vault();
+        let path = cfg.root.join("A.md");
+        std::fs::write(&path, "on disk").unwrap();
+        let stale = hash_content("what the app last read");
+
+        let first = write_note(&cfg, "A.md", "first app version", Some(&stale)).await.unwrap();
+        let second = write_note(&cfg, "A.md", "second app version", Some(&stale)).await.unwrap();
+
+        let (p1, p2) = match (first, second) {
+            (WriteOutcome::Conflict { conflict_path: a, .. }, WriteOutcome::Conflict { conflict_path: b, .. }) => (a, b),
+            other => panic!("expected two conflicts, got {other:?}"),
+        };
+        assert_ne!(p1, p2, "second conflict must not reuse the first filename");
+        assert_eq!(std::fs::read_to_string(cfg.root.join(&p1)).unwrap(), "first app version");
+        assert_eq!(std::fs::read_to_string(cfg.root.join(&p2)).unwrap(), "second app version");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "on disk");
 
         std::fs::remove_dir_all(&cfg.root).ok();
     }
