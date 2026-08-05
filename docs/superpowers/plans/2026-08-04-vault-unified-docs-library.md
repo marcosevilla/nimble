@@ -36,7 +36,7 @@ This plan implements spec **Part 2** end-to-end on the Mac, plus the **desktop h
 
 - All business logic lives in `daily-triage-core`; Tauri commands are thin wrappers. Registration path: core fn → `src-tauri/src/commands/<domain>.rs` → export in `commands/mod.rs` → import in `lib.rs` → add to `invoke_handler![]` → TS wrapper in `apps/desktop/src/services/tauri.ts`.
 - Frontend never does HTTP or filesystem or SQLite access — always `invoke()`.
-- Every mutation to a synced table appends to `sync_log` via `crate::db::sync::append_sync_log(pool, table, row_id, op, changed_columns, snapshot)`; the snapshot's JSON keys **must** exactly match the SQLite column names, because the Turso push builds `INSERT OR REPLACE` column lists straight from them.
+- Every **content-bearing** mutation to a synced table appends to `sync_log` via `crate::db::sync::append_sync_log(pool, table, row_id, op, changed_columns, snapshot)`; the snapshot's JSON keys **must** exactly match the SQLite column names, because the Turso push builds `INSERT OR REPLACE` column lists straight from them. The one deliberate exception is `vault_notes.mtime`/`size` touched on their own (`vault::index::touch_stat`, Task 4): those columns are a device-local stat cache that lets the scanner skip unchanged files, and the note's content is by definition identical — logging them would push a row to Turso every time Obsidian rewrites the same bytes. Any change to `content`, `title`, `frontmatter_json`, `hash`, or `deleted_at` is content-bearing and must be logged.
 - Vault paths stored in the DB are **vault-relative, forward-slash** (`journal/briefs/Brief 2026-08-04.md`). Absolute paths never enter a synced row.
 - Timestamps: `datetime('now','localtime')`-style strings (`YYYY-MM-DD HH:MM:SS`) for `updated_at` / `deleted_at`, matching every other table. File mtimes are stored as RFC3339 (they come from the filesystem, not SQLite).
 - UI copy stays neutral and guilt-free: no "overdue", no streaks, no scolding. Sync/scan failures read as "will retry".
@@ -2138,39 +2138,47 @@ In the same file, extend `tables_with_id` (line 946):
     ];
 ```
 
-- [ ] **Step 5: Add the remote CREATE TABLE statements**
+- [ ] **Step 5: Define the vault DDL once and use it for fresh remotes**
 
-In `initialize_remote`'s `create_statements` vector, immediately after the `doc_notes` entry (line 314-320), insert:
+The same three `CREATE TABLE` statements are needed in two places (a fresh remote, and the v18 upgrade of an already-initialized one), so they live in a single constant. Add it immediately above `initialize_remote` in `daily-triage-core/src/db/sync.rs`:
 
 ```rust
-        // vault_notes
-        "CREATE TABLE IF NOT EXISTS vault_notes (
-            id TEXT PRIMARY KEY,
-            path TEXT NOT NULL UNIQUE,
-            title TEXT NOT NULL DEFAULT '',
-            content TEXT NOT NULL DEFAULT '',
-            frontmatter_json TEXT,
-            mtime TEXT,
-            size INTEGER NOT NULL DEFAULT 0,
-            hash TEXT,
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-            deleted_at TEXT
-        )",
-        // vault_links
-        "CREATE TABLE IF NOT EXISTS vault_links (
-            id TEXT PRIMARY KEY,
-            from_note_id TEXT NOT NULL,
-            to_path TEXT NOT NULL,
-            link_type TEXT NOT NULL DEFAULT 'wikilink',
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )",
-        // vault_tags
-        "CREATE TABLE IF NOT EXISTS vault_tags (
-            id TEXT PRIMARY KEY,
-            note_id TEXT NOT NULL,
-            tag TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )",
+/// Remote DDL for the vault tables. Used both when initializing a fresh remote
+/// and when upgrading a remote that was initialized before v18 — keep it the
+/// single definition so the two paths can never drift apart.
+const VAULT_TABLE_DDL: [&str; 3] = [
+    "CREATE TABLE IF NOT EXISTS vault_notes (
+        id TEXT PRIMARY KEY,
+        path TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL DEFAULT '',
+        frontmatter_json TEXT,
+        mtime TEXT,
+        size INTEGER NOT NULL DEFAULT 0,
+        hash TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        deleted_at TEXT
+    )",
+    "CREATE TABLE IF NOT EXISTS vault_links (
+        id TEXT PRIMARY KEY,
+        from_note_id TEXT NOT NULL,
+        to_path TEXT NOT NULL,
+        link_type TEXT NOT NULL DEFAULT 'wikilink',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )",
+    "CREATE TABLE IF NOT EXISTS vault_tags (
+        id TEXT PRIMARY KEY,
+        note_id TEXT NOT NULL,
+        tag TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )",
+];
+```
+
+Then wire it into `initialize_remote`. Change the binding at line 180 from `let create_statements = vec![` to `let mut create_statements = vec![`, and immediately after the vector literal closes (before the code that turns it into pipeline requests) add:
+
+```rust
+    create_statements.extend_from_slice(&VAULT_TABLE_DDL);
 ```
 
 - [ ] **Step 6: Add the v18 remote upgrade path for already-initialized remotes**
@@ -2180,37 +2188,10 @@ Marco's Turso database is already initialized, so `initialize_remote` short-circ
 ```rust
 /// Create the vault tables on a remote that was initialized before v18.
 /// `CREATE TABLE IF NOT EXISTS` is idempotent, so this is safe to retry.
+/// Shares `VAULT_TABLE_DDL` with `initialize_remote` — one definition only.
 async fn create_remote_vault_tables(turso_url: &str, turso_token: &str) -> crate::Result<()> {
-    let statements = [
-        "CREATE TABLE IF NOT EXISTS vault_notes (
-            id TEXT PRIMARY KEY,
-            path TEXT NOT NULL UNIQUE,
-            title TEXT NOT NULL DEFAULT '',
-            content TEXT NOT NULL DEFAULT '',
-            frontmatter_json TEXT,
-            mtime TEXT,
-            size INTEGER NOT NULL DEFAULT 0,
-            hash TEXT,
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-            deleted_at TEXT
-        )",
-        "CREATE TABLE IF NOT EXISTS vault_links (
-            id TEXT PRIMARY KEY,
-            from_note_id TEXT NOT NULL,
-            to_path TEXT NOT NULL,
-            link_type TEXT NOT NULL DEFAULT 'wikilink',
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )",
-        "CREATE TABLE IF NOT EXISTS vault_tags (
-            id TEXT PRIMARY KEY,
-            note_id TEXT NOT NULL,
-            tag TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )",
-    ];
-
     let mut requests: Vec<serde_json::Value> =
-        statements.iter().map(|sql| turso_execute(sql, vec![])).collect();
+        VAULT_TABLE_DDL.iter().map(|sql| turso_execute(sql, vec![])).collect();
     requests.push(serde_json::json!({ "type": "close" }));
 
     let body = turso_pipeline(turso_url, turso_token, requests).await?;
@@ -4020,4 +4001,5 @@ Known non-blocking items this plan leaves open, worth a line in the next session
 - Note **renames** produce a new id and a tombstone rather than a move; `linked_doc_id` references to renamed notes dangle.
 - **Turso payload size**: the whole vault's content replicates. Marco explicitly accepted journal content living on Turso, but the first push after seeding will be large and slow (the same "first sync push is slow with large datasets" caveat already in CLAUDE.md).
 - **Wikilink resolution is name-based**, not Obsidian's full shortest-unique-path algorithm: exact path, then filename stem, then title (`vault::index::resolve_link`). Two notes with the same stem in different folders resolve to the shorter path. Worth revisiting only if Marco hits it in practice.
+- **Changing the vault path requires a relaunch** to re-point the watcher. `vault_runner::start` reads the path once at setup; "Rescan vault" re-indexes against the new path but the live `notify` watch still points at the old root. Restarting the watcher on a path change is a small follow-up (swap the `VaultWatchState` contents), not wired here.
 - **Vault notes have no delete affordance** in the app by design — deleting a real file from a sidebar hover target isn't a risk worth taking. Deletion happens in Obsidian or Finder; the watcher tombstones the row.
