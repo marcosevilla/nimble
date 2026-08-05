@@ -283,4 +283,57 @@ mod tests {
         assert_eq!(hash_content("abc"), hash_content("abc"));
         assert_ne!(hash_content("abc"), hash_content("abd"));
     }
+
+    /// Pins the cheap-path invariant itself, not just its observable counts.
+    /// `rescan_skips_unchanged_files_and_tombstones_deleted_ones` only proves
+    /// the report says `unchanged`, which a broken pre-check could also
+    /// produce (read the file anyway, hash-match, fall into the second
+    /// `unchanged` branch). Here the file is made unreadable *without*
+    /// touching its size or mtime, so a scan that still reports `unchanged`
+    /// (and not `skipped`) proves the read was never attempted.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cheap_path_precheck_skips_reading_stat_unchanged_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let pool = test_pool().await;
+        let (root, cfg) = temp_vault();
+        let path = root.join("Locked.md");
+        std::fs::write(&path, "# Locked").unwrap();
+
+        let report = full_scan(&pool, &cfg).await.unwrap();
+        assert_eq!(report.indexed, 1, "{report:?}");
+
+        // Revoke read permission without touching size/mtime.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Guard against running as root (or any context where mode 0o000 is
+        // still readable, e.g. some CI containers) — there the read would
+        // succeed regardless of the pre-check, and the assertions below would
+        // pass for the wrong reason. libc::geteuid() would be the direct way
+        // to check this, but libc is not a direct dependency of this crate,
+        // so probe behaviorally instead.
+        if std::fs::read_to_string(&path).is_ok() {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            std::fs::remove_dir_all(&root).ok();
+            eprintln!(
+                "cheap_path_precheck_skips_reading_stat_unchanged_files: \
+                 permissions are not enforced (likely running as root) — test is meaningless here, skipping"
+            );
+            return;
+        }
+
+        let report = full_scan(&pool, &cfg).await.unwrap();
+        assert_eq!(
+            report.unchanged, 1,
+            "cheap path must skip reading a stat-unchanged file, even if unreadable: {report:?}"
+        );
+        assert_eq!(
+            report.skipped, 0,
+            "a read attempt on the locked file would land here instead of unchanged: {report:?}"
+        );
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::remove_dir_all(&root).ok();
+    }
 }
