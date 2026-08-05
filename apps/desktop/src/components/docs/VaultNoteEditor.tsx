@@ -26,45 +26,93 @@ export function VaultNoteEditor() {
   const expectedHash = useRef<string | null>(null)
   const lastSaved = useRef<string>('')
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The path most recently displayed by this component — updated only on a
+  // real navigation, never on a same-path re-read (see below). Read at save
+  // time (via ref, not closure) to tell whether a scheduled save still
+  // targets the note the user is currently looking at.
+  const loadedPath = useRef<string | null>(null)
+  // A debounced save not yet fired, so navigating away can flush it instead
+  // of silently dropping it.
+  const pending = useRef<{ path: string; content: string; hash: string | null } | null>(null)
 
   useEffect(() => {
+    // Only a real navigation clears the banner. A same-path re-read is exactly
+    // what a conflict triggers — clearing here would make the banner vanish the
+    // moment the re-read lands, and the user would never learn that their
+    // version was diverted to a conflict file.
+    if (note?.path !== loadedPath.current) {
+      // Leaving a note with an unfired debounced save — flush it now so the
+      // edit is written (with the hash it was scheduled against) instead of
+      // being discarded by the switch.
+      if (timer.current) {
+        clearTimeout(timer.current)
+        timer.current = null
+        const p = pending.current
+        pending.current = null
+        if (p) save(p.path, p.content, p.hash)
+      }
+      setConflictPath(null)
+      loadedPath.current = note?.path ?? null
+    }
     expectedHash.current = note?.hash ?? null
     lastSaved.current = note?.content ?? ''
-    setConflictPath(null)
     if (note?.path) {
       dp.vault.backlinks(note.path).then(setBacklinks).catch(() => setBacklinks([]))
     } else {
       setBacklinks([])
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note?.path, note?.hash, note?.content, dp])
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
 
-  const save = useCallback(async (content: string) => {
-    if (!note) return
+  const save = useCallback(async (path: string, content: string, hash: string | null) => {
     setSaving(true)
     try {
-      const result = await dp.vault.saveNote(note.path, content, expectedHash.current)
+      const result = await dp.vault.saveNote(path, content, hash)
+      // The note being written may no longer be the one on screen — the user
+      // can navigate away while a debounced save is in flight. Only touch
+      // this component's visible state (banner, expected hash) when the
+      // write still belongs to the currently-open note.
+      const isCurrent = path === loadedPath.current
       if (result.kind === 'conflict') {
-        setConflictPath(result.conflict_path)
-        // Re-read so the editor shows what's actually on disk now.
-        await selectVaultNote(note.path)
-      } else {
+        if (isCurrent) {
+          setConflictPath(result.conflict_path)
+          // Re-read so the editor shows what's actually on disk now.
+          await selectVaultNote(path)
+        } else {
+          // Abandoned note, but its conflict copy is real — say so neutrally
+          // without yanking the user back to a note they've already left.
+          toast.message(`"${path}" changed on disk while you were editing it`, {
+            description: `Your version was saved as ${result.conflict_path}`,
+          })
+        }
+      } else if (isCurrent) {
         expectedHash.current = result.hash
         lastSaved.current = content
-        setConflictPath(null)
       }
     } catch (e) {
       toast.error(`Couldn't save note — ${e}`)
     } finally {
       setSaving(false)
     }
-  }, [note, dp, selectVaultNote])
+  }, [dp, selectVaultNote])
 
   const handleChange = useCallback((content: string) => {
     if (!note || content === lastSaved.current) return
+    // Capture what this save targets at schedule time, not at fire time —
+    // by the time the timer fires the user may be looking at a different
+    // note, and `note`/`expectedHash.current` would then describe that one.
+    const scheduledPath = note.path
+    const scheduledHash = expectedHash.current
     if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => { save(content) }, SAVE_DELAY_MS)
+    pending.current = { path: scheduledPath, content, hash: scheduledHash }
+    timer.current = setTimeout(() => {
+      timer.current = null
+      const p = pending.current
+      pending.current = null
+      if (p) save(p.path, p.content, p.hash)
+    }, SAVE_DELAY_MS)
   }, [note, save])
 
   const openInObsidian = useCallback(async () => {
