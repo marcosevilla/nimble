@@ -413,14 +413,21 @@ pub async fn delete_local_task(pool: &SqlitePool, id: &str) -> crate::Result<()>
             .ok()
             .flatten();
 
+    // Fetch full subtask rows (not just ids) before the cascade, so the
+    // Todoist observer can fire for each child exactly as it does for the
+    // parent — otherwise a child's pending 'create' op survives the cascade
+    // and resurrects the deleted subtask remotely, then locally on the next
+    // pull (I2).
+    let subtasks: Vec<LocalTask> =
+        sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE parent_id = ?", SELECT_COLS))
+            .bind(id)
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+
     // Log sync for subtask deletes
-    let subtask_ids: Vec<(String,)> = sqlx::query_as("SELECT id FROM local_tasks WHERE parent_id = ?")
-        .bind(id)
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-    for (sub_id,) in &subtask_ids {
-        sync::append_sync_log(pool, "local_tasks", sub_id, "DELETE", None, None).await.ok();
+    for task in &subtasks {
+        sync::append_sync_log(pool, "local_tasks", &task.id, "DELETE", None, None).await.ok();
     }
 
     // Delete subtasks first
@@ -445,8 +452,17 @@ pub async fn delete_local_task(pool: &SqlitePool, id: &str) -> crate::Result<()>
     )
     .await;
 
-    // Todoist mutation observer: best-effort
+    // Todoist mutation observer: best-effort — fire for the parent and every
+    // cascaded child so each gets its outbox cleanup (pending creates
+    // cancelled, pending updates replaced with a delete op).
     if let Some(task) = &pre_delete_task {
+        crate::integrations::todoist::observer::on_task_mutation(
+            pool,
+            crate::integrations::todoist::observer::TaskMutation::Deleted { task },
+        )
+        .await;
+    }
+    for task in &subtasks {
         crate::integrations::todoist::observer::on_task_mutation(
             pool,
             crate::integrations::todoist::observer::TaskMutation::Deleted { task },
@@ -506,5 +522,96 @@ mod tests {
         let t = all.iter().find(|x| x.id == task.id).unwrap();
         assert_eq!(t.synced_snapshot.as_deref(), Some("{}"));
         assert_eq!(t.remote_updated_at.as_deref(), Some("2026-08-04T00:00:00Z"));
+    }
+
+    /// I2 regression: deleting a parent must fire the Todoist observer for
+    /// each cascaded child too, not just the parent — otherwise a child's
+    /// pending 'create' op survives the cascade and resurrects the deleted
+    /// subtask remotely (then locally, via the next pull).
+    #[tokio::test]
+    async fn cascade_delete_cancels_child_pending_create() {
+        let pool = test_pool().await;
+        crate::integrations::ensure_state(&pool, "todoist").await.unwrap();
+        crate::db::settings::set_setting(&pool, "todoist_api_token", "tok").await.unwrap();
+
+        let parent = super::create_local_task(&pool, "Parent", None, None, None, None, None)
+            .await
+            .unwrap();
+        let child = super::create_local_task(&pool, "Child", None, Some(&parent.id), None, None, None)
+            .await
+            .unwrap();
+
+        // Both parent and child got pending 'create' ops from the observer.
+        let batch = crate::integrations::todoist::outbox::pending_batch(&pool, 100)
+            .await
+            .unwrap();
+        assert_eq!(batch.len(), 2);
+        assert!(batch.iter().any(|r| r.local_id == parent.id));
+        assert!(batch.iter().any(|r| r.local_id == child.id));
+
+        super::delete_local_task(&pool, &parent.id).await.unwrap();
+
+        // Neither task was ever synced, so both pending creates should be
+        // cancelled outright — no op survives to resurrect the child.
+        let batch = crate::integrations::todoist::outbox::pending_batch(&pool, 100)
+            .await
+            .unwrap();
+        assert!(
+            batch.is_empty(),
+            "expected no surviving outbox ops after cascade delete, got: {:?}",
+            batch.iter().map(|r| (&r.local_id, &r.op)).collect::<Vec<_>>()
+        );
+
+        // The child row itself is gone.
+        let remaining: Option<(String,)> = sqlx::query_as("SELECT id FROM local_tasks WHERE id = ?")
+            .bind(&child.id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+        assert!(remaining.is_none());
+    }
+
+    /// I2 regression, synced case: a child that was already linked to Todoist
+    /// (has external_id) gets a delete op enqueued when its parent cascades,
+    /// instead of silently disappearing from the outbox with no remote cleanup.
+    #[tokio::test]
+    async fn cascade_delete_enqueues_delete_for_synced_child() {
+        let pool = test_pool().await;
+        crate::integrations::ensure_state(&pool, "todoist").await.unwrap();
+        crate::db::settings::set_setting(&pool, "todoist_api_token", "tok").await.unwrap();
+
+        let parent = super::create_local_task(&pool, "Parent", None, None, None, None, None)
+            .await
+            .unwrap();
+        let child = super::create_local_task(&pool, "Child", None, Some(&parent.id), None, None, None)
+            .await
+            .unwrap();
+
+        // Simulate the child having already been synced to Todoist in a
+        // previous cycle: it has an external_id and its prior create/update
+        // ops are done, not pending.
+        sqlx::query("UPDATE local_tasks SET external_id = 'ext-child-1', external_source = 'todoist' WHERE id = ?")
+            .bind(&child.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE todoist_outbox SET status = 'done' WHERE local_id = ?")
+            .bind(&child.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        super::delete_local_task(&pool, &parent.id).await.unwrap();
+
+        let batch = crate::integrations::todoist::outbox::pending_batch(&pool, 100)
+            .await
+            .unwrap();
+        let child_delete = batch.iter().find(|r| r.local_id == child.id && r.op == "delete");
+        assert!(
+            child_delete.is_some(),
+            "expected a delete op enqueued for the synced child, got: {:?}",
+            batch.iter().map(|r| (&r.local_id, &r.op)).collect::<Vec<_>>()
+        );
+        assert_eq!(child_delete.unwrap().payload["external_id"], "ext-child-1");
     }
 }
