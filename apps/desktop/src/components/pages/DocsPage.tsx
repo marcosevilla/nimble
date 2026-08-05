@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import { useDocsStore } from '@/stores/docsStore'
 import { FolderTree } from '@/components/docs/FolderTree'
 import { DocEditor } from '@/components/docs/DocEditor'
@@ -15,6 +16,12 @@ export function DocsPage() {
   // Load data on mount
   useEffect(() => {
     refresh()
+  }, [refresh])
+
+  // The vault watcher re-indexes on disk changes; pull the fresh tree in.
+  useEffect(() => {
+    const unlisten = listen('vault-changed', () => { refresh() })
+    return () => { unlisten.then((fn) => fn()) }
   }, [refresh])
 
   return (
