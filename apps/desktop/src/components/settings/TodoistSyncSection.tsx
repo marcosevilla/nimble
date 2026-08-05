@@ -3,12 +3,14 @@ import { useDataProvider } from '@/services/provider-context'
 import type { TodoistSyncStatus } from '@daily-triage/types'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { Label as SectionLabel, Meta } from '@/components/shared/typography'
+import { Meta } from '@/components/shared/typography'
+import { toast } from 'sonner'
 
 export function TodoistSyncSection() {
   const dp = useDataProvider()
   const [status, setStatus] = useState<TodoistSyncStatus | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [toggling, setToggling] = useState(false)
   const [showErrors, setShowErrors] = useState(false)
 
   const refresh = useCallback(() => {
@@ -22,8 +24,16 @@ export function TodoistSyncSection() {
   }, [refresh])
 
   const toggle = async (enabled: boolean) => {
-    await dp.todoistSync.setEnabled(enabled)
-    refresh()
+    setToggling(true)
+    try {
+      await dp.todoistSync.setEnabled(enabled)
+      refresh()
+    } catch (e) {
+      toast.error(`Failed to update Todoist sync: ${e}`)
+      refresh()
+    } finally {
+      setToggling(false)
+    }
   }
 
   const syncNow = async () => {
@@ -47,14 +57,10 @@ export function TodoistSyncSection() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-6">
-        <div className="space-y-1">
-          <SectionLabel as="div">Todoist sync</SectionLabel>
-          <Meta as="p">Keeps your tasks mirrored in Todoist both ways.</Meta>
-        </div>
+      <div className="flex items-center justify-end">
         <Switch
           checked={status.enabled}
-          disabled={!status.connected}
+          disabled={!status.connected || toggling}
           onCheckedChange={toggle}
           aria-label="Toggle Todoist sync"
         />

@@ -1461,7 +1461,7 @@ export function SettingsPage() {
       <section id="todoist-sync" className="space-y-4 scroll-mt-6">
         <SectionHeader
           title="Todoist sync"
-          description="Two-way sync between local tasks and Todoist, running automatically once turned on."
+          description="Keeps your tasks mirrored in Todoist both ways."
         />
         <TodoistSyncSection />
       </section>
