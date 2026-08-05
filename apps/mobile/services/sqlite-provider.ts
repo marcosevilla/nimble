@@ -133,7 +133,7 @@ export function createSqliteProvider(): DataProvider {
       async list() {
         const db = getDatabase();
         return db.getAllAsync<Project>(
-          'SELECT id, name, color, position FROM projects ORDER BY position'
+          'SELECT * FROM projects ORDER BY position'
         );
       },
       async create(name: string, color: string) {
