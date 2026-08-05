@@ -455,9 +455,33 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
     // 3. items -- pass 1
     let mut parent_links: Vec<(String, String)> = Vec::new(); // (child_external, parent_external)
     for item in &resp.items {
+        // Test-only failure-injection hook: lets a regression test force a
+        // mid-transaction error deterministically (without HTTP mocking or
+        // relying on a real DB constraint violation) to prove the whole
+        // transaction — deltas AND the new sync_token — rolls back together.
+        // Compiled out entirely in non-test builds.
+        #[cfg(test)]
+        if item.content == "__FORCE_TEST_APPLY_FAILURE__" {
+            return Err(crate::Error::Other("test-injected apply_pull failure".into()));
+        }
         let local = find_task_by_external(&mut *tx, &item.id).await?;
         if item.is_deleted.unwrap_or(false) {
             if let Some(t) = local {
+                // Defensive cascade mirroring db::tasks::delete_local_task's
+                // semantics: Todoist's sync API is expected to emit explicit
+                // per-item deletes for descendants too, but if that
+                // assumption is ever violated, don't leave local children
+                // orphaned with a parent_id pointing at a now-deleted row.
+                let child_ids: Vec<(String,)> =
+                    sqlx::query_as("SELECT id FROM local_tasks WHERE parent_id = ?")
+                        .bind(&t.id)
+                        .fetch_all(&mut *tx)
+                        .await?;
+                for (child_id,) in &child_ids {
+                    sqlx::query("DELETE FROM local_tasks WHERE id = ?").bind(child_id).execute(&mut *tx).await?;
+                    logged.push((child_id.clone(), "DELETE"));
+                    report.deleted += 1;
+                }
                 sqlx::query("DELETE FROM local_tasks WHERE id = ?").bind(&t.id).execute(&mut *tx).await?;
                 logged.push((t.id, "DELETE"));
                 report.deleted += 1;
@@ -540,6 +564,30 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
                         sqlx::query("UPDATE local_tasks SET project_id = ? WHERE id = ?").bind(&pid).bind(&local_task.id).execute(&mut *tx).await?;
                     }
                 }
+                // Reparenting isn't part of MergePlan (parent linking is
+                // otherwise two-pass-at-creation only) — handled here
+                // directly, analogous to how project changes are applied
+                // above. Only act on a genuine remote change (compare
+                // against the synced_snapshot base, not the current local
+                // parent_id, so a local-only reparent that hasn't pushed yet
+                // isn't clobbered). If the new parent is set, defer
+                // resolution to the same pass-2 mechanism used at creation
+                // time — it now leaves parent_id untouched (via COALESCE)
+                // rather than nulling it out if the parent can't be
+                // resolved yet, so this is safe to reuse here too.
+                let base_parent_ext = base.as_ref().and_then(|b| b.parent_external_id.clone());
+                let parent_changed = remote.parent_external_id != base_parent_ext;
+                if parent_changed {
+                    match &remote.parent_external_id {
+                        Some(parent_ext) => parent_links.push((item.id.clone(), parent_ext.clone())),
+                        None => {
+                            sqlx::query("UPDATE local_tasks SET parent_id = NULL WHERE id = ?")
+                                .bind(&local_task.id)
+                                .execute(&mut *tx)
+                                .await?;
+                        }
+                    }
+                }
                 if let Some(completed) = plan.completed {
                     if completed {
                         sqlx::query("UPDATE local_tasks SET completed = 1, status = 'complete', completed_at = datetime('now','localtime') WHERE id = ?")
@@ -555,7 +603,7 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
                     .bind(&local_task.id)
                     .execute(&mut *tx)
                     .await?;
-                if !plan.is_empty() {
+                if !plan.is_empty() || parent_changed {
                     logged.push((local_task.id.clone(), "UPDATE"));
                     report.updated += 1;
                 }
@@ -563,10 +611,18 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
         }
     }
 
-    // 4. items -- pass 2: resolve parents
+    // 4. items -- pass 2: resolve parents. COALESCE onto the existing
+    // parent_id (rather than overwriting with NULL) so an unresolved parent
+    // — either at creation (parent not in this delta at all) or on an
+    // update-time reparent (new parent not found locally, e.g. parent not
+    // found → leave parent unchanged per the pull's don't-error contract) —
+    // never clobbers a previously-linked parent_id.
     for (child_ext, parent_ext) in parent_links {
         sqlx::query(
-            "UPDATE local_tasks SET parent_id = (SELECT id FROM local_tasks WHERE external_source = 'todoist' AND external_id = ?)
+            "UPDATE local_tasks SET parent_id = COALESCE(
+                (SELECT id FROM local_tasks WHERE external_source = 'todoist' AND external_id = ?),
+                parent_id
+             )
              WHERE external_source = 'todoist' AND external_id = ?",
         )
         .bind(&parent_ext)
@@ -862,6 +918,123 @@ mod pull_tests {
         let parent = tasks.iter().find(|t| t.external_id.as_deref() == Some("PA1")).unwrap();
         let child = tasks.iter().find(|t| t.external_id.as_deref() == Some("C1")).unwrap();
         assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn remote_reparent_of_already_synced_task_propagates() {
+        // Review finding: reparenting a task to a different parent on
+        // Todoist after its initial local sync must be applied locally, not
+        // just at creation time via the two-pass linking.
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [
+            {"id": "PA1", "content": "parent A", "checked": false, "is_deleted": false},
+            {"id": "PB1", "content": "parent B", "checked": false, "is_deleted": false},
+            {"id": "C1", "content": "child", "parent_id": "PA1", "checked": false, "is_deleted": false}
+        ]}))).await.unwrap();
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let parent_a = tasks.iter().find(|t| t.external_id.as_deref() == Some("PA1")).unwrap().id.clone();
+        let parent_b = tasks.iter().find(|t| t.external_id.as_deref() == Some("PB1")).unwrap().id.clone();
+        let child = tasks.iter().find(|t| t.external_id.as_deref() == Some("C1")).unwrap();
+        assert_eq!(child.parent_id.as_deref(), Some(parent_a.as_str()));
+
+        // Remote moves C1 from parent A to parent B.
+        let report = apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [
+            {"id": "C1", "content": "child", "parent_id": "PB1", "checked": false, "is_deleted": false,
+             "updated_at": "2026-08-04T12:00:00Z"}
+        ]}))).await.unwrap();
+        assert_eq!(report.updated, 1, "reparent-only change must still count as an update");
+
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let child = tasks.iter().find(|t| t.external_id.as_deref() == Some("C1")).unwrap();
+        assert_eq!(child.parent_id.as_deref(), Some(parent_b.as_str()), "reparent must propagate locally");
+    }
+
+    #[tokio::test]
+    async fn reparent_to_unresolvable_parent_leaves_parent_unchanged() {
+        // Controller ruling: parent not found locally -> leave parent
+        // unchanged, don't error the pull.
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [
+            {"id": "PA1", "content": "parent A", "checked": false, "is_deleted": false},
+            {"id": "C1", "content": "child", "parent_id": "PA1", "checked": false, "is_deleted": false}
+        ]}))).await.unwrap();
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let parent_a = tasks.iter().find(|t| t.external_id.as_deref() == Some("PA1")).unwrap().id.clone();
+
+        // Remote reparents C1 to a parent Todoist id we've never seen locally.
+        apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [
+            {"id": "C1", "content": "child", "parent_id": "GHOST1", "checked": false, "is_deleted": false,
+             "updated_at": "2026-08-04T12:00:00Z"}
+        ]}))).await.unwrap();
+
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let child = tasks.iter().find(|t| t.external_id.as_deref() == Some("C1")).unwrap();
+        assert_eq!(child.parent_id.as_deref(), Some(parent_a.as_str()), "unresolvable parent must not clobber the existing parent_id");
+    }
+
+    #[tokio::test]
+    async fn remote_delete_of_parent_cascades_to_local_children() {
+        // Review finding: a remote deletion of a parent task with local
+        // children must cascade-delete them locally (mirroring
+        // db::tasks::delete_local_task), rather than relying on Todoist
+        // always sending explicit per-item deletes for descendants.
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [
+            {"id": "PA1", "content": "parent", "checked": false, "is_deleted": false},
+            {"id": "C1", "content": "child", "parent_id": "PA1", "checked": false, "is_deleted": false}
+        ]}))).await.unwrap();
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let parent_id = tasks.iter().find(|t| t.external_id.as_deref() == Some("PA1")).unwrap().id.clone();
+        let child = tasks.iter().find(|t| t.external_id.as_deref() == Some("C1")).unwrap();
+        assert_eq!(child.parent_id.as_deref(), Some(parent_id.as_str()));
+
+        // Remote deletes ONLY the parent — no explicit delete entry for the child.
+        let report = apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [
+            {"id": "PA1", "content": "parent", "checked": false, "is_deleted": true}
+        ]}))).await.unwrap();
+        assert_eq!(report.deleted, 2, "parent + cascaded child");
+
+        let tasks_after = crate::db::tasks::get_local_tasks(&pool, None, None, true).await.unwrap();
+        assert!(!tasks_after.iter().any(|t| t.id == parent_id));
+        assert!(
+            !tasks_after.iter().any(|t| t.external_id.as_deref() == Some("C1")),
+            "child must be cascade-deleted, not orphaned with a dangling parent_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn mid_apply_failure_rolls_back_and_retains_old_sync_token() {
+        // Review finding: no test forced a mid-apply_pull failure to prove
+        // the transaction rolls back and the old sync_token is retained.
+        // Uses the #[cfg(test)] failure-injection hook (see apply_pull's
+        // items loop) since there's no way to trigger a genuine DB
+        // constraint violation deterministically from crafted SyncResponse
+        // input in this schema (no FK enforcement, no unique constraints on
+        // external_id, content is a required non-nullable String).
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "OLD_TOKEN", "items": []})))
+            .await
+            .unwrap();
+
+        let result = apply_pull(&pool, &resp(json!({
+            "sync_token": "NEW_TOKEN_SHOULD_NOT_STICK",
+            "items": [
+                {"id": "R1", "content": "should not persist", "checked": false, "is_deleted": false},
+                {"id": "R2", "content": "__FORCE_TEST_APPLY_FAILURE__", "checked": false, "is_deleted": false}
+            ]
+        }))).await;
+        assert!(result.is_err(), "mid-apply failure must propagate as Err");
+
+        // No partial writes: R1 (applied before the injected failure) must not be visible.
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, true).await.unwrap();
+        assert!(
+            !tasks.iter().any(|t| t.external_id.as_deref() == Some("R1")),
+            "transaction must roll back — no partial writes from the failed delta"
+        );
+
+        // sync_token must still hold the OLD value, not the failed delta's token.
+        let state = crate::integrations::get_state(&pool, "todoist").await.unwrap().unwrap();
+        assert_eq!(state.sync_token.as_deref(), Some("OLD_TOKEN"));
     }
 
     #[tokio::test]
