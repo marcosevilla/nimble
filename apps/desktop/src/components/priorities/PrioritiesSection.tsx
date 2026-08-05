@@ -33,11 +33,12 @@ function buildCalendarSummary(events: { summary: string; start_time: string; end
 }
 
 function buildTasksSummary(
-  tasks: { content: string; project_id: string; priority: number }[],
+  tasks: { content: string; project_id: string; priority: number; completed: boolean }[],
   projectNames: Record<string, string>,
 ): string {
-  if (tasks.length === 0) return 'No tasks due today.'
-  return tasks
+  const open = tasks.filter((t) => !t.completed)
+  if (open.length === 0) return 'No tasks due today.'
+  return open
     .map((t) => {
       const pri = t.priority >= 3 ? ' [HIGH]' : ''
       const proj = projectNames[t.project_id] ? ` (${projectNames[t.project_id]})` : ''
@@ -87,7 +88,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, compact }: P
   const calendarEvents = useAppStore((s) => s.calendarEvents)
   const obsidianToday = useAppStore((s) => s.obsidianToday)
   const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
-  const { tasks: tasksDueToday } = useLocalTasks({ dueDate: today })
+  const { tasks: tasksDueToday } = useLocalTasks({ dueDate: today, includeCompleted: false })
   const { projects } = useProjects()
   const projectNames = useMemo(() => {
     const map: Record<string, string> = {}
