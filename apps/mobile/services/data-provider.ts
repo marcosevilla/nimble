@@ -26,6 +26,8 @@ import type {
   DocFolder,
   Document,
   DocNote,
+  DocsMdPreview,
+  DocsMdResult,
   FocusState,
   Goal,
   GoalWithProgress,
@@ -159,6 +161,8 @@ export interface DataProvider {
     createNote(docId: string, content: string): Promise<DocNote>;
     deleteNote(id: string): Promise<void>;
     reorderNotes(noteIds: string[]): Promise<void>;
+    previewMarkdownMigration(): Promise<DocsMdPreview>;
+    migrateToMarkdown(): Promise<DocsMdResult>;
   };
 
   activity: {

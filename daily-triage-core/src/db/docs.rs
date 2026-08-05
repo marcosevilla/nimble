@@ -2,7 +2,9 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::db::activity;
+use crate::db::settings::set_setting;
 use crate::db::sync;
+use crate::parsers::html_to_md::{html_to_markdown, scan_unknown_tags};
 use crate::types::{DocFolder, DocNote, Document};
 
 // ── Folder operations ──
@@ -294,4 +296,175 @@ pub async fn reorder_doc_notes(pool: &SqlitePool, note_ids: &[String]) -> crate:
         }
     }
     Ok(())
+}
+
+// ── Markdown migration ──
+
+#[derive(Debug, serde::Serialize)]
+pub struct FlaggedDoc {
+    pub id: String,
+    pub title: String,
+    pub unknown_tags: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct DocsMdPreview {
+    pub total: i64,
+    pub convertible: usize,
+    pub already_plain: usize,
+    pub flagged: Vec<FlaggedDoc>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct DocsMdResult {
+    pub converted: usize,
+    pub skipped_plain: usize,
+    pub backup_path: String,
+}
+
+/// Dry-run report: which documents look HTML, how many would flip untouched
+/// (already plain-text), and which contain tags outside the known Tiptap
+/// allowlist (risk of lossy conversion). Read-only — never writes.
+pub async fn preview_docs_markdown_migration(pool: &SqlitePool) -> crate::Result<DocsMdPreview> {
+    let rows: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT id, title, content FROM documents")
+            .fetch_all(pool)
+            .await?;
+    let total = rows.len() as i64;
+    let mut convertible = 0;
+    let mut already_plain = 0;
+    let mut flagged = Vec::new();
+    for (id, title, content) in rows {
+        if !content.trim_start().starts_with('<') {
+            already_plain += 1;
+            continue;
+        }
+        convertible += 1;
+        let unknown = scan_unknown_tags(&content);
+        if !unknown.is_empty() {
+            flagged.push(FlaggedDoc { id, title, unknown_tags: unknown });
+        }
+    }
+    Ok(DocsMdPreview { total, convertible, already_plain, flagged })
+}
+
+/// Back up the live DB (via `VACUUM INTO`, safe while open), then convert
+/// every HTML `documents.content` to markdown in a single transaction and
+/// flip the `docs_content_format` setting to `"markdown"`. `doc_notes` are
+/// plain text already (spec deviation #2) and are left untouched.
+///
+/// Idempotent: rows that no longer start with '<' are skipped, so re-running
+/// after a successful migration converts nothing.
+pub async fn migrate_docs_to_markdown(
+    pool: &SqlitePool,
+    backup_path: &str,
+) -> crate::Result<DocsMdResult> {
+    // 1. Online backup (safe while the DB is open)
+    sqlx::query("VACUUM INTO ?").bind(backup_path).execute(pool).await?;
+
+    // 2. Convert everything in one transaction
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT id, content FROM documents")
+        .fetch_all(pool)
+        .await?;
+    let mut converted = 0usize;
+    let mut skipped_plain = 0usize;
+    let mut tx = pool.begin().await?;
+    let mut touched: Vec<String> = Vec::new();
+    for (id, content) in rows {
+        if !content.trim_start().starts_with('<') {
+            skipped_plain += 1;
+            continue;
+        }
+        let md = html_to_markdown(&content);
+        sqlx::query("UPDATE documents SET content = ?, updated_at = datetime('now','localtime') WHERE id = ?")
+            .bind(&md)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+        converted += 1;
+        touched.push(id);
+    }
+    tx.commit().await?;
+
+    // 3. Flip the format setting. `set_setting` only takes a pool (no
+    // transaction handle), so this happens immediately after commit rather
+    // than inside the transaction above — see docs.rs task-3 report for why.
+    set_setting(pool, "docs_content_format", "markdown").await?;
+
+    // 4. Sync-log the converted docs so Turso propagates the new content
+    for id in touched {
+        if let Ok(Some(doc)) = get_document(pool, &id).await {
+            let snapshot = serde_json::to_string(&doc).unwrap_or_default();
+            crate::db::sync::append_sync_log(pool, "documents", &id, "UPDATE", Some("content"), Some(&snapshot))
+                .await
+                .ok();
+        }
+    }
+    Ok(DocsMdResult { converted, skipped_plain, backup_path: backup_path.to_string() })
+}
+
+#[cfg(test)]
+mod md_migration_tests {
+    use crate::test_util::{file_pool, test_pool};
+
+    #[tokio::test]
+    async fn preview_reports_flagged_docs_without_writing() {
+        let pool = test_pool().await;
+        let clean = super::create_document(&pool, "Clean", None).await.unwrap();
+        super::update_document(&pool, &clean.id, None, Some("<p>hello <strong>world</strong></p>"), None)
+            .await
+            .unwrap();
+        let risky = super::create_document(&pool, "Risky", None).await.unwrap();
+        super::update_document(&pool, &risky.id, None, Some("<table><tr><td>x</td></tr></table>"), None)
+            .await
+            .unwrap();
+
+        let preview = super::preview_docs_markdown_migration(&pool).await.unwrap();
+        assert_eq!(preview.total, 2);
+        assert_eq!(preview.flagged.len(), 1);
+        assert_eq!(preview.flagged[0].title, "Risky");
+        assert!(preview.flagged[0].unknown_tags.contains(&"table".to_string()));
+
+        // preview must not modify content
+        let doc = super::get_document(&pool, &clean.id).await.unwrap().unwrap();
+        assert!(doc.content.starts_with("<p>"));
+    }
+
+    // NOTE: this test uses `file_pool()` (a real on-disk SQLite file), not the
+    // in-memory `test_pool()` used everywhere else. `VACUUM INTO` is a no-op
+    // against SQLite's `:memory:` databases (confirmed against sqlx 0.8.6 /
+    // libsqlite3-sys 0.30.1 here: the query returns Ok with no error, but no
+    // file is ever written) — a known SQLite/sqlx limitation, not something
+    // production hits since the real app always runs on a file-backed pool.
+    #[tokio::test]
+    async fn migrate_converts_content_and_flips_setting() {
+        let (pool, _db_path) = file_pool().await;
+        let doc = super::create_document(&pool, "Doc", None).await.unwrap();
+        super::update_document(&pool, &doc.id, None, Some("<h2>Head</h2><p>body <em>i</em></p>"), None)
+            .await
+            .unwrap();
+
+        let backup = std::env::temp_dir().join(format!("dt-test-backup-{}.db", uuid::Uuid::new_v4()));
+        let result = super::migrate_docs_to_markdown(&pool, backup.to_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(result.converted, 1);
+        assert!(std::path::Path::new(&result.backup_path).exists());
+
+        let after = super::get_document(&pool, &doc.id).await.unwrap().unwrap();
+        assert!(after.content.contains("## Head"));
+        assert!(!after.content.contains('<'));
+
+        let fmt = crate::db::settings::get_setting(&pool, "docs_content_format").await.unwrap();
+        assert_eq!(fmt.as_deref(), Some("markdown"));
+
+        // idempotent: second run converts nothing (content no longer starts with '<')
+        let backup2 = std::env::temp_dir().join(format!("dt-test-backup-{}.db", uuid::Uuid::new_v4()));
+        let again = super::migrate_docs_to_markdown(&pool, backup2.to_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(again.converted, 0);
+        let _ = std::fs::remove_file(&backup);
+        let _ = std::fs::remove_file(&backup2);
+    }
 }

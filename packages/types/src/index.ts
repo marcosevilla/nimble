@@ -228,6 +228,25 @@ export interface DocNote {
   created_at: string
 }
 
+export interface FlaggedDoc {
+  id: string
+  title: string
+  unknown_tags: string[]
+}
+
+export interface DocsMdPreview {
+  total: number
+  convertible: number
+  already_plain: number
+  flagged: FlaggedDoc[]
+}
+
+export interface DocsMdResult {
+  converted: number
+  skipped_plain: number
+  backup_path: string
+}
+
 // ── Focus Mode ──
 
 export interface FocusState {

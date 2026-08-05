@@ -389,6 +389,12 @@ export function createSqliteProvider(): DataProvider {
       createNote: () => stub('docs.createNote'),
       deleteNote: () => stub('docs.deleteNote'),
       reorderNotes: () => stub('docs.reorderNotes'),
+      previewMarkdownMigration: () => {
+        throw new Error('desktop only')
+      },
+      migrateToMarkdown: () => {
+        throw new Error('desktop only')
+      },
     },
 
     activity: {

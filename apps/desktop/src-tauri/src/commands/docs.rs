@@ -92,3 +92,29 @@ pub async fn reorder_doc_notes(app: AppHandle, note_ids: Vec<String>) -> Result<
     let pool = app.state::<SqlitePool>();
     daily_triage_core::db::docs::reorder_doc_notes(pool.inner(), &note_ids).await.map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn preview_docs_markdown_migration(
+    app: AppHandle,
+) -> Result<daily_triage_core::db::docs::DocsMdPreview, String> {
+    let pool = app.state::<SqlitePool>();
+    daily_triage_core::db::docs::preview_docs_markdown_migration(pool.inner())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn migrate_docs_to_markdown(
+    app: AppHandle,
+) -> Result<daily_triage_core::db::docs::DocsMdResult, String> {
+    let pool = app.state::<SqlitePool>();
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let backup = app_dir.join(format!("daily-triage-backup-pre-markdown-{stamp}.db"));
+    daily_triage_core::db::docs::migrate_docs_to_markdown(
+        pool.inner(),
+        backup.to_str().ok_or("backup path not utf-8")?,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}

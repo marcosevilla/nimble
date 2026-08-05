@@ -92,6 +92,8 @@ export function createTauriProvider(): DataProvider {
       createNote: tauri.createDocNote,
       deleteNote: tauri.deleteDocNote,
       reorderNotes: tauri.reorderDocNotes,
+      previewMarkdownMigration: tauri.previewDocsMarkdownMigration,
+      migrateToMarkdown: tauri.migrateDocsToMarkdown,
     },
 
     activity: {

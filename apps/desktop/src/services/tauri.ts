@@ -25,6 +25,8 @@ export type {
   DocFolder,
   Document,
   DocNote,
+  DocsMdPreview,
+  DocsMdResult,
   FocusState,
   GoalStatus,
   Goal,
@@ -67,6 +69,8 @@ import type {
   DocFolder,
   Document,
   DocNote,
+  DocsMdPreview,
+  DocsMdResult,
   FocusState,
   GoalStatus,
   Goal,
@@ -495,6 +499,14 @@ export async function deleteDocNote(id: string): Promise<void> {
 
 export async function reorderDocNotes(noteIds: string[]): Promise<void> {
   return invoke<void>('reorder_doc_notes', { noteIds })
+}
+
+export async function previewDocsMarkdownMigration(): Promise<DocsMdPreview> {
+  return invoke<DocsMdPreview>('preview_docs_markdown_migration')
+}
+
+export async function migrateDocsToMarkdown(): Promise<DocsMdResult> {
+  return invoke<DocsMdResult>('migrate_docs_to_markdown')
 }
 
 // ── AI ──

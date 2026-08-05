@@ -381,6 +381,8 @@ pub fn run() {
             docs::create_doc_note,
             docs::delete_doc_note,
             docs::reorder_doc_notes,
+            docs::preview_docs_markdown_migration,
+            docs::migrate_docs_to_markdown,
             captures::get_captures,
             captures::create_capture,
             captures::convert_capture_to_task,
