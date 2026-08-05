@@ -325,6 +325,23 @@
   padding-left: 1.5em;
   margin: 0.5em 0;
 }
+/* Tailwind preflight sets list-style: none on ul/ol — restore markers inside
+   the editor, with the conventional disc → circle → square nesting cycle. */
+.tiptap-editor ul {
+  list-style: disc;
+}
+.tiptap-editor ul ul {
+  list-style: circle;
+}
+.tiptap-editor ul ul ul {
+  list-style: square;
+}
+.tiptap-editor ol {
+  list-style: decimal;
+}
+.tiptap-editor li::marker {
+  color: oklch(from var(--muted-foreground) l c h / 0.7);
+}
 .tiptap-editor li {
   margin: 0.15em 0;
 }
