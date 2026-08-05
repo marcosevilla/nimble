@@ -1,5 +1,6 @@
 pub mod api;
 pub mod db;
+pub mod integrations;
 pub mod parsers;
 #[cfg(test)]
 pub mod test_util;
