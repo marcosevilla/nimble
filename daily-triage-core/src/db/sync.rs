@@ -157,6 +157,37 @@ pub async fn test_connection(turso_url: &str, turso_token: &str) -> crate::Resul
 
 // ── Initialize Remote ──
 
+/// Remote DDL for the vault tables. Used both when initializing a fresh remote
+/// and when upgrading a remote that was initialized before v18 — keep it the
+/// single definition so the two paths can never drift apart.
+const VAULT_TABLE_DDL: [&str; 3] = [
+    "CREATE TABLE IF NOT EXISTS vault_notes (
+        id TEXT PRIMARY KEY,
+        path TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL DEFAULT '',
+        frontmatter_json TEXT,
+        mtime TEXT,
+        size INTEGER NOT NULL DEFAULT 0,
+        hash TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        deleted_at TEXT
+    )",
+    "CREATE TABLE IF NOT EXISTS vault_links (
+        id TEXT PRIMARY KEY,
+        from_note_id TEXT NOT NULL,
+        to_path TEXT NOT NULL,
+        link_type TEXT NOT NULL DEFAULT 'wikilink',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )",
+    "CREATE TABLE IF NOT EXISTS vault_tags (
+        id TEXT PRIMARY KEY,
+        note_id TEXT NOT NULL,
+        tag TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )",
+];
+
 /// Create all synced tables on the remote Turso database.
 /// Only runs once — checks for `turso_initialized` setting.
 pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
@@ -177,7 +208,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     }
 
     // All CREATE TABLE statements for synced tables
-    let create_statements = vec![
+    let mut create_statements = vec![
         // settings (needed for sync_log references but also useful)
         "CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -365,6 +396,8 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
         "CREATE INDEX IF NOT EXISTS idx_sync_log_table_row ON sync_log(table_name, row_id)",
     ];
 
+    create_statements.extend_from_slice(&VAULT_TABLE_DDL);
+
     // Build pipeline requests — one execute per statement
     let mut requests: Vec<serde_json::Value> = create_statements
         .iter()
@@ -452,6 +485,61 @@ async fn ensure_remote_schema_upgraded(
 
     sqlx::query(
         "INSERT INTO settings (key, value, updated_at) VALUES ('turso_schema_v17_upgraded', '1', datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')"
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Create the vault tables on a remote that was initialized before v18.
+/// `CREATE TABLE IF NOT EXISTS` is idempotent, so this is safe to retry.
+/// Shares `VAULT_TABLE_DDL` with `initialize_remote` — one definition only.
+async fn create_remote_vault_tables(turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let mut requests: Vec<serde_json::Value> =
+        VAULT_TABLE_DDL.iter().map(|sql| turso_execute(sql, vec![])).collect();
+    requests.push(serde_json::json!({ "type": "close" }));
+
+    let body = turso_pipeline(turso_url, turso_token, requests).await?;
+
+    if let Some(results) = body.get("results").and_then(|v| v.as_array()) {
+        for (i, result) in results.iter().enumerate() {
+            if let Some("error") = result.get("type").and_then(|v| v.as_str()) {
+                let err_msg = result
+                    .pointer("/error/message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error");
+                log::warn!("Turso vault-table statement {i} failed: {err_msg}");
+                return Err(crate::Error::Api(format!(
+                    "Turso vault schema upgrade failed: {err_msg}"
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Gate the v18 remote upgrade behind a local setting so it hits Turso once per
+/// device. If it fails the setting is never written, so the next push retries.
+async fn ensure_remote_vault_schema(
+    pool: &SqlitePool,
+    turso_url: &str,
+    turso_token: &str,
+) -> crate::Result<()> {
+    let done: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'turso_schema_v18_upgraded'")
+            .fetch_optional(pool)
+            .await?;
+    if done.is_some() {
+        return Ok(());
+    }
+
+    create_remote_vault_tables(turso_url, turso_token).await?;
+
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_at) VALUES ('turso_schema_v18_upgraded', '1', datetime('now'))
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')"
     )
     .execute(pool)
@@ -548,6 +636,9 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     // this branch added (external_id, external_source, remote_updated_at,
     // synced_snapshot, captures.context) exist before we try to write them.
     ensure_remote_schema_upgraded(pool, turso_url, turso_token).await?;
+
+    // v18: the vault tables may not exist on a remote initialized earlier.
+    ensure_remote_vault_schema(pool, turso_url, turso_token).await?;
 
     // Fetch all unsynced entries
     let entries: Vec<(String, String, String, String, Option<String>, Option<String>, String, String)> =
@@ -755,6 +846,11 @@ pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
         )
         .await;
 
+        // Vault: a note row applied from another device needs its device-local
+        // FTS entry refreshed (links/tags are re-derived when the Mac re-parses
+        // the file).
+        crate::vault::index::on_turso_row_applied(pool, &table_name, &row_id).await;
+
         // Record entry in local sync_log as already synced (so we don't push it back)
         let _ = sqlx::query(
             "INSERT OR IGNORE INTO sync_log (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp, synced)
@@ -874,6 +970,9 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
         "capture_routes",
         "life_areas",
         "calendar_feeds",
+        "vault_notes",
+        "vault_links",
+        "vault_tags",
     ];
 
     if ALLOWED.contains(&name) {
@@ -947,6 +1046,7 @@ pub async fn seed_existing_data(pool: &SqlitePool) -> crate::Result<u64> {
         "local_tasks", "projects", "captures", "goals", "milestones",
         "habits", "habit_logs", "documents", "doc_folders", "doc_notes",
         "capture_routes", "life_areas", "calendar_feeds", "activity_log",
+        "vault_notes", "vault_links", "vault_tags",
     ];
 
     let mut count: u64 = 0;
@@ -1068,4 +1168,69 @@ pub async fn get_pending_entries(pool: &SqlitePool) -> crate::Result<Vec<SyncLog
             synced: synced != 0,
         }
     }).collect())
+}
+
+#[cfg(test)]
+mod vault_sync_tests {
+    use crate::test_util::test_pool;
+
+    #[test]
+    fn vault_tables_are_allowed_for_sync() {
+        for table in ["vault_notes", "vault_links", "vault_tags"] {
+            assert!(
+                super::sanitize_table_name(table).is_ok(),
+                "{table} must be sync-allowed"
+            );
+        }
+        assert!(super::sanitize_table_name("todoist_outbox").is_err(), "Mac-local only");
+        assert!(super::sanitize_table_name("vault_fts").is_err(), "device-local only");
+    }
+
+    #[test]
+    fn vault_note_snapshot_builds_a_valid_insert() {
+        let snapshot = serde_json::json!({
+            "id": "n1",
+            "path": "journal/A.md",
+            "title": "A",
+            "content": "body",
+            "frontmatter_json": serde_json::Value::Null,
+            "mtime": "2026-08-04T10:00:00Z",
+            "size": 4,
+            "hash": "abc",
+            "updated_at": "2026-08-04 10:00:00",
+            "deleted_at": serde_json::Value::Null,
+        })
+        .to_string();
+
+        let reqs = super::build_data_mutation_requests(
+            "vault_notes",
+            "n1",
+            "INSERT",
+            &Some(snapshot),
+        );
+        assert_eq!(reqs.len(), 1);
+        let sql = reqs[0].pointer("/stmt/sql").and_then(|v| v.as_str()).unwrap_or_default();
+        assert!(sql.starts_with("INSERT OR REPLACE INTO vault_notes"), "got {sql}");
+    }
+
+    #[tokio::test]
+    async fn seed_existing_data_covers_vault_notes() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO vault_notes (id, path, title, content) VALUES ('n1', 'a.md', 'A', 'body')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        super::seed_existing_data(&pool).await.unwrap();
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'vault_notes' AND row_id = 'n1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
+    }
 }
