@@ -21,6 +21,27 @@ async fn get_vault_path(app: &AppHandle) -> Result<String, String> {
     }
 }
 
+/// Read a vault file's content, preferring the index (already in memory,
+/// no disk hit) and falling back to disk when the note isn't indexed yet —
+/// e.g. the very first launch before the initial scan finishes, or a file
+/// under an excluded folder.
+async fn read_vault_file(app: &AppHandle, rel: &str) -> Result<Option<String>, String> {
+    let pool = app.state::<SqlitePool>();
+    if let Ok(Some(note)) = daily_triage_core::vault::index::get_note_by_path(pool.inner(), rel).await {
+        if note.deleted_at.is_none() {
+            return Ok(Some(note.content));
+        }
+    }
+
+    let vault_path = get_vault_path(app).await?;
+    let file_path = format!("{}/{}", vault_path, rel);
+    match tokio::fs::read_to_string(&file_path).await {
+        Ok(content) => Ok(Some(content)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("Failed to read {}: {}", rel, e)),
+    }
+}
+
 /// Parse Quick Captures.md -- entries separated by ---
 fn parse_quick_captures(content: &str) -> Vec<QuickCapture> {
     let mut captures = Vec::new();
@@ -88,52 +109,30 @@ fn extract_timestamp(entry: &str) -> (Option<String>, String) {
 
 #[tauri::command]
 pub async fn read_today_md(app: AppHandle) -> Result<ParsedTodayMd, String> {
-    let vault_path = get_vault_path(&app).await?;
-    let file_path = format!("{}/today.md", vault_path);
-
-    let content = tokio::fs::read_to_string(&file_path)
-        .await
-        .map_err(|e| format!("Failed to read today.md: {}", e))?;
-
+    let content = read_vault_file(&app, "today.md")
+        .await?
+        .ok_or_else(|| "Failed to read today.md: not found".to_string())?;
     Ok(daily_triage_core::parsers::markdown::parse_today_md(&content))
 }
 
 #[tauri::command]
 pub async fn read_quick_captures(app: AppHandle) -> Result<Vec<QuickCapture>, String> {
-    let vault_path = get_vault_path(&app).await?;
-    let file_path = format!("{}/inbox/Quick Captures.md", vault_path);
-
-    let content = tokio::fs::read_to_string(&file_path)
-        .await
-        .map_err(|e| format!("Failed to read Quick Captures.md: {}", e))?;
-
+    let content = read_vault_file(&app, "inbox/Quick Captures.md")
+        .await?
+        .ok_or_else(|| "Failed to read Quick Captures.md: not found".to_string())?;
     Ok(parse_quick_captures(&content))
 }
 
 #[tauri::command]
 pub async fn read_session_log(app: AppHandle) -> Result<Option<String>, String> {
-    let vault_path = get_vault_path(&app).await?;
     let today = Local::now().format("%Y-%m-%d").to_string();
-    let file_path = format!("{}/journal/sessions/Session {}.md", vault_path, today);
-
-    match tokio::fs::read_to_string(&file_path).await {
-        Ok(content) => Ok(Some(content)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(format!("Failed to read session log: {}", e)),
-    }
+    read_vault_file(&app, &format!("journal/sessions/Session {}.md", today)).await
 }
 
 #[tauri::command]
 pub async fn read_daily_brief(app: AppHandle, date: Option<String>) -> Result<Option<String>, String> {
-    let vault_path = get_vault_path(&app).await?;
     let date = date.unwrap_or_else(|| Local::now().format("%Y-%m-%d").to_string());
-    let file_path = format!("{}/journal/briefs/Brief {}.md", vault_path, date);
-
-    match tokio::fs::read_to_string(&file_path).await {
-        Ok(content) => Ok(Some(content)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(format!("Failed to read daily brief: {}", e)),
-    }
+    read_vault_file(&app, &format!("journal/briefs/Brief {}.md", date)).await
 }
 
 #[tauri::command]
