@@ -3391,6 +3391,20 @@ git commit -m "feat: unified docs sidebar — vault notes beside native docs"
 
 ### Task 12: Editor — vault notes in place, with conflict handling
 
+> ⚠️ **SUPERSEDED BY THE FINAL REVIEW — vault editing does not ship in this branch.**
+>
+> This task as written wires `TiptapEditor` (`format="markdown"`) directly at the user's real vault files. That pipeline is **lossy**: `tiptap-markdown` parses with markdown-it and re-serializes with `prosemirror-markdown`, neither of which knows Obsidian's dialect. Verified round-trip on a representative note — YAML frontmatter is re-emitted as an `##` heading (every tag/alias/date lost), `[[wikilinks]]` and `![[embeds]]` come back as escaped literals (`\[\[…\]\]`, breaking both Obsidian and `vault_links`), `- [ ]` checkboxes become `\[ \]`, and callouts flatten.
+>
+> The hash guard does **not** protect against this, which is what makes it dangerous: the hash matches, because the app read the file correctly. The corruption is introduced on serialization, so the write proceeds with no conflict, no banner, and no warning. It would also hit `today.md` and `inbox/Quick Captures.md`, which this branch makes reachable from the Docs sidebar, breaking the Today page's parsers.
+>
+> **This is a planning defect, not an implementation one.** The plan never asked whether Tiptap round-trips Obsidian markdown losslessly; the word "fidelity" appears nowhere in it. Every per-task review passed because each verified its own piece correctly, and `WikilinkExtension.ts`'s doc comment ("the underlying markdown text is never rewritten") is true of that file and false of the pipeline around it.
+>
+> **Resolution (Marco's ruling, post-final-review):** the vault editor becomes **read-only**. Rendering, backlinks, clickable wikilinks and "Open in Obsidian" all stay; `onChange` is removed so no vault write can originate from the editor. Editing returns in a follow-up via a raw-markdown source editor (textarea/CodeMirror), which is byte-exact by construction and the right affordance for a vault the user also edits in Obsidian.
+>
+> **Any future work that re-enables vault editing must ship with a round-trip fidelity test** — open a note containing frontmatter, a `[[wikilink]]`, an `![[embed]]`, a `- [ ]` checkbox and a callout, save it unchanged, and assert the on-disk bytes are identical.
+>
+> The steps below are retained as the historical record of what was built and then disabled.
+
 **Files:**
 - Modify: `apps/desktop/src/components/docs/DocEditor.tsx`
 - Create: `apps/desktop/src/components/docs/VaultNoteEditor.tsx`
@@ -4168,6 +4182,7 @@ Known non-blocking items this plan leaves open, worth a line in the next session
 - Note **renames** produce a new id and a tombstone rather than a move; `linked_doc_id` references to renamed notes dangle.
 - **Turso payload size**: the whole vault's content replicates. Marco explicitly accepted journal content living on Turso, but the first push after seeding will be large and slow (the same "first sync push is slow with large datasets" caveat already in CLAUDE.md).
 - **Wikilink resolution is name-based**, not Obsidian's full shortest-unique-path algorithm: exact path, then filename stem, then title (`vault::index::resolve_link`). Two notes with the same stem in different folders resolve to the shorter path. Worth revisiting only if Marco hits it in practice.
+- **Vault notes are read-only in the app.** The vault library, search, link graph, backlinks and "Open in Obsidian" all ship; editing does not — see the superseded-task notice on Task 12 for why. The entire writer layer (`vault::writer`, `vault_save_note`, `vault_create_note`) remains implemented, tested and reachable from Rust; only the editor's `onChange` is disconnected. Re-enabling editing means adding a byte-exact source editor plus the round-trip fidelity test described there, not re-wiring Tiptap.
 - **`vault::writer::resolve` does not defend against symlinks.** It rejects `..` segments, absolute paths, non-markdown files and excluded paths, but never canonicalizes the resolved path to confirm it still sits under the vault root. A symlinked directory or file inside the vault could therefore let a write land outside it. Deferred deliberately (Task 6 review): it requires a symlink the user created themselves inside their own vault, and the fix needs canonicalization with not-yet-created-parent handling. Fix by canonicalizing the deepest existing ancestor and checking it against the canonicalized root.
 - **Changing the vault path requires a relaunch** to re-point the watcher. `vault_runner::start` reads the path once at setup; "Rescan vault" re-indexes against the new path but the live `notify` watch still points at the old root. Restarting the watcher on a path change is a small follow-up (swap the `VaultWatchState` contents), not wired here.
 - **Vault notes have no delete affordance** in the app by design — deleting a real file from a sidebar hover target isn't a risk worth taking. Deletion happens in Obsidian or Finder; the watcher tombstones the row.
