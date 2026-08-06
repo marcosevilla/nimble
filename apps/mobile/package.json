@@ -2,6 +2,9 @@
   "name": "@daily-triage/mobile",
   "version": "0.1.0",
   "main": "expo-router/entry",
+  "engines": {
+    "node": ">=20 <23"
+  },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
