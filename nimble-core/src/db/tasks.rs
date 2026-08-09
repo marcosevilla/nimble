@@ -1,10 +1,32 @@
+use std::collections::HashMap;
+
 use sqlx::sqlite::SqliteRow;
 use sqlx::{FromRow, Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::db::activity;
+use crate::db::labels;
 use crate::db::sync;
 use crate::types::{CreateTaskInput, LocalTask, UpdateTaskInput};
+
+/// True if `section_id` names a real section belonging to `project_id`.
+/// `local_tasks.section_id` carries no foreign key (v19 migration), so this
+/// app-level check is what stops a task from pointing at a section in a
+/// different project or one that doesn't exist at all — same pattern as
+/// `db::sections::create_section`'s project-existence check.
+async fn section_belongs_to_project(
+    pool: &SqlitePool,
+    section_id: &str,
+    project_id: &str,
+) -> crate::Result<bool> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM sections WHERE id = ? AND project_id = ?")
+            .bind(section_id)
+            .bind(project_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.is_some())
+}
 
 impl FromRow<'_, SqliteRow> for LocalTask {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
@@ -119,7 +141,7 @@ pub async fn get_local_tasks(
 
     let bind_val: Option<&str> = project_id.or(due_date);
 
-    let rows: Vec<LocalTask> = if let Some(val) = bind_val {
+    let mut rows: Vec<LocalTask> = if let Some(val) = bind_val {
         sqlx::query_as::<_, LocalTask>(&query)
             .bind(val)
             .fetch_all(pool)
@@ -129,6 +151,24 @@ pub async fn get_local_tasks(
             .fetch_all(pool)
             .await?
     };
+
+    // Batch-load labels for every returned task with one aggregate query,
+    // rather than one `labels_for_task` query per row — this list can hold
+    // hundreds of tasks, and N+1 queries here would be the dominant cost of
+    // loading the Today/project view.
+    let label_rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT task_id, label_id FROM task_labels ORDER BY rowid")
+            .fetch_all(pool)
+            .await?;
+    let mut labels_by_task: HashMap<String, Vec<String>> = HashMap::new();
+    for (task_id, label_id) in label_rows {
+        labels_by_task.entry(task_id).or_default().push(label_id);
+    }
+    for task in rows.iter_mut() {
+        if let Some(ids) = labels_by_task.remove(&task.id) {
+            task.labels = ids;
+        }
+    }
 
     Ok(rows)
 }
@@ -141,16 +181,34 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
         description,
         priority,
         due_date,
+        due_time,
+        duration_minutes,
+        recurrence_rule,
+        section_id,
+        label_ids,
     } = input;
     let content = content.as_str();
     let project_id = project_id.as_deref();
     let parent_id = parent_id.as_deref();
     let description = description.as_deref();
     let due_date = due_date.as_deref();
+    let due_time = due_time.as_deref();
+    let recurrence_rule = recurrence_rule.as_deref();
+    let section_id = section_id.as_deref();
 
     let id = Uuid::new_v4().to_string();
     let project_id = project_id.unwrap_or("inbox");
     let priority = priority.unwrap_or(1);
+
+    // No FK on local_tasks.section_id — validate app-side that the section
+    // actually belongs to this task's project before writing it.
+    if let Some(sec_id) = section_id {
+        if !section_belongs_to_project(pool, sec_id, project_id).await? {
+            return Err(crate::Error::Other(format!(
+                "create_local_task: section '{sec_id}' does not belong to project '{project_id}'"
+            )));
+        }
+    }
 
     // Get next position within the parent/project scope
     let max_pos: i64 = if let Some(pid) = parent_id {
@@ -168,8 +226,8 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
     };
 
     sqlx::query(
-        "INSERT INTO local_tasks (id, parent_id, content, description, project_id, priority, due_date, position)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO local_tasks (id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, position)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(parent_id)
@@ -178,6 +236,10 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
     .bind(project_id)
     .bind(priority)
     .bind(due_date)
+    .bind(due_time)
+    .bind(duration_minutes)
+    .bind(recurrence_rule)
+    .bind(section_id)
     .bind(max_pos + 1)
     .execute(pool)
     .await?;
@@ -211,6 +273,15 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
     )
     .await;
 
+    // `label_ids` delegates to `set_task_labels`, which does its own
+    // transactional assignment + sync_log/observer firing (fields_changed =
+    // ["labels"]) and returns the task with `labels` populated — a brand new
+    // task otherwise has no `task_labels` rows, so there's nothing to query
+    // for when this is absent.
+    if let Some(ids) = label_ids {
+        return labels::set_task_labels(pool, &task.id, &ids).await;
+    }
+
     Ok(task)
 }
 
@@ -223,12 +294,42 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
         due_date,
         clear_due_date,
         linked_doc_id,
+        due_time,
+        duration_minutes,
+        recurrence_rule,
+        section_id,
+        label_ids,
+        clear_due_time,
+        clear_recurrence,
+        clear_section,
     } = input;
     let content = content.as_deref();
     let description = description.as_deref();
     let project_id = project_id.as_deref();
     let due_date = due_date.as_deref();
     let linked_doc_id = linked_doc_id.as_deref();
+    let due_time = due_time.as_deref();
+    let recurrence_rule = recurrence_rule.as_deref();
+    let section_id = section_id.as_deref();
+
+    // No FK on local_tasks.section_id — validate app-side that the section
+    // belongs to this task's *final* project (the one supplied in this same
+    // call, if any, else the task's current one) before writing it.
+    if let Some(sec_id) = section_id {
+        let target_project_id: String = match project_id {
+            Some(pid) => pid.to_string(),
+            None => sqlx::query_scalar("SELECT project_id FROM local_tasks WHERE id = ?")
+                .bind(id)
+                .fetch_optional(pool)
+                .await?
+                .ok_or_else(|| crate::Error::Other(format!("update_local_task: no such task '{id}'")))?,
+        };
+        if !section_belongs_to_project(pool, sec_id, &target_project_id).await? {
+            return Err(crate::Error::Other(format!(
+                "update_local_task: section '{sec_id}' does not belong to project '{target_project_id}'"
+            )));
+        }
+    }
 
     if let Some(content) = content {
         sqlx::query("UPDATE local_tasks SET content = ?, updated_at = datetime('now') WHERE id = ?")
@@ -278,6 +379,57 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
             .execute(pool)
             .await?;
     }
+    if let Some(time) = due_time {
+        sqlx::query("UPDATE local_tasks SET due_time = ?, updated_at = datetime('now') WHERE id = ?")
+            .bind(time)
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
+    if let Some(minutes) = duration_minutes {
+        sqlx::query("UPDATE local_tasks SET duration_minutes = ?, updated_at = datetime('now') WHERE id = ?")
+            .bind(minutes)
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
+    if let Some(rule) = recurrence_rule {
+        sqlx::query("UPDATE local_tasks SET recurrence_rule = ?, updated_at = datetime('now') WHERE id = ?")
+            .bind(rule)
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
+    if let Some(sec_id) = section_id {
+        sqlx::query("UPDATE local_tasks SET section_id = ?, updated_at = datetime('now') WHERE id = ?")
+            .bind(sec_id)
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
+    // `clear_due_time` also nulls `duration_minutes`: a block length with no
+    // start time is meaningless, so the two clear together rather than
+    // leaving a dangling duration on an all-day task.
+    if clear_due_time {
+        sqlx::query(
+            "UPDATE local_tasks SET due_time = NULL, duration_minutes = NULL, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(id)
+        .execute(pool)
+        .await?;
+    }
+    if clear_recurrence {
+        sqlx::query("UPDATE local_tasks SET recurrence_rule = NULL, updated_at = datetime('now') WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
+    if clear_section {
+        sqlx::query("UPDATE local_tasks SET section_id = NULL, updated_at = datetime('now') WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
 
     // Log activity with changed fields
     let mut fields_changed = Vec::new();
@@ -287,6 +439,10 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
     if priority.is_some() { fields_changed.push("priority"); }
     if linked_doc_id.is_some() { fields_changed.push("linked_doc_id"); }
     if due_date.is_some() || clear_due_date { fields_changed.push("due_date"); }
+    if due_time.is_some() || clear_due_time { fields_changed.push("due_time"); }
+    if duration_minutes.is_some() || clear_due_time { fields_changed.push("duration_minutes"); }
+    if recurrence_rule.is_some() || clear_recurrence { fields_changed.push("recurrence_rule"); }
+    if section_id.is_some() || clear_section { fields_changed.push("section_id"); }
     if !fields_changed.is_empty() {
         let action = if fields_changed == vec!["project_id"] { "task_moved" } else { "task_updated" };
         activity::log_activity(
@@ -298,10 +454,14 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
         .await;
     }
 
-    let task: LocalTask = sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+    let mut task: LocalTask = sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
         .bind(id)
         .fetch_one(pool)
         .await?;
+    // Every task-returning fn carries `labels` — populate it here even when
+    // this update didn't touch them, so a plain content/date edit doesn't
+    // silently report the task as label-less.
+    task.labels = labels::labels_for_task(pool, id).await.unwrap_or_default();
 
     // Sync log: UPDATE with changed columns
     if !fields_changed.is_empty() {
@@ -319,6 +479,14 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
             },
         )
         .await;
+    }
+
+    // `label_ids` delegates to `set_task_labels`, which does its own
+    // transactional replace + sync_log/observer firing (fields_changed =
+    // ["labels"]) and returns the task with `labels` populated — runs last so
+    // its re-fetch reflects every other field update above.
+    if let Some(ids) = label_ids {
+        return labels::set_task_labels(pool, id, &ids).await;
     }
 
     Ok(task)
@@ -493,6 +661,242 @@ pub async fn delete_local_task(pool: &SqlitePool, id: &str) -> crate::Result<()>
 mod tests {
     use crate::test_util::test_pool;
     use crate::types::{CreateTaskInput, UpdateTaskInput};
+
+    /// Task 7 Step 1: create with all new fields, read back intact (incl.
+    /// `labels` populated via `get_local_tasks`'s aggregate join, not a
+    /// per-task query).
+    #[tokio::test]
+    async fn create_task_with_new_fields_roundtrips_through_get_local_tasks() {
+        let pool = test_pool().await;
+        let project = crate::db::projects::create_project(&pool, "Errands", "blue", None).await.unwrap();
+        let section = crate::db::sections::create_section(&pool, &project.id, "Groceries").await.unwrap();
+        let label = crate::db::labels::create_label(&pool, "deep work", "orange").await.unwrap();
+
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "Buy milk".to_string(),
+                project_id: Some(project.id.clone()),
+                due_time: Some("09:30".to_string()),
+                duration_minutes: Some(45),
+                recurrence_rule: Some("every day".to_string()),
+                section_id: Some(section.id.clone()),
+                label_ids: Some(vec![label.id.clone()]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(task.due_time.as_deref(), Some("09:30"));
+        assert_eq!(task.duration_minutes, Some(45));
+        assert_eq!(task.recurrence_rule.as_deref(), Some("every day"));
+        assert_eq!(task.section_id.as_deref(), Some(section.id.as_str()));
+        assert_eq!(task.labels, vec![label.id.clone()]);
+
+        let all = super::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let fetched = all.iter().find(|t| t.id == task.id).unwrap();
+        assert_eq!(fetched.due_time.as_deref(), Some("09:30"));
+        assert_eq!(fetched.duration_minutes, Some(45));
+        assert_eq!(fetched.recurrence_rule.as_deref(), Some("every day"));
+        assert_eq!(fetched.section_id.as_deref(), Some(section.id.as_str()));
+        assert_eq!(fetched.labels, vec![label.id]);
+    }
+
+    /// `create_local_task` must reject a `section_id` that doesn't belong to
+    /// the task's project — no FK exists to catch this at the SQLite layer.
+    #[tokio::test]
+    async fn create_task_rejects_section_from_a_different_project() {
+        let pool = test_pool().await;
+        let p1 = crate::db::projects::create_project(&pool, "P1", "blue", None).await.unwrap();
+        let p2 = crate::db::projects::create_project(&pool, "P2", "red", None).await.unwrap();
+        let section = crate::db::sections::create_section(&pool, &p1.id, "Section").await.unwrap();
+
+        let err = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "x".to_string(),
+                project_id: Some(p2.id.clone()),
+                section_id: Some(section.id.clone()),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(err.is_err());
+    }
+
+    /// Each new field updates independently, and `fields_changed` (surfaced
+    /// via `sync_log.changed_columns`) carries the exact column names so
+    /// sync_log/the Todoist observer fire per field.
+    #[tokio::test]
+    async fn update_local_task_updates_new_fields_independently_with_exact_field_names() {
+        let pool = test_pool().await;
+        let project = crate::db::projects::create_project(&pool, "Errands", "blue", None).await.unwrap();
+        let section = crate::db::sections::create_section(&pool, &project.id, "Groceries").await.unwrap();
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput { content: "Buy milk".to_string(), project_id: Some(project.id.clone()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+
+        let updated = super::update_local_task(
+            &pool,
+            &task.id,
+            UpdateTaskInput { due_time: Some("14:00".to_string()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.due_time.as_deref(), Some("14:00"));
+
+        let updated = super::update_local_task(
+            &pool,
+            &task.id,
+            UpdateTaskInput { duration_minutes: Some(30), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.duration_minutes, Some(30));
+
+        let updated = super::update_local_task(
+            &pool,
+            &task.id,
+            UpdateTaskInput { recurrence_rule: Some("every week".to_string()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.recurrence_rule.as_deref(), Some("every week"));
+
+        let updated = super::update_local_task(
+            &pool,
+            &task.id,
+            UpdateTaskInput { section_id: Some(section.id.clone()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.section_id.as_deref(), Some(section.id.as_str()));
+
+        let logged: Vec<(String,)> = sqlx::query_as(
+            "SELECT changed_columns FROM sync_log WHERE table_name = 'local_tasks' AND row_id = ? ORDER BY timestamp",
+        )
+        .bind(&task.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let all_changed: Vec<String> = logged.into_iter().map(|(c,)| c).collect();
+        assert!(all_changed.iter().any(|c| c.contains("due_time")));
+        assert!(all_changed.iter().any(|c| c.contains("duration_minutes")));
+        assert!(all_changed.iter().any(|c| c.contains("recurrence_rule")));
+        assert!(all_changed.iter().any(|c| c.contains("section_id")));
+    }
+
+    /// `update_local_task` must reject a `section_id` that doesn't belong to
+    /// the task's current project.
+    #[tokio::test]
+    async fn update_task_rejects_section_from_a_different_project() {
+        let pool = test_pool().await;
+        let p1 = crate::db::projects::create_project(&pool, "P1", "blue", None).await.unwrap();
+        let p2 = crate::db::projects::create_project(&pool, "P2", "red", None).await.unwrap();
+        let section = crate::db::sections::create_section(&pool, &p1.id, "Section").await.unwrap();
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput { content: "x".to_string(), project_id: Some(p2.id.clone()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+
+        let err = super::update_local_task(
+            &pool,
+            &task.id,
+            UpdateTaskInput { section_id: Some(section.id.clone()), ..Default::default() },
+        )
+        .await;
+        assert!(err.is_err());
+    }
+
+    /// `label_ids` on update delegates to `set_task_labels` and the returned
+    /// task carries the new label set.
+    #[tokio::test]
+    async fn update_local_task_label_ids_delegates_to_set_task_labels() {
+        let pool = test_pool().await;
+        let label = crate::db::labels::create_label(&pool, "deep work", "orange").await.unwrap();
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput { content: "x".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        assert!(task.labels.is_empty());
+
+        let updated = super::update_local_task(
+            &pool,
+            &task.id,
+            UpdateTaskInput { label_ids: Some(vec![label.id.clone()]), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.labels, vec![label.id]);
+    }
+
+    /// A plain update that doesn't touch labels must still return the task's
+    /// existing labels, not an empty vec — every task-returning fn carries
+    /// `labels`, not just the ones that just changed them.
+    #[tokio::test]
+    async fn update_local_task_preserves_existing_labels_when_not_touched() {
+        let pool = test_pool().await;
+        let label = crate::db::labels::create_label(&pool, "deep work", "orange").await.unwrap();
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput { content: "x".to_string(), label_ids: Some(vec![label.id.clone()]), ..Default::default() },
+        )
+        .await
+        .unwrap();
+
+        let updated = super::update_local_task(
+            &pool,
+            &task.id,
+            UpdateTaskInput { content: Some("y".to_string()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.labels, vec![label.id]);
+    }
+
+    /// `clear_due_time` nulls `due_time` (and the duration that hangs off
+    /// it — a block length with no start time is meaningless); `clear_recurrence`
+    /// and `clear_section` null their respective columns.
+    #[tokio::test]
+    async fn clear_flags_null_their_columns() {
+        let pool = test_pool().await;
+        let project = crate::db::projects::create_project(&pool, "Errands", "blue", None).await.unwrap();
+        let section = crate::db::sections::create_section(&pool, &project.id, "Groceries").await.unwrap();
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "x".to_string(),
+                project_id: Some(project.id.clone()),
+                due_time: Some("09:00".to_string()),
+                duration_minutes: Some(60),
+                recurrence_rule: Some("every day".to_string()),
+                section_id: Some(section.id.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let updated = super::update_local_task(
+            &pool,
+            &task.id,
+            UpdateTaskInput { clear_due_time: true, clear_recurrence: true, clear_section: true, ..Default::default() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.due_time, None);
+        assert_eq!(updated.duration_minutes, None);
+        assert_eq!(updated.recurrence_rule, None);
+        assert_eq!(updated.section_id, None);
+    }
 
     #[tokio::test]
     async fn external_link_survives_task_edits() {

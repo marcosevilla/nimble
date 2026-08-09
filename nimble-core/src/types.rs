@@ -63,6 +63,11 @@ pub struct CreateTaskInput {
     pub description: Option<String>,
     pub priority: Option<i64>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
+    pub duration_minutes: Option<i64>,
+    pub recurrence_rule: Option<String>,
+    pub section_id: Option<String>,
+    pub label_ids: Option<Vec<String>>,
 }
 
 /// Input for `db::tasks::update_local_task`. Struct form lets later tasks add
@@ -76,6 +81,14 @@ pub struct UpdateTaskInput {
     pub due_date: Option<String>,
     pub clear_due_date: bool,
     pub linked_doc_id: Option<String>,
+    pub due_time: Option<String>,
+    pub duration_minutes: Option<i64>,
+    pub recurrence_rule: Option<String>,
+    pub section_id: Option<String>,
+    pub label_ids: Option<Vec<String>>,
+    pub clear_due_time: bool,
+    pub clear_recurrence: bool,
+    pub clear_section: bool,
 }
 
 // ── Labels ──

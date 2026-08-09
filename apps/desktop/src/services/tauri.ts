@@ -292,6 +292,11 @@ export async function createLocalTask(opts: {
   description?: string
   priority?: number
   dueDate?: string
+  dueTime?: string
+  durationMinutes?: number
+  recurrenceRule?: string
+  sectionId?: string
+  labelIds?: string[]
 }): Promise<LocalTask> {
   return invoke<LocalTask>('create_local_task', {
     content: opts.content,
@@ -300,6 +305,11 @@ export async function createLocalTask(opts: {
     description: opts.description,
     priority: opts.priority,
     dueDate: opts.dueDate,
+    dueTime: opts.dueTime,
+    durationMinutes: opts.durationMinutes,
+    recurrenceRule: opts.recurrenceRule,
+    sectionId: opts.sectionId,
+    labelIds: opts.labelIds,
   })
 }
 
@@ -312,6 +322,14 @@ export async function updateLocalTask(opts: {
   dueDate?: string
   clearDueDate?: boolean
   linkedDocId?: string | null
+  dueTime?: string
+  durationMinutes?: number
+  recurrenceRule?: string
+  sectionId?: string
+  labelIds?: string[]
+  clearDueTime?: boolean
+  clearRecurrence?: boolean
+  clearSection?: boolean
 }): Promise<LocalTask> {
   return invoke<LocalTask>('update_local_task', opts)
 }

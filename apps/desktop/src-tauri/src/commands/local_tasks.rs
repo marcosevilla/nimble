@@ -31,6 +31,7 @@ pub async fn get_local_tasks(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn create_local_task(
     app: AppHandle,
     content: String,
@@ -39,6 +40,11 @@ pub async fn create_local_task(
     description: Option<String>,
     priority: Option<i64>,
     due_date: Option<String>,
+    due_time: Option<String>,
+    duration_minutes: Option<i64>,
+    recurrence_rule: Option<String>,
+    section_id: Option<String>,
+    label_ids: Option<Vec<String>>,
 ) -> Result<LocalTask, String> {
     let pool = app.state::<SqlitePool>();
     nimble_core::db::tasks::create_local_task(
@@ -50,6 +56,11 @@ pub async fn create_local_task(
             description,
             priority,
             due_date,
+            due_time,
+            duration_minutes,
+            recurrence_rule,
+            section_id,
+            label_ids,
         },
     )
     .await
@@ -57,6 +68,7 @@ pub async fn create_local_task(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn update_local_task(
     app: AppHandle,
     id: String,
@@ -67,6 +79,14 @@ pub async fn update_local_task(
     due_date: Option<String>,
     clear_due_date: Option<bool>,
     linked_doc_id: Option<String>,
+    due_time: Option<String>,
+    duration_minutes: Option<i64>,
+    recurrence_rule: Option<String>,
+    section_id: Option<String>,
+    label_ids: Option<Vec<String>>,
+    clear_due_time: Option<bool>,
+    clear_recurrence: Option<bool>,
+    clear_section: Option<bool>,
 ) -> Result<LocalTask, String> {
     let pool = app.state::<SqlitePool>();
     nimble_core::db::tasks::update_local_task(
@@ -80,6 +100,14 @@ pub async fn update_local_task(
             due_date,
             clear_due_date: clear_due_date.unwrap_or(false),
             linked_doc_id,
+            due_time,
+            duration_minutes,
+            recurrence_rule,
+            section_id,
+            label_ids,
+            clear_due_time: clear_due_time.unwrap_or(false),
+            clear_recurrence: clear_recurrence.unwrap_or(false),
+            clear_section: clear_section.unwrap_or(false),
         },
     )
     .await

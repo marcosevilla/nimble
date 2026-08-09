@@ -98,6 +98,11 @@ export interface LocalTask {
   project_id: string
   priority: number
   due_date: string | null
+  due_time: string | null
+  duration_minutes: number | null
+  recurrence_rule: string | null
+  section_id: string | null
+  labels: string[]
   completed: boolean
   completed_at: string | null
   status: TaskStatus
