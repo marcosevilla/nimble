@@ -55,12 +55,14 @@ export function LabelManager() {
     }
   }, [newName, newColor, saving])
 
-  const handleRename = useCallback(async (id: string, name: string) => {
+  const handleRename = useCallback(async (id: string, name: string): Promise<boolean> => {
     try {
       const updated = await updateLabel(id, { name })
       setLabels((prev) => prev.map((l) => (l.id === id ? updated : l)))
+      return true
     } catch (e) {
       toast.error(`Failed to rename label: ${e}`)
+      return false
     }
   }, [])
 
@@ -164,7 +166,7 @@ function LabelRow({
   onDelete,
 }: {
   label: Label
-  onRename: (id: string, name: string) => void
+  onRename: (id: string, name: string) => Promise<boolean>
   onColorChange: (id: string, color: string) => void
   onDelete: () => void
 }) {
@@ -172,10 +174,17 @@ function LabelRow({
 
   useEffect(() => { setDraft(label.name) }, [label.name])
 
-  const save = () => {
+  const save = async () => {
     const trimmed = draft.trim()
-    if (trimmed && trimmed !== label.name) onRename(label.id, trimmed)
-    else setDraft(label.name)
+    if (!trimmed || trimmed === label.name) {
+      setDraft(label.name)
+      return
+    }
+    // Optimistically-typed value stays on screen only if the rename lands —
+    // a failed request (offline, validation) must not leave the input
+    // showing text that never actually saved.
+    const ok = await onRename(label.id, trimmed)
+    if (!ok) setDraft(label.name)
   }
 
   return (
