@@ -31,6 +31,7 @@ pub async fn update_project(
     name: Option<String>,
     color: Option<String>,
     parent_id: Option<String>,
+    clear_parent: Option<bool>,
 ) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
     nimble_core::db::projects::update_project(
@@ -39,6 +40,7 @@ pub async fn update_project(
         name.as_deref(),
         color.as_deref(),
         parent_id.as_deref(),
+        clear_parent.unwrap_or(false),
     )
     .await
     .map_err(|e| e.to_string())

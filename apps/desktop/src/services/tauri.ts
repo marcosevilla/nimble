@@ -239,9 +239,10 @@ export async function updateProject(
   id: string,
   name?: string,
   color?: string,
-  parentId?: string
+  parentId?: string,
+  clearParent?: boolean
 ): Promise<void> {
-  return invoke<void>('update_project', { id, name, color, parentId })
+  return invoke<void>('update_project', { id, name, color, parentId, clearParent })
 }
 
 export async function deleteProject(id: string): Promise<void> {

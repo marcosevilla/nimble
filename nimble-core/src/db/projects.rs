@@ -143,7 +143,35 @@ pub async fn update_project(
     name: Option<&str>,
     color: Option<&str>,
     parent_id: Option<&str>,
+    clear_parent: bool,
 ) -> crate::Result<()> {
+    if clear_parent && parent_id.is_some() {
+        return Err(crate::Error::Other(
+            "update_project: cannot pass both clear_parent=true and a parent_id".to_string(),
+        ));
+    }
+
+    // Validate parent_id (existence + cycle) BEFORE any field UPDATE runs.
+    // Otherwise a name/color UPDATE below would persist even though the
+    // overall call fails on an invalid parent_id — a partial write on the
+    // exact failure path this fn introduces.
+    if let Some(pid) = parent_id {
+        let parent_exists: Option<(String,)> = sqlx::query_as("SELECT id FROM projects WHERE id = ?")
+            .bind(pid)
+            .fetch_optional(pool)
+            .await?;
+        if parent_exists.is_none() {
+            return Err(crate::Error::Other(format!(
+                "update_project: no such parent project '{pid}'"
+            )));
+        }
+        if would_create_cycle(pool, id, pid).await? {
+            return Err(crate::Error::Other(format!(
+                "update_project: setting parent to '{pid}' would make '{id}' its own ancestor"
+            )));
+        }
+    }
+
     let mut fields_changed = Vec::new();
     if let Some(name) = name {
         sqlx::query("UPDATE projects SET name = ? WHERE id = ?")
@@ -162,23 +190,14 @@ pub async fn update_project(
         fields_changed.push("color");
     }
     if let Some(pid) = parent_id {
-        let parent_exists: Option<(String,)> = sqlx::query_as("SELECT id FROM projects WHERE id = ?")
-            .bind(pid)
-            .fetch_optional(pool)
-            .await?;
-        if parent_exists.is_none() {
-            return Err(crate::Error::Other(format!(
-                "update_project: no such parent project '{pid}'"
-            )));
-        }
-        if would_create_cycle(pool, id, pid).await? {
-            return Err(crate::Error::Other(format!(
-                "update_project: setting parent to '{pid}' would make '{id}' its own ancestor"
-            )));
-        }
-
         sqlx::query("UPDATE projects SET parent_id = ? WHERE id = ?")
             .bind(pid)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        fields_changed.push("parent_id");
+    } else if clear_parent {
+        sqlx::query("UPDATE projects SET parent_id = NULL WHERE id = ?")
             .bind(id)
             .execute(pool)
             .await?;
@@ -291,7 +310,7 @@ mod tests {
 
         // re-parent via update_project
         let other = super::create_project(&pool, "Client B", "red", None).await.unwrap();
-        super::update_project(&pool, &child.id, None, None, Some(&other.id))
+        super::update_project(&pool, &child.id, None, None, Some(&other.id), false)
             .await
             .unwrap();
         let all = super::get_projects(&pool).await.unwrap();
@@ -303,7 +322,7 @@ mod tests {
     async fn update_project_rejects_self_parent() {
         let pool = test_pool().await;
         let a = super::create_project(&pool, "A", "blue", None).await.unwrap();
-        let err = super::update_project(&pool, &a.id, None, None, Some(&a.id)).await;
+        let err = super::update_project(&pool, &a.id, None, None, Some(&a.id), false).await;
         assert!(err.is_err());
     }
 
@@ -314,10 +333,10 @@ mod tests {
         let b = super::create_project(&pool, "B", "green", None).await.unwrap();
 
         // A.parent = B is fine (B has no parent yet)
-        super::update_project(&pool, &a.id, None, None, Some(&b.id)).await.unwrap();
+        super::update_project(&pool, &a.id, None, None, Some(&b.id), false).await.unwrap();
 
         // B.parent = A would make A its own ancestor (A -> B -> A) — must error
-        let err = super::update_project(&pool, &b.id, None, None, Some(&a.id)).await;
+        let err = super::update_project(&pool, &b.id, None, None, Some(&a.id), false).await;
         assert!(err.is_err());
 
         // and must not have partially applied
@@ -330,6 +349,66 @@ mod tests {
     async fn create_project_rejects_unknown_parent() {
         let pool = test_pool().await;
         let err = super::create_project(&pool, "Orphan", "blue", Some("nonexistent")).await;
+        assert!(err.is_err());
+    }
+
+    /// Review finding 1 regression: an invalid parent_id must be rejected
+    /// BEFORE any other field UPDATE runs, so a valid `name` change in the
+    /// same call never partially persists when the call as a whole errors.
+    #[tokio::test]
+    async fn update_project_does_not_persist_valid_fields_when_parent_id_is_invalid() {
+        let pool = test_pool().await;
+        let p = super::create_project(&pool, "Original Name", "blue", None).await.unwrap();
+
+        let err = super::update_project(
+            &pool,
+            &p.id,
+            Some("New Name"),
+            None,
+            Some("nonexistent-parent"),
+            false,
+        )
+        .await;
+        assert!(err.is_err());
+
+        let all = super::get_projects(&pool).await.unwrap();
+        let fetched = all.iter().find(|x| x.id == p.id).unwrap();
+        assert_eq!(
+            fetched.name, "Original Name",
+            "name must NOT have been persisted when the same call's parent_id was rejected"
+        );
+    }
+
+    /// Review finding 3 regression: `clear_parent: true` moves a nested
+    /// project back to top level (parent_id = NULL), the only way to reverse
+    /// nesting through this API (`parent_id: None` means "leave unchanged").
+    #[tokio::test]
+    async fn clear_parent_moves_project_back_to_top_level() {
+        let pool = test_pool().await;
+        let parent = super::create_project(&pool, "Work", "blue", None).await.unwrap();
+        let child = super::create_project(&pool, "Client A", "green", Some(&parent.id))
+            .await
+            .unwrap();
+        assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
+
+        super::update_project(&pool, &child.id, None, None, None, true)
+            .await
+            .unwrap();
+
+        let all = super::get_projects(&pool).await.unwrap();
+        let fetched = all.iter().find(|p| p.id == child.id).unwrap();
+        assert_eq!(fetched.parent_id, None);
+    }
+
+    /// Review finding 3: passing both `clear_parent: true` and a `parent_id`
+    /// is contradictory and must error rather than silently picking one.
+    #[tokio::test]
+    async fn clear_parent_and_parent_id_together_is_rejected() {
+        let pool = test_pool().await;
+        let a = super::create_project(&pool, "A", "blue", None).await.unwrap();
+        let b = super::create_project(&pool, "B", "green", None).await.unwrap();
+
+        let err = super::update_project(&pool, &a.id, None, None, Some(&b.id), true).await;
         assert!(err.is_err());
     }
 }

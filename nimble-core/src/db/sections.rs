@@ -171,14 +171,35 @@ pub async fn delete_section(pool: &SqlitePool, id: &str) -> crate::Result<()> {
     Ok(())
 }
 
+/// Reorders sections by the given id list. Runs inside a transaction: every
+/// id is checked to exist BEFORE any `UPDATE` runs, so a bogus id errors the
+/// whole call instead of silently no-opping (a stray id would otherwise just
+/// match zero rows) or leaving a partially-reordered set from a mid-loop
+/// failure.
 pub async fn reorder_sections(pool: &SqlitePool, section_ids: &[String]) -> crate::Result<()> {
+    let mut tx = pool.begin().await?;
+
+    for id in section_ids {
+        let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM sections WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if exists.is_none() {
+            return Err(crate::Error::Other(format!(
+                "reorder_sections: no such section '{id}'"
+            )));
+        }
+    }
+
     for (i, id) in section_ids.iter().enumerate() {
         sqlx::query("UPDATE sections SET position = ? WHERE id = ?")
             .bind(i as i64)
             .bind(id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
+
+    tx.commit().await?;
 
     Ok(())
 }
@@ -254,6 +275,28 @@ mod tests {
             logged.iter().any(|(_, changed)| changed.contains("section_id")),
             "delete_section must append a sync_log UPDATE entry with section_id in changed_columns for each affected task"
         );
+    }
+
+    /// Review finding 2 regression: a bogus id in the reorder list must
+    /// error the whole call (not silently no-op that one entry), and must
+    /// leave every section's position untouched — not partially reordered.
+    #[tokio::test]
+    async fn reorder_sections_rejects_unknown_id_and_leaves_positions_untouched() {
+        let pool = test_pool().await;
+        let p = create_project(&pool, "Errands", "blue", None).await.unwrap();
+        let s1 = create_section(&pool, &p.id, "Groceries").await.unwrap();
+        let s2 = create_section(&pool, &p.id, "Chores").await.unwrap();
+
+        let before = list_sections(&pool, &p.id).await.unwrap();
+        assert_eq!(before[0].id, s1.id);
+        assert_eq!(before[1].id, s2.id);
+
+        let err = reorder_sections(&pool, &[s2.id.clone(), "nonexistent-section".to_string()]).await;
+        assert!(err.is_err());
+
+        let after = list_sections(&pool, &p.id).await.unwrap();
+        assert_eq!(after[0].id, s1.id, "positions must be untouched after a rejected reorder");
+        assert_eq!(after[1].id, s2.id);
     }
 
     #[tokio::test]
