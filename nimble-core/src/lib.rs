@@ -2,6 +2,7 @@ pub mod api;
 pub mod db;
 pub mod integrations;
 pub mod parsers;
+pub mod recurrence;
 #[cfg(test)]
 pub mod test_util;
 pub mod types;
