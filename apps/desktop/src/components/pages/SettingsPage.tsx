@@ -44,6 +44,7 @@ import { Label as SectionLabel, Meta, SectionTitle } from '@/components/shared/t
 import { TodoistSyncSection } from '@/components/settings/TodoistSyncSection'
 import { TodoistMigrationSection } from '@/components/settings/TodoistMigrationSection'
 import { DocsMigrationSection } from '@/components/settings/DocsMigrationSection'
+import { TasksMigrationSection } from '@/components/settings/TasksMigrationSection'
 import { VaultSection } from '@/components/settings/VaultSection'
 import { LabelManager } from '@/components/settings/LabelManager'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
@@ -1509,6 +1510,17 @@ export function SettingsPage() {
           description="Converts all docs from HTML to markdown. A backup of the database is saved first. Run the preview to see which docs contain formatting that may simplify during conversion."
         />
         <DocsMigrationSection />
+      </section>
+
+      <Separator />
+
+      {/* Task descriptions storage format */}
+      <section id="tasks-format" className="space-y-4 scroll-mt-6">
+        <SectionHeader
+          title="Task descriptions storage format"
+          description="Converts task descriptions from HTML to markdown. A backup of the database is saved first. Run the preview to see which descriptions contain formatting that may simplify during conversion."
+        />
+        <TasksMigrationSection />
       </section>
 
       <Separator />

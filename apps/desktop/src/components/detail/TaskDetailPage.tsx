@@ -196,11 +196,14 @@ export function TaskDetailPage() {
       </div>
 
       {/* Description */}
-      {/* Description — rich text with @mentions */}
+      {/* Description — rich text with @mentions. Markdown-canonical: local_tasks.description
+          is markdown from here forward (Todoist sync/import and R3's CLI already write it
+          verbatim, no conversion layer). */}
       <TiptapEditor
         content={task.description ?? ''}
         onChange={handleSaveDescription}
         placeholder="Add a description..."
+        format="markdown"
       />
 
       {/* Subtasks */}

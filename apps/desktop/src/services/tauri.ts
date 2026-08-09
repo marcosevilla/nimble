@@ -13,6 +13,8 @@ export type {
   Project,
   TaskStatus,
   LocalTask,
+  TasksMdPreview,
+  TasksMdResult,
   Label,
   Section,
   UpdateStatus,
@@ -64,6 +66,8 @@ import type {
   Project,
   TaskStatus,
   LocalTask,
+  TasksMdPreview,
+  TasksMdResult,
   Label,
   Section,
   UpdateStatus,
@@ -350,6 +354,14 @@ export async function deleteLocalTask(id: string): Promise<void> {
 
 export async function reorderLocalTasks(taskIds: string[]): Promise<void> {
   return invoke<void>('reorder_local_tasks', { taskIds })
+}
+
+export async function previewTasksMarkdownMigration(): Promise<TasksMdPreview> {
+  return invoke<TasksMdPreview>('preview_tasks_markdown_migration')
+}
+
+export async function migrateTasksToMarkdown(): Promise<TasksMdResult> {
+  return invoke<TasksMdResult>('migrate_tasks_to_markdown')
 }
 
 // ── Labels ──

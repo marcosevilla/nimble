@@ -116,6 +116,25 @@ export interface LocalTask {
   synced_snapshot: string | null
 }
 
+export interface FlaggedTask {
+  id: string
+  content: string
+  unknown_tags: string[]
+}
+
+export interface TasksMdPreview {
+  total: number
+  convertible: number
+  already_plain: number
+  flagged: FlaggedTask[]
+}
+
+export interface TasksMdResult {
+  converted: number
+  skipped_plain: number
+  backup_path: string
+}
+
 // ── Labels ──
 
 export interface Label {

@@ -149,3 +149,29 @@ pub async fn delete_local_task(app: AppHandle, id: String) -> Result<(), String>
         .await
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn preview_tasks_markdown_migration(
+    app: AppHandle,
+) -> Result<nimble_core::db::tasks::TasksMdPreview, String> {
+    let pool = app.state::<SqlitePool>();
+    nimble_core::db::tasks::preview_tasks_markdown_migration(pool.inner())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn migrate_tasks_to_markdown(
+    app: AppHandle,
+) -> Result<nimble_core::db::tasks::TasksMdResult, String> {
+    let pool = app.state::<SqlitePool>();
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let backup = app_dir.join(format!("nimble-backup-pre-task-markdown-{stamp}.db"));
+    nimble_core::db::tasks::migrate_tasks_to_markdown(
+        pool.inner(),
+        backup.to_str().ok_or("backup path not utf-8")?,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}

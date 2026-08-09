@@ -18,6 +18,8 @@ import type {
   DailyState,
   Project,
   LocalTask,
+  TasksMdPreview,
+  TasksMdResult,
   TaskStatus,
   UpdateStatus,
   SaveResult,
@@ -68,6 +70,8 @@ export type {
   DailyState,
   Project,
   LocalTask,
+  TasksMdPreview,
+  TasksMdResult,
   TaskStatus,
   UpdateStatus,
   SaveResult,
@@ -201,6 +205,8 @@ export interface DataProvider {
     uncomplete(id: string): Promise<void>
     delete(id: string): Promise<void>
     reorder(taskIds: string[]): Promise<void>
+    previewMarkdownMigration(): Promise<TasksMdPreview>
+    migrateToMarkdown(): Promise<TasksMdResult>
   }
 
   docs: {

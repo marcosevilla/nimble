@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::db::activity;
 use crate::db::labels;
 use crate::db::sync;
+use crate::parsers::html_to_md::{html_to_markdown, scan_unknown_tags};
 use crate::types::{CreateTaskInput, LocalTask, UpdateTaskInput};
 
 /// True if `section_id` names a real section belonging to `project_id`.
@@ -751,6 +752,217 @@ pub async fn delete_local_task(pool: &SqlitePool, id: &str) -> crate::Result<()>
     }
 
     Ok(())
+}
+
+// ── Markdown migration ──
+//
+// Task 12 (2026-08-09): local_tasks.description is markdown-canonical from
+// here forward — the TaskDetailPage editor now loads/saves through
+// tiptap-markdown unconditionally (no per-row format toggle like docs has,
+// since there's no legacy HTML consumer left to support). This is a
+// one-time backfill for rows written before that switch. Mirrors
+// db::docs::{preview,migrate}_docs_markdown_migration's detection (the
+// `<`-prefix heuristic) and backup pattern; reuses the same shared
+// `html_to_markdown`/`scan_unknown_tags` parser used there — Todoist-pulled
+// descriptions are already markdown stored raw and must pass through
+// untouched, which the `<`-prefix check guarantees.
+
+#[derive(Debug, serde::Serialize)]
+pub struct FlaggedTask {
+    pub id: String,
+    pub content: String,
+    pub unknown_tags: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TasksMdPreview {
+    pub total: i64,
+    pub convertible: usize,
+    pub already_plain: usize,
+    pub flagged: Vec<FlaggedTask>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TasksMdResult {
+    pub converted: usize,
+    pub skipped_plain: usize,
+    pub backup_path: String,
+}
+
+/// Dry-run report over every non-null `local_tasks.description`: how many
+/// look like HTML (would be converted), how many are already plain/markdown
+/// (left untouched — this is where verbatim Todoist-synced descriptions
+/// land), and which contain tags outside the known Tiptap allowlist (risk of
+/// lossy conversion). Read-only — never writes.
+pub async fn preview_tasks_markdown_migration(pool: &SqlitePool) -> crate::Result<TasksMdPreview> {
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT id, content, description FROM local_tasks WHERE description IS NOT NULL AND description != ''",
+    )
+    .fetch_all(pool)
+    .await?;
+    let total = rows.len() as i64;
+    let mut convertible = 0;
+    let mut already_plain = 0;
+    let mut flagged = Vec::new();
+    for (id, content, description) in rows {
+        if !description.trim_start().starts_with('<') {
+            already_plain += 1;
+            continue;
+        }
+        convertible += 1;
+        let unknown = scan_unknown_tags(&description);
+        if !unknown.is_empty() {
+            flagged.push(FlaggedTask { id, content, unknown_tags: unknown });
+        }
+    }
+    Ok(TasksMdPreview { total, convertible, already_plain, flagged })
+}
+
+/// Back up the live DB (via `VACUUM INTO`, safe while open), then convert
+/// every HTML `local_tasks.description` to markdown in a single transaction.
+/// Unlike docs, there's no format setting to flip afterward — the editor
+/// reads/writes markdown unconditionally as of Task 12.
+///
+/// Idempotent: rows that no longer start with '<' are skipped, so re-running
+/// after a successful migration converts nothing.
+pub async fn migrate_tasks_to_markdown(
+    pool: &SqlitePool,
+    backup_path: &str,
+) -> crate::Result<TasksMdResult> {
+    // 1. Online backup (safe while the DB is open)
+    sqlx::query("VACUUM INTO ?").bind(backup_path).execute(pool).await?;
+
+    // 2. Convert everything in one transaction
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT id, description FROM local_tasks WHERE description IS NOT NULL AND description != ''",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut converted = 0usize;
+    let mut skipped_plain = 0usize;
+    let mut tx = pool.begin().await?;
+    let mut touched: Vec<String> = Vec::new();
+    for (id, description) in rows {
+        if !description.trim_start().starts_with('<') {
+            skipped_plain += 1;
+            continue;
+        }
+        let md = html_to_markdown(&description);
+        sqlx::query("UPDATE local_tasks SET description = ?, updated_at = datetime('now') WHERE id = ?")
+            .bind(&md)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+        converted += 1;
+        touched.push(id);
+    }
+    tx.commit().await?;
+
+    // 3. Sync-log the converted tasks so Turso propagates the new content
+    for id in &touched {
+        let row: Option<LocalTask> =
+            sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+                .bind(id)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten();
+        if let Some(task) = row {
+            let changed = serde_json::json!(["description"]).to_string();
+            let snapshot = serde_json::to_string(&task).unwrap_or_default();
+            sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot))
+                .await
+                .ok();
+        }
+    }
+    Ok(TasksMdResult { converted, skipped_plain, backup_path: backup_path.to_string() })
+}
+
+#[cfg(test)]
+mod md_migration_tests {
+    use crate::test_util::test_pool;
+    use crate::types::{CreateTaskInput, LocalTask};
+    use sqlx::SqlitePool;
+    use super::SELECT_COLS;
+
+    /// No standalone single-row getter exists on this module (every other
+    /// caller inlines the same `SELECT {SELECT_COLS} ... WHERE id = ?`) — a
+    /// tiny local helper beats repeating that four times in these tests.
+    async fn fetch(pool: &SqlitePool, id: &str) -> LocalTask {
+        sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn preview_reports_flagged_tasks_without_writing() {
+        let pool = test_pool().await;
+        let clean = super::create_local_task(&pool, CreateTaskInput {
+            content: "Clean".into(),
+            description: Some("<p>hello <strong>world</strong></p>".into()),
+            ..Default::default()
+        }).await.unwrap();
+        let risky = super::create_local_task(&pool, CreateTaskInput {
+            content: "Risky".into(),
+            description: Some("<table><tr><td>x</td></tr></table>".into()),
+            ..Default::default()
+        }).await.unwrap();
+        let already_md = super::create_local_task(&pool, CreateTaskInput {
+            content: "Already markdown".into(),
+            description: Some("**already** markdown, e.g. from Todoist".into()),
+            ..Default::default()
+        }).await.unwrap();
+
+        let preview = super::preview_tasks_markdown_migration(&pool).await.unwrap();
+        assert_eq!(preview.total, 3);
+        assert_eq!(preview.convertible, 2);
+        assert_eq!(preview.already_plain, 1);
+        assert_eq!(preview.flagged.len(), 1);
+        assert_eq!(preview.flagged[0].id, risky.id);
+
+        // Read-only: nothing changed.
+        let reloaded_clean = fetch(&pool, &clean.id).await;
+        assert_eq!(reloaded_clean.description.as_deref(), Some("<p>hello <strong>world</strong></p>"));
+        let reloaded_md = fetch(&pool, &already_md.id).await;
+        assert_eq!(reloaded_md.description.as_deref(), Some("**already** markdown, e.g. from Todoist"));
+    }
+
+    #[tokio::test]
+    async fn migrate_converts_html_and_leaves_markdown_untouched() {
+        let pool = test_pool().await;
+        let html_task = super::create_local_task(&pool, CreateTaskInput {
+            content: "HTML".into(),
+            description: Some("<p>hello <strong>world</strong></p>".into()),
+            ..Default::default()
+        }).await.unwrap();
+        let md_task = super::create_local_task(&pool, CreateTaskInput {
+            content: "Markdown".into(),
+            description: Some("already **markdown** from Todoist".into()),
+            ..Default::default()
+        }).await.unwrap();
+
+        let tmp = std::env::temp_dir().join(format!("nimble-test-backup-{}.db", uuid::Uuid::new_v4()));
+        let result = super::migrate_tasks_to_markdown(&pool, tmp.to_str().unwrap()).await.unwrap();
+        assert_eq!(result.converted, 1);
+        assert_eq!(result.skipped_plain, 1);
+        std::fs::remove_file(&tmp).ok();
+
+        let converted = fetch(&pool, &html_task.id).await;
+        let desc = converted.description.unwrap();
+        assert!(desc.contains("**world**"), "expected bold markdown, got: {desc}");
+        assert!(!desc.contains('<'), "no HTML tags may survive: {desc}");
+
+        let untouched = fetch(&pool, &md_task.id).await;
+        assert_eq!(untouched.description.as_deref(), Some("already **markdown** from Todoist"));
+
+        // Idempotent: running again converts nothing further.
+        let tmp2 = std::env::temp_dir().join(format!("nimble-test-backup2-{}.db", uuid::Uuid::new_v4()));
+        let second = super::migrate_tasks_to_markdown(&pool, tmp2.to_str().unwrap()).await.unwrap();
+        assert_eq!(second.converted, 0);
+        std::fs::remove_file(&tmp2).ok();
+    }
 }
 
 #[cfg(test)]
