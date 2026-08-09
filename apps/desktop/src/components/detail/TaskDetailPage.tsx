@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useDetailStore } from '@/stores/detailStore'
 import { useTaskDetail } from '@/hooks/useTaskDetail'
 import { useProjects } from '@/hooks/useLocalTasks'
@@ -55,6 +55,26 @@ export function TaskDetailPage() {
     await dp.tasks.update({ id: task.id, content })
     emitTasksChanged()
   }, [task, dp])
+
+  // Task 12 fix (review finding 1): unconditional markdown mode is a
+  // corrupting load path for descriptions the one-time backfill hasn't
+  // converted yet — loading an HTML description through the markdown parser
+  // renders literal tag soup, and the next debounced save would persist that
+  // garbled text as the new "markdown". Sniff per-row with the same
+  // `<`-prefix heuristic the backfill migration uses (db::tasks::
+  // preview_tasks_markdown_migration), so an un-migrated task keeps loading
+  // and saving as HTML — lossless round-trip via TiptapEditor's HTML
+  // path — until the Settings backfill converts it.
+  //
+  // Frozen for the life of this task view: keyed on `task?.id` only, not
+  // `task?.description`, so a debounced save mid-edit (which changes
+  // `task.description` to the just-saved value) can never flip the format
+  // out from under an open editor.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately not reacting to description changes, see comment above
+  const descFormat = useMemo<'html' | 'markdown'>(() => {
+    const initial = task?.description ?? ''
+    return initial.trim().startsWith('<') ? 'html' : 'markdown'
+  }, [task?.id])
 
   const lastSavedDesc = useRef(task?.description ?? '')
   const handleSaveDescription = useCallback(async (description: string) => {
@@ -197,13 +217,16 @@ export function TaskDetailPage() {
 
       {/* Description */}
       {/* Description — rich text with @mentions. Markdown-canonical: local_tasks.description
-          is markdown from here forward (Todoist sync/import and R3's CLI already write it
-          verbatim, no conversion layer). */}
+          is markdown for every description saved from here forward (Todoist sync/import and
+          R3's CLI already write it verbatim, no conversion layer). Pre-existing HTML
+          descriptions keep loading/saving as HTML (descFormat above) until the Settings
+          backfill converts them — see Task 12 fix report. */}
       <TiptapEditor
+        key={task.id}
         content={task.description ?? ''}
         onChange={handleSaveDescription}
         placeholder="Add a description..."
-        format="markdown"
+        format={descFormat}
       />
 
       {/* Subtasks */}

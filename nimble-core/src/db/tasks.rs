@@ -858,7 +858,22 @@ pub async fn migrate_tasks_to_markdown(
     }
     tx.commit().await?;
 
-    // 3. Sync-log the converted tasks so Turso propagates the new content
+    // 3. Sync-log the converted tasks so Turso propagates the new content.
+    //
+    // Also fire the Todoist mutation observer for tasks Todoist owns
+    // (`external_source == "todoist"`). The raw `UPDATE` above (like the
+    // sync_log append) bypasses `update_local_task`'s normal path, which is
+    // the only other place that calls `on_task_mutation` for a description
+    // edit — without this, a converted description on a Todoist-linked task
+    // would diverge from Todoist forever, silently, since nothing would ever
+    // enqueue the push. This is a deliberate, explicit choice (not the
+    // implicit gap it started as): gate on `external_source` here rather
+    // than firing for every touched row, since only Todoist-linked tasks
+    // have anywhere to push to, and the volume is bounded by rows this
+    // migration actually converts (locally-HTML descriptions only) — no
+    // flood risk even on a large task list. `on_task_mutation` is
+    // best-effort (logs and swallows errors), matching every other call site
+    // in this file.
     for id in &touched {
         let row: Option<LocalTask> =
             sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
@@ -873,6 +888,18 @@ pub async fn migrate_tasks_to_markdown(
             sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot))
                 .await
                 .ok();
+
+            if task.external_source.as_deref() == Some("todoist") {
+                let fields_changed = vec!["description".to_string()];
+                crate::integrations::todoist::observer::on_task_mutation(
+                    pool,
+                    crate::integrations::todoist::observer::TaskMutation::Updated {
+                        task: &task,
+                        fields_changed: &fields_changed,
+                    },
+                )
+                .await;
+            }
         }
     }
     Ok(TasksMdResult { converted, skipped_plain, backup_path: backup_path.to_string() })
@@ -962,6 +989,60 @@ mod md_migration_tests {
         let second = super::migrate_tasks_to_markdown(&pool, tmp2.to_str().unwrap()).await.unwrap();
         assert_eq!(second.converted, 0);
         std::fs::remove_file(&tmp2).ok();
+    }
+
+    /// Fix for review finding 2: the backfill's raw UPDATE bypasses
+    /// `update_local_task`'s normal path, which is the only other place a
+    /// description edit fires the Todoist observer. Without an explicit
+    /// fire here, a converted description on a Todoist-linked task would
+    /// silently diverge from Todoist forever (nothing would ever enqueue the
+    /// push). Verifies the fix enqueues an update op for a converted,
+    /// Todoist-linked task and does NOT enqueue anything for a converted
+    /// purely-local task (bounding volume to rows that both converted AND
+    /// have somewhere to push to).
+    #[tokio::test]
+    async fn migrate_enqueues_todoist_update_for_linked_tasks_only() {
+        let pool = test_pool().await;
+        crate::integrations::ensure_state(&pool, "todoist").await.unwrap();
+        crate::db::settings::set_setting(&pool, "todoist_api_token", "tok").await.unwrap();
+
+        let linked = super::create_local_task(&pool, CreateTaskInput {
+            content: "Linked".into(),
+            description: Some("<p>hello <strong>world</strong></p>".into()),
+            ..Default::default()
+        }).await.unwrap();
+        // Simulate a task already synced to Todoist in a previous cycle:
+        // external_source/external_id set, and clear the 'create' op the
+        // observer enqueued on create_local_task above so only the
+        // migration's own enqueue is visible below.
+        sqlx::query("UPDATE local_tasks SET external_id = 'ext-1', external_source = 'todoist' WHERE id = ?")
+            .bind(&linked.id).execute(&pool).await.unwrap();
+        sqlx::query("DELETE FROM todoist_outbox WHERE local_id = ?")
+            .bind(&linked.id).execute(&pool).await.unwrap();
+
+        let local_only = super::create_local_task(&pool, CreateTaskInput {
+            content: "Local only".into(),
+            description: Some("<p>plain local</p>".into()),
+            ..Default::default()
+        }).await.unwrap();
+        sqlx::query("DELETE FROM todoist_outbox WHERE local_id = ?")
+            .bind(&local_only.id).execute(&pool).await.unwrap();
+
+        let tmp = std::env::temp_dir().join(format!("nimble-test-backup-{}.db", uuid::Uuid::new_v4()));
+        let result = super::migrate_tasks_to_markdown(&pool, tmp.to_str().unwrap()).await.unwrap();
+        assert_eq!(result.converted, 2);
+        std::fs::remove_file(&tmp).ok();
+
+        let batch = crate::integrations::todoist::outbox::pending_batch(&pool, 100).await.unwrap();
+        let linked_op = batch.iter().find(|r| r.local_id == linked.id);
+        assert!(linked_op.is_some(), "expected an enqueued op for the Todoist-linked task, got: {:?}",
+            batch.iter().map(|r| (&r.local_id, &r.op)).collect::<Vec<_>>());
+        let linked_op = linked_op.unwrap();
+        assert_eq!(linked_op.op, "update");
+        assert!(linked_op.payload.get("description").is_some(), "expected description in push payload, got: {:?}", linked_op.payload);
+        assert!(!batch.iter().any(|r| r.local_id == local_only.id),
+            "expected no enqueued op for the purely-local task, got: {:?}",
+            batch.iter().map(|r| (&r.local_id, &r.op)).collect::<Vec<_>>());
     }
 }
 

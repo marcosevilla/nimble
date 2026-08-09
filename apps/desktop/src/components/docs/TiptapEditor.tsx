@@ -95,6 +95,37 @@ const MentionList = forwardRef<MentionListRef, SuggestionProps<MentionItem>>((pr
 })
 MentionList.displayName = 'MentionList'
 
+// ── Mention, with a markdown serializer ──
+//
+// tiptap-markdown has no built-in markdown syntax for a mention node (there
+// isn't a standard one) and, with `html: false` (our config — vault-editing
+// history means we never allow raw HTML through), its generic node fallback
+// serializes ANY node without an explicit markdown spec to a literal
+// "[mention]" placeholder string, discarding the actual @reference — and
+// that string is unstable under a second round-trip too (a bare `[mention]`
+// gets escaped to `\[mention\]` on reparse, since it looks like unterminated
+// link syntax). Confirmed via the Task 12 fidelity harness before this fix
+// was added. `addStorage` gives the extension its own markdown serialize
+// rule (tiptap-markdown reads `extension.storage.markdown`), so a mention
+// survives as plain "@label" text instead. There's still no markdown parse
+// rule turning "@label" back into a live mention node on reopen — a saved
+// mention downgrades to plain, non-clickable text after one round-trip —
+// but the actual reference text is never destroyed, and re-saving that
+// plain text is byte-stable indefinitely. Only takes effect when
+// `format === 'markdown'` includes the `Markdown` extension; inert (never
+// consulted) in HTML mode.
+const MentionMarkdown = Mention.extend({
+  addStorage() {
+    return {
+      markdown: {
+        serialize(state: { text: (text: string) => void }, node: { attrs: { label?: string; id?: string } }) {
+          state.text(`@${node.attrs.label ?? node.attrs.id}`)
+        },
+      },
+    }
+  },
+})
+
 // ── Main editor ──
 
 export function TiptapEditor({ content, onChange, placeholder = 'Start writing...', format, onWikilinkClick }: TiptapEditorProps) {
@@ -120,7 +151,7 @@ export function TiptapEditor({ content, onChange, placeholder = 'Start writing..
       ...(format === 'markdown'
         ? [Markdown.configure({ html: false, linkify: true, breaks: false })]
         : []),
-      Mention.configure({
+      MentionMarkdown.configure({
         HTMLAttributes: {
           class: 'mention-tag',
         },
