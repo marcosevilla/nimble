@@ -1,2 +1,2 @@
-// Moved to daily_triage_core::parsers::markdown
-pub use daily_triage_core::parsers::markdown::*;
+// Moved to nimble_core::parsers::markdown
+pub use nimble_core::parsers::markdown::*;

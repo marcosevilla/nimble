@@ -2,13 +2,13 @@ use chrono::Local;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
-pub use daily_triage_core::parsers::markdown::ParsedTodayMd;
-pub use daily_triage_core::types::QuickCapture;
+pub use nimble_core::parsers::markdown::ParsedTodayMd;
+pub use nimble_core::types::QuickCapture;
 
 /// Resolve the vault path from settings, expanding ~
 async fn get_vault_path(app: &AppHandle) -> Result<String, String> {
     let pool = app.state::<SqlitePool>();
-    let path = daily_triage_core::db::settings::get_setting(pool.inner(), "obsidian_vault_path")
+    let path = nimble_core::db::settings::get_setting(pool.inner(), "obsidian_vault_path")
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Obsidian vault path not configured".to_string())?;
@@ -27,7 +27,7 @@ async fn get_vault_path(app: &AppHandle) -> Result<String, String> {
 /// under an excluded folder.
 async fn read_vault_file(app: &AppHandle, rel: &str) -> Result<Option<String>, String> {
     let pool = app.state::<SqlitePool>();
-    if let Ok(Some(note)) = daily_triage_core::vault::index::get_note_by_path(pool.inner(), rel).await {
+    if let Ok(Some(note)) = nimble_core::vault::index::get_note_by_path(pool.inner(), rel).await {
         if note.deleted_at.is_none() {
             return Ok(Some(note.content));
         }
@@ -112,7 +112,7 @@ pub async fn read_today_md(app: AppHandle) -> Result<ParsedTodayMd, String> {
     let content = read_vault_file(&app, "today.md")
         .await?
         .ok_or_else(|| "Failed to read today.md: not found".to_string())?;
-    Ok(daily_triage_core::parsers::markdown::parse_today_md(&content))
+    Ok(nimble_core::parsers::markdown::parse_today_md(&content))
 }
 
 #[tauri::command]
@@ -189,7 +189,7 @@ pub async fn write_quick_capture(app: AppHandle, content: String) -> Result<Quic
         .map_err(|e| format!("Failed to write Quick Captures.md: {}", e))?;
 
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::activity::log_activity(
+    nimble_core::db::activity::log_activity(
         pool.inner(),
         "item_captured",
         None,
@@ -219,11 +219,11 @@ pub async fn toggle_obsidian_checkbox(
         .await
         .map_err(|e| format!("Failed to read {}: {}", file_name, e))?;
 
-    let new_content = daily_triage_core::parsers::markdown::toggle_checkbox(&content, line_number);
+    let new_content = nimble_core::parsers::markdown::toggle_checkbox(&content, line_number);
 
     tokio::fs::write(&file_path, &new_content)
         .await
         .map_err(|e| format!("Failed to write {}: {}", file_name, e))?;
 
-    Ok(daily_triage_core::parsers::markdown::parse_today_md(&new_content))
+    Ok(nimble_core::parsers::markdown::parse_today_md(&new_content))
 }

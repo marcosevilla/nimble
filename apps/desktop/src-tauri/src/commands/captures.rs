@@ -2,7 +2,7 @@ use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
 use super::local_tasks::LocalTask;
-pub use daily_triage_core::types::Capture;
+pub use nimble_core::types::Capture;
 
 /// Get captures from SQLite, newest first
 #[tauri::command]
@@ -14,7 +14,7 @@ pub async fn get_captures(
     let pool = app.state::<SqlitePool>();
     let limit = limit.unwrap_or(50);
     let include_converted = include_converted.unwrap_or(false);
-    daily_triage_core::db::captures::get_captures(pool.inner(), limit, include_converted)
+    nimble_core::db::captures::get_captures(pool.inner(), limit, include_converted)
         .await
         .map_err(|e| e.to_string())
 }
@@ -30,7 +30,7 @@ pub async fn create_capture(
     let pool = app.state::<SqlitePool>();
     let source = source.unwrap_or_else(|| "manual".to_string());
 
-    let capture = daily_triage_core::db::captures::create_capture(pool.inner(), &content, &source, context.as_deref())
+    let capture = nimble_core::db::captures::create_capture(pool.inner(), &content, &source, context.as_deref())
         .await
         .map_err(|e| e.to_string())?;
 
@@ -49,13 +49,13 @@ pub async fn convert_capture_to_task(
 ) -> Result<LocalTask, String> {
     let pool = app.state::<SqlitePool>();
 
-    let row = daily_triage_core::db::captures::get_capture_content(pool.inner(), &capture_id)
+    let row = nimble_core::db::captures::get_capture_content(pool.inner(), &capture_id)
         .await
         .map_err(|e| e.to_string())?;
     let (_, content) = row.ok_or_else(|| "Capture not found".to_string())?;
 
     // Create the task via the core crate
-    let task = daily_triage_core::db::tasks::create_local_task(
+    let task = nimble_core::db::tasks::create_local_task(
         pool.inner(),
         &content,
         project_id.as_deref(),
@@ -65,7 +65,7 @@ pub async fn convert_capture_to_task(
     .map_err(|e| e.to_string())?;
 
     // Mark capture as converted
-    daily_triage_core::db::captures::mark_capture_converted(pool.inner(), &capture_id, &task.id)
+    nimble_core::db::captures::mark_capture_converted(pool.inner(), &capture_id, &task.id)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -76,7 +76,7 @@ pub async fn convert_capture_to_task(
 #[tauri::command]
 pub async fn delete_capture(app: AppHandle, id: String) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::captures::delete_capture(pool.inner(), &id)
+    nimble_core::db::captures::delete_capture(pool.inner(), &id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -112,7 +112,7 @@ pub async fn import_obsidian_captures(app: AppHandle) -> Result<i64, String> {
             if !current_lines.is_empty() {
                 let entry = current_lines.join("\n").trim().to_string();
                 if !entry.is_empty() {
-                    if daily_triage_core::db::captures::insert_capture_if_new(pool.inner(), &entry).await {
+                    if nimble_core::db::captures::insert_capture_if_new(pool.inner(), &entry).await {
                         imported += 1;
                     }
                 }
@@ -129,7 +129,7 @@ pub async fn import_obsidian_captures(app: AppHandle) -> Result<i64, String> {
     if !current_lines.is_empty() {
         let entry = current_lines.join("\n").trim().to_string();
         if !entry.is_empty() {
-            if daily_triage_core::db::captures::insert_capture_if_new(pool.inner(), &entry).await {
+            if nimble_core::db::captures::insert_capture_if_new(pool.inner(), &entry).await {
                 imported += 1;
             }
         }
@@ -168,7 +168,7 @@ async fn write_obsidian_backup(app: &AppHandle, content: &str) -> Result<(), Str
 /// Resolve vault path from settings (Tauri-specific helper)
 async fn get_vault_path(app: &AppHandle) -> Result<String, String> {
     let pool = app.state::<SqlitePool>();
-    let path = daily_triage_core::db::settings::get_setting(pool.inner(), "obsidian_vault_path")
+    let path = nimble_core::db::settings::get_setting(pool.inner(), "obsidian_vault_path")
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Obsidian vault path not configured".to_string())?;

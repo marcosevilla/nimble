@@ -3,7 +3,7 @@
 **Date:** 2026-04-18
 **Author:** Marco Sevilla (w/ Claude Opus 4.7)
 **Status:** Approved, ready for implementation plan
-**Surface:** Daily Triage desktop app (`apps/desktop`) — mobile out of scope
+**Surface:** Nimble desktop app (`apps/desktop`) — mobile out of scope
 
 ---
 
@@ -43,8 +43,8 @@ Confirmed numbers collected from Linear (design system mirror), Vercel Geist doc
 - Body emphasis is a weight shift (500→600), not a separate size.
 
 **They differ on:**
-- **Uppercase:** Linear uses it only on mono 12px labels; Stripe at ~11px with positive tracking; Notion refuses it in doc surfaces. Daily Triage follows Notion's lead.
-- **Tracking sign:** Linear is aggressively negative at every size ≥13px (-0.022em → -0.010em). Daily Triage adopts mild negative tracking (-0.006em on body).
+- **Uppercase:** Linear uses it only on mono 12px labels; Stripe at ~11px with positive tracking; Notion refuses it in doc surfaces. Nimble follows Notion's lead.
+- **Tracking sign:** Linear is aggressively negative at every size ≥13px (-0.022em → -0.010em). Nimble adopts mild negative tracking (-0.006em on body).
 
 ## 4. The Token System — 10 tokens
 
@@ -125,7 +125,7 @@ shadcn primitives (`ui/button.tsx`, `ui/input.tsx`, etc.) are **out of scope** a
 **Component migrations (~45 files):** every file surfaced by the audit patterns above. Mechanical find/replace for the most part; case-by-case judgment for the `text-lg` / `text-base` sites where intent is ambiguous.
 
 **Documentation:**
-- `daily-triage/docs/typography-system.md` (NEW) — canonical token reference for future work (lives alongside `roadmap.md`, `theming-research.md`).
+- `nimble/docs/typography-system.md` (NEW) — canonical token reference for future work (lives alongside `roadmap.md`, `theming-research.md`).
 
 ## 7. Non-goals
 

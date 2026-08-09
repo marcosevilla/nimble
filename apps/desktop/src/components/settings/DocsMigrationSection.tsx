@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { getDataProvider } from '@/services/provider-context'
 import { invalidateDocsFormatCache } from '@/components/docs/DocEditor'
-import type { DocsMdPreview, DocsMdResult } from '@daily-triage/types'
+import type { DocsMdPreview, DocsMdResult } from '@nimble/types'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Meta } from '@/components/shared/typography'

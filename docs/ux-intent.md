@@ -1,12 +1,12 @@
-# Daily Triage — UX Intent
+# Nimble — UX Intent
 
 The canonical rubric that audit agents use to benchmark the app. When an agent finds something "wrong" or "could be improved," it cites this doc — not its own vibes.
 
 Consolidated 2026-05-10 from:
 - `CLAUDE.md` (project-level design philosophy)
-- `daily-triage/CLAUDE.md` (style guide, anti-patterns, architecture rules)
+- `nimble/CLAUDE.md` (style guide, anti-patterns, architecture rules)
 - `docs/linear-ux-patterns.md` (Linear patterns applied to personal productivity)
-- `daily-triage/docs/buildplan.md` (functional intent per phase)
+- `nimble/docs/buildplan.md` (functional intent per phase)
 - `project_app_vision.md` memory (command bar, focus mode, activity log, mutable inbox)
 
 When those sources disagree, **this doc wins**. Update this doc, then update the sources to match.
@@ -180,7 +180,7 @@ If an audit agent sees any of these, it's a high-priority finding.
 - Modal interruptions for trivial confirmations.
 - Multi-step flows where one-step would work.
 
-### 3.3 Architecture violations (from daily-triage/CLAUDE.md)
+### 3.3 Architecture violations (from nimble/CLAUDE.md)
 - HTTP calls from the React frontend (all via Rust).
 - Filesystem access from the frontend (all via `tauri-plugin-fs` through Rust).
 - Direct SQLite access from frontend (use Rust commands).
@@ -189,7 +189,7 @@ If an audit agent sees any of these, it's a high-priority finding.
 - Template literals for class names — use `cn()`.
 
 ### 3.4 Visual / type violations
-- Uppercase treatments anywhere. Daily Triage uses sentence case throughout.
+- Uppercase treatments anywhere. Nimble uses sentence case throughout.
 - Positive letter-spacing on labels/captions.
 - `text-<size>` + custom `text-<color>` in the same `cn()` without registering the color in `extendTailwindMerge` (see lesson 2026-04-18).
 - `font-medium` stacks instead of `text-body-strong` for emphasis.

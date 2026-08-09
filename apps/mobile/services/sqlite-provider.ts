@@ -16,7 +16,7 @@ import type {
   HabitLog,
   GoalWithProgress,
   TaskStatus,
-} from '@daily-triage/types';
+} from '@nimble/types';
 import { getDatabase } from './database';
 import { generateUUID, appendSyncLog } from './sync-utils';
 import * as sync from './sync';

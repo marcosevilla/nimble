@@ -4,7 +4,7 @@
 
 **Goal:** Index Marco's whole Obsidian vault into SQLite (content, links, tags, full-text search), let the app edit vault notes in place with conflict protection, and surface vault notes beside native docs in one Docs library UI.
 
-**Architecture:** A new `daily-triage-core/src/vault/` module owns everything: config resolution, an Obsidian-flavored-markdown parser, the SQLite index (`vault_notes` / `vault_links` / `vault_tags` + a device-local FTS5 table), a filesystem scanner, an atomic writer with hash-check conflict handling, and a debounced `notify` watcher. Files on disk stay the physical truth — the DB is a derived index that also happens to be the sync payload. Tauri commands in `apps/desktop/src-tauri/src/commands/vault.rs` are thin wrappers; a `vault_runner.rs` (modelled on the existing `sync_runner.rs`) owns the watcher handle and emits `vault-changed` to the webview. The Docs UI grows a `backend: 'native' | 'vault'` discriminator routed through the existing DataProvider.
+**Architecture:** A new `nimble-core/src/vault/` module owns everything: config resolution, an Obsidian-flavored-markdown parser, the SQLite index (`vault_notes` / `vault_links` / `vault_tags` + a device-local FTS5 table), a filesystem scanner, an atomic writer with hash-check conflict handling, and a debounced `notify` watcher. Files on disk stay the physical truth — the DB is a derived index that also happens to be the sync payload. Tauri commands in `apps/desktop/src-tauri/src/commands/vault.rs` are thin wrappers; a `vault_runner.rs` (modelled on the existing `sync_runner.rs`) owns the watcher handle and emits `vault-changed` to the webview. The Docs UI grows a `backend: 'native' | 'vault'` discriminator routed through the existing DataProvider.
 
 **Tech Stack:** Rust (sqlx/SQLite, tokio), `turbovault-parser` 1.6 (Obsidian-flavored markdown), `notify` 8.2 + `notify-debouncer-full` 0.6, `blake3` 1.8, `walkdir` 2.5, React 19 + Zustand + Tiptap (markdown mode) on the desktop frontend.
 
@@ -34,14 +34,14 @@ This plan implements spec **Part 2** end-to-end on the Mac, plus the **desktop h
 
 ## Global Constraints
 
-- All business logic lives in `daily-triage-core`; Tauri commands are thin wrappers. Registration path: core fn → `src-tauri/src/commands/<domain>.rs` → export in `commands/mod.rs` → import in `lib.rs` → add to `invoke_handler![]` → TS wrapper in `apps/desktop/src/services/tauri.ts`.
+- All business logic lives in `nimble-core`; Tauri commands are thin wrappers. Registration path: core fn → `src-tauri/src/commands/<domain>.rs` → export in `commands/mod.rs` → import in `lib.rs` → add to `invoke_handler![]` → TS wrapper in `apps/desktop/src/services/tauri.ts`.
 - Frontend never does HTTP or filesystem or SQLite access — always `invoke()`.
 - Every **content-bearing** mutation to a synced table appends to `sync_log` via `crate::db::sync::append_sync_log(pool, table, row_id, op, changed_columns, snapshot)`; the snapshot's JSON keys **must** exactly match the SQLite column names, because the Turso push builds `INSERT OR REPLACE` column lists straight from them. The one deliberate exception is `vault_notes.mtime`/`size` touched on their own (`vault::index::touch_stat`, Task 4): those columns are a device-local stat cache that lets the scanner skip unchanged files, and the note's content is by definition identical — logging them would push a row to Turso every time Obsidian rewrites the same bytes. Any change to `content`, `title`, `frontmatter_json`, `hash`, or `deleted_at` is content-bearing and must be logged.
 - Vault paths stored in the DB are **vault-relative, forward-slash** (`journal/briefs/Brief 2026-08-04.md`). Absolute paths never enter a synced row.
 - Timestamps: `datetime('now','localtime')`-style strings (`YYYY-MM-DD HH:MM:SS`) for `updated_at` / `deleted_at`, matching every other table. File mtimes are stored as RFC3339 (they come from the filesystem, not SQLite).
 - UI copy stays neutral and guilt-free: no "overdue", no streaks, no scolding. Sync/scan failures read as "will retry".
 - Use `cn()` for conditional classes; import shadcn primitives from `@/components/ui/`; skeletons over spinners.
-- Rust tests: `cargo test -p daily-triage-core`. Desktop types: `cd apps/desktop && npm run build` — **not** `npx tsc --noEmit`. `apps/desktop/tsconfig.json` is a solution-style config (`"files": []` plus project references), so a bare `tsc --noEmit` resolves it, checks **zero** files, and exits 0 no matter how broken the code is. Only `tsc -b` (which `npm run build` runs) descends into `tsconfig.app.json` and actually type-checks `src/`. Discovered during Task 14 — every earlier "tsc clean" in this plan was a no-op. Both commands must be clean before every commit.
+- Rust tests: `cargo test -p nimble-core`. Desktop types: `cd apps/desktop && npm run build` — **not** `npx tsc --noEmit`. `apps/desktop/tsconfig.json` is a solution-style config (`"files": []` plus project references), so a bare `tsc --noEmit` resolves it, checks **zero** files, and exits 0 no matter how broken the code is. Only `tsc -b` (which `npm run build` runs) descends into `tsconfig.app.json` and actually type-checks `src/`. Discovered during Task 14 — every earlier "tsc clean" in this plan was a no-op. Both commands must be clean before every commit.
 - Commit messages use `feat:` / `fix:` / `refactor:` prefixes, one commit per task.
 
 ---
@@ -49,10 +49,10 @@ This plan implements spec **Part 2** end-to-end on the Mac, plus the **desktop h
 ### Task 1: Dependencies and migration v18 (vault schema)
 
 **Files:**
-- Modify: `daily-triage-core/Cargo.toml`
+- Modify: `nimble-core/Cargo.toml`
 - Modify: `apps/desktop/src-tauri/Cargo.toml:9`
-- Modify: `daily-triage-core/src/db/migrations.rs` (append to `MIGRATIONS`, after the v17 entry ending at line ~429)
-- Modify: `daily-triage-core/CLAUDE.md` is NOT touched here; `daily-triage/CLAUDE.md` schema notes are updated in Task 14.
+- Modify: `nimble-core/src/db/migrations.rs` (append to `MIGRATIONS`, after the v17 entry ending at line ~429)
+- Modify: `nimble-core/CLAUDE.md` is NOT touched here; `nimble/CLAUDE.md` schema notes are updated in Task 14.
 
 **Interfaces:**
 - Consumes: nothing.
@@ -60,7 +60,7 @@ This plan implements spec **Part 2** end-to-end on the Mac, plus the **desktop h
 
 - [ ] **Step 1: Raise the MSRV on both crates before adding dependencies**
 
-In `daily-triage-core/Cargo.toml` change:
+In `nimble-core/Cargo.toml` change:
 
 ```toml
 rust-version = "1.77.2"
@@ -77,14 +77,14 @@ Do the same at `apps/desktop/src-tauri/Cargo.toml:9`. Both must change: cargo's 
 - [ ] **Step 2: Add the dependencies**
 
 ```bash
-cd daily-triage-core
+cd nimble-core
 cargo add turbovault-parser@1.6 notify@8.2 notify-debouncer-full@0.6 blake3@1.8 walkdir@2.5
 ```
 
 - [ ] **Step 3: Verify the resolved versions are the intended ones**
 
 ```bash
-cd /Users/marcosevilla/Developer/marco-task-app/daily-triage
+cd /Users/marcosevilla/Developer/marco-task-app/nimble
 grep -A1 'name = "turbovault-parser"' Cargo.lock
 grep -A1 'name = "notify-debouncer-full"' Cargo.lock
 ```
@@ -93,7 +93,7 @@ Expected: `version = "1.6.0"` and `version = "0.6.0"`. If `turbovault-parser` re
 
 - [ ] **Step 4: Write the failing migration test**
 
-Add to the bottom of `daily-triage-core/src/db/migrations.rs`:
+Add to the bottom of `nimble-core/src/db/migrations.rs`:
 
 ```rust
 #[cfg(test)]
@@ -142,12 +142,12 @@ mod v18_tests {
 
 - [ ] **Step 5: Run it and watch it fail**
 
-Run: `cargo test -p daily-triage-core v18_tests -- --nocapture`
+Run: `cargo test -p nimble-core v18_tests -- --nocapture`
 Expected: FAIL — `missing table vault_notes`.
 
 - [ ] **Step 6: Add migration v18**
 
-Append this `Migration` entry to the `MIGRATIONS` slice in `daily-triage-core/src/db/migrations.rs`, immediately after the version 17 entry and before the closing `];`. Note there are **no** `CREATE TRIGGER` statements — the runner splits this string on `;`, so a trigger body would be torn apart.
+Append this `Migration` entry to the `MIGRATIONS` slice in `nimble-core/src/db/migrations.rs`, immediately after the version 17 entry and before the closing `];`. Note there are **no** `CREATE TRIGGER` statements — the runner splits this string on `;`, so a trigger body would be torn apart.
 
 ```rust
     Migration {
@@ -192,18 +192,18 @@ Append this `Migration` entry to the `MIGRATIONS` slice in `daily-triage-core/sr
 
 - [ ] **Step 7: Run the test to verify it passes**
 
-Run: `cargo test -p daily-triage-core v18_tests`
+Run: `cargo test -p nimble-core v18_tests`
 Expected: PASS.
 
 - [ ] **Step 8: Confirm the whole suite still passes**
 
-Run: `cargo test -p daily-triage-core`
+Run: `cargo test -p nimble-core`
 Expected: all pre-existing tests (68 at branch point) plus the new one pass.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add daily-triage-core/Cargo.toml daily-triage-core/src/db/migrations.rs apps/desktop/src-tauri/Cargo.toml Cargo.lock
+git add nimble-core/Cargo.toml nimble-core/src/db/migrations.rs apps/desktop/src-tauri/Cargo.toml Cargo.lock
 git commit -m "feat: add vault index schema (migration v18) and vault dependencies"
 ```
 
@@ -212,8 +212,8 @@ git commit -m "feat: add vault index schema (migration v18) and vault dependenci
 ### Task 2: Vault config — path resolution and exclusion rules
 
 **Files:**
-- Create: `daily-triage-core/src/vault/mod.rs`
-- Modify: `daily-triage-core/src/lib.rs:1-7` (add `pub mod vault;`)
+- Create: `nimble-core/src/vault/mod.rs`
+- Modify: `nimble-core/src/lib.rs:1-7` (add `pub mod vault;`)
 
 **Interfaces:**
 - Consumes: `crate::db::settings::{get_setting, set_setting}`.
@@ -228,7 +228,7 @@ git commit -m "feat: add vault index schema (migration v18) and vault dependenci
 
 - [ ] **Step 1: Write the failing test**
 
-Create `daily-triage-core/src/vault/mod.rs` containing only this test module for now:
+Create `nimble-core/src/vault/mod.rs` containing only this test module for now:
 
 ```rust
 #[cfg(test)]
@@ -289,12 +289,12 @@ mod config_tests {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cargo test -p daily-triage-core config_tests`
+Run: `cargo test -p nimble-core config_tests`
 Expected: FAIL — `cannot find function is_excluded` / module `vault` not declared.
 
 - [ ] **Step 3: Declare the module**
 
-In `daily-triage-core/src/lib.rs`, add `pub mod vault;` to the module list so it reads:
+In `nimble-core/src/lib.rs`, add `pub mod vault;` to the module list so it reads:
 
 ```rust
 pub mod api;
@@ -309,7 +309,7 @@ pub mod vault;
 
 - [ ] **Step 4: Write the implementation**
 
-Put this **above** the test module in `daily-triage-core/src/vault/mod.rs`:
+Put this **above** the test module in `nimble-core/src/vault/mod.rs`:
 
 ```rust
 use sqlx::SqlitePool;
@@ -411,19 +411,19 @@ pub fn rel_path(root: &Path, abs: &Path) -> Option<String> {
 Note: the `pub mod index; pub mod parser; pub mod scanner; pub mod watcher; pub mod writer;` lines reference files created in Tasks 3–7. Create the four remaining files as empty placeholders now so the crate compiles:
 
 ```bash
-cd daily-triage-core/src/vault
+cd nimble-core/src/vault
 touch index.rs parser.rs scanner.rs watcher.rs writer.rs
 ```
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core config_tests`
+Run: `cargo test -p nimble-core config_tests`
 Expected: PASS (4 tests).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add daily-triage-core/src/lib.rs daily-triage-core/src/vault/
+git add nimble-core/src/lib.rs nimble-core/src/vault/
 git commit -m "feat: vault config — path resolution and exclusion rules"
 ```
 
@@ -432,7 +432,7 @@ git commit -m "feat: vault config — path resolution and exclusion rules"
 ### Task 3: Vault parser — Obsidian-flavored markdown to indexable fields
 
 **Files:**
-- Modify: `daily-triage-core/src/vault/parser.rs` (currently empty)
+- Modify: `nimble-core/src/vault/parser.rs` (currently empty)
 
 **Interfaces:**
 - Consumes: `turbovault_parser::ParsedContent`, `crate::vault::rel_path` conventions.
@@ -447,7 +447,7 @@ Verified `turbovault-parser` 1.6 behaviour this task depends on (checked against
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `daily-triage-core/src/vault/parser.rs`:
+Add to `nimble-core/src/vault/parser.rs`:
 
 ```rust
 #[cfg(test)]
@@ -532,12 +532,12 @@ mod tests {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cargo test -p daily-triage-core vault::parser`
+Run: `cargo test -p nimble-core vault::parser`
 Expected: FAIL — `cannot find function parse_note in this scope`.
 
 - [ ] **Step 3: Write the implementation**
 
-Put this above the test module in `daily-triage-core/src/vault/parser.rs`:
+Put this above the test module in `nimble-core/src/vault/parser.rs`:
 
 ```rust
 use turbovault_parser::ParsedContent;
@@ -648,13 +648,13 @@ pub fn parse_note(rel_path: &str, content: &str) -> ParsedNote {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core vault::parser`
+Run: `cargo test -p nimble-core vault::parser`
 Expected: PASS (5 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add daily-triage-core/src/vault/parser.rs
+git add nimble-core/src/vault/parser.rs
 git commit -m "feat: vault parser — titles, wikilinks, embeds, tags, frontmatter"
 ```
 
@@ -663,7 +663,7 @@ git commit -m "feat: vault parser — titles, wikilinks, embeds, tags, frontmatt
 ### Task 4: Vault index — note upsert, tombstones, FTS, sync_log
 
 **Files:**
-- Modify: `daily-triage-core/src/vault/index.rs` (currently empty)
+- Modify: `nimble-core/src/vault/index.rs` (currently empty)
 
 **Interfaces:**
 - Consumes: `crate::vault::parser::{parse_note, ParsedNote}`, `crate::db::sync::append_sync_log`.
@@ -685,7 +685,7 @@ git commit -m "feat: vault parser — titles, wikilinks, embeds, tags, frontmatt
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `daily-triage-core/src/vault/index.rs`:
+Add to `nimble-core/src/vault/index.rs`:
 
 ```rust
 #[cfg(test)]
@@ -827,12 +827,12 @@ mod tests {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cargo test -p daily-triage-core vault::index`
+Run: `cargo test -p nimble-core vault::index`
 Expected: FAIL — `cannot find function upsert_note in this scope`.
 
 - [ ] **Step 3: Write the implementation**
 
-Put this above the test module in `daily-triage-core/src/vault/index.rs`:
+Put this above the test module in `nimble-core/src/vault/index.rs`:
 
 ```rust
 use sqlx::SqlitePool;
@@ -1339,13 +1339,13 @@ async fn refresh_fts(
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core vault::index`
+Run: `cargo test -p nimble-core vault::index`
 Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add daily-triage-core/src/vault/index.rs
+git add nimble-core/src/vault/index.rs
 git commit -m "feat: vault index — upsert, tombstones, FTS, backlinks, sync_log"
 ```
 
@@ -1354,7 +1354,7 @@ git commit -m "feat: vault index — upsert, tombstones, FTS, backlinks, sync_lo
 ### Task 5: Vault scanner — full walk with mtime/size pre-check and blake3 confirm
 
 **Files:**
-- Modify: `daily-triage-core/src/vault/scanner.rs` (currently empty)
+- Modify: `nimble-core/src/vault/scanner.rs` (currently empty)
 
 **Interfaces:**
 - Consumes: `crate::vault::{VaultConfig, is_indexable, rel_path}`, `crate::vault::index::{indexed_files, upsert_note, touch_stat, soft_delete_note}`.
@@ -1367,7 +1367,7 @@ git commit -m "feat: vault index — upsert, tombstones, FTS, backlinks, sync_lo
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `daily-triage-core/src/vault/scanner.rs`:
+Add to `nimble-core/src/vault/scanner.rs`:
 
 ```rust
 #[cfg(test)]
@@ -1479,12 +1479,12 @@ mod tests {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cargo test -p daily-triage-core vault::scanner`
+Run: `cargo test -p nimble-core vault::scanner`
 Expected: FAIL — `cannot find function full_scan in this scope`.
 
 - [ ] **Step 3: Write the implementation**
 
-Put this above the test module in `daily-triage-core/src/vault/scanner.rs`:
+Put this above the test module in `nimble-core/src/vault/scanner.rs`:
 
 ```rust
 use sqlx::SqlitePool;
@@ -1671,13 +1671,13 @@ pub async fn index_one(pool: &SqlitePool, cfg: &VaultConfig, abs: &Path) -> crat
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core vault::scanner`
+Run: `cargo test -p nimble-core vault::scanner`
 Expected: PASS (5 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add daily-triage-core/src/vault/scanner.rs
+git add nimble-core/src/vault/scanner.rs
 git commit -m "feat: vault scanner — full walk, stat pre-check, blake3 confirm, tombstones"
 ```
 
@@ -1686,7 +1686,7 @@ git commit -m "feat: vault scanner — full walk, stat pre-check, blake3 confirm
 ### Task 6: Vault writer — atomic edit-in-place with conflict copies
 
 **Files:**
-- Modify: `daily-triage-core/src/vault/writer.rs` (currently empty)
+- Modify: `nimble-core/src/vault/writer.rs` (currently empty)
 
 **Interfaces:**
 - Consumes: `crate::vault::{VaultConfig, is_indexable}`, `crate::vault::scanner::hash_content`.
@@ -1697,7 +1697,7 @@ git commit -m "feat: vault scanner — full walk, stat pre-check, blake3 confirm
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `daily-triage-core/src/vault/writer.rs`:
+Add to `nimble-core/src/vault/writer.rs`:
 
 ```rust
 #[cfg(test)]
@@ -1841,12 +1841,12 @@ mod tests {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cargo test -p daily-triage-core vault::writer`
+Run: `cargo test -p nimble-core vault::writer`
 Expected: FAIL — `cannot find function write_note in this scope`.
 
 - [ ] **Step 3: Write the implementation**
 
-Put this above the test module in `daily-triage-core/src/vault/writer.rs`:
+Put this above the test module in `nimble-core/src/vault/writer.rs`:
 
 ```rust
 use std::path::{Path, PathBuf};
@@ -2018,13 +2018,13 @@ async fn atomic_write(abs: &Path, content: &str) -> crate::Result<()> {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core vault::writer`
+Run: `cargo test -p nimble-core vault::writer`
 Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add daily-triage-core/src/vault/writer.rs
+git add nimble-core/src/vault/writer.rs
 git commit -m "feat: vault writer — atomic edit-in-place with conflict copies"
 ```
 
@@ -2033,7 +2033,7 @@ git commit -m "feat: vault writer — atomic edit-in-place with conflict copies"
 ### Task 7: Vault watcher — debounced filesystem events
 
 **Files:**
-- Modify: `daily-triage-core/src/vault/watcher.rs` (currently empty)
+- Modify: `nimble-core/src/vault/watcher.rs` (currently empty)
 
 **Interfaces:**
 - Consumes: `notify`, `notify_debouncer_full`.
@@ -2045,7 +2045,7 @@ The exact API shape below is compile-verified against `notify` 8.2.0 + `notify-d
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `daily-triage-core/src/vault/watcher.rs`:
+Add to `nimble-core/src/vault/watcher.rs`:
 
 ```rust
 #[cfg(test)]
@@ -2090,12 +2090,12 @@ mod tests {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cargo test -p daily-triage-core vault::watcher`
+Run: `cargo test -p nimble-core vault::watcher`
 Expected: FAIL — `cannot find function spawn in this scope`.
 
 - [ ] **Step 3: Write the implementation**
 
-Put this above the test module in `daily-triage-core/src/vault/watcher.rs`:
+Put this above the test module in `nimble-core/src/vault/watcher.rs`:
 
 ```rust
 use notify::{RecommendedWatcher, RecursiveMode};
@@ -2157,18 +2157,18 @@ where
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `cargo test -p daily-triage-core vault::watcher -- --nocapture`
+Run: `cargo test -p nimble-core vault::watcher -- --nocapture`
 Expected: PASS. (This test touches the real filesystem and takes up to ~1s.)
 
 - [ ] **Step 5: Run the whole core suite**
 
-Run: `cargo test -p daily-triage-core`
+Run: `cargo test -p nimble-core`
 Expected: all green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add daily-triage-core/src/vault/watcher.rs
+git add nimble-core/src/vault/watcher.rs
 git commit -m "feat: vault watcher — debounced filesystem events"
 ```
 
@@ -2177,8 +2177,8 @@ git commit -m "feat: vault watcher — debounced filesystem events"
 ### Task 8: Turso replication for vault tables (Mac side)
 
 **Files:**
-- Modify: `daily-triage-core/src/db/sync.rs` — `initialize_remote` create list (~line 320, after the `doc_notes` entry), `sanitize_table_name` ALLOWED list (line 861-877), `seed_existing_data` table list (line 946-950), `push` (line 546-551), and the pull loop (line 743-756)
-- Modify: `daily-triage-core/src/vault/index.rs` (no change if Task 4 already added `on_turso_row_applied` — verify)
+- Modify: `nimble-core/src/db/sync.rs` — `initialize_remote` create list (~line 320, after the `doc_notes` entry), `sanitize_table_name` ALLOWED list (line 861-877), `seed_existing_data` table list (line 946-950), `push` (line 546-551), and the pull loop (line 743-756)
+- Modify: `nimble-core/src/vault/index.rs` (no change if Task 4 already added `on_turso_row_applied` — verify)
 
 **Interfaces:**
 - Consumes: `crate::vault::index::on_turso_row_applied`.
@@ -2186,7 +2186,7 @@ git commit -m "feat: vault watcher — debounced filesystem events"
 
 - [ ] **Step 1: Write the failing test**
 
-Add to the existing test area at the bottom of `daily-triage-core/src/db/sync.rs` (create the module if there isn't one):
+Add to the existing test area at the bottom of `nimble-core/src/db/sync.rs` (create the module if there isn't one):
 
 ```rust
 #[cfg(test)]
@@ -2257,12 +2257,12 @@ mod vault_sync_tests {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cargo test -p daily-triage-core vault_sync_tests`
+Run: `cargo test -p nimble-core vault_sync_tests`
 Expected: FAIL — `vault_notes must be sync-allowed`.
 
 - [ ] **Step 3: Add the three tables to the sync allowlist**
 
-In `daily-triage-core/src/db/sync.rs`, extend the `ALLOWED` const inside `sanitize_table_name` (line 861) so it ends:
+In `nimble-core/src/db/sync.rs`, extend the `ALLOWED` const inside `sanitize_table_name` (line 861) so it ends:
 
 ```rust
         "capture_routes",
@@ -2291,7 +2291,7 @@ In the same file, extend `tables_with_id` (line 946):
 
 - [ ] **Step 5: Define the vault DDL once and use it for fresh remotes**
 
-The same three `CREATE TABLE` statements are needed in two places (a fresh remote, and the v18 upgrade of an already-initialized one), so they live in a single constant. Add it immediately above `initialize_remote` in `daily-triage-core/src/db/sync.rs`:
+The same three `CREATE TABLE` statements are needed in two places (a fresh remote, and the v18 upgrade of an already-initialized one), so they live in a single constant. Add it immediately above `initialize_remote` in `nimble-core/src/db/sync.rs`:
 
 ```rust
 /// Remote DDL for the vault tables. Used both when initializing a fresh remote
@@ -2415,18 +2415,18 @@ In `pull`, immediately after the existing Todoist observer call (line 749-756), 
 
 - [ ] **Step 9: Run the tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core vault_sync_tests`
+Run: `cargo test -p nimble-core vault_sync_tests`
 Expected: PASS (3 tests).
 
 - [ ] **Step 10: Run the whole core suite**
 
-Run: `cargo test -p daily-triage-core`
+Run: `cargo test -p nimble-core`
 Expected: all green.
 
 - [ ] **Step 11: Commit**
 
 ```bash
-git add daily-triage-core/src/db/sync.rs
+git add nimble-core/src/db/sync.rs
 git commit -m "feat: replicate vault tables through Turso (Mac side)"
 ```
 
@@ -2445,12 +2445,12 @@ git commit -m "feat: replicate vault tables through Turso (Mac side)"
 - Modify: `apps/desktop/src/services/tauri-provider.ts`
 
 **Interfaces:**
-- Consumes: `daily_triage_core::vault::{load_config, index, scanner, watcher, writer}`.
+- Consumes: `nimble_core::vault::{load_config, index, scanner, watcher, writer}`.
 - Produces: commands `vault_status`, `vault_rescan`, `vault_list_notes`, `vault_get_note`, `vault_save_note`, `vault_create_note`, `vault_search`, `vault_backlinks`, `vault_resolve_link`, `vault_open_in_obsidian`; the `vault-changed` webview event; TS types `VaultNoteSummary`, `VaultNoteDetail`, `VaultSearchHit`, `VaultStatus`, `VaultScanReport`, `VaultSaveResult`; `dp.vault.*`.
 
 - [ ] **Step 1: Add a status helper to the core vault module**
 
-Append to `daily-triage-core/src/vault/mod.rs` (above its test module):
+Append to `nimble-core/src/vault/mod.rs` (above its test module):
 
 ```rust
 #[derive(Debug, Clone, serde::Serialize)]
@@ -2556,7 +2556,7 @@ Add this test to the `config_tests` module in the same file:
     }
 ```
 
-Run: `cargo test -p daily-triage-core config_tests`
+Run: `cargo test -p nimble-core config_tests`
 Expected: PASS (5 tests).
 
 - [ ] **Step 2: Write the Tauri command wrappers**
@@ -2567,12 +2567,12 @@ Create `apps/desktop/src-tauri/src/commands/vault.rs`:
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
-use daily_triage_core::vault::{self, index, scanner, writer};
+use nimble_core::vault::{self, index, scanner, writer};
 
-pub use daily_triage_core::vault::VaultStatus;
-pub use daily_triage_core::vault::index::{VaultNoteRow, VaultNoteSummary, VaultSearchHit};
-pub use daily_triage_core::vault::scanner::ScanReport;
-pub use daily_triage_core::vault::writer::WriteOutcome;
+pub use nimble_core::vault::VaultStatus;
+pub use nimble_core::vault::index::{VaultNoteRow, VaultNoteSummary, VaultSearchHit};
+pub use nimble_core::vault::scanner::ScanReport;
+pub use nimble_core::vault::writer::WriteOutcome;
 
 async fn config(app: &AppHandle) -> Result<vault::VaultConfig, String> {
     let pool = app.state::<SqlitePool>();
@@ -2710,7 +2710,7 @@ Create `apps/desktop/src-tauri/src/vault_runner.rs`, modelled on the existing `s
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager};
 
-use daily_triage_core::vault::{self, scanner, watcher::VaultWatcher};
+use nimble_core::vault::{self, scanner, watcher::VaultWatcher};
 
 /// Holds the live watcher so it isn't dropped (dropping stops the watch).
 pub struct VaultWatchState(pub std::sync::Mutex<Option<VaultWatcher>>);
@@ -2742,7 +2742,7 @@ pub async fn start(app: &AppHandle) {
 
     let handle = app.clone();
     let watch_cfg = cfg.clone();
-    let spawned = daily_triage_core::vault::watcher::spawn(&cfg.root, move |paths| {
+    let spawned = nimble_core::vault::watcher::spawn(&cfg.root, move |paths| {
         let handle = handle.clone();
         let cfg = watch_cfg.clone();
         tauri::async_runtime::spawn(async move {
@@ -2878,7 +2878,7 @@ export type VaultSaveResult =
 
 - [ ] **Step 6: Add the invoke wrappers**
 
-Append to `apps/desktop/src/services/tauri.ts` (import the new types alongside the existing `@daily-triage/types` imports at the top of the file):
+Append to `apps/desktop/src/services/tauri.ts` (import the new types alongside the existing `@nimble/types` imports at the top of the file):
 
 ```ts
 // ── Obsidian vault ──
@@ -2969,7 +2969,7 @@ Place it directly after the `docs` slice, which ends at `apps/desktop/src/servic
 - [ ] **Step 8: Verify the Rust side compiles and the frontend type-checks**
 
 ```bash
-cargo build -p daily-triage-core
+cargo build -p nimble-core
 cd apps/desktop/src-tauri && cargo check
 cd ../ && npx tsc --noEmit
 ```
@@ -2978,7 +2978,7 @@ Expected: all three clean.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add daily-triage-core/src/vault/mod.rs apps/desktop/src-tauri/src apps/desktop/src/services packages/types/src/index.ts
+git add nimble-core/src/vault/mod.rs apps/desktop/src-tauri/src apps/desktop/src/services packages/types/src/index.ts
 git commit -m "feat: vault Tauri commands, launch scan + watcher runtime, TS surface"
 ```
 
@@ -2990,7 +2990,7 @@ git commit -m "feat: vault Tauri commands, launch scan + watcher runtime, TS sur
 - Modify: `apps/desktop/src-tauri/src/commands/obsidian.rs:89-137`
 
 **Interfaces:**
-- Consumes: `daily_triage_core::vault::index::get_note_by_path`.
+- Consumes: `nimble_core::vault::index::get_note_by_path`.
 - Produces: unchanged command signatures — `read_today_md`, `read_quick_captures`, `read_session_log`, `read_daily_brief` keep their exact return types.
 
 Behaviour must be preserved exactly: these commands feed `TodayPanel.tsx` and `BriefDisplay.tsx`. The change is the *source* of the bytes (index first, disk fallback), not the shape of the result. `write_quick_capture` and `toggle_obsidian_checkbox` keep writing to disk directly — the watcher re-indexes them — because they are surgical line edits, not whole-note replacements.
@@ -3006,7 +3006,7 @@ Add to `apps/desktop/src-tauri/src/commands/obsidian.rs`, below `get_vault_path`
 /// under an excluded folder.
 async fn read_vault_file(app: &AppHandle, rel: &str) -> Result<Option<String>, String> {
     let pool = app.state::<SqlitePool>();
-    if let Ok(Some(note)) = daily_triage_core::vault::index::get_note_by_path(pool.inner(), rel).await {
+    if let Ok(Some(note)) = nimble_core::vault::index::get_note_by_path(pool.inner(), rel).await {
         if note.deleted_at.is_none() {
             return Ok(Some(note.content));
         }
@@ -3032,7 +3032,7 @@ pub async fn read_today_md(app: AppHandle) -> Result<ParsedTodayMd, String> {
     let content = read_vault_file(&app, "today.md")
         .await?
         .ok_or_else(|| "Failed to read today.md: not found".to_string())?;
-    Ok(daily_triage_core::parsers::markdown::parse_today_md(&content))
+    Ok(nimble_core::parsers::markdown::parse_today_md(&content))
 }
 
 #[tauri::command]
@@ -3070,7 +3070,7 @@ Run: `cd apps/desktop && npm run tauri dev`
 Confirm on the Today page: the Obsidian today.md panel renders its checklist, the quick-captures list populates, and the brief displays under Activity. Then check the log for the launch scan line:
 
 ```bash
-grep "vault scan:" "$HOME/Library/Logs/com.marcosevilla.daily-triage/Marco's Task App.log" | tail -3
+grep "vault scan:" "$HOME/Library/Logs/com.marcosevilla.daily-triage/Nimble.log" | tail -3
 ```
 Expected: a line reporting scanned/indexed counts for Marco's real vault.
 
@@ -3100,7 +3100,7 @@ Rewrite `apps/desktop/src/stores/docsStore.ts` as:
 ```ts
 import { create } from 'zustand'
 import { getDataProvider } from '@/services/provider-context'
-import type { DocFolder, Document, VaultNoteDetail, VaultNoteSummary } from '@daily-triage/types'
+import type { DocFolder, Document, VaultNoteDetail, VaultNoteSummary } from '@nimble/types'
 
 interface DocsStore {
   folders: DocFolder[]
@@ -3282,7 +3282,7 @@ export function groupVaultNotes(notes: VaultNoteSummary[]): VaultFolderGroup[] {
 }
 ```
 
-Add `import type { Document, VaultNoteSummary } from '@daily-triage/types'` (replacing the existing type-only Document import on line 8).
+Add `import type { Document, VaultNoteSummary } from '@nimble/types'` (replacing the existing type-only Document import on line 8).
 
 4. Render the section immediately after the "Unfiled docs" block (after line 245, before the new-folder input). It mirrors the native tree's visual language so the two backends read as one library:
 
@@ -3427,7 +3427,7 @@ import { Button } from '@/components/ui/button'
 import { Meta } from '@/components/shared/typography'
 import { ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
-import type { VaultNoteSummary } from '@daily-triage/types'
+import type { VaultNoteSummary } from '@nimble/types'
 
 /** Debounce for auto-save: long enough that a burst of typing is one write. */
 const SAVE_DELAY_MS = 1200
@@ -3991,7 +3991,7 @@ git commit -m "feat: clickable wikilinks with note creation for unresolved targe
 **Files:**
 - Create: `apps/desktop/src/components/settings/VaultSection.tsx`
 - Modify: `apps/desktop/src/components/pages/SettingsPage.tsx` (import ~line 44, sidebar nav ~line 1245, section placement ~line 1460)
-- Modify: `daily-triage/CLAUDE.md` (migration version, key tables, sync notes)
+- Modify: `nimble/CLAUDE.md` (migration version, key tables, sync notes)
 
 **Interfaces:**
 - Consumes: `dp.vault.status()`, `dp.vault.rescan()`.
@@ -4007,7 +4007,7 @@ import { useDataProvider } from '@/services/provider-context'
 import { Button } from '@/components/ui/button'
 import { Meta } from '@/components/shared/typography'
 import { toast } from 'sonner'
-import type { VaultStatus } from '@daily-triage/types'
+import type { VaultStatus } from '@nimble/types'
 
 export function VaultSection() {
   const dp = useDataProvider()
@@ -4107,7 +4107,7 @@ import { VaultSection } from '@/components/settings/VaultSection'
 
 - [ ] **Step 3: Update the project documentation**
 
-In `daily-triage/CLAUDE.md`:
+In `nimble/CLAUDE.md`:
 
 1. In **Database Migrations**, change `Current version: **17**` to `**18**` and extend the version list with:
 
@@ -4143,7 +4143,7 @@ In `daily-triage/CLAUDE.md`:
 - [ ] **Step 4: Full verification**
 
 ```bash
-cargo test -p daily-triage-core
+cargo test -p nimble-core
 cd apps/desktop/src-tauri && cargo check
 cd .. && npx tsc --noEmit && npm run build
 ```

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useDataProvider } from '@/services/provider-context'
-import type { ActivityEntry, ActivitySummary } from '@daily-triage/types'
+import type { ActivityEntry, ActivitySummary } from '@nimble/types'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import {

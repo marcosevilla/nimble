@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "daily-triage-dev",
+      "name": "nimble-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "tauri", "dev"],
       "port": 5173

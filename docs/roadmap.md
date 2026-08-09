@@ -1,4 +1,4 @@
-# Daily Triage — Roadmap
+# Nimble — Roadmap
 
 ## Current State (as of 2026-03-23)
 

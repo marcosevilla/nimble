@@ -1,11 +1,11 @@
-# Daily Triage
+# Nimble
 
-A personal daily triage and briefing macOS app built with Tauri 2.0.
+Nimble (formerly "Daily Triage") — a personal daily triage and briefing macOS app built with Tauri 2.0.
 
 ## Tech Stack
 - **Frontend (desktop):** React 19 + TypeScript + Vite + Tailwind CSS v4 + shadcn/ui (base-nova style)
 - **Frontend (mobile):** React Native (Expo) + TypeScript + StyleSheet
-- **Backend:** Rust (Tauri 2.0) + `daily-triage-core` library crate
+- **Backend:** Rust (Tauri 2.0) + `nimble-core` library crate
 - **Database:** SQLite via sqlx (desktop) / expo-sqlite (mobile)
 - **Sync:** Custom sync protocol via Turso (hosted libSQL) — last-write-wins, single-user
 - **State:** Zustand (appStore, focusStore, detailStore) via DataProvider abstraction
@@ -20,7 +20,7 @@ A personal daily triage and briefing macOS app built with Tauri 2.0.
 
 ## Project Structure (Monorepo)
 ```
-daily-triage/
+nimble/
 ├── apps/
 │   ├── desktop/              (Tauri desktop app)
 │   │   ├── src/              (React frontend)
@@ -33,8 +33,8 @@ daily-triage/
 │       ├── constants/        (theme)
 │       └── package.json
 ├── packages/
-│   └── types/                (shared TypeScript types — @daily-triage/types)
-├── daily-triage-core/        (Rust library crate — all business logic)
+│   └── types/                (shared TypeScript types — @nimble/types)
+├── nimble-core/        (Rust library crate — all business logic)
 │   ├── src/db/               (tasks, projects, captures, goals, habits, docs, sync, etc.)
 │   ├── src/api/              (todoist_migration, anthropic, calendar, updater)
 │   ├── src/parsers/          (ical, markdown)
@@ -55,7 +55,7 @@ daily-triage/
 - Task/project mutations must go through `db/tasks.rs` / `db/projects.rs` CRUD fns (they feed sync_log AND the Todoist outbox observer) — never raw SQL from commands
 
 ## Adding a Rust Command
-1. Add the business logic function in `daily-triage-core/src/db/<domain>.rs`
+1. Add the business logic function in `nimble-core/src/db/<domain>.rs`
 2. Create a thin Tauri wrapper in `apps/desktop/src-tauri/src/commands/<domain>.rs`
 3. Export the module in `apps/desktop/src-tauri/src/commands/mod.rs`
 4. Import it in `apps/desktop/src-tauri/src/lib.rs`
@@ -64,7 +64,7 @@ daily-triage/
 
 ## Database Migrations
 - SQLite managed via sqlx (desktop Rust) and expo-sqlite (mobile TypeScript)
-- Versioned migration system in `daily-triage-core/src/db/migrations.rs` (Rust) and `apps/mobile/services/database.ts` (TypeScript mirror)
+- Versioned migration system in `nimble-core/src/db/migrations.rs` (Rust) and `apps/mobile/services/database.ts` (TypeScript mirror)
 - Both platforms share the same schema — keep migrations in sync
 - Current version: **18** (v1-13: core schema + v14: sync_log table + device_id + v15: external_id/external_source tracking on local_tasks/projects + v16: capture context column + v17: todoist_outbox, integration_sync_state, and remote_updated_at/synced_snapshot columns for two-way sync + v18: vault_notes/vault_links/vault_tags + device-local vault_fts (FTS5))
 - `schema_version` table tracks what's been applied
@@ -122,7 +122,7 @@ daily-triage/
 - Mobile: `min-h-dvh` + `overflow-y-auto` does not enable scrolling if inner content uses `flex-1` without a constrained parent height. Use `h-dvh` + `flex flex-col` on the outer container so `flex-1` children get bounded remaining space.
 - shadcn Checkbox className overrides (e.g. `data-checked:bg-white`) don't reliably beat the internal `data-checked:bg-primary` on dark backgrounds. Build a custom checkbox button for dark UIs instead.
 - Expo in this monorepo requires `metro.config.js` (with `watchFolders` + `nodeModulesPaths` pointing to the monorepo root) and `babel.config.js` (`babel-preset-expo`). Without both, the app renders a blank white screen with no error.
-- Before deriving layout from a screenshot or reference capture, verify which UI state it shows — Daily Triage renders different layouts for the guided morning flow (Today page, first open, centered ~520px) vs. the dashboard (review complete). Take final dimensions from `getBoundingClientRect`, not image estimates.
+- Before deriving layout from a screenshot or reference capture, verify which UI state it shows — Nimble renders different layouts for the guided morning flow (Today page, first open, centered ~520px) vs. the dashboard (review complete). Take final dimensions from `getBoundingClientRect`, not image estimates.
 - When working from screenshots of this app, verify the dark 44px circle bottom-right isn't the Agentation dev toolbar (collapsed) — it's a dev-only overlay, not real app UI.
 - `services/data-provider.ts` is type-only at runtime — importing a value (e.g. `getDataProvider`) from it passes tsc but throws "Importing binding name not found" at module eval and blanks the whole app. Runtime provider access comes from `@/services/provider-context`.
 - `npx tsc --noEmit` in `apps/desktop` type-checks NOTHING. `tsconfig.json` there is solution-style (`"files": []` + project references), so the bare command resolves it, checks zero files, and exits 0 regardless of how broken `src/` is. Use `npm run build` (which runs `tsc -b`, descending into `tsconfig.app.json`) as the real type check. This silently hid a production-build failure across two plans.
@@ -143,7 +143,7 @@ daily-triage/
 - Pull: fetch remote entries, apply with LWW conflict resolution (skip if local is newer)
 - "Seed Existing Data" command backfills sync_log for pre-existing data
 - Turso URL format: `libsql://<db>-<org>.turso.io` (auto-normalized to https)
-- Remote schema initialization runs once, creating every synced table on Turso (the list lives in `initialize_remote` in `daily-triage-core/src/db/sync.rs`)
+- Remote schema initialization runs once, creating every synced table on Turso (the list lives in `initialize_remote` in `nimble-core/src/db/sync.rs`)
 - Vault tables replicate through the same sync_log pipeline; `vault_fts`, `todoist_outbox`, and `integration_sync_state` stay device/Mac-local
 - Remote schema upgrades are gated per version by a `turso_schema_v<N>_upgraded` setting, since `initialize_remote` only runs once per database
 
@@ -153,8 +153,8 @@ daily-triage/
 - **Completed this session:**
   - Committed the outstanding CLAUDE.md monorepo/mobile/sync refresh (a58eaa1)
   - Audited all 48 files importing from `services/tauri`; split into Wave A (22 type-only) and Wave B (26 UI components still calling invoke wrappers)
-  - Executed Wave A: bulk renamed `@/services/tauri` → `@daily-triage/types` across 22 files (7e3252a). All 4 stores + 6 hooks now fully decoupled from tauri.ts. `tsc --noEmit` clean.
-  - Added git remote `origin` → github.com/marcosevilla/todo and force-pushed clean 50-commit history (overwrote the README-only placeholder commit)
+  - Executed Wave A: bulk renamed `@/services/tauri` → `@nimble/types` across 22 files (7e3252a). All 4 stores + 6 hooks now fully decoupled from tauri.ts. `tsc --noEmit` clean.
+  - Added git remote `origin` → github.com/marcosevilla/nimble and force-pushed clean 50-commit history (overwrote the README-only placeholder commit)
   - Designed v2 logging system proposal with Marco (hooks + nightly rollup + opt-in /note); saved to `~/Obsidian/marcowits/claude-sync/logging-system-v2.md`
 - **Known issues:** Tiptap duplicate link extension warning. HelpPanel roadmap data is stale. First sync push is slow with large datasets. 26 desktop UI components still call invoke wrappers directly (Wave B — scoped as a dedicated follow-up session).
 - **Next up:** Per the v2 proposal's build order, next session = drop-or-fix decision on `daily-brief-data` repo. After that: hook scripts → /note skill → nightly rollup. Unrelated work still pending: Phase 3 mobile polish, evening review flow, goals detail page, Wave B migration (~26 files × ~100 callsites).

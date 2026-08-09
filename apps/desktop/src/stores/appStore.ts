@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CalendarEvent } from '@daily-triage/types'
+import type { CalendarEvent } from '@nimble/types'
 
 export type Page = 'today' | 'tasks' | 'inbox' | 'docs' | 'goals' | 'session' | 'settings'
 

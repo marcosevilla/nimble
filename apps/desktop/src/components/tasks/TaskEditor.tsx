@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useDataProvider } from '@/services/provider-context'
-import type { LocalTask, Project } from '@daily-triage/types'
+import type { LocalTask, Project } from '@nimble/types'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'

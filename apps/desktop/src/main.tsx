@@ -10,7 +10,7 @@ import { useAppStore } from '@/stores/appStore'
 
 // DEV-only: expose stores on window so the audit-loop Playwright session can
 // bypass onboarding (no Tauri runtime in a plain browser → invoke() throws →
-// SetupDialog blocks the UI). See daily-triage/docs/audit-loop-playbook.md.
+// SetupDialog blocks the UI). See nimble/docs/audit-loop-playbook.md.
 if (import.meta.env.DEV) {
   ;(window as unknown as { __stores: unknown }).__stores = { useAppStore }
 }

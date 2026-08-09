@@ -1,4 +1,4 @@
-# Daily Triage — Build Plan
+# Nimble — Build Plan
 
 ## Current State (as of 2026-03-29)
 

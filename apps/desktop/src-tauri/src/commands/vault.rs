@@ -1,12 +1,12 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
-use daily_triage_core::vault::{self, index, scanner, writer};
+use nimble_core::vault::{self, index, scanner, writer};
 
-pub use daily_triage_core::vault::VaultStatus;
-pub use daily_triage_core::vault::index::{VaultNoteRow, VaultNoteSummary, VaultSearchHit};
-pub use daily_triage_core::vault::scanner::ScanReport;
-pub use daily_triage_core::vault::writer::WriteOutcome;
+pub use nimble_core::vault::VaultStatus;
+pub use nimble_core::vault::index::{VaultNoteRow, VaultNoteSummary, VaultSearchHit};
+pub use nimble_core::vault::scanner::ScanReport;
+pub use nimble_core::vault::writer::WriteOutcome;
 
 async fn config(app: &AppHandle) -> Result<vault::VaultConfig, String> {
     let pool = app.state::<SqlitePool>();

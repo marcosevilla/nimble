@@ -10,7 +10,7 @@ import { IconButton } from '@/components/shared/IconButton'
 import { PanelRight, X, Trash2, ArrowRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { taskToast } from '@/lib/taskToast'
-import type { Capture } from '@daily-triage/types'
+import type { Capture } from '@nimble/types'
 
 export function CaptureDetailPage() {
   const dp = useDataProvider()

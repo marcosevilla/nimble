@@ -6,7 +6,7 @@ import { ChevronRight, ChevronsDownUp, Plus, FolderOpen, Folder, FileText, Trash
 import { toast } from 'sonner'
 import { IconButton } from '@/components/shared/IconButton'
 import { DocsSearch } from './DocsSearch'
-import type { Document, VaultNoteSummary } from '@daily-triage/types'
+import type { Document, VaultNoteSummary } from '@nimble/types'
 
 export function FolderTree() {
   const dp = useDataProvider()

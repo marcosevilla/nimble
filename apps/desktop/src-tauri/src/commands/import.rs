@@ -2,12 +2,12 @@ use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
-pub use daily_triage_core::types::ImportSummary;
+pub use nimble_core::types::ImportSummary;
 
 /// Resolve the vault path from settings, expanding ~
 async fn get_vault_path(app: &AppHandle) -> Result<String, String> {
     let pool = app.state::<SqlitePool>();
-    let path = daily_triage_core::db::settings::get_setting(pool.inner(), "obsidian_vault_path")
+    let path = nimble_core::db::settings::get_setting(pool.inner(), "obsidian_vault_path")
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Obsidian vault path not configured".to_string())?;
@@ -35,7 +35,7 @@ pub async fn import_goals_from_vault(app: AppHandle) -> Result<ImportSummary, St
         vault_path
     );
     if let Ok(content) = tokio::fs::read_to_string(&resolutions_path).await {
-        let (goals, habits) = daily_triage_core::parsers::markdown::parse_resolutions(&content);
+        let (goals, habits) = nimble_core::parsers::markdown::parse_resolutions(&content);
 
         for goal_name in &goals {
             let id = Uuid::new_v4().to_string();
@@ -84,7 +84,7 @@ pub async fn import_goals_from_vault(app: AppHandle) -> Result<ImportSummary, St
     // --- Parse Bingo Card ---
     let bingo_path = format!("{}/goals/2026-bingo-card.md", vault_path);
     if let Ok(content) = tokio::fs::read_to_string(&bingo_path).await {
-        let bingo_items = daily_triage_core::parsers::markdown::parse_bingo_card(&content);
+        let bingo_items = nimble_core::parsers::markdown::parse_bingo_card(&content);
 
         for item_name in &bingo_items {
             let id = Uuid::new_v4().to_string();
@@ -108,7 +108,7 @@ pub async fn import_goals_from_vault(app: AppHandle) -> Result<ImportSummary, St
         }
     }
 
-    daily_triage_core::db::activity::log_activity(
+    nimble_core::db::activity::log_activity(
         pool.inner(),
         "vault_import",
         None,

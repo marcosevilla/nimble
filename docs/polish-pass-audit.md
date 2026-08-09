@@ -191,7 +191,7 @@ Then replace hardcoded durations with `duration-[var(--transition-fast)]` etc. T
 
 ## 4. DateStrip
 
-**File:** `/Users/marcosevilla/Developer/personal triage and briefing app/daily-triage/apps/desktop/src/components/shared/DateStrip.tsx`
+**File:** `/Users/marcosevilla/Developer/personal triage and briefing app/nimble/apps/desktop/src/components/shared/DateStrip.tsx`
 
 **Scroll container structure:**
 - Outer div: `flex items-center gap-1` (container with left/right scroll buttons)
@@ -223,7 +223,7 @@ Then replace hardcoded durations with `duration-[var(--transition-fast)]` etc. T
 
 ## 5. SettingsPage sections
 
-**File:** `/Users/marcosevilla/Developer/personal triage and briefing app/daily-triage/apps/desktop/src/components/pages/SettingsPage.tsx`
+**File:** `/Users/marcosevilla/Developer/personal triage and briefing app/nimble/apps/desktop/src/components/pages/SettingsPage.tsx`
 
 ### Sections (in order of appearance):
 
@@ -282,7 +282,7 @@ export function SettingsPage() {
 
 ## 6. Content max-w + sidebar
 
-**File:** `/Users/marcosevilla/Developer/personal triage and briefing app/daily-triage/apps/desktop/src/components/layout/Dashboard.tsx`
+**File:** `/Users/marcosevilla/Developer/personal triage and briefing app/nimble/apps/desktop/src/components/layout/Dashboard.tsx`
 
 ### Main layout structure:
 
@@ -322,10 +322,10 @@ return (
 ### Sidebar visibility:
 - Hidden when: `currentPage === 'settings' || currentPage === 'session'`
 - Controlled by boolean: `hideSidebar`
-- Right sidebar toggle is in `/Users/marcosevilla/Developer/personal triage and briefing app/daily-triage/apps/desktop/src/components/layout/RightSidebar.tsx:77–105`
+- Right sidebar toggle is in `/Users/marcosevilla/Developer/personal triage and briefing app/nimble/apps/desktop/src/components/layout/RightSidebar.tsx:77–105`
 
 ### RightSidebar structure:
-- File: `/Users/marcosevilla/Developer/personal triage and briefing app/daily-triage/apps/desktop/src/components/layout/RightSidebar.tsx`
+- File: `/Users/marcosevilla/Developer/personal triage and briefing app/nimble/apps/desktop/src/components/layout/RightSidebar.tsx`
 - Container: line 69 — `className="relative flex flex-col border-l border-border/20 bg-muted/10 overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"`
 - Toggleable width (via `sidebarCollapsed` state from layoutStore)
 - Contains: Schedule, Habits sections + Detail view (when in sidebar mode)

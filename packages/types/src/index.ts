@@ -1,5 +1,5 @@
 /**
- * @daily-triage/types — Shared TypeScript types for the Daily Triage app.
+ * @nimble/types — Shared TypeScript types for the Nimble app.
  *
  * Used by both the desktop (Tauri) and mobile (Expo) apps.
  * These types mirror the Rust structs and SQLite schema.

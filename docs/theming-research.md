@@ -1,6 +1,6 @@
 # Theming & Typography System — Research & Implementation Plan
 
-> Research doc for Daily Triage theming overhaul.
+> Research doc for Nimble theming overhaul.
 > Written 2026-03-29. Implementation in a follow-up session.
 
 ---
@@ -160,7 +160,7 @@ This is slightly larger than typical SaaS defaults (which use 13px base). The 14
 
 ### Recommended Architecture: Accent Themes + Light/Dark
 
-The best approach for Daily Triage is a **two-axis system**:
+The best approach for Nimble is a **two-axis system**:
 
 1. **Mode axis:** Light / Dark / System (already exists)
 2. **Accent theme axis:** Warm / Ocean / Rose / Mono / Forest

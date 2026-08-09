@@ -1,3 +1,3 @@
-// Moved to daily_triage_core::db::migrations
+// Moved to nimble_core::db::migrations
 // This file is kept for backward compatibility.
-pub use daily_triage_core::db::migrations::*;
+pub use nimble_core::db::migrations::*;

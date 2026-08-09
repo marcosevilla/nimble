@@ -3,7 +3,7 @@ import { StatusDropdown } from './StatusDropdown'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { PriorityBars } from '@/components/shared/PriorityBars'
-import type { TaskStatus } from '@daily-triage/types'
+import type { TaskStatus } from '@nimble/types'
 import { format, parseISO, isToday, isTomorrow, isPast } from 'date-fns'
 import { CornerDownRight, ListTree, CheckCircle2 } from 'lucide-react'
 

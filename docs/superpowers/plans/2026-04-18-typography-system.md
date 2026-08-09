@@ -10,7 +10,7 @@
 
 **Non-goals:** shadcn `ui/*.tsx` primitives keep their raw `text-sm`/`text-xs` (except where they already use `text-body` — those migrate). Mobile app untouched. No test suite exists in this repo; "tests" in this plan means type-check + grep + visual smoke.
 
-**Working directory:** `/Users/marcosevilla/Developer/personal triage and briefing app/daily-triage`
+**Working directory:** `/Users/marcosevilla/Developer/personal triage and briefing app/nimble`
 
 **Precondition:** repo has 86+ unrelated dirty files from the recent cleanup marathon. Each task commits ONLY its own files — never `git add -A`.
 
@@ -1047,14 +1047,14 @@ comment."
 ## Task 14: Write `docs/typography-system.md`
 
 **Files:**
-- Create: `apps/desktop/docs/typography-system.md` OR `daily-triage/docs/typography-system.md` — pick the latter (project-level, matches `roadmap.md`, `theming-research.md`).
+- Create: `apps/desktop/docs/typography-system.md` OR `nimble/docs/typography-system.md` — pick the latter (project-level, matches `roadmap.md`, `theming-research.md`).
 
-- [ ] **Step 1: Create `daily-triage/docs/typography-system.md`**
+- [ ] **Step 1: Create `nimble/docs/typography-system.md`**
 
 ```markdown
 # Typography System
 
-Canonical reference for the Daily Triage type system. For design rationale and migration history, see `docs/superpowers/specs/2026-04-18-typography-system-design.md`.
+Canonical reference for the Nimble type system. For design rationale and migration history, see `docs/superpowers/specs/2026-04-18-typography-system-design.md`.
 
 ## The 10 tokens
 
@@ -1124,11 +1124,11 @@ The tuner (`components/shared/TypographyTuner.tsx`) reads from `lib/typography-t
 - [ ] **Step 2: Commit**
 
 ```bash
-git add daily-triage/docs/typography-system.md
+git add nimble/docs/typography-system.md
 git commit -m "docs: add typography-system.md canonical reference"
 ```
 
-(Note: if run from inside `daily-triage/`, the path is `docs/typography-system.md`.)
+(Note: if run from inside `nimble/`, the path is `docs/typography-system.md`.)
 
 ---
 
@@ -1251,6 +1251,6 @@ The index.css and typography-tokens.ts changes are interdependent; revert both t
 - Everything surfaced by the Task 6-13 grep outputs.
 
 **New docs:**
-- `daily-triage/docs/typography-system.md`
+- `nimble/docs/typography-system.md`
 
 **Total expected commits:** 13 (Tasks 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, optional 15). Task 5 and 16 are checkpoints, not commits.

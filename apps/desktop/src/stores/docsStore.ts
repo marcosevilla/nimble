@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { getDataProvider } from '@/services/provider-context'
-import type { DocFolder, Document, VaultNoteDetail, VaultNoteSummary } from '@daily-triage/types'
+import type { DocFolder, Document, VaultNoteDetail, VaultNoteSummary } from '@nimble/types'
 
 interface DocsStore {
   folders: DocFolder[]

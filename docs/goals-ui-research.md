@@ -1,6 +1,6 @@
 # Goals System UI/UX Research
 
-> Research compiled for the Daily Triage app (Tauri + React)
+> Research compiled for the Nimble app (Tauri + React)
 > Date: 2026-03-29
 > Purpose: Inform the design of goal cards, timeline, habit tracking, progress visualization, life areas, and milestone markers for the Goals page (Phase C)
 

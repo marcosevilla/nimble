@@ -3,7 +3,7 @@ import { useDataProvider } from '@/services/provider-context'
 import { Button } from '@/components/ui/button'
 import { Meta } from '@/components/shared/typography'
 import { toast } from 'sonner'
-import type { VaultStatus } from '@daily-triage/types'
+import type { VaultStatus } from '@nimble/types'
 
 export function VaultSection() {
   const dp = useDataProvider()

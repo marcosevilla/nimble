@@ -10,7 +10,7 @@ import { useDetailStore } from '@/stores/detailStore'
 import { CommandBarResults, type BarMode } from './CommandBarResults'
 import { toast } from 'sonner'
 import { taskToast } from '@/lib/taskToast'
-import type { LocalTask, Document, Capture } from '@daily-triage/types'
+import type { LocalTask, Document, Capture } from '@nimble/types'
 
 const MAX_RESULTS = 8
 

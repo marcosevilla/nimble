@@ -4,7 +4,7 @@ import { useDetailStore } from '@/stores/detailStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { TaskItem } from './TaskItem'
 import { TaskEditor } from './TaskEditor'
-import type { LocalTask, Project } from '@daily-triage/types'
+import type { LocalTask, Project } from '@nimble/types'
 
 interface LocalTaskRowProps {
   task: LocalTask

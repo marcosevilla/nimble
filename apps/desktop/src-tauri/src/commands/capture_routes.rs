@@ -1,13 +1,13 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
-pub use daily_triage_core::types::{CaptureRoute, RouteCaptureResult};
+pub use nimble_core::types::{CaptureRoute, RouteCaptureResult};
 
 /// List all capture routes
 #[tauri::command]
 pub async fn get_capture_routes(app: AppHandle) -> Result<Vec<CaptureRoute>, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::capture_routes::get_capture_routes(pool.inner())
+    nimble_core::db::capture_routes::get_capture_routes(pool.inner())
         .await
         .map_err(|e| e.to_string())
 }
@@ -24,7 +24,7 @@ pub async fn create_capture_route(
     icon: String,
 ) -> Result<CaptureRoute, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::capture_routes::create_capture_route(
+    nimble_core::db::capture_routes::create_capture_route(
         pool.inner(),
         &prefix,
         &target_type,
@@ -50,7 +50,7 @@ pub async fn update_capture_route(
     icon: Option<String>,
 ) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::capture_routes::update_capture_route(
+    nimble_core::db::capture_routes::update_capture_route(
         pool.inner(),
         &id,
         prefix.as_deref(),
@@ -68,7 +68,7 @@ pub async fn update_capture_route(
 #[tauri::command]
 pub async fn delete_capture_route(app: AppHandle, id: String) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::capture_routes::delete_capture_route(pool.inner(), &id)
+    nimble_core::db::capture_routes::delete_capture_route(pool.inner(), &id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -83,7 +83,7 @@ pub async fn route_capture(
     let pool = app.state::<SqlitePool>();
 
     // Look up the route
-    let route = daily_triage_core::db::capture_routes::get_route_by_prefix(pool.inner(), &prefix)
+    let route = nimble_core::db::capture_routes::get_route_by_prefix(pool.inner(), &prefix)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("No route found for prefix '{}'", prefix))?;
@@ -109,7 +109,7 @@ pub async fn route_capture(
             // Auto-create the doc with the route label as title
             let doc = super::docs::create_document(app.clone(), route.label.clone(), None).await?;
             // Update the route to link to this doc
-            daily_triage_core::db::capture_routes::link_route_to_doc(pool.inner(), &route.id, &doc.id)
+            nimble_core::db::capture_routes::link_route_to_doc(pool.inner(), &route.id, &doc.id)
                 .await
                 .map_err(|e| e.to_string())?;
             doc.id
@@ -121,12 +121,12 @@ pub async fn route_capture(
     };
 
     // Save to captures table for history
-    let capture_id = daily_triage_core::db::captures::save_routed_capture(pool.inner(), &content, &route.label)
+    let capture_id = nimble_core::db::captures::save_routed_capture(pool.inner(), &content, &route.label)
         .await
         .map_err(|e| e.to_string())?;
 
     // Log activity
-    daily_triage_core::db::activity::log_activity(
+    nimble_core::db::activity::log_activity(
         pool.inner(),
         "capture_routed",
         Some(&capture_id),

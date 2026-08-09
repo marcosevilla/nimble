@@ -1,5 +1,5 @@
 import { Trash2 } from 'lucide-react'
-import type { DocNote } from '@daily-triage/types'
+import type { DocNote } from '@nimble/types'
 
 interface DocNoteEntryProps {
   note: DocNote

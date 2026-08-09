@@ -48,7 +48,7 @@ export type {
   TodoistMigrationResult,
   SyncReport,
   TodoistSyncStatus,
-} from '@daily-triage/types'
+} from '@nimble/types'
 
 import type {
   Setting,
@@ -96,7 +96,7 @@ import type {
   SyncStatus,
   SyncReport,
   TodoistSyncStatus,
-} from '@daily-triage/types'
+} from '@nimble/types'
 
 // ── Settings ──
 

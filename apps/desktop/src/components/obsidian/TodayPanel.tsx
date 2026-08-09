@@ -2,7 +2,7 @@ import { useObsidian } from '@/hooks/useObsidian'
 import { cn } from '@/lib/utils'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { CheckboxItem } from '@daily-triage/types'
+import type { CheckboxItem } from '@nimble/types'
 
 function CheckboxRow({
   item,

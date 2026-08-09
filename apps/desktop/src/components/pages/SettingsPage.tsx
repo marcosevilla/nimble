@@ -7,7 +7,7 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { useDataProvider } from '@/services/provider-context'
-import type { UpdateStatus, CalendarFeed, CaptureRoute, Document, SyncStatus } from '@daily-triage/types'
+import type { UpdateStatus, CalendarFeed, CaptureRoute, Document, SyncStatus } from '@nimble/types'
 import { useAppStore } from '@/stores/appStore'
 import { useTheme } from '@/hooks/useTheme'
 import type { AccentTheme } from '@/hooks/useTheme'
@@ -425,7 +425,7 @@ function DemoModeSection() {
       await dp.system.toggleDemoMode(on)
       setActive(on)
       toast.message(on ? 'Entering demo mode...' : 'Leaving demo mode...', {
-        description: 'Restarting Daily Triage.',
+        description: 'Restarting Nimble.',
       })
     } catch (e) {
       toast.error(`Failed to toggle demo mode: ${e}`)
@@ -1311,7 +1311,7 @@ export function SettingsPage() {
       <section id="appearance" className="space-y-4 scroll-mt-6">
         <SectionHeader
           title="Appearance"
-          description="Choose how Daily Triage looks on your machine."
+          description="Choose how Nimble looks on your machine."
         />
 
         {/* Mode selector */}

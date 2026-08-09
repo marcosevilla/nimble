@@ -41,7 +41,7 @@ import type {
   SyncStatus,
   SyncReport,
   TodoistSyncStatus,
-} from '@daily-triage/types';
+} from '@nimble/types';
 
 export interface DataProvider {
   settings: {

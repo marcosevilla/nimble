@@ -3,7 +3,7 @@
 **Mode:** Design Critique (Josh Puckett methodology)
 **Surface:** Today page, review mode, Step 1 visible, no calendar/brief data
 **Inputs:** `smoke-today-after-bypass.png`, `TodayPage.tsx`, `Dashboard.tsx`, `CalendarPanel.tsx:480-510`
-**Rubric:** `daily-triage/docs/ux-intent.md`
+**Rubric:** `nimble/docs/ux-intent.md`
 
 ## Summary — overall craft level: 2/5
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '@/stores/appStore'
 import { useDataProvider } from '@/services/provider-context'
-import type { CalendarEvent } from '@daily-triage/types'
+import type { CalendarEvent } from '@nimble/types'
 import { friendlyError } from '@/lib/errors'
 import { toast } from 'sonner'
 

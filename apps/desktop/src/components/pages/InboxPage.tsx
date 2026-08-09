@@ -7,7 +7,7 @@ import { useDetailStore } from '@/stores/detailStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { useDataProvider } from '@/services/provider-context'
-import type { CaptureRoute } from '@daily-triage/types'
+import type { CaptureRoute } from '@nimble/types'
 import { parseRoutePrefix } from '@/lib/captureRoutes'
 import { cn } from '@/lib/utils'
 import { StatusDropdown } from '@/components/tasks/StatusDropdown'
@@ -18,7 +18,7 @@ import { toast } from 'sonner'
 import { taskToast } from '@/lib/taskToast'
 import { PenLine, ArrowRight, FileText, Download, Search, Lightbulb, Quote, CheckSquare } from 'lucide-react'
 import { PageHeader } from '@/components/shared/PageHeader'
-import type { LocalTask, Capture, DocFolder, Document } from '@daily-triage/types'
+import type { LocalTask, Capture, DocFolder, Document } from '@nimble/types'
 
 // ── Route icon map ──
 

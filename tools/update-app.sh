@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="Marco's Task App"
+APP_NAME="Nimble"
 BUNDLE_ID="com.marcosevilla.daily-triage"
 
 cd "$ROOT"

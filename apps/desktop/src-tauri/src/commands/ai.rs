@@ -11,12 +11,12 @@ pub async fn break_down_task(
     let pool = app.state::<SqlitePool>();
 
     // Get API key
-    let api_key = daily_triage_core::db::settings::get_setting(pool.inner(), "anthropic_api_key")
+    let api_key = nimble_core::db::settings::get_setting(pool.inner(), "anthropic_api_key")
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Anthropic API key not configured. Add it in Settings.".to_string())?;
 
-    let subtasks = daily_triage_core::api::anthropic::break_down_task(
+    let subtasks = nimble_core::api::anthropic::break_down_task(
         &api_key,
         &task_content,
         task_description.as_deref(),
@@ -25,7 +25,7 @@ pub async fn break_down_task(
     .map_err(|e| e.to_string())?;
 
     // Log activity
-    daily_triage_core::db::activity::log_activity(
+    nimble_core::db::activity::log_activity(
         pool.inner(),
         "task_breakdown_requested",
         None,

@@ -1,6 +1,6 @@
 # Typography System
 
-Canonical reference for the Daily Triage type system. For design rationale, research, and migration history, see `docs/superpowers/specs/2026-04-18-typography-system-design.md`.
+Canonical reference for the Nimble type system. For design rationale, research, and migration history, see `docs/superpowers/specs/2026-04-18-typography-system-design.md`.
 
 ## The 10 tokens
 

@@ -4,11 +4,11 @@
 
 **Goal:** Fix the external-id plumbing bug and docs HTML→markdown format, then make Todoist a detachable two-way sync adapter over the native task model (outbox + incremental sync loop), retiring the legacy cached Todoist view.
 
-**Architecture:** All business logic lands in `daily-triage-core` (new `src/integrations/` module tree); Tauri commands stay thin wrappers. Local mutations enqueue ops into a persistent `todoist_outbox`; a serialized sync loop pushes batched `/api/v1/sync` commands then pulls incremental deltas by `sync_token`, three-way-merging per field against a stored `synced_snapshot`. Docs content migrates from Tiptap HTML to markdown behind a `docs_content_format` setting.
+**Architecture:** All business logic lands in `nimble-core` (new `src/integrations/` module tree); Tauri commands stay thin wrappers. Local mutations enqueue ops into a persistent `todoist_outbox`; a serialized sync loop pushes batched `/api/v1/sync` commands then pulls incremental deltas by `sync_token`, three-way-merging per field against a stored `synced_snapshot`. Docs content migrates from Tiptap HTML to markdown behind a `docs_content_format` setting.
 
-**Tech Stack:** Rust (sqlx/SQLite, reqwest, tokio, chrono, serde_json, uuid; new dep: `htmd`), Tauri 2, React 19 + TypeScript (new dep: `tiptap-markdown`), Zustand, `@daily-triage/types`.
+**Tech Stack:** Rust (sqlx/SQLite, reqwest, tokio, chrono, serde_json, uuid; new dep: `htmd`), Tauri 2, React 19 + TypeScript (new dep: `tiptap-markdown`), Zustand, `@nimble/types`.
 
-**Scope:** Spec Part 0 (foundation) + Part 1 (Todoist). Spec source: `daily-triage/docs/superpowers/specs/2026-08-04-todoist-obsidian-integration-design.md`. Parts 2 (Vault) and 3 (Mobile) get their own plans once this ships.
+**Scope:** Spec Part 0 (foundation) + Part 1 (Todoist). Spec source: `nimble/docs/superpowers/specs/2026-08-04-todoist-obsidian-integration-design.md`. Parts 2 (Vault) and 3 (Mobile) get their own plans once this ships.
 
 ## Global Constraints
 
@@ -22,8 +22,8 @@
 - New schema migration is **v17** (current is v16). Any column added to a Turso-synced table (`local_tasks`, `projects`) must be mirrored in `apps/mobile/services/database.ts`. `todoist_outbox` and `integration_sync_state` are Mac-local — do NOT mirror them and do NOT add them to any sync allowlist.
 - Todoist token lives in settings key `todoist_api_token` (plaintext settings pattern retained — no keychain work in this project).
 - `/sync` requests carry ≤100 commands; every command's `uuid` is persisted in the outbox row BEFORE sending (idempotent retries).
-- Rust tests: `cargo test -p daily-triage-core`. Frontend check: `cd apps/desktop && npx tsc --noEmit`.
-- Commit after every task. Repo root for git commands is `daily-triage/`.
+- Rust tests: `cargo test -p nimble-core`. Frontend check: `cd apps/desktop && npx tsc --noEmit`.
+- Commit after every task. Repo root for git commands is `nimble/`.
 - New-command recipe (from CLAUDE.md): core fn → thin wrapper in `apps/desktop/src-tauri/src/commands/<domain>.rs` → export in `commands/mod.rs` → register in `lib.rs` `invoke_handler![]` → TS wrapper in `apps/desktop/src/services/tauri.ts` → `DataProvider` interface + `TauriProvider` + mobile `SqliteProvider` stub.
 
 ## Spec deviations (implementation-level refinements — flag to Marco, product decisions untouched)
@@ -38,7 +38,7 @@
 ## File Structure
 
 ```
-daily-triage-core/
+nimble-core/
   src/lib.rs                          MODIFY: + pub mod integrations; #[cfg(test)] pub mod test_util;
   src/test_util.rs                    NEW: in-memory pool + migrations for tests
   src/types.rs                        MODIFY: LocalTask/Project gain external + sync-meta fields
@@ -82,11 +82,11 @@ apps/mobile/services/sqlite-provider.ts MODIFY: stubs for new provider methods
 The latent bug: migration v15 added `external_id`/`external_source` to `local_tasks` and `projects`, but `LocalTask`, `Project`, `SELECT_COLS`, and `row_to_task` don't read them — app code can't see or preserve the Todoist link. This task makes them first-class, and stands up the repo's first Rust tests.
 
 **Files:**
-- Create: `daily-triage-core/src/test_util.rs`
-- Modify: `daily-triage-core/src/lib.rs`
-- Modify: `daily-triage-core/src/types.rs:13-39`
-- Modify: `daily-triage-core/src/db/tasks.rs` (SELECT_COLS :44, row_to_task :8-42, all `query_as` call sites)
-- Modify: `daily-triage-core/src/db/projects.rs` (get_projects :8, create_project :26)
+- Create: `nimble-core/src/test_util.rs`
+- Modify: `nimble-core/src/lib.rs`
+- Modify: `nimble-core/src/types.rs:13-39`
+- Modify: `nimble-core/src/db/tasks.rs` (SELECT_COLS :44, row_to_task :8-42, all `query_as` call sites)
+- Modify: `nimble-core/src/db/projects.rs` (get_projects :8, create_project :26)
 - Modify: `packages/types/src/index.ts:107-133`
 - Test: inline `#[cfg(test)] mod tests` in `tasks.rs` and `projects.rs`
 
@@ -96,7 +96,7 @@ The latent bug: migration v15 added `external_id`/`external_source` to `local_ta
 
 - [ ] **Step 1: Create the test harness**
 
-`daily-triage-core/src/test_util.rs`:
+`nimble-core/src/test_util.rs`:
 ```rust
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
@@ -117,7 +117,7 @@ pub async fn test_pool() -> SqlitePool {
 }
 ```
 
-In `daily-triage-core/src/lib.rs` add alongside the existing module decls:
+In `nimble-core/src/lib.rs` add alongside the existing module decls:
 ```rust
 #[cfg(test)]
 pub mod test_util;
@@ -125,7 +125,7 @@ pub mod test_util;
 
 - [ ] **Step 2: Write the failing test**
 
-At the bottom of `daily-triage-core/src/db/tasks.rs`:
+At the bottom of `nimble-core/src/db/tasks.rs`:
 ```rust
 #[cfg(test)]
 mod tests {
@@ -162,7 +162,7 @@ mod tests {
 }
 ```
 
-And in `daily-triage-core/src/db/projects.rs`:
+And in `nimble-core/src/db/projects.rs`:
 ```rust
 #[cfg(test)]
 mod tests {
@@ -190,7 +190,7 @@ mod tests {
 
 - [ ] **Step 3: Run tests to verify they fail**
 
-Run: `cargo test -p daily-triage-core`
+Run: `cargo test -p nimble-core`
 Expected: COMPILE ERROR — `LocalTask` has no field `external_id` (this is the failing state; the struct doesn't have the fields yet).
 
 - [ ] **Step 4: Implement**
@@ -246,7 +246,7 @@ impl FromRow<'_, SqliteRow> for LocalTask {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core`
+Run: `cargo test -p nimble-core`
 Expected: both tests PASS.
 
 - [ ] **Step 6: Verify nothing else broke**
@@ -268,9 +268,9 @@ git commit -m "fix: expose external_id/external_source through task+project CRUD
 Rust-side conversion of Tiptap HTML to markdown via `htmd`, plus a tag scanner that powers the dry-run lossiness report. Pure functions, fully unit-tested.
 
 **Files:**
-- Modify: `daily-triage-core/Cargo.toml` (add `htmd`)
-- Create: `daily-triage-core/src/parsers/html_to_md.rs`
-- Modify: `daily-triage-core/src/parsers/mod.rs` (add `pub mod html_to_md;`)
+- Modify: `nimble-core/Cargo.toml` (add `htmd`)
+- Create: `nimble-core/src/parsers/html_to_md.rs`
+- Modify: `nimble-core/src/parsers/mod.rs` (add `pub mod html_to_md;`)
 - Test: inline in `html_to_md.rs`
 
 **Interfaces:**
@@ -279,12 +279,12 @@ Rust-side conversion of Tiptap HTML to markdown via `htmd`, plus a tag scanner t
 
 - [ ] **Step 1: Add the dependency**
 
-Run: `cargo add htmd --package daily-triage-core`
-Expected: `htmd = "…"` appears in `daily-triage-core/Cargo.toml`; `cargo build -p daily-triage-core` compiles.
+Run: `cargo add htmd --package nimble-core`
+Expected: `htmd = "…"` appears in `nimble-core/Cargo.toml`; `cargo build -p nimble-core` compiles.
 
 - [ ] **Step 2: Write the failing tests**
 
-`daily-triage-core/src/parsers/html_to_md.rs` (tests first; module skeleton so it compiles as a failing-test state is fine):
+`nimble-core/src/parsers/html_to_md.rs` (tests first; module skeleton so it compiles as a failing-test state is fine):
 ```rust
 #[cfg(test)]
 mod tests {
@@ -340,7 +340,7 @@ mod tests {
 
 - [ ] **Step 3: Run tests to verify they fail**
 
-Run: `cargo test -p daily-triage-core html_to_md`
+Run: `cargo test -p nimble-core html_to_md`
 Expected: COMPILE ERROR (`html_to_markdown` not defined) — add `pub mod html_to_md;` to `parsers/mod.rs` first so the module is reachable.
 
 - [ ] **Step 4: Implement**
@@ -399,7 +399,7 @@ Note: if `htmd::convert` isn't the crate's entry point at the resolved version, 
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core html_to_md`
+Run: `cargo test -p nimble-core html_to_md`
 Expected: 5 tests PASS. If the mention test fails on residual `<span>`, configure htmd to unwrap unknown inline tags (builder option) rather than weakening the assertion.
 
 - [ ] **Step 6: Commit**
@@ -416,7 +416,7 @@ git commit -m "feat: HTML->markdown converter with tag scanner for docs migratio
 Dry-run report over Marco's real docs, `VACUUM INTO` backup, then convert all `documents.content` in one transaction and flip the `docs_content_format` setting. `doc_notes` are plain text (spec deviation #2) — untouched.
 
 **Files:**
-- Modify: `daily-triage-core/src/db/docs.rs`
+- Modify: `nimble-core/src/db/docs.rs`
 - Modify: `apps/desktop/src-tauri/src/commands/docs.rs`
 - Modify: `apps/desktop/src-tauri/src/lib.rs` (register 2 commands)
 - Modify: `apps/desktop/src/services/tauri.ts`, `data-provider.ts`, `tauri-provider.ts`
@@ -434,7 +434,7 @@ Dry-run report over Marco's real docs, `VACUUM INTO` backup, then convert all `d
 
 - [ ] **Step 1: Write the failing tests**
 
-In `daily-triage-core/src/db/docs.rs`:
+In `nimble-core/src/db/docs.rs`:
 ```rust
 #[cfg(test)]
 mod md_migration_tests {
@@ -499,7 +499,7 @@ mod md_migration_tests {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p daily-triage-core md_migration`
+Run: `cargo test -p nimble-core md_migration`
 Expected: COMPILE ERROR — `preview_docs_markdown_migration` not defined.
 
 - [ ] **Step 3: Implement the core functions**
@@ -603,7 +603,7 @@ pub async fn migrate_docs_to_markdown(
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core md_migration`
+Run: `cargo test -p nimble-core md_migration`
 Expected: 2 tests PASS.
 
 - [ ] **Step 5: Wire commands + TS**
@@ -613,9 +613,9 @@ Expected: 2 tests PASS.
 #[tauri::command]
 pub async fn preview_docs_markdown_migration(
     app: AppHandle,
-) -> Result<daily_triage_core::db::docs::DocsMdPreview, String> {
+) -> Result<nimble_core::db::docs::DocsMdPreview, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::docs::preview_docs_markdown_migration(pool.inner())
+    nimble_core::db::docs::preview_docs_markdown_migration(pool.inner())
         .await
         .map_err(|e| e.to_string())
 }
@@ -623,12 +623,12 @@ pub async fn preview_docs_markdown_migration(
 #[tauri::command]
 pub async fn migrate_docs_to_markdown(
     app: AppHandle,
-) -> Result<daily_triage_core::db::docs::DocsMdResult, String> {
+) -> Result<nimble_core::db::docs::DocsMdResult, String> {
     let pool = app.state::<SqlitePool>();
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let backup = app_dir.join(format!("daily-triage-backup-pre-markdown-{stamp}.db"));
-    daily_triage_core::db::docs::migrate_docs_to_markdown(
+    let backup = app_dir.join(format!("nimble-backup-pre-markdown-{stamp}.db"));
+    nimble_core::db::docs::migrate_docs_to_markdown(
         pool.inner(),
         backup.to_str().ok_or("backup path not utf-8")?,
     )
@@ -758,7 +758,7 @@ export function invalidateDocsFormatCache() {
 import { useState } from 'react'
 import { getDataProvider } from '@/services/data-provider'
 import { invalidateDocsFormatCache } from '@/components/docs/DocEditor'
-import type { DocsMdPreview, DocsMdResult } from '@daily-triage/types'
+import type { DocsMdPreview, DocsMdResult } from '@nimble/types'
 // + the Button / AlertDialog imports used by TodoistMigrationSection
 
 export function DocsMigrationSection() {
@@ -810,10 +810,10 @@ git commit -m "feat: markdown mode for Tiptap editor + docs migration settings U
 Adds the Todoist sync tables and per-row sync metadata, and threads the two new synced columns through `LocalTask`/`Project`, TS types, and the mobile schema mirror (so Turso snapshots round-trip without wiping them).
 
 **Files:**
-- Modify: `daily-triage-core/src/db/migrations.rs` (append v17 to the `MIGRATIONS` slice, matching the existing `Migration { version, description, sql }` shape)
-- Modify: `daily-triage-core/src/types.rs` (2 new fields on both structs)
-- Modify: `daily-triage-core/src/db/tasks.rs` (SELECT_COLS + FromRow + create literal)
-- Modify: `daily-triage-core/src/db/projects.rs` (same)
+- Modify: `nimble-core/src/db/migrations.rs` (append v17 to the `MIGRATIONS` slice, matching the existing `Migration { version, description, sql }` shape)
+- Modify: `nimble-core/src/types.rs` (2 new fields on both structs)
+- Modify: `nimble-core/src/db/tasks.rs` (SELECT_COLS + FromRow + create literal)
+- Modify: `nimble-core/src/db/projects.rs` (same)
 - Modify: `packages/types/src/index.ts`
 - Modify: `apps/mobile/services/database.ts` (v17 mirror — columns only)
 - Test: extend the Task 1 test in `tasks.rs`
@@ -847,7 +847,7 @@ Add to `tasks.rs` tests module:
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cargo test -p daily-triage-core v17_sync_metadata`
+Run: `cargo test -p nimble-core v17_sync_metadata`
 Expected: FAIL — `no such table: todoist_outbox`.
 
 - [ ] **Step 3: Implement**
@@ -906,7 +906,7 @@ While in that file, confirm the mobile mirror already has v15 (`external_id`/`ex
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core`
+Run: `cargo test -p nimble-core`
 Expected: all tests PASS (including Tasks 1–3 tests — they now run migrations through v17).
 
 - [ ] **Step 5: Verify builds**
@@ -928,10 +928,10 @@ git commit -m "feat: migration v17 - todoist outbox, integration sync state, per
 `integration_sync_state` accessors and the persistent outbox with coalescing rules: updates merge into pending creates/updates; a delete cancels all pending ops for that row (and is dropped entirely if the row never reached Todoist).
 
 **Files:**
-- Modify: `daily-triage-core/src/lib.rs` (add `pub mod integrations;`)
-- Create: `daily-triage-core/src/integrations/mod.rs`
-- Create: `daily-triage-core/src/integrations/todoist/mod.rs`
-- Create: `daily-triage-core/src/integrations/todoist/outbox.rs`
+- Modify: `nimble-core/src/lib.rs` (add `pub mod integrations;`)
+- Create: `nimble-core/src/integrations/mod.rs`
+- Create: `nimble-core/src/integrations/todoist/mod.rs`
+- Create: `nimble-core/src/integrations/todoist/outbox.rs`
 - Test: inline in both new files
 
 **Interfaces:**
@@ -1069,7 +1069,7 @@ mod tests {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `cargo test -p daily-triage-core integrations`
+Run: `cargo test -p nimble-core integrations`
 Expected: COMPILE ERROR — module not defined. Add `pub mod integrations;` to `lib.rs`, `pub mod todoist;` to `integrations/mod.rs`, `pub mod outbox;` to `todoist/mod.rs`, then re-run to see the real missing-fn errors.
 
 - [ ] **Step 3: Implement `integrations/mod.rs`**
@@ -1278,7 +1278,7 @@ pub async fn prune_done(pool: &SqlitePool) -> crate::Result<()> {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core integrations`
+Run: `cargo test -p nimble-core integrations`
 Expected: 7 tests PASS.
 
 - [ ] **Step 6: Commit**
@@ -1295,8 +1295,8 @@ git commit -m "feat: integration state helpers + todoist outbox with op coalesci
 Thin typed client for the unified Sync endpoint. No business logic here — that's why its tests are just serde shape checks; everything interesting is tested in mappers/merge/loop tasks.
 
 **Files:**
-- Create: `daily-triage-core/src/integrations/todoist/client.rs`
-- Modify: `daily-triage-core/src/integrations/todoist/mod.rs` (`pub mod client;`)
+- Create: `nimble-core/src/integrations/todoist/client.rs`
+- Modify: `nimble-core/src/integrations/todoist/mod.rs` (`pub mod client;`)
 - Test: inline (deserialization fixtures)
 
 **Interfaces:**
@@ -1363,7 +1363,7 @@ mod tests {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cargo test -p daily-triage-core client`
+Run: `cargo test -p nimble-core client`
 Expected: COMPILE ERROR — types not defined.
 
 - [ ] **Step 3: Implement**
@@ -1467,11 +1467,11 @@ pub async fn sync(token: &str, body: &serde_json::Value) -> crate::Result<SyncRe
     Ok(resp.json::<SyncResponse>().await?)
 }
 ```
-Note: `crate::error_from_msg` is a stand-in — open `daily-triage-core/src/api/todoist.rs::complete_todoist_task` and use the exact same non-2xx error construction it uses (the crate's `thiserror` enum has an existing variant for API-message errors; do not add a new mechanism).
+Note: `crate::error_from_msg` is a stand-in — open `nimble-core/src/api/todoist.rs::complete_todoist_task` and use the exact same non-2xx error construction it uses (the crate's `thiserror` enum has an existing variant for API-message errors; do not add a new mechanism).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core client`
+Run: `cargo test -p nimble-core client`
 Expected: 2 tests PASS.
 
 - [ ] **Step 5: Commit**
@@ -1488,8 +1488,8 @@ git commit -m "feat: todoist /sync client with typed response structs"
 Pure functions: `TaskSnapshot` (the stored merge base / echo filter), item↔snapshot mapping, command-arg builders honoring the recurring-due rule, timestamp normalization, and the three-way field-level merge. This is the spec's mandated test surface — be thorough here.
 
 **Files:**
-- Create: `daily-triage-core/src/integrations/todoist/mappers.rs`
-- Create: `daily-triage-core/src/integrations/todoist/merge.rs`
+- Create: `nimble-core/src/integrations/todoist/mappers.rs`
+- Create: `nimble-core/src/integrations/todoist/merge.rs`
 - Modify: `todoist/mod.rs` (`pub mod mappers; pub mod merge;`)
 - Test: inline in both
 
@@ -1681,7 +1681,7 @@ mod tests {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `cargo test -p daily-triage-core mappers merge`
+Run: `cargo test -p nimble-core mappers merge`
 Expected: COMPILE ERROR — types/fns not defined.
 
 - [ ] **Step 3: Implement `mappers.rs`**
@@ -1837,7 +1837,7 @@ Note the `due_date` plan field is `Option<Option<String>>` — `pick` on an `Opt
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core mappers merge`
+Run: `cargo test -p nimble-core mappers merge`
 Expected: all 13 tests PASS.
 
 - [ ] **Step 6: Commit**
@@ -1854,11 +1854,11 @@ git commit -m "feat: todoist snapshots, command mappers, three-way field merge w
 Hooks every task/project mutation path so the mirror is symmetric: direct edits, status changes, deletes, AND rows arriving via Turso pull (phone-originated). The Todoist sync loop's own applies bypass CRUD (direct SQL) so they never echo.
 
 **Files:**
-- Create: `daily-triage-core/src/integrations/todoist/observer.rs`
+- Create: `nimble-core/src/integrations/todoist/observer.rs`
 - Modify: `todoist/mod.rs` (`pub mod observer;`)
-- Modify: `daily-triage-core/src/db/tasks.rs` (4 hook calls)
-- Modify: `daily-triage-core/src/db/projects.rs` (3 hook calls)
-- Modify: `daily-triage-core/src/db/sync.rs` (Turso-pull hook)
+- Modify: `nimble-core/src/db/tasks.rs` (4 hook calls)
+- Modify: `nimble-core/src/db/projects.rs` (3 hook calls)
+- Modify: `nimble-core/src/db/sync.rs` (Turso-pull hook)
 - Test: inline in `observer.rs`
 
 **Interfaces:**
@@ -1976,7 +1976,7 @@ mod tests {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `cargo test -p daily-triage-core observer`
+Run: `cargo test -p nimble-core observer`
 Expected: COMPILE ERROR — module missing.
 
 - [ ] **Step 3: Implement `observer.rs`**
@@ -2182,7 +2182,7 @@ crate::integrations::todoist::observer::on_turso_row_applied(
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core`
+Run: `cargo test -p nimble-core`
 Expected: all observer tests PASS, all prior tests still PASS (they run with the adapter inactive, so hooks are no-ops).
 
 - [ ] **Step 6: Commit**
@@ -2199,7 +2199,7 @@ git commit -m "feat: mutation observer enqueues todoist ops from local edits and
 Builds `/sync` commands from outbox rows (resolving local ids to external ids or in-batch temp_ids), sends batches of ≤100, processes per-command results, and records `temp_id → external_id` mappings plus initial snapshots.
 
 **Files:**
-- Create: `daily-triage-core/src/integrations/todoist/sync_loop.rs` (push half)
+- Create: `nimble-core/src/integrations/todoist/sync_loop.rs` (push half)
 - Modify: `todoist/mod.rs` (`pub mod sync_loop;`)
 - Test: inline (command-building is tested pure; HTTP send is not unit-tested)
 
@@ -2307,7 +2307,7 @@ mod push_tests {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `cargo test -p daily-triage-core push_tests`
+Run: `cargo test -p nimble-core push_tests`
 Expected: COMPILE ERROR.
 
 - [ ] **Step 3: Implement the push half of `sync_loop.rs`**
@@ -2570,7 +2570,7 @@ Note on snapshots after push: the pull that follows (Task 11) receives the pushe
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core push_tests`
+Run: `cargo test -p nimble-core push_tests`
 Expected: 5 tests PASS.
 
 - [ ] **Step 5: Commit**
@@ -2587,7 +2587,7 @@ git commit -m "feat: todoist push engine - outbox to batched sync commands with 
 Incremental pull with the stored `sync_token`, transactional apply (projects → sections → items two-pass), snapshot-based echo skip, merge application, and token persisted in the same transaction. `run_sync` serializes everything behind a `try_lock`.
 
 **Files:**
-- Modify: `daily-triage-core/src/integrations/todoist/sync_loop.rs` (pull half + orchestrator)
+- Modify: `nimble-core/src/integrations/todoist/sync_loop.rs` (pull half + orchestrator)
 - Test: inline — `apply_pull` is tested against hand-built `SyncResponse` values (no HTTP mocking)
 
 **Interfaces:**
@@ -2727,7 +2727,7 @@ mod pull_tests {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `cargo test -p daily-triage-core pull_tests`
+Run: `cargo test -p nimble-core pull_tests`
 Expected: COMPILE ERROR — `apply_pull` not defined.
 
 - [ ] **Step 3: Implement the pull half**
@@ -3027,7 +3027,7 @@ pub async fn run_sync_if_due(pool: &SqlitePool, min_interval_secs: i64) -> crate
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test -p daily-triage-core`
+Run: `cargo test -p nimble-core`
 Expected: all 6 pull tests PASS, everything else still green.
 
 - [ ] **Step 5: Commit**
@@ -3074,7 +3074,7 @@ pub struct TodoistSyncStatus {
 
 - [ ] **Step 1: Implement core status fn**
 
-Add to `daily-triage-core/src/integrations/mod.rs`:
+Add to `nimble-core/src/integrations/mod.rs`:
 ```rust
 #[derive(Debug, serde::Serialize)]
 pub struct TodoistSyncStatus {
@@ -3114,16 +3114,16 @@ use tauri::{AppHandle, Manager};
 #[tauri::command]
 pub async fn todoist_sync_now(
     app: AppHandle,
-) -> Result<daily_triage_core::integrations::todoist::sync_loop::SyncReport, String> {
+) -> Result<nimble_core::integrations::todoist::sync_loop::SyncReport, String> {
     crate::sync_runner::run_and_emit(&app).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn get_todoist_sync_status(
     app: AppHandle,
-) -> Result<daily_triage_core::integrations::TodoistSyncStatus, String> {
+) -> Result<nimble_core::integrations::TodoistSyncStatus, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::integrations::todoist_sync_status(pool.inner())
+    nimble_core::integrations::todoist_sync_status(pool.inner())
         .await
         .map_err(|e| e.to_string())
 }
@@ -3131,12 +3131,12 @@ pub async fn get_todoist_sync_status(
 #[tauri::command]
 pub async fn set_todoist_sync_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::integrations::set_enabled(pool.inner(), "todoist", enabled)
+    nimble_core::integrations::set_enabled(pool.inner(), "todoist", enabled)
         .await
         .map_err(|e| e.to_string())?;
     if enabled {
         // first-enable backfill: mirror pre-existing native tasks/projects out to Todoist
-        daily_triage_core::integrations::todoist::observer::seed_outbox_for_unlinked(pool.inner())
+        nimble_core::integrations::todoist::observer::seed_outbox_for_unlinked(pool.inner())
             .await
             .map_err(|e| e.to_string())?;
         let app2 = app.clone();
@@ -3155,9 +3155,9 @@ use tauri::{AppHandle, Emitter, Manager};
 
 pub async fn run_and_emit(
     app: &AppHandle,
-) -> daily_triage_core::Result<daily_triage_core::integrations::todoist::sync_loop::SyncReport> {
+) -> nimble_core::Result<nimble_core::integrations::todoist::sync_loop::SyncReport> {
     let pool = app.state::<SqlitePool>();
-    let report = daily_triage_core::integrations::todoist::sync_loop::run_sync(pool.inner()).await?;
+    let report = nimble_core::integrations::todoist::sync_loop::run_sync(pool.inner()).await?;
     if report.changed_anything() {
         let _ = app.emit("todoist-sync-applied", ());
     }
@@ -3166,7 +3166,7 @@ pub async fn run_and_emit(
 
 pub async fn run_if_due_and_emit(app: &AppHandle, min_interval_secs: i64) {
     let pool = app.state::<SqlitePool>();
-    match daily_triage_core::integrations::todoist::sync_loop::run_sync_if_due(pool.inner(), min_interval_secs).await {
+    match nimble_core::integrations::todoist::sync_loop::run_sync_if_due(pool.inner(), min_interval_secs).await {
         Ok(report) if report.changed_anything() => {
             let _ = app.emit("todoist-sync-applied", ());
         }
@@ -3309,7 +3309,7 @@ The sunset switch and a neutral status surface. No guilt, no red walls: "couldn'
 ```tsx
 import { useCallback, useEffect, useState } from 'react'
 import { getDataProvider } from '@/services/data-provider'
-import type { TodoistSyncStatus } from '@daily-triage/types'
+import type { TodoistSyncStatus } from '@nimble/types'
 // reuse the exact Section wrapper / Switch / Button components and classNames
 // used by TodoistMigrationSection.tsx and its neighbors
 
@@ -3434,10 +3434,10 @@ One native task list. The cached read-only Todoist panel, its hook, and its 4 co
 - Modify: `apps/desktop/src/stores/appStore.ts` (remove the `todoistTasks` slice + `setTodoistTasks`)
 - Modify: `apps/desktop/src-tauri/src/commands/todoist.rs` (remove `fetch_todoist_tasks`, `refresh_todoist_tasks`, `complete_todoist_task`, `snooze_todoist_task`; KEEP `get_api_token`, `preview_todoist_migration`, `migrate_todoist`, `migrated_todoist_ids`)
 - Modify: `apps/desktop/src-tauri/src/lib.rs` (deregister the 4 commands)
-- Delete: `daily-triage-core/src/api/todoist.rs` (+ remove its `pub mod todoist;` from `api/mod.rs`)
+- Delete: `nimble-core/src/api/todoist.rs` (+ remove its `pub mod todoist;` from `api/mod.rs`)
 - Modify: `apps/desktop/src/services/tauri.ts`, `data-provider.ts`, `tauri-provider.ts`, `apps/mobile/services/sqlite-provider.ts` (remove the 4 legacy wrappers from the `todoist` group; keep migration ones)
 - Modify: `packages/types/src/index.ts` (remove `TodoistTask`/`TodoistTaskRow` type if nothing references it after the deletions)
-- Modify: `daily-triage/CLAUDE.md`
+- Modify: `nimble/CLAUDE.md`
 
 **Interfaces:**
 - Consumes: nothing new
@@ -3453,17 +3453,17 @@ In `TasksPage.tsx` and `TodayPage.tsx`: delete the `useTodoist`/`TaskRow` import
 
 - [ ] **Step 3: Remove the Rust side**
 
-Strip the 4 command fns from `commands/todoist.rs` and their 4 lines from `invoke_handler![]`. Delete `daily-triage-core/src/api/todoist.rs`; remove its module decl. If `commands/todoist.rs` imported types from it (`TodoistTaskRow`), those imports go too.
+Strip the 4 command fns from `commands/todoist.rs` and their 4 lines from `invoke_handler![]`. Delete `nimble-core/src/api/todoist.rs`; remove its module decl. If `commands/todoist.rs` imported types from it (`TodoistTaskRow`), those imports go too.
 
 - [ ] **Step 4: Verify everything builds and tests pass**
 
-Run: `cargo build && cargo test -p daily-triage-core && cd apps/desktop && npx tsc --noEmit && cd ../..`
+Run: `cargo build && cargo test -p nimble-core && cd apps/desktop && npx tsc --noEmit && cd ../..`
 Expected: clean, all tests green.
 Manual: `npm run tauri dev` — Tasks and Today pages render without the Todoist panel; settings migration section still works.
 
 - [ ] **Step 5: Update CLAUDE.md**
 
-In `daily-triage/CLAUDE.md`:
+In `nimble/CLAUDE.md`:
 - Database Migrations: "Current version: **17**" with a line for v15–17.
 - Key Tables: mark `todoist_tasks` as "legacy cache — UI retired, table dropped in a future migration"; add `todoist_outbox` and `integration_sync_state` (Mac-local, not synced).
 - Architecture Rules: add "Task/project mutations must go through `db/tasks.rs` / `db/projects.rs` CRUD fns (they feed sync_log AND the Todoist outbox observer) — never raw SQL from commands."
@@ -3483,7 +3483,7 @@ For a fresh setup (or when Marco reconnects): token goes into settings (existing
 
 ## Verification checklist (end-to-end, after Task 14)
 
-1. `cargo test -p daily-triage-core` — all green.
+1. `cargo test -p nimble-core` — all green.
 2. Create task in app → appears in Todoist web within ~10 s.
 3. Complete a **recurring** task in the app → Todoist advances it to the next occurrence (same item), local row gets the new due date on next pull, still open.
 4. Reschedule that recurring task in the app → recurrence string intact in Todoist (inspect the task's due in Todoist web).

@@ -1,12 +1,12 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
-pub use daily_triage_core::types::{DailyStateResponse, Priority};
+pub use nimble_core::types::{DailyStateResponse, Priority};
 
 #[tauri::command]
 pub async fn get_daily_state(app: AppHandle) -> Result<DailyStateResponse, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::daily_state::get_daily_state(pool.inner())
+    nimble_core::db::daily_state::get_daily_state(pool.inner())
         .await
         .map_err(|e| e.to_string())
 }
@@ -22,12 +22,12 @@ pub async fn generate_priorities(
     let pool = app.state::<SqlitePool>();
 
     // Get API key
-    let api_key = daily_triage_core::db::settings::get_setting(pool.inner(), "anthropic_api_key")
+    let api_key = nimble_core::db::settings::get_setting(pool.inner(), "anthropic_api_key")
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Anthropic API key not configured".to_string())?;
 
-    let priorities = daily_triage_core::api::anthropic::generate_priorities(
+    let priorities = nimble_core::api::anthropic::generate_priorities(
         &api_key,
         &energy_level,
         &calendar_summary,
@@ -38,7 +38,7 @@ pub async fn generate_priorities(
     .map_err(|e| e.to_string())?;
 
     // Cache in daily_state
-    daily_triage_core::db::daily_state::save_priorities(pool.inner(), &energy_level, &priorities)
+    nimble_core::db::daily_state::save_priorities(pool.inner(), &energy_level, &priorities)
         .await
         .map_err(|e| e.to_string())?;
 

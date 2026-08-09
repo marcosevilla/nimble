@@ -1,4 +1,4 @@
-import type { GoalStatus } from '@daily-triage/types'
+import type { GoalStatus } from '@nimble/types'
 
 export const GOAL_STATUSES: { value: GoalStatus; label: string; color: string }[] = [
   { value: 'not_started', label: 'Not started', color: 'text-muted-foreground' },

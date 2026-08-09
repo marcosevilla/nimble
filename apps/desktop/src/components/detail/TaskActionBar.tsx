@@ -12,7 +12,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
-import type { LocalTask, Project } from '@daily-triage/types'
+import type { LocalTask, Project } from '@nimble/types'
 
 interface TaskActionBarProps {
   task: LocalTask

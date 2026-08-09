@@ -9,7 +9,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
-import type { LocalTask, Project, Document, Capture } from '@daily-triage/types'
+import type { LocalTask, Project, Document, Capture } from '@nimble/types'
 
 export type BarMode = 'search' | 'task' | 'capture' | 'breakdown' | 'doc'
 

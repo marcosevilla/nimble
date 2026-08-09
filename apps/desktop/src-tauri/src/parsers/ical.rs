@@ -1,2 +1,2 @@
-// Moved to daily_triage_core::parsers::ical
-pub use daily_triage_core::parsers::ical::*;
+// Moved to nimble_core::parsers::ical
+pub use nimble_core::parsers::ical::*;

@@ -1,12 +1,12 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
-pub use daily_triage_core::types::Project;
+pub use nimble_core::types::Project;
 
 #[tauri::command]
 pub async fn get_projects(app: AppHandle) -> Result<Vec<Project>, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::projects::get_projects(pool.inner())
+    nimble_core::db::projects::get_projects(pool.inner())
         .await
         .map_err(|e| e.to_string())
 }
@@ -18,7 +18,7 @@ pub async fn create_project(
     color: String,
 ) -> Result<Project, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::projects::create_project(pool.inner(), &name, &color)
+    nimble_core::db::projects::create_project(pool.inner(), &name, &color)
         .await
         .map_err(|e| e.to_string())
 }
@@ -31,7 +31,7 @@ pub async fn update_project(
     color: Option<String>,
 ) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::projects::update_project(
+    nimble_core::db::projects::update_project(
         pool.inner(),
         &id,
         name.as_deref(),
@@ -44,7 +44,7 @@ pub async fn update_project(
 #[tauri::command]
 pub async fn delete_project(app: AppHandle, id: String) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::projects::delete_project(pool.inner(), &id)
+    nimble_core::db::projects::delete_project(pool.inner(), &id)
         .await
         .map_err(|e| e.to_string())
 }

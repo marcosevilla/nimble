@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Label, Meta } from '@/components/shared/typography'
-import type { CheckboxItem } from '@daily-triage/types'
+import type { CheckboxItem } from '@nimble/types'
 
 function HabitRow({
   item,

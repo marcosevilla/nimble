@@ -30,7 +30,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import type { LocalTask, TaskStatus } from '@daily-triage/types'
+import type { LocalTask, TaskStatus } from '@nimble/types'
 
 const COUNTDOWN_OPTIONS = [
   { minutes: 15, label: '15 min' },

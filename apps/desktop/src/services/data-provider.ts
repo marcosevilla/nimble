@@ -5,7 +5,7 @@
  * Mobile:  implemented by SqliteProvider (delegates to expo-sqlite)
  *
  * The interface mirrors the current tauri.ts API surface exactly.
- * Types are imported from @daily-triage/types shared package.
+ * Types are imported from @nimble/types shared package.
  */
 
 import type {
@@ -54,7 +54,7 @@ import type {
   TodoistMigrationResult,
   SyncReport,
   TodoistSyncStatus,
-} from '@daily-triage/types'
+} from '@nimble/types'
 
 // Re-export all types so consumers can import from data-provider instead of tauri
 export type {

@@ -3,7 +3,7 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@daily-triage/types": ["../../packages/types/src/index.ts"]
+      "@nimble/types": ["../../packages/types/src/index.ts"]
     }
   },
   "include": [

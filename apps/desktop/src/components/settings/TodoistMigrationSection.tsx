@@ -4,7 +4,7 @@ import type {
   TodoistMigrationOptions,
   TodoistMigrationPreview,
   TodoistMigrationResult,
-} from '@daily-triage/types'
+} from '@nimble/types'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Label, Meta } from '@/components/shared/typography'

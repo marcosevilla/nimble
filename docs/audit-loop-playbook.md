@@ -1,6 +1,6 @@
 # Subagent-Driven Audit & Fix Loop — Playbook
 
-A repeatable workflow for autonomously auditing Daily Triage, finding bugs and UX/visual issues, and executing fixes with multi-agent verification. Designed to be benchmarked against the app's intended UX, not vibes.
+A repeatable workflow for autonomously auditing Nimble, finding bugs and UX/visual issues, and executing fixes with multi-agent verification. Designed to be benchmarked against the app's intended UX, not vibes.
 
 First written 2026-05-09 alongside the first dry run on the Today page. Update this doc after each loop with what worked and what didn't.
 
@@ -43,7 +43,7 @@ Multiple agents run concurrently, each owning a surface area, each writing findi
 ## Two known gaps to design around
 
 ### No test suite
-From `daily-triage/CLAUDE.md`: "No unit or integration tests." So "triple-check" can't lean on a green test bar. Substitute:
+From `nimble/CLAUDE.md`: "No unit or integration tests." So "triple-check" can't lean on a green test bar. Substitute:
 
 - TypeScript clean (`npm run build` in `apps/desktop`)
 - Rust clean (`cargo check` from workspace root)
@@ -67,7 +67,7 @@ Golden flows that the Playwright smoke pass must cover (initial list — expand 
 - Empty states: cleared inbox, no tasks today, no calendar events
 
 ### UX rubric — resolved 2026-05-10
-Canonical rubric lives at **`daily-triage/docs/ux-intent.md`**. Consolidated from `CLAUDE.md`, `docs/linear-ux-patterns.md`, `daily-triage/docs/buildplan.md`, and the `project_app_vision.md` memory.
+Canonical rubric lives at **`nimble/docs/ux-intent.md`**. Consolidated from `CLAUDE.md`, `docs/linear-ux-patterns.md`, `nimble/docs/buildplan.md`, and the `project_app_vision.md` memory.
 
 Audit agents are instructed to:
 1. Read Section 1 (core philosophy) in full.
@@ -97,13 +97,13 @@ End-to-end on one surface before scaling:
 - [x] UX rubric consolidated (`ux-intent.md`)
 - [x] Playwright MCP installed by Marco — `claude mcp add playwright -s user -- npx -y @playwright/mcp@latest`, then `/exit` and relaunch
 - [x] Verify Playwright tools load in new session (ask: "list playwright mcp tools")
-- [x] Start Vite dev server: `cd daily-triage/apps/desktop && npm run dev` (Vite reports `http://localhost:5173/`, not 1420)
+- [x] Start Vite dev server: `cd nimble/apps/desktop && npm run dev` (Vite reports `http://localhost:5173/`, not 1420)
 - [x] Smoke check: navigate Playwright to Vite URL and screenshot. **Onboarding bypass:** in browser (no Tauri runtime) `invoke()` throws, so `setupComplete` falls back to `false` and SetupDialog blocks the app. DEV-only `window.__stores.useAppStore` hatch added in `apps/desktop/src/main.tsx`. From Playwright: `window.__stores.useAppStore.getState().setSetupComplete(true)` to render Today. Known non-fatal: `Dashboard.tsx:122` Tauri `listen()` throws `transformCallback` undefined — flag for the audit, doesn't block render.
 - [x] Dispatch 3 audit agents on the Today page (design-qa, interface-craft, make-interfaces-feel-better)
   - Each cites `ux-intent.md` section numbers in findings
-  - Each writes findings to its own markdown file in `daily-triage/docs/audit-findings/today/`
+  - Each writes findings to its own markdown file in `nimble/docs/audit-findings/today/`
   - Totals: design-qa 12 (3 blocker / 4 major / 4 minor / 1 polish), interface-craft 10 (1 / 3 / 3 / 3, craft 2/5), make-interfaces-feel-better 10 (0 / 0 / 6 / 4). 32 findings total.
-- [x] Synthesize findings → plan via `superpowers:writing-plans` — saved to `daily-triage/docs/superpowers/plans/2026-05-10-today-page-audit-fixes.md`. 7 lanes (A no-guilt language, B calendar error chrome, C color tokens, E button base, G misc safety — all independent; D composition, F polish — both blocked on Gate 0). 17 tasks total before Gate 0; 9 after.
+- [x] Synthesize findings → plan via `superpowers:writing-plans` — saved to `nimble/docs/superpowers/plans/2026-05-10-today-page-audit-fixes.md`. 7 lanes (A no-guilt language, B calendar error chrome, C color tokens, E button base, G misc safety — all independent; D composition, F polish — both blocked on Gate 0). 17 tasks total before Gate 0; 9 after.
 - [x] Marco reviewed plan + answered Gate 0: 1=a 2=a 3=a 4=b
 - [x] Execute fixes in worktrees (subagent-driven). Pre-Gate-0 worktree `audit-loop-1-today` (12 commits, merged 2026-05-11 as `cec3786`). Post-Gate-0 worktree `audit-loop-1-today-composition` (10 commits, merged 2026-05-11 as `c8fdf5d`).
 - [x] Verify — TS build clean, Playwright golden flow (Enter advances Step 1→2 confirmed). Rust check fails on stale path cache (pre-existing, unrelated).
@@ -130,7 +130,7 @@ _(fill in after each loop)_
 - **Audit agents over-cite from pixels.** Interface-craft's "right-rail collapse icon" finding had no corresponding component code — implementer + reviewer both searched calendar/ and Dashboard.tsx, found nothing. The icon visible in the screenshot is likely an Agentation/TypeOverlay element. Mitigation: instruct audit agents to verify each finding has a code anchor before reporting it.
 - **Per-task Playwright would have meant restarting Vite in each worktree.** We batched smoke checks at the merge checkpoints instead. Worked, but means polish lanes were verified together rather than incrementally. Acceptable tradeoff for the dry run.
 - **No populated-state verification.** All audits ran against the empty state because the DEV bypass only flips `setupComplete=true` — actual data loads still throw because `invoke()` fails outside Tauri. We never visually confirmed lanes A1/A2 (Overdue rename, TriageSection copy), C1/C2 (ProgressBar, badge tokens with real green completion state), or G3 (+N more alignment with calendar events). Substituted via source inspection. Real fix for loop #2: MockDataProvider.
-- **Rust target cache is stuck on the OLD project path** (`personal triage and briefing app/` with spaces). `cargo check` fails to resolve permission TOML files. Unrelated to the audit but blocks the playbook's "Rust clean" verification. Fix: `rm -rf daily-triage/target/` and rebuild — pre-existing tech debt.
+- **Rust target cache is stuck on the OLD project path** (`personal triage and briefing app/` with spaces). `cargo check` fails to resolve permission TOML files. Unrelated to the audit but blocks the playbook's "Rust clean" verification. Fix: `rm -rf nimble/target/` and rebuild — pre-existing tech debt.
 
 **Adjustments for next loop:**
 1. **Subagent prompt header template:** always start implementer prompts with the cd verification block (proven in lanes D2-F5).

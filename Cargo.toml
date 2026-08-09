@@ -1,3 +1,3 @@
 [workspace]
-members = ["apps/desktop/src-tauri", "daily-triage-core"]
+members = ["apps/desktop/src-tauri", "nimble-core"]
 resolver = "2"

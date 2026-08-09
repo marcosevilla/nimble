@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useDataProvider } from '@/services/provider-context'
-import type { ActivityEntry } from '@daily-triage/types'
+import type { ActivityEntry } from '@nimble/types'
 import { cn } from '@/lib/utils'
 import {
   Check, Plus, Trash2, Pencil, Play, Square, SkipForward,

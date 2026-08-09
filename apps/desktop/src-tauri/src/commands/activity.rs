@@ -1,7 +1,7 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
-pub use daily_triage_core::types::{ActivityEntry, ActivitySummary};
+pub use nimble_core::types::{ActivityEntry, ActivitySummary};
 
 /// Frontend escape hatch for session-level events (page_viewed, app_opened, etc.)
 #[tauri::command]
@@ -12,7 +12,7 @@ pub async fn log_activity(
     metadata: Option<serde_json::Value>,
 ) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::activity::log_activity(
+    nimble_core::db::activity::log_activity(
         pool.inner(),
         &action_type,
         target_id.as_deref(),
@@ -34,7 +34,7 @@ pub async fn get_activity_log(
 ) -> Result<Vec<ActivityEntry>, String> {
     let pool = app.state::<SqlitePool>();
     let limit = limit.unwrap_or(200);
-    daily_triage_core::db::activity::get_activity_log(
+    nimble_core::db::activity::get_activity_log(
         pool.inner(),
         &from_date,
         &to_date,
@@ -53,7 +53,7 @@ pub async fn get_activity_summary(
     date: String,
 ) -> Result<Vec<ActivitySummary>, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::activity::get_activity_summary(pool.inner(), &date)
+    nimble_core::db::activity::get_activity_summary(pool.inner(), &date)
         .await
         .map_err(|e| e.to_string())
 }

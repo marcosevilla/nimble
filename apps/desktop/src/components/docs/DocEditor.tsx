@@ -6,7 +6,7 @@ import { DocNoteEntry } from './DocNoteEntry'
 import { VaultNoteEditor } from './VaultNoteEditor'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
-import type { DocNote } from '@daily-triage/types'
+import type { DocNote } from '@nimble/types'
 import { getSetting } from '@/services/tauri'
 
 let cachedFormat: 'html' | 'markdown' | null = null

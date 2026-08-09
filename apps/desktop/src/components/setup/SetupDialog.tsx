@@ -88,7 +88,7 @@ export function SetupDialog({ open, onComplete }: SetupDialogProps) {
         className="sm:max-w-lg"
       >
         <DialogHeader>
-          <DialogTitle className="text-title">Welcome to Daily Triage</DialogTitle>
+          <DialogTitle className="text-title">Welcome to Nimble</DialogTitle>
           <DialogDescription>
             Connect your accounts to get started. These stay on your machine.
           </DialogDescription>

@@ -1,5 +1,5 @@
 {
-  "name": "daily-triage",
+  "name": "nimble",
   "private": true,
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {

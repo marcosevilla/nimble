@@ -2,17 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. **Worktrees are required** — see Workspace Setup below.
 
-**Goal:** Resolve 32 findings from the dry-run #1 audit of the Today page (empty state, Review mode), bringing the surface into alignment with `daily-triage/docs/ux-intent.md`.
+**Goal:** Resolve 32 findings from the dry-run #1 audit of the Today page (empty state, Review mode), bringing the surface into alignment with `nimble/docs/ux-intent.md`.
 
 **Architecture:** Fixes are split into seven lanes. Five are independent and can ship without a design decision (A: no-guilt language, B: calendar error chrome, C: color tokens, E: button base, G: misc safety). Two depend on **Gate 0** — a composition decision about focal point and greeting placement that must be resolved before lanes D and F can execute (lane F's stagger / radius / animation choices are reactions to lane D's layout).
 
-**Tech Stack:** React 19, Tailwind v4, shadcn/ui (base-nova), Tauri 2.0 webview. No unit tests (per `daily-triage/CLAUDE.md`). Verification substitutes: `npm run build` (TS clean), Playwright MCP smoke at `http://localhost:5173/` with the DEV bypass `window.__stores.useAppStore.getState().setSetupComplete(true)`, and visual diff against `/Users/marcosevilla/Developer/marco-task-app/smoke-today-after-bypass.png`.
+**Tech Stack:** React 19, Tailwind v4, shadcn/ui (base-nova), Tauri 2.0 webview. No unit tests (per `nimble/CLAUDE.md`). Verification substitutes: `npm run build` (TS clean), Playwright MCP smoke at `http://localhost:5173/` with the DEV bypass `window.__stores.useAppStore.getState().setSetupComplete(true)`, and visual diff against `/Users/marcosevilla/Developer/marco-task-app/smoke-today-after-bypass.png`.
 
 ---
 
 ## Workspace Setup
 
-**Per `daily-triage/docs/audit-loop-playbook.md` step 3 — non-negotiable:**
+**Per `nimble/docs/audit-loop-playbook.md` step 3 — non-negotiable:**
 
 - [ ] **Setup 1: Create worktrees for parallel lanes**
 
@@ -52,7 +52,7 @@ Lane A removes literal "Overdue" / "need attention" framing — direct §1.1 + �
 ### Task A1: Rename `groupByUrgency` "Overdue" group → "Still open"
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:62-83`
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:62-83`
 
 - [ ] **Step 1: Apply the rename**
 
@@ -87,25 +87,25 @@ Also lowercases "High Priority", "Due Today", "Quick Wins" to sentence case to m
 
 - [ ] **Step 2: Search for residual "Overdue" string usage**
 
-Run: `grep -rn "Overdue\|overdue" daily-triage/apps/desktop/src --include="*.tsx" --include="*.ts"`
+Run: `grep -rn "Overdue\|overdue" nimble/apps/desktop/src --include="*.tsx" --include="*.ts"`
 Expected: only matches in `TaskRow.tsx` / Todoist data shape comments — flag any user-facing string. If a user-facing string appears outside lane A's scope (e.g. in a tooltip), append it as a sub-task here.
 
 - [ ] **Step 3: TS clean**
 
-Run: `cd daily-triage/apps/desktop && npm run build`
+Run: `cd nimble/apps/desktop && npm run build`
 Expected: build succeeds, no TS errors.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx
 git commit -m "fix(today): rename 'Overdue' urgency group to 'Still open' per §1.1"
 ```
 
 ### Task A2: Rewrite `TriageSection` copy + variable
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:170-206`
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:170-206`
 
 - [ ] **Step 1: Rewrite the function**
 
@@ -155,20 +155,20 @@ Three changes: `overdue` → `carriedOver`; `needsAttention` → `stillOpen`; co
 
 - [ ] **Step 2: TS clean**
 
-Run: `cd daily-triage/apps/desktop && npm run build`
+Run: `cd nimble/apps/desktop && npm run build`
 Expected: build succeeds.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx
 git commit -m "fix(today): triage copy uses 'still open' framing, not 'needs attention' (§1.1)"
 ```
 
 ### Task A3: Add evening greeting variant
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:26-31, 239`
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:26-31, 239`
 
 - [ ] **Step 1: Extend `getGreeting()` with a subtitle**
 
@@ -217,13 +217,13 @@ In DashboardMode replace lines 380-387 with:
 
 - [ ] **Step 3: TS clean**
 
-Run: `cd daily-triage/apps/desktop && npm run build`
+Run: `cd nimble/apps/desktop && npm run build`
 Expected: build succeeds.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx
 git commit -m "feat(today): time-aware greeting subtitle (morning/afternoon/evening)"
 ```
 
@@ -236,7 +236,7 @@ The right rail's red "Could not load calendar" + Retry block is flagged by all t
 ### Task B1: Demote calendar error from destructive to muted
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/calendar/CalendarPanel.tsx:491-498`
+- Modify: `nimble/apps/desktop/src/components/calendar/CalendarPanel.tsx:491-498`
 
 - [ ] **Step 1: Rewrite the error branch**
 
@@ -270,25 +270,25 @@ Changes: drops `text-destructive`; sentence shortened from "Could not load calen
 Via Playwright MCP:
 1. `browser_navigate` to `http://localhost:5173/`
 2. `browser_evaluate` `window.__stores.useAppStore.getState().setSetupComplete(true)`
-3. `browser_take_screenshot` saving to `daily-triage/docs/audit-findings/today/after-lane-b.png`
+3. `browser_take_screenshot` saving to `nimble/docs/audit-findings/today/after-lane-b.png`
 4. `browser_evaluate` `getComputedStyle(document.querySelector('[class*="text-destructive"]') ?? document.body).color` — expected: no element matches the destructive selector in the calendar rail.
 
 - [ ] **Step 3: TS clean + commit**
 
 ```bash
-cd daily-triage/apps/desktop && npm run build
-git add daily-triage/apps/desktop/src/components/calendar/CalendarPanel.tsx daily-triage/docs/audit-findings/today/after-lane-b.png
+cd nimble/apps/desktop && npm run build
+git add nimble/apps/desktop/src/components/calendar/CalendarPanel.tsx nimble/docs/audit-findings/today/after-lane-b.png
 git commit -m "fix(calendar): demote load failure from destructive red to muted text (§1.1, §1.4)"
 ```
 
 ### Task B2: Right-rail header — match optical weight of "May" and "Sun 10"
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/calendar/CalendarPanel.tsx` (DayNavigationHeader, ~line 483 — grep `DayNavigationHeader` definition to find the actual file/lines)
+- Modify: `nimble/apps/desktop/src/components/calendar/CalendarPanel.tsx` (DayNavigationHeader, ~line 483 — grep `DayNavigationHeader` definition to find the actual file/lines)
 
 - [ ] **Step 1: Find the header component**
 
-Run: `grep -rn "function DayNavigationHeader\|export.*DayNavigationHeader" daily-triage/apps/desktop/src --include="*.tsx"`. Open the file at the matching line.
+Run: `grep -rn "function DayNavigationHeader\|export.*DayNavigationHeader" nimble/apps/desktop/src --include="*.tsx"`. Open the file at the matching line.
 
 - [ ] **Step 2: Align type scale**
 
@@ -309,8 +309,8 @@ In DayNavigationHeader, find the elements rendering the month label (`"May"`) an
 - [ ] **Step 3: TS clean + commit**
 
 ```bash
-cd daily-triage/apps/desktop && npm run build
-git add daily-triage/apps/desktop/src/components/calendar/CalendarPanel.tsx
+cd nimble/apps/desktop && npm run build
+git add nimble/apps/desktop/src/components/calendar/CalendarPanel.tsx
 git commit -m "fix(calendar): unify header type scale and inline collapse icon (§1.4)"
 ```
 
@@ -323,12 +323,12 @@ Three recurring color violations: hardcoded Tailwind palette values, ad-hoc opac
 ### Task C1: Replace `bg-accent-blue` / `bg-green-500` in `ProgressBar`
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:33-51`
-- Modify: `daily-triage/apps/desktop/src/index.css` (add `--canary-success` token if not present)
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:33-51`
+- Modify: `nimble/apps/desktop/src/index.css` (add `--canary-success` token if not present)
 
 - [ ] **Step 1: Check whether a success token exists**
 
-Run: `grep -n "success\|--canary-" daily-triage/apps/desktop/src/index.css`. If a `--canary-success` or `--color-success` token exists, skip Step 2 and use it directly in Step 3. If not, do Step 2.
+Run: `grep -n "success\|--canary-" nimble/apps/desktop/src/index.css`. If a `--canary-success` or `--color-success` token exists, skip Step 2 and use it directly in Step 3. If not, do Step 2.
 
 - [ ] **Step 2: Add semantic success token to theme**
 
@@ -380,19 +380,19 @@ Changes: cool `bg-accent-blue` → neutral `bg-foreground/40` (progress is not s
 - [ ] **Step 4: TS clean + commit**
 
 ```bash
-cd daily-triage/apps/desktop && npm run build
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx daily-triage/apps/desktop/src/index.css daily-triage/apps/desktop/src/lib/utils.ts
+cd nimble/apps/desktop && npm run build
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx nimble/apps/desktop/src/index.css nimble/apps/desktop/src/lib/utils.ts
 git commit -m "fix(today): ProgressBar uses semantic tokens, not bg-accent-blue / bg-green-500 (§1.4, §3.4)"
 ```
 
 ### Task C2: Step-circle badge — use `bg-success` + drop `font-semibold`
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:109-115`
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:109-115`
 
 - [ ] **Step 1: Check for `text-meta-strong` token**
 
-Run: `grep -n "text-meta-strong\|--text-meta" daily-triage/apps/desktop/src/index.css daily-triage/apps/desktop/src/components/shared/typography.tsx 2>/dev/null`. If `text-meta-strong` exists, use it directly. If not, fall through to using `text-body-strong` at a smaller scale, or define `text-meta-strong` in index.css mirroring the existing `text-body-strong` pattern.
+Run: `grep -n "text-meta-strong\|--text-meta" nimble/apps/desktop/src/index.css nimble/apps/desktop/src/components/shared/typography.tsx 2>/dev/null`. If `text-meta-strong` exists, use it directly. If not, fall through to using `text-body-strong` at a smaller scale, or define `text-meta-strong` in index.css mirroring the existing `text-body-strong` pattern.
 
 - [ ] **Step 2: Update the badge**
 
@@ -413,15 +413,15 @@ Drops the `font-semibold` deliberate carve-out, uses `text-meta-strong` for syst
 - [ ] **Step 3: TS clean + commit**
 
 ```bash
-cd daily-triage/apps/desktop && npm run build
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx daily-triage/apps/desktop/src/index.css
+cd nimble/apps/desktop && npm run build
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx nimble/apps/desktop/src/index.css
 git commit -m "fix(today): step badge uses text-meta-strong + bg-success tokens (§3.4)"
 ```
 
 ### Task C3: Collapse the ad-hoc opacity scale
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:106, 397, 401, 418, 449`
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:106, 397, 401, 418, 449`
 
 The five instances of `bg-muted/5`, `bg-muted/30`, `border-border/30`, `border-border/20`, `divide-border/20`, `text-muted-foreground/40` are hand-picked mini-tokens. Collapse them into two named tiers.
 
@@ -478,15 +478,15 @@ Lines 418, 449 — task list dividers:
 - [ ] **Step 3: TS clean + visual diff**
 
 ```bash
-cd daily-triage/apps/desktop && npm run build
+cd nimble/apps/desktop && npm run build
 ```
 
-Playwright smoke — screenshot Today page (with composition still pre-lane-D) and visually compare. Expected: subtle increase in border/bg contrast in the brief container and task divider areas. Save to `daily-triage/docs/audit-findings/today/after-lane-c.png`.
+Playwright smoke — screenshot Today page (with composition still pre-lane-D) and visually compare. Expected: subtle increase in border/bg contrast in the brief container and task divider areas. Save to `nimble/docs/audit-findings/today/after-lane-c.png`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx daily-triage/docs/audit-findings/today/after-lane-c.png
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx nimble/docs/audit-findings/today/after-lane-c.png
 git commit -m "fix(today): collapse ad-hoc opacity scale to two tiers (§1.4, §3.4)"
 ```
 
@@ -499,7 +499,7 @@ Fixes `transition-all` (§14) + adds `active:scale-[0.96]` press feedback (§12)
 ### Task E1: Replace `transition-all` with explicit transitions + add scale-on-press
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/ui/button.tsx:9`
+- Modify: `nimble/apps/desktop/src/components/ui/button.tsx:9`
 
 - [ ] **Step 1: Update the base class**
 
@@ -519,7 +519,7 @@ Three changes from original:
 
 - [ ] **Step 2: TS clean**
 
-Run: `cd daily-triage/apps/desktop && npm run build`
+Run: `cd nimble/apps/desktop && npm run build`
 Expected: build succeeds.
 
 - [ ] **Step 3: Manual smoke — three surfaces, not just Today**
@@ -529,12 +529,12 @@ Via Playwright at `http://localhost:5173/` (with onboarding bypass):
 2. Navigate to Tasks (left rail icon) — click a button there.
 3. Open Command Bar (likely Cmd+K) — confirm dropdown triggers do NOT bounce (the `not-aria-[haspopup]` guard prevents it).
 
-Screenshot the Today page Next button in active state: `daily-triage/docs/audit-findings/today/after-lane-e.png`.
+Screenshot the Today page Next button in active state: `nimble/docs/audit-findings/today/after-lane-e.png`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add daily-triage/apps/desktop/src/components/ui/button.tsx daily-triage/docs/audit-findings/today/after-lane-e.png
+git add nimble/apps/desktop/src/components/ui/button.tsx nimble/docs/audit-findings/today/after-lane-e.png
 git commit -m "fix(button): explicit transitions + scale-on-press; respects motion-reduce (§12, §14)"
 ```
 
@@ -547,7 +547,7 @@ Independent fixes: font smoothing, HelpPanel hit area, arbitrary spacing values.
 ### Task G1: Add `-webkit-font-smoothing` to root
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/index.css:120-122`
+- Modify: `nimble/apps/desktop/src/index.css:120-122`
 
 - [ ] **Step 1: Update the body rule**
 
@@ -563,19 +563,19 @@ body {
 
 - [ ] **Step 2: Visual diff**
 
-Screenshot Today page → save `daily-triage/docs/audit-findings/today/after-lane-g1.png`. Compare to baseline `smoke-today-after-bypass.png`. Geist glyphs should read crisper.
+Screenshot Today page → save `nimble/docs/audit-findings/today/after-lane-g1.png`. Compare to baseline `smoke-today-after-bypass.png`. Geist glyphs should read crisper.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add daily-triage/apps/desktop/src/index.css daily-triage/docs/audit-findings/today/after-lane-g1.png
+git add nimble/apps/desktop/src/index.css nimble/docs/audit-findings/today/after-lane-g1.png
 git commit -m "fix(css): enable antialiased font smoothing app-wide on macOS"
 ```
 
 ### Task G2: HelpPanel hit-area to 40×40
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/shared/HelpPanel.tsx:181`
+- Modify: `nimble/apps/desktop/src/components/shared/HelpPanel.tsx:181`
 
 - [ ] **Step 1: Find current class string**
 
@@ -594,15 +594,15 @@ size-9 before:absolute before:inset-[-2px] before:content-[''] before:rounded-fu
 - [ ] **Step 3: TS clean + commit**
 
 ```bash
-cd daily-triage/apps/desktop && npm run build
-git add daily-triage/apps/desktop/src/components/shared/HelpPanel.tsx
+cd nimble/apps/desktop && npm run build
+git add nimble/apps/desktop/src/components/shared/HelpPanel.tsx
 git commit -m "fix(help-panel): extend hit area to 40x40 via pseudo-element (§3.6)"
 ```
 
 ### Task G3: Replace `max-h-[50vh]` and `pl-[62px]` with on-grid values
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:164, 256`
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:164, 256`
 
 - [ ] **Step 1: Brief container max-height**
 
@@ -636,8 +636,8 @@ Replace line 164:
 - [ ] **Step 3: TS clean + commit**
 
 ```bash
-cd daily-triage/apps/desktop && npm run build
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx
+cd nimble/apps/desktop && npm run build
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx
 git commit -m "fix(today): replace arbitrary max-h-[50vh] / pl-[62px] with on-grid values (§3.5)"
 ```
 
@@ -652,14 +652,14 @@ After all five independent lanes are done, merge worktree A back to main (or its
 ```bash
 cd /path/to/main/worktree
 git merge audit-loop-1  # or whatever branch name
-cd daily-triage/apps/desktop && npm run build
+cd nimble/apps/desktop && npm run build
 ```
 
 - [ ] **Checkpoint 2: Full smoke**
 
 Restart Vite. Via Playwright:
 1. Navigate, bypass onboarding.
-2. Screenshot full page → `daily-triage/docs/audit-findings/today/after-checkpoint-1.png`.
+2. Screenshot full page → `nimble/docs/audit-findings/today/after-checkpoint-1.png`.
 3. Run `browser_console_messages` with `level: error` — expected: still only the 2 known Tauri `listen()` errors. Zero new errors.
 
 - [ ] **Checkpoint 3: Gate 0 decision**
@@ -679,7 +679,7 @@ The exact shape of each task depends on Gate 0 answers. Below are the four decis
 #### Task D1a: Constrain review column to centered 520px
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:235` (ReviewMode wrapper)
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:235` (ReviewMode wrapper)
 
 - [ ] **Step 1: Wrap content**
 
@@ -711,7 +711,7 @@ Apply `bg-muted/20` to the ReviewMode outer wrapper, keep `bg-card` on the step 
 #### Task D2a: Left-align both greeting blocks
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:237, 380`
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:237, 380`
 
 - [ ] **Step 1: Remove `text-center`**
 
@@ -791,7 +791,7 @@ if (!active && !done) {
 ### Task D5: Drop heavy card chrome on empty Step 1
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:243-267` (the first ReviewStep body)
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:243-267` (the first ReviewStep body)
 
 - [ ] **Step 1: Conditional chrome for empty state**
 
@@ -820,7 +820,7 @@ These tasks read the layout shape from Lane D. If composition shifts, F tasks re
 ### Task F1: Stagger `ReviewStep` enter animation
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:104-127`
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:104-127`
 
 - [ ] **Step 1: Split the enter animation across semantic chunks**
 
@@ -868,14 +868,14 @@ return (
 - [ ] **Step 3: Commit**
 
 ```bash
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx
 git commit -m "feat(today): stagger ReviewStep enter — badge → title → body (§5)"
 ```
 
 ### Task F2: Greeting + subtitle independent enter
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:237` (ReviewMode greeting block)
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:237` (ReviewMode greeting block)
 
 - [ ] **Step 1: Stagger greeting and subtitle**
 
@@ -897,15 +897,15 @@ Replace the greeting block (after Gate 0 shape is settled — apply to whichever
 - [ ] **Step 2: Commit**
 
 ```bash
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx
 git commit -m "feat(today): independent stagger for greeting + subtitle (§5, §1.6)"
 ```
 
 ### Task F3: Add `text-balance` to greeting, PageHeader, subtitle
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:238-239, 381-386`
-- Modify: `daily-triage/apps/desktop/src/components/shared/PageHeader.tsx` (title line)
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:238-239, 381-386`
+- Modify: `nimble/apps/desktop/src/components/shared/PageHeader.tsx` (title line)
 
 - [ ] **Step 1: Today greeting headlines**
 
@@ -922,15 +922,15 @@ Find the `<h1>` in PageHeader.tsx (around line 43-53). Add `text-balance` to its
 - [ ] **Step 4: TS clean + commit**
 
 ```bash
-cd daily-triage/apps/desktop && npm run build
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx daily-triage/apps/desktop/src/components/shared/PageHeader.tsx
+cd nimble/apps/desktop && npm run build
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx nimble/apps/desktop/src/components/shared/PageHeader.tsx
 git commit -m "fix: text-balance on headlines, optical baseline on PageHeader meta (§2, §10)"
 ```
 
 ### Task F4: Bump `ReviewStep` card radius for concentric corners
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:105, 397`
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:105, 397`
 
 - [ ] **Step 1: Update both card wrappers**
 
@@ -957,14 +957,14 @@ Line 397:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx
 git commit -m "fix(today): bump card radius to xl for concentric corners (§1)"
 ```
 
 ### Task F5: Wire Enter key + add `↵` glyph to Next button
 
 **Files:**
-- Modify: `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx:263-265, 281-283`
+- Modify: `nimble/apps/desktop/src/components/pages/TodayPage.tsx:263-265, 281-283`
 - Modify: ReviewMode — add a useEffect for the Enter handler
 
 - [ ] **Step 1: Add the Enter handler**
@@ -1019,7 +1019,7 @@ Via Playwright:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add daily-triage/apps/desktop/src/components/pages/TodayPage.tsx
+git add nimble/apps/desktop/src/components/pages/TodayPage.tsx
 git commit -m "feat(today): Enter advances review step + keyboard glyph on primary buttons (§1.5)"
 ```
 
@@ -1030,8 +1030,8 @@ git commit -m "feat(today): Enter advances review step + keyboard glyph on prima
 - [ ] **Final 1: TS + Rust clean**
 
 ```bash
-cd daily-triage && npm run build --workspaces
-cd daily-triage && cargo check --workspace
+cd nimble && npm run build --workspaces
+cd nimble && cargo check --workspace
 ```
 
 Both expected to succeed.
@@ -1043,7 +1043,7 @@ Per the playbook's golden flows (so far the loop covers Today only):
 - Press Enter twice to verify the review flow advances Step 1 → Step 2 → Step 3.
 - Confirm console errors = the 2 cataloged Tauri `listen()` errors only. Zero new errors.
 
-Save final screenshots to `daily-triage/docs/audit-findings/today/final-*.png`.
+Save final screenshots to `nimble/docs/audit-findings/today/final-*.png`.
 
 - [ ] **Final 3: Fresh-agent review**
 
@@ -1051,7 +1051,7 @@ Dispatch `superpowers:requesting-code-review` on the merged branch with the orig
 
 - [ ] **Final 4: Update playbook post-run notes**
 
-Edit `daily-triage/docs/audit-loop-playbook.md` → "Dry run #1 — Today page" section. Fill in:
+Edit `nimble/docs/audit-loop-playbook.md` → "Dry run #1 — Today page" section. Fill in:
 - What worked (what the loop produced cleanly)
 - What leaked (anything that needed mid-flight adjustment)
 - Adjustments for next loop (process changes)

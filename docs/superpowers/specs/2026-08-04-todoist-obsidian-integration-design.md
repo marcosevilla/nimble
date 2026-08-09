@@ -6,7 +6,7 @@
 
 ## Goal
 
-Make daily-triage the complete source of truth for tasks, docs, and context:
+Make nimble the complete source of truth for tasks, docs, and context:
 
 1. **Todoist** becomes a detachable two-way sync adapter over the fully native task model — mirror now (Todoist mobile covers the iPhone gap), clean sunset later once the app's own mobile capture + reminders exist.
 2. **Obsidian** integrates as a unified docs library — one docs UI over two backends: vault notes remain markdown files on disk (files = physical truth, app edits them in place), app-native docs remain DB-first.
@@ -23,10 +23,10 @@ Make daily-triage the complete source of truth for tasks, docs, and context:
 
 ## Architecture overview
 
-All business logic lives in `daily-triage-core` (existing rule: frontend never does HTTP; Tauri commands are thin wrappers). New work follows the same shape.
+All business logic lives in `nimble-core` (existing rule: frontend never does HTTP; Tauri commands are thin wrappers). New work follows the same shape.
 
 ```
-daily-triage-core/
+nimble-core/
   src/integrations/            ← NEW: adapter layer
     mod.rs                     (shared: outbox draining, sync-state helpers)
     todoist/                   (client, sync loop, mappers)
@@ -40,7 +40,7 @@ packages/types/                (TS types for new/changed models)
 
 ## Part 0 — Foundation fixes (prerequisites)
 
-1. **Plumb `external_id`/`external_source` through task CRUD.** Columns exist since migration v15 but `LocalTask` (`daily-triage-core/src/types.rs`), `SELECT_COLS`, and `row_to_task` in `db/tasks.rs` omit them — normal edits currently cannot see or preserve the Todoist link. Add to the Rust struct, all queries, and `@daily-triage/types`.
+1. **Plumb `external_id`/`external_source` through task CRUD.** Columns exist since migration v15 but `LocalTask` (`nimble-core/src/types.rs`), `SELECT_COLS`, and `row_to_task` in `db/tasks.rs` omit them — normal edits currently cannot see or preserve the Todoist link. Add to the Rust struct, all queries, and `@nimble/types`.
 2. **Docs → markdown migration.** Convert `documents.content` from Tiptap HTML to markdown (Rust-side HTML→MD conversion, e.g. `htmd`); switch the Tiptap pipeline to markdown serialization (`tiptap-markdown`). Migration runs in dry-run mode first (report of any lossy conversions across Marco's real docs), backs up the DB, then commits. `doc_notes` content converts the same way.
 
 ## Part 1 — Todoist two-way sync
@@ -96,7 +96,7 @@ On launch, on window focus, ~5-minute tokio background interval (new — spawned
 
 ## Part 2 — Obsidian vault service
 
-### Core (`daily-triage-core/src/vault/`)
+### Core (`nimble-core/src/vault/`)
 
 - **Watcher:** `notify` + `notify-debouncer-full` (≈500ms) on `obsidian_vault_path`, background thread, events → Tauri events to the webview. Full rescan on launch (walk + mtime/size pre-check, blake3 hash to confirm changes) covers missed events. Watcher state is Mac-only.
 - **Parser:** Obsidian-flavored markdown — YAML frontmatter, `[[wikilinks]]` (incl. heading/block refs), embeds, tags. Prefer `turbovault-parser`; fallback `pulldown-cmark` + `gray_matter` + wikilink regex.

@@ -1,7 +1,7 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
-pub use daily_triage_core::types::FocusState;
+pub use nimble_core::types::FocusState;
 
 #[tauri::command]
 pub async fn start_focus_session(
@@ -10,7 +10,7 @@ pub async fn start_focus_session(
     task_content: String,
 ) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::focus::start_focus_session(pool.inner(), &task_id, &task_content)
+    nimble_core::db::focus::start_focus_session(pool.inner(), &task_id, &task_content)
         .await
         .map_err(|e| e.to_string())
 }
@@ -23,7 +23,7 @@ pub async fn end_focus_session(
     duration_secs: i64,
 ) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::focus::end_focus_session(pool.inner(), &task_id, &outcome, duration_secs)
+    nimble_core::db::focus::end_focus_session(pool.inner(), &task_id, &outcome, duration_secs)
         .await
         .map_err(|e| e.to_string())
 }
@@ -31,7 +31,7 @@ pub async fn end_focus_session(
 #[tauri::command]
 pub async fn get_active_focus(app: AppHandle) -> Result<FocusState, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::focus::get_active_focus(pool.inner())
+    nimble_core::db::focus::get_active_focus(pool.inner())
         .await
         .map_err(|e| e.to_string())
 }

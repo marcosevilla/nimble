@@ -1,3 +1,3 @@
-// Moved to daily_triage_core::db::activity
+// Moved to nimble_core::db::activity
 // This file is kept for backward compatibility.
-pub use daily_triage_core::db::activity::*;
+pub use nimble_core::db::activity::*;

@@ -2,8 +2,8 @@
 
 **Audit date:** 2026-05-10
 **Surface:** Today page, empty state (no brief, no calendar events, no tasks), Review mode Step 1.
-**Sources audited:** `daily-triage/apps/desktop/src/components/pages/TodayPage.tsx`, `daily-triage/apps/desktop/src/components/layout/Dashboard.tsx`, screenshot `smoke-today-after-bypass.png`.
-**Rubric:** `daily-triage/docs/ux-intent.md`.
+**Sources audited:** `nimble/apps/desktop/src/components/pages/TodayPage.tsx`, `nimble/apps/desktop/src/components/layout/Dashboard.tsx`, screenshot `smoke-today-after-bypass.png`.
+**Rubric:** `nimble/docs/ux-intent.md`.
 
 ## Summary
 

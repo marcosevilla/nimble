@@ -2,7 +2,7 @@ use chrono::Local;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
-pub use daily_triage_core::types::SaveResult;
+pub use nimble_core::types::SaveResult;
 
 /// Save progress: snapshot to SQLite + append session entry to Obsidian vault
 #[tauri::command]
@@ -16,7 +16,7 @@ pub async fn save_progress(
     let now = Local::now();
 
     // 1. Save snapshot to SQLite + update daily_state
-    let snapshot_id = daily_triage_core::db::daily_state::save_progress_snapshot(
+    let snapshot_id = nimble_core::db::daily_state::save_progress_snapshot(
         pool.inner(),
         &tasks_completed,
         &tasks_open,
@@ -53,7 +53,7 @@ pub async fn save_progress(
         ));
     }
 
-    entry.push_str(&format!("\n---\n\n## {} — Daily Triage\n\n", time_str));
+    entry.push_str(&format!("\n---\n\n## {} — Nimble\n\n", time_str));
     entry.push_str("`#triage`\n\n");
 
     if !completed_list.is_empty() {
@@ -72,7 +72,7 @@ pub async fn save_progress(
         entry.push('\n');
     }
 
-    entry.push_str("> Logged from Daily Triage app\n");
+    entry.push_str("> Logged from Nimble app\n");
 
     let mut existing = if file_exists {
         tokio::fs::read_to_string(&session_file)
@@ -96,7 +96,7 @@ pub async fn save_progress(
 /// Resolve vault path from settings
 async fn get_vault_path(app: &AppHandle) -> Result<String, String> {
     let pool = app.state::<SqlitePool>();
-    let path = daily_triage_core::db::settings::get_setting(pool.inner(), "obsidian_vault_path")
+    let path = nimble_core::db::settings::get_setting(pool.inner(), "obsidian_vault_path")
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Obsidian vault path not configured".to_string())?;

@@ -2,7 +2,7 @@ mod commands;
 mod selection;
 mod sync_runner;
 mod vault_runner;
-// db and parsers modules re-export from daily-triage-core for backward compatibility
+// db and parsers modules re-export from nimble-core for backward compatibility
 #[allow(unused)]
 mod db;
 #[allow(unused)]
@@ -212,7 +212,7 @@ pub fn run() {
             let _ = autostart.enable();
 
             // --- System tray ---
-            let show_item = MenuItemBuilder::with_id("show", "Show Marco's Task App")
+            let show_item = MenuItemBuilder::with_id("show", "Show Nimble")
                 .build(app)?;
             let capture_item = MenuItemBuilder::with_id("capture", "Quick Capture...")
                 .build(app)?;
@@ -234,7 +234,7 @@ pub fn run() {
                 // Template image: macOS recolors it to match the menu bar theme
                 .icon_as_template(true)
                 .menu(&tray_menu)
-                .tooltip("Marco's Task App")
+                .tooltip("Nimble")
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
                         "show" => {
@@ -271,7 +271,7 @@ pub fn run() {
                 let db_path = if demo_mode {
                     app_dir.join("demo.db")
                 } else {
-                    app_dir.join("daily-triage.db")
+                    app_dir.join("nimble.db")
                 };
                 let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
@@ -282,7 +282,7 @@ pub fn run() {
                     .expect("failed to connect to database");
 
                 // Run migrations from core crate
-                daily_triage_core::db::migrations::run_migrations(&pool)
+                nimble_core::db::migrations::run_migrations(&pool)
                     .await
                     .expect("failed to run migrations");
 

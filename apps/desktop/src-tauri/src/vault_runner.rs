@@ -1,7 +1,7 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager};
 
-use daily_triage_core::vault::{self, scanner, watcher::VaultWatcher};
+use nimble_core::vault::{self, scanner, watcher::VaultWatcher};
 
 /// Holds the live watcher so it isn't dropped (dropping stops the watch).
 pub struct VaultWatchState(pub std::sync::Mutex<Option<VaultWatcher>>);
@@ -33,7 +33,7 @@ pub async fn start(app: &AppHandle) {
 
     let handle = app.clone();
     let watch_cfg = cfg.clone();
-    let spawned = daily_triage_core::vault::watcher::spawn(&cfg.root, move |paths| {
+    let spawned = nimble_core::vault::watcher::spawn(&cfg.root, move |paths| {
         let handle = handle.clone();
         let cfg = watch_cfg.clone();
         tauri::async_runtime::spawn(async move {

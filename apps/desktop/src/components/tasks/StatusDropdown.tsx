@@ -8,7 +8,7 @@ import { useSelectionStore } from '@/stores/selectionStore'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { playCompletionSound } from '@/lib/sound'
 import { toast } from 'sonner'
-import type { TaskStatus } from '@daily-triage/types'
+import type { TaskStatus } from '@nimble/types'
 import type { LucideIcon } from 'lucide-react'
 
 /** Matches the `task-complete-exit` keyframe duration in index.css. */

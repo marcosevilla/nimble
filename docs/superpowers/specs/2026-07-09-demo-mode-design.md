@@ -19,7 +19,7 @@ A toggle that clears all visible content (inbox captures, tasks, docs, goals, ca
 All app content *and* all integration config (Turso credentials, Todoist token, calendar feeds, Obsidian vault path) live in one SQLite database. Demo mode swaps which database file the app opens:
 
 - **Marker file** `demo-mode` in the app data dir (`~/Library/Application Support/com.marcosevilla.daily-triage/`).
-- At startup, `lib.rs` checks for the marker: present → open `demo.db`; absent → open `daily-triage.db` (unchanged path).
+- At startup, `lib.rs` checks for the marker: present → open `demo.db`; absent → open `nimble.db` (unchanged path).
 - `demo.db` is created fresh on every entry into demo mode (existing migrations run, which seed default life areas and the Inbox project). Because its `settings` table is empty, sync, Todoist, calendar, and Obsidian are all automatically unconfigured — no special-case guards needed.
 - Exiting demo mode deletes the marker and `demo.db`.
 

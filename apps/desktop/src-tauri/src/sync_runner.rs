@@ -5,9 +5,9 @@ use tauri::{AppHandle, Emitter, Manager};
 /// emits `todoist-sync-applied` so the frontend refreshes its task lists.
 pub async fn run_and_emit(
     app: &AppHandle,
-) -> daily_triage_core::Result<daily_triage_core::integrations::todoist::sync_loop::SyncReport> {
+) -> nimble_core::Result<nimble_core::integrations::todoist::sync_loop::SyncReport> {
     let pool = app.state::<SqlitePool>();
-    let report = daily_triage_core::integrations::todoist::sync_loop::run_sync(pool.inner()).await?;
+    let report = nimble_core::integrations::todoist::sync_loop::run_sync(pool.inner()).await?;
     if report.changed_anything() {
         let _ = app.emit("todoist-sync-applied", ());
     }
@@ -21,7 +21,7 @@ pub async fn run_and_emit(
 /// the next trigger to retry (the outbox and sync_token make this safe).
 pub async fn run_if_due_and_emit(app: &AppHandle, min_interval_secs: i64) {
     let pool = app.state::<SqlitePool>();
-    match daily_triage_core::integrations::todoist::sync_loop::run_sync_if_due(pool.inner(), min_interval_secs).await {
+    match nimble_core::integrations::todoist::sync_loop::run_sync_if_due(pool.inner(), min_interval_secs).await {
         Ok(report) if report.changed_anything() => {
             let _ = app.emit("todoist-sync-applied", ());
         }

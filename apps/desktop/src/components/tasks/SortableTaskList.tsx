@@ -19,7 +19,7 @@ import { LocalTaskRow } from './LocalTaskRow'
 import { useDataProvider } from '@/services/provider-context'
 import { GripVertical } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { LocalTask, Project } from '@daily-triage/types'
+import type { LocalTask, Project } from '@nimble/types'
 
 interface SortableTaskItemProps {
   task: LocalTask

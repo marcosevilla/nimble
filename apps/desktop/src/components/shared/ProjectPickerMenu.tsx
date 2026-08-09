@@ -1,4 +1,4 @@
-import type { Project } from '@daily-triage/types'
+import type { Project } from '@nimble/types'
 
 interface ProjectPickerMenuProps {
   projects: Project[]

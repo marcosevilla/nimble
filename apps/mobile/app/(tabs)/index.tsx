@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useDataProvider } from '../../services/provider-context';
 import { fullSync } from '../../services/sync';
-import type { LocalTask, HabitWithStats } from '@daily-triage/types';
+import type { LocalTask, HabitWithStats } from '@nimble/types';
 import { colors, spacing, fontSize } from '../../constants/theme';
 
 function getGreeting(): string {

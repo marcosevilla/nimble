@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useDataProvider } from '@/services/provider-context'
-import type { TodoistSyncStatus } from '@daily-triage/types'
+import type { TodoistSyncStatus } from '@nimble/types'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Meta } from '@/components/shared/typography'

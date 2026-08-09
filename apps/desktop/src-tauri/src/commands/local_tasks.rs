@@ -1,12 +1,12 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
-pub use daily_triage_core::types::LocalTask;
+pub use nimble_core::types::LocalTask;
 
 #[tauri::command]
 pub async fn reorder_local_tasks(app: AppHandle, task_ids: Vec<String>) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::tasks::reorder_local_tasks(pool.inner(), &task_ids)
+    nimble_core::db::tasks::reorder_local_tasks(pool.inner(), &task_ids)
         .await
         .map_err(|e| e.to_string())
 }
@@ -20,7 +20,7 @@ pub async fn get_local_tasks(
 ) -> Result<Vec<LocalTask>, String> {
     let pool = app.state::<SqlitePool>();
     let include_completed = include_completed.unwrap_or(false);
-    daily_triage_core::db::tasks::get_local_tasks(
+    nimble_core::db::tasks::get_local_tasks(
         pool.inner(),
         project_id.as_deref(),
         due_date.as_deref(),
@@ -41,7 +41,7 @@ pub async fn create_local_task(
     due_date: Option<String>,
 ) -> Result<LocalTask, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::tasks::create_local_task(
+    nimble_core::db::tasks::create_local_task(
         pool.inner(),
         &content,
         project_id.as_deref(),
@@ -67,7 +67,7 @@ pub async fn update_local_task(
     linked_doc_id: Option<String>,
 ) -> Result<LocalTask, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::tasks::update_local_task(
+    nimble_core::db::tasks::update_local_task(
         pool.inner(),
         &id,
         content.as_deref(),
@@ -90,7 +90,7 @@ pub async fn update_task_status(
     note: Option<String>,
 ) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::tasks::update_task_status(
+    nimble_core::db::tasks::update_task_status(
         pool.inner(),
         &id,
         &status,
@@ -113,7 +113,7 @@ pub async fn uncomplete_local_task(app: AppHandle, id: String) -> Result<(), Str
 #[tauri::command]
 pub async fn delete_local_task(app: AppHandle, id: String) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::tasks::delete_local_task(pool.inner(), &id)
+    nimble_core::db::tasks::delete_local_task(pool.inner(), &id)
         .await
         .map_err(|e| e.to_string())
 }

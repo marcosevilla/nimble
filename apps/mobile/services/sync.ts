@@ -1,7 +1,7 @@
 /**
  * Sync service — push/pull local changes to/from Turso cloud database.
  *
- * Mirrors the Rust implementation in daily-triage-core/src/db/sync.rs.
+ * Mirrors the Rust implementation in nimble-core/src/db/sync.rs.
  * Uses last-write-wins (LWW) conflict resolution for single-user multi-device sync.
  */
 
@@ -16,7 +16,7 @@ import {
   type TursoStatement,
   type TursoArg,
 } from './turso';
-import type { SyncStatus } from '@daily-triage/types';
+import type { SyncStatus } from '@nimble/types';
 
 // ── Table allowlist (prevents SQL injection) ──
 

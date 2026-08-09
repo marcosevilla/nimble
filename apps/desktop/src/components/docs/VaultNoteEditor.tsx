@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Meta } from '@/components/shared/typography'
 import { ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
-import type { VaultNoteSummary } from '@daily-triage/types'
+import type { VaultNoteSummary } from '@nimble/types'
 
 /**
  * Vault notes are shown here, not edited here.

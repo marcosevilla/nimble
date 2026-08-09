@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useLocalTasks } from '@/hooks/useLocalTasks'
-import type { LocalTask } from '@daily-triage/types'
+import type { LocalTask } from '@nimble/types'
 
 export function useFocusQueue(currentTask: LocalTask | null): LocalTask | null {
   const { tasks } = useLocalTasks()

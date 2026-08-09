@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/shared/PageHeader'
 import { cn } from '@/lib/utils'
 import { Plus } from 'lucide-react'
 import { Input } from '@/components/ui/input'
-import type { Project, LocalTask, TaskStatus } from '@daily-triage/types'
+import type { Project, LocalTask, TaskStatus } from '@nimble/types'
 
 // ── Inline Task Creator ──
 

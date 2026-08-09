@@ -12,7 +12,7 @@ import { ProjectDetailPage } from '@/components/tasks/ProjectDetailPage'
 import { IconButton } from '@/components/shared/IconButton'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { useLayoutStore } from '@/stores/layoutStore'
-import type { TaskStatus, LocalTask } from '@daily-triage/types'
+import type { TaskStatus, LocalTask } from '@nimble/types'
 
 // ── Inline Task Creator ──
 
@@ -70,7 +70,7 @@ function ProjectSection({
   onDelete: (id: string) => void
   onAddSubtask: (parentId: string, content: string) => void
   onUpdated?: () => void
-  allProjects: import('@daily-triage/types').Project[]
+  allProjects: import('@nimble/types').Project[]
   defaultOpen: boolean
 }) {
   const topLevel = tasks.filter((t) => !t.parent_id)
@@ -120,7 +120,7 @@ function AllTasksView({
   remove,
   refresh,
 }: {
-  projects: import('@daily-triage/types').Project[]
+  projects: import('@nimble/types').Project[]
   filteredTasks: LocalTask[]
   statusFilter: TaskStatus | 'all'
   setStatusFilter: (v: TaskStatus | 'all') => void

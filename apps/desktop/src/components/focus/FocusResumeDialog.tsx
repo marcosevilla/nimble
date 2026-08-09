@@ -9,7 +9,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import type { LocalTask } from '@daily-triage/types'
+import type { LocalTask } from '@nimble/types'
 
 export function FocusResumeDialog() {
   const dp = useDataProvider()

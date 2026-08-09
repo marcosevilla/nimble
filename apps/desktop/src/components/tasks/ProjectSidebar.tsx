@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/shared/IconButton'
 import { ProjectEditDialog } from './ProjectEditDialog'
-import type { Project, LocalTask } from '@daily-triage/types'
+import type { Project, LocalTask } from '@nimble/types'
 
 const PROJECT_COLORS = [
   '#6366f1', '#ec4899', '#22c55e', '#f59e0b', '#06b6d4', '#f43f5e', '#8b5cf6', '#14b8a6',

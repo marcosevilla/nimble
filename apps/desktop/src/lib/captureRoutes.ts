@@ -1,4 +1,4 @@
-import type { CaptureRoute } from '@daily-triage/types'
+import type { CaptureRoute } from '@nimble/types'
 
 export interface ParsedRoute {
   route: CaptureRoute | null

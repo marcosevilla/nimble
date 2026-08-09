@@ -14,7 +14,7 @@ interface Migration {
 }
 
 /**
- * All migrations, mirrored from daily-triage-core/src/db/migrations.rs.
+ * All migrations, mirrored from nimble-core/src/db/migrations.rs.
  * Each migration's SQL may contain multiple statements separated by semicolons.
  */
 const MIGRATIONS: Migration[] = [
@@ -388,7 +388,7 @@ let _db: Database | null = null;
 export async function initDatabase(): Promise<Database> {
   if (_db) return _db;
 
-  const db = await SQLite.openDatabaseAsync('daily-triage.db');
+  const db = await SQLite.openDatabaseAsync('nimble.db');
 
   // Create schema_version table if not exists
   await db.execAsync(`

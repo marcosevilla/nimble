@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { useDataProvider } from '../../services/provider-context';
 import { fullSync } from '../../services/sync';
-import type { Project, LocalTask, TaskStatus } from '@daily-triage/types';
+import type { Project, LocalTask, TaskStatus } from '@nimble/types';
 import { colors, spacing, fontSize } from '../../constants/theme';
 
 const priorityColors: Record<number, string> = {

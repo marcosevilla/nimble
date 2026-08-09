@@ -2,7 +2,7 @@
 
 ## DataProvider Surface
 
-The `DataProvider` interface is the abstraction layer that decouples the UI from direct Tauri invoke calls. Located at `/Users/marcosevilla/Developer/personal triage and briefing app/daily-triage/apps/desktop/src/services/data-provider.ts`.
+The `DataProvider` interface is the abstraction layer that decouples the UI from direct Tauri invoke calls. Located at `/Users/marcosevilla/Developer/personal triage and briefing app/nimble/apps/desktop/src/services/data-provider.ts`.
 
 ### Domain Map
 

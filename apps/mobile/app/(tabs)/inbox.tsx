@@ -16,7 +16,7 @@ import {
   Alert,
 } from 'react-native';
 import { useDataProvider } from '../../services/provider-context';
-import type { Capture } from '@daily-triage/types';
+import type { Capture } from '@nimble/types';
 import { colors, spacing, fontSize } from '../../constants/theme';
 
 function formatTimestamp(iso: string): string {

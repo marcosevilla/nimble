@@ -1,9 +1,9 @@
-// mock-tauri.js — Tauri backend polyfill for running the daily-triage desktop
+// mock-tauri.js — Tauri backend polyfill for running the nimble desktop
 // app in a plain browser (vite dev server) with fully populated mock data.
 // Inject via Playwright addInitScript BEFORE the app bundle loads.
 //
 // Today (in mock-world): Saturday, August 1, 2026.
-// All field names are snake_case, matching @daily-triage/types (Rust structs).
+// All field names are snake_case, matching @nimble/types (Rust structs).
 (function () {
   'use strict'
 

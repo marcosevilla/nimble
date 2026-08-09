@@ -1,6 +1,6 @@
 # Mobile Architecture Plan
 
-> Cross-platform strategy for Daily Triage: desktop + mobile with synced data.
+> Cross-platform strategy for Nimble: desktop + mobile with synced data.
 > Written 2026-04-04. Not a roadmap — a structural blueprint.
 
 ---
@@ -69,7 +69,7 @@
 │  └──────────────────┬───────────────────────────┘       │
 │                     │ sqlx                               │
 │  ┌──────────────────┴───────────────────────────┐       │
-│  │  SQLite (daily-triage.db)                    │       │
+│  │  SQLite (nimble.db)                    │       │
 │  └──────────────────────────────────────────────┘       │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -86,7 +86,7 @@ This means the extraction work is well-scoped, not a rewrite.
 
 ### The problem
 
-Daily Triage is local-first: one SQLite database per device, no cloud. To work across laptop + phone + second laptop, we need a sync layer that:
+Nimble is local-first: one SQLite database per device, no cloud. To work across laptop + phone + second laptop, we need a sync layer that:
 
 1. Works offline (full local DB, sync when connected)
 2. Handles the single-user, multi-device case (not multi-tenant)
@@ -204,7 +204,7 @@ These changes prepare the desktop codebase for cross-platform without breaking a
 
 ### Change 1: Extract Rust core into a library crate
 
-**What:** Move all business logic out of the Tauri command layer into a standalone `daily-triage-core` Rust library crate.
+**What:** Move all business logic out of the Tauri command layer into a standalone `nimble-core` Rust library crate.
 
 **Why:** The library crate can be:
 - Used by Tauri desktop (current)
@@ -234,7 +234,7 @@ src-tauri/
 │   ├── lib.rs           (Tauri setup + thin command wrappers only)
 │   └── commands/        (each fn: extract pool → call core → return)
 
-daily-triage-core/       (NEW — standalone Rust crate)
+nimble-core/       (NEW — standalone Rust crate)
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs
@@ -281,7 +281,7 @@ pub async fn get_local_tasks(
     project_id: Option<String>,
 ) -> Result<Vec<LocalTask>, String> {
     let pool = app.state::<SqlitePool>();
-    daily_triage_core::db::tasks::get_tasks(&pool, project_id)
+    nimble_core::db::tasks::get_tasks(&pool, project_id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -389,7 +389,7 @@ const tasks = await dp.tasks.list(projectId)
 
 ### Change 5: Extract shared types into a TypeScript package
 
-**What:** Move all TypeScript interfaces from `services/tauri.ts` into a `@daily-triage/types` package (or a `shared/types.ts` file in a monorepo).
+**What:** Move all TypeScript interfaces from `services/tauri.ts` into a `@nimble/types` package (or a `shared/types.ts` file in a monorepo).
 
 **Why:** Both the desktop React app and the future mobile React Native app need the same type definitions.
 
@@ -397,7 +397,7 @@ const tasks = await dp.tasks.list(projectId)
 
 **Target monorepo structure:**
 ```
-daily-triage/
+nimble/
 ├── apps/
 │   ├── desktop/          (current Tauri app, moved here)
 │   └── mobile/           (future React Native app)
@@ -405,7 +405,7 @@ daily-triage/
 │   ├── types/            (shared TypeScript types)
 │   ├── core/             (shared business logic — optional, for TypeScript-only sync)
 │   └── ui/               (shared component logic — future, if converging UI)
-├── daily-triage-core/    (Rust crate — shared backend logic)
+├── nimble-core/    (Rust crate — shared backend logic)
 ├── package.json          (workspace root)
 └── turbo.json            (or pnpm workspace config)
 ```
@@ -455,7 +455,7 @@ React Native (Expo managed workflow)
 ├── State: Zustand (same stores, decoupled from Tauri)
 ├── Database: expo-sqlite (local SQLite)
 ├── Navigation: expo-router (file-based routing)
-├── Types: @daily-triage/types (shared package)
+├── Types: @nimble/types (shared package)
 ├── Sync: Custom sync module (TypeScript, talks to Turso)
 └── Notifications: expo-notifications
 ```
@@ -534,7 +534,7 @@ This mirrors the Rust backend's SQL queries but in TypeScript. The shared types 
 > Goal: Make the desktop codebase mobile-ready without breaking anything.
 
 **Session 0a:** Extract Rust core crate
-- Create `daily-triage-core/` workspace member
+- Create `nimble-core/` workspace member
 - Move all db/, parsers/, types from `src-tauri/src/` to core crate
 - Tauri commands become thin wrappers calling core functions
 - Verify: `npm run tauri dev` still works identically
@@ -567,7 +567,7 @@ This mirrors the Rust backend's SQL queries but in TypeScript. The shared types 
 **Session 1a:** Project setup
 - `npx create-expo-app apps/mobile`
 - Configure: NativeWind, Gluestack UI, expo-sqlite, expo-router
-- Import `@daily-triage/types`
+- Import `@nimble/types`
 - Create SQLite database with same schema (run migrations)
 - Implement `SqliteProvider` for core tables (tasks, projects, captures)
 

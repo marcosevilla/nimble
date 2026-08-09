@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Marco's Task App",
+  "productName": "Nimble",
   "mainBinaryName": "marco-task-app",
   "version": "0.1.0",
   "identifier": "com.marcosevilla.daily-triage",
@@ -15,7 +15,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Marco's Task App",
+        "title": "Nimble",
         "width": 1200,
         "height": 800,
         "minWidth": 800,

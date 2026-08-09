@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDataProvider } from '@/services/provider-context'
 import type { DataProvider } from '@/services/data-provider'
-import type { CalendarEvent } from '@daily-triage/types'
+import type { CalendarEvent } from '@nimble/types'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 // ── Helpers ──
