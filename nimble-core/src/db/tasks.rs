@@ -492,12 +492,27 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
     Ok(task)
 }
 
-/// Update task status (backlog, todo, in_progress, blocked, complete)
+/// Update task status (backlog, todo, in_progress, blocked, complete).
+/// Delegates to `update_task_status_at` with the real local date.
 pub async fn update_task_status(
     pool: &SqlitePool,
     id: &str,
     status: &str,
     note: Option<&str>,
+) -> crate::Result<()> {
+    update_task_status_at(pool, id, status, note, chrono::Local::now().date_naive()).await
+}
+
+/// Same as `update_task_status`, but takes `today` explicitly instead of
+/// reading the wall clock. This is what makes the recurrence-on-complete
+/// branch below testable with fixed dates instead of ones that go stale as
+/// real time passes; `update_task_status` is the production entry point.
+pub async fn update_task_status_at(
+    pool: &SqlitePool,
+    id: &str,
+    status: &str,
+    note: Option<&str>,
+    today: chrono::NaiveDate,
 ) -> crate::Result<()> {
     // Get old status for logging
     let old_status: Option<(String,)> = sqlx::query_as(
@@ -521,6 +536,87 @@ pub async fn update_task_status(
     // Update status + completed flag
     let is_complete = status == "complete";
     if is_complete {
+        // Recurrence check, ahead of the normal completion path: a recurring
+        // task (rule parses AND has a due date) reschedules instead of
+        // completing. An unparseable rule or a missing due date falls
+        // through below and completes normally (rule is inert).
+        let recur_row: Option<(Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT recurrence_rule, due_date, due_time FROM local_tasks WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+
+        if let Some((Some(rule_str), Some(due_date_str), existing_due_time)) = recur_row {
+            if let Some(rule) = crate::recurrence::parse_rule(&rule_str) {
+                if let Ok(current_due) =
+                    chrono::NaiveDate::parse_from_str(&due_date_str, "%Y-%m-%d")
+                {
+                    let next_due = crate::recurrence::next_occurrence(&rule, current_due, today);
+                    let next_due_str = next_due.format("%Y-%m-%d").to_string();
+                    let new_due_time = rule.time.clone().or(existing_due_time);
+
+                    sqlx::query(
+                        "UPDATE local_tasks SET due_date = ?, due_time = ?, status = 'todo', updated_at = datetime('now', 'localtime') WHERE id = ?",
+                    )
+                    .bind(&next_due_str)
+                    .bind(&new_due_time)
+                    .bind(id)
+                    .execute(pool)
+                    .await?;
+
+                    activity::log_activity(
+                        pool,
+                        "task_recurred",
+                        Some(id),
+                        Some(serde_json::json!({ "from": due_date_str, "to": &next_due_str })),
+                    )
+                    .await;
+
+                    let row: Option<LocalTask> = sqlx::query_as::<_, LocalTask>(&format!(
+                        "SELECT {} FROM local_tasks WHERE id = ?",
+                        SELECT_COLS
+                    ))
+                    .bind(id)
+                    .fetch_optional(pool)
+                    .await
+                    .ok()
+                    .flatten();
+
+                    if let Some(task) = &row {
+                        let fields_changed: Vec<String> = vec![
+                            "due_date".to_string(),
+                            "due_time".to_string(),
+                            "status".to_string(),
+                        ];
+                        let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
+                        let snapshot = sync::task_sync_snapshot(task);
+                        sync::append_sync_log(
+                            pool,
+                            "local_tasks",
+                            id,
+                            "UPDATE",
+                            Some(&changed),
+                            Some(&snapshot),
+                        )
+                        .await
+                        .ok();
+
+                        crate::integrations::todoist::observer::on_task_mutation(
+                            pool,
+                            crate::integrations::todoist::observer::TaskMutation::Updated {
+                                task,
+                                fields_changed: &fields_changed,
+                            },
+                        )
+                        .await;
+                    }
+
+                    return Ok(());
+                }
+            }
+        }
+
         sqlx::query(
             "UPDATE local_tasks SET status = ?, completed = 1, completed_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime') WHERE id = ?",
         )
@@ -660,7 +756,8 @@ pub async fn delete_local_task(pool: &SqlitePool, id: &str) -> crate::Result<()>
 #[cfg(test)]
 mod tests {
     use crate::test_util::test_pool;
-    use crate::types::{CreateTaskInput, UpdateTaskInput};
+    use crate::types::{CreateTaskInput, LocalTask, UpdateTaskInput};
+    use super::SELECT_COLS;
 
     /// Task 7 Step 1: create with all new fields, read back intact (incl.
     /// `labels` populated via `get_local_tasks`'s aggregate join, not a
@@ -1064,5 +1161,225 @@ mod tests {
             batch.iter().map(|r| (&r.local_id, &r.op)).collect::<Vec<_>>()
         );
         assert_eq!(child_delete.unwrap().payload["external_id"], "ext-child-1");
+    }
+
+    // --- Task 8: recurrence-on-complete wiring ---
+    //
+    // `today` is injected via `update_task_status_at` rather than read from
+    // the wall clock, so these date assertions (mirroring the EDD fixture
+    // in recurrence.rs's own tests: due 2026-08-16, "every 2 weeks @ 09:00"
+    // -> 2026-08-30 -> 2026-09-13) never rot as real time passes.
+    fn d(s: &str) -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    /// Completing a recurring task with a due date reschedules instead of
+    /// completing: due_date advances via `next_occurrence`, due_time takes
+    /// the rule's time, status resets to "todo", completed stays false, and
+    /// a `task_recurred` activity row is logged with the old/new due dates.
+    #[tokio::test]
+    async fn completing_recurring_task_with_due_date_reschedules_instead_of_completing() {
+        let pool = test_pool().await;
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "🔴 Certify for EDD benefits (UI Online)".to_string(),
+                due_date: Some("2026-08-16".to_string()),
+                due_time: Some("09:00".to_string()),
+                recurrence_rule: Some("every 2 weeks @ 09:00".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        super::update_task_status_at(&pool, &task.id, "complete", None, d("2026-08-10"))
+            .await
+            .unwrap();
+
+        let updated: LocalTask =
+            sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+                .bind(&task.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(!updated.completed);
+        assert_eq!(updated.completed_at, None);
+        assert_eq!(updated.status, "todo");
+        assert_eq!(updated.due_date.as_deref(), Some("2026-08-30"));
+        assert_eq!(updated.due_time.as_deref(), Some("09:00"));
+
+        let logged: Option<(String, Option<String>)> = sqlx::query_as(
+            "SELECT action_type, metadata FROM activity_log WHERE target_id = ? AND action_type = 'task_recurred'",
+        )
+        .bind(&task.id)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        let (action, metadata) = logged.expect("expected a task_recurred activity row");
+        assert_eq!(action, "task_recurred");
+        let metadata: serde_json::Value = serde_json::from_str(&metadata.unwrap()).unwrap();
+        assert_eq!(metadata["from"], "2026-08-16");
+        assert_eq!(metadata["to"], "2026-08-30");
+    }
+
+    /// Completing the same recurring task a second time in a row advances
+    /// again from the new due date — the "twice in a row" exit test in
+    /// miniature that Task 16's end-to-end test scales up.
+    #[tokio::test]
+    async fn completing_recurring_task_twice_in_a_row_advances_each_time() {
+        let pool = test_pool().await;
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "🔴 Certify for EDD benefits (UI Online)".to_string(),
+                due_date: Some("2026-08-16".to_string()),
+                due_time: Some("09:00".to_string()),
+                recurrence_rule: Some("every 2 weeks @ 09:00".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        super::update_task_status_at(&pool, &task.id, "complete", None, d("2026-08-10"))
+            .await
+            .unwrap();
+        super::update_task_status_at(&pool, &task.id, "complete", None, d("2026-08-10"))
+            .await
+            .unwrap();
+
+        let updated: LocalTask =
+            sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+                .bind(&task.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(updated.due_date.as_deref(), Some("2026-09-13"));
+        assert_eq!(updated.status, "todo");
+        assert!(!updated.completed);
+    }
+
+    /// A recurring task with no due date has nothing to advance from — the
+    /// rule is inert and the task completes normally.
+    #[tokio::test]
+    async fn recurring_task_without_due_date_completes_normally() {
+        let pool = test_pool().await;
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "No due date".to_string(),
+                recurrence_rule: Some("every 2 weeks @ 09:00".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        super::update_task_status(&pool, &task.id, "complete", None).await.unwrap();
+
+        let updated: LocalTask =
+            sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+                .bind(&task.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(updated.completed);
+        assert!(updated.completed_at.is_some());
+        assert_eq!(updated.status, "complete");
+    }
+
+    /// An unparseable recurrence rule is inert too — the task completes
+    /// normally rather than silently getting stuck unable to recur.
+    #[tokio::test]
+    async fn unparseable_recurrence_rule_completes_normally() {
+        let pool = test_pool().await;
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "Weird rule".to_string(),
+                due_date: Some("2026-08-16".to_string()),
+                recurrence_rule: Some("every 3rd tuesday".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        super::update_task_status(&pool, &task.id, "complete", None).await.unwrap();
+
+        let updated: LocalTask =
+            sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+                .bind(&task.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(updated.completed);
+        assert_eq!(updated.status, "complete");
+        assert_eq!(updated.due_date.as_deref(), Some("2026-08-16")); // untouched
+    }
+
+    /// Recurrence only branches off the "complete" arm — every other status
+    /// transition on a recurring task leaves the due date alone.
+    #[tokio::test]
+    async fn non_complete_status_on_recurring_task_leaves_due_date_untouched() {
+        let pool = test_pool().await;
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "🔴 Certify for EDD benefits (UI Online)".to_string(),
+                due_date: Some("2026-08-16".to_string()),
+                recurrence_rule: Some("every 2 weeks @ 09:00".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        super::update_task_status(&pool, &task.id, "blocked", Some("waiting")).await.unwrap();
+
+        let updated: LocalTask =
+            sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
+                .bind(&task.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(updated.status, "blocked");
+        assert_eq!(updated.due_date.as_deref(), Some("2026-08-16"));
+        assert!(!updated.completed);
+    }
+
+    /// Sync log + Todoist observer fire with the exact `fields_changed` the
+    /// brief specifies for a recurrence reschedule, distinct from the
+    /// ["status", "completed", "completed_at"] set used by a normal
+    /// completion.
+    #[tokio::test]
+    async fn recurrence_reschedule_logs_sync_with_exact_fields_changed() {
+        let pool = test_pool().await;
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "🔴 Certify for EDD benefits (UI Online)".to_string(),
+                due_date: Some("2026-08-16".to_string()),
+                recurrence_rule: Some("every 2 weeks @ 09:00".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        super::update_task_status_at(&pool, &task.id, "complete", None, d("2026-08-10"))
+            .await
+            .unwrap();
+
+        let logged: Vec<(String,)> = sqlx::query_as(
+            "SELECT changed_columns FROM sync_log WHERE table_name = 'local_tasks' AND row_id = ? ORDER BY timestamp DESC LIMIT 1",
+        )
+        .bind(&task.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let changed: Vec<String> = serde_json::from_str(&logged[0].0).unwrap();
+        assert_eq!(changed, vec!["due_date", "due_time", "status"]);
     }
 }
