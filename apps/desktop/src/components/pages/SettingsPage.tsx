@@ -45,6 +45,7 @@ import { TodoistSyncSection } from '@/components/settings/TodoistSyncSection'
 import { TodoistMigrationSection } from '@/components/settings/TodoistMigrationSection'
 import { DocsMigrationSection } from '@/components/settings/DocsMigrationSection'
 import { VaultSection } from '@/components/settings/VaultSection'
+import { LabelManager } from '@/components/settings/LabelManager'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
 
 // ── Types ──
@@ -1288,6 +1289,11 @@ export function SettingsPage() {
             </a>
           </li>
           <li>
+            <a href="#labels" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
+              Labels
+            </a>
+          </li>
+          <li>
             <a href="#sync" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
               Sync
             </a>
@@ -1535,6 +1541,17 @@ export function SettingsPage() {
 
       {/* Capture Routes */}
       <CaptureRoutesSection />
+
+      <Separator />
+
+      {/* Labels */}
+      <section id="labels" className="space-y-4 scroll-mt-6">
+        <SectionHeader
+          title="Labels"
+          description="Reusable tags for tasks. Colors are for your own visual sorting."
+        />
+        <LabelManager />
+      </section>
 
       <Separator />
 
