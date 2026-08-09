@@ -189,6 +189,26 @@ pub async fn get_or_create_label_by_name(pool: &SqlitePool, name: &str) -> crate
     Ok(label)
 }
 
+/// Resolves label ids to their current names, sorted. Used to translate
+/// Nimble-local label ids (`LocalTask::labels`) into the Todoist-facing
+/// names that `TaskSnapshot::labels` and Todoist's `item_update`/`item_add`
+/// `labels` arg both compare/carry by — label ids never round-trip to
+/// Todoist. Unknown/stale ids are silently dropped rather than erroring.
+pub async fn names_for_ids(pool: &SqlitePool, ids: &[String]) -> crate::Result<Vec<String>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = vec!["?"; ids.len()].join(", ");
+    let query = format!("SELECT name FROM labels WHERE id IN ({placeholders})");
+    let mut q = sqlx::query_as::<_, (String,)>(&query);
+    for id in ids {
+        q = q.bind(id);
+    }
+    let mut names: Vec<String> = q.fetch_all(pool).await?.into_iter().map(|(n,)| n).collect();
+    names.sort();
+    Ok(names)
+}
+
 pub async fn labels_for_task(pool: &SqlitePool, task_id: &str) -> crate::Result<Vec<String>> {
     let rows: Vec<(String,)> = sqlx::query_as(
         "SELECT label_id FROM task_labels WHERE task_id = ? ORDER BY rowid",

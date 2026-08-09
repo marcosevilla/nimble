@@ -20,6 +20,8 @@ fn task_create_payload(task: &LocalTask) -> serde_json::Value {
         "content": task.content,
         "description": task.description,
         "due_date": task.due_date,
+        "due_time": task.due_time,
+        "duration_minutes": task.duration_minutes,
         "priority": task.priority,
         "project_local_id": task.project_id,
         "parent_local_id": task.parent_id,
@@ -51,6 +53,23 @@ pub async fn on_task_mutation(pool: &SqlitePool, m: TaskMutation<'_>) {
                     "description" => { payload.insert("description".into(), task.description.clone().into()); }
                     "due_date" => { payload.insert("due_date".into(), task.due_date.clone().into()); }
                     "priority" => { payload.insert("priority".into(), task.priority.into()); }
+                    // due_time is meaningless without a paired date on the
+                    // push side (Todoist's `due.datetime` combines both) —
+                    // always send the task's current due_date alongside it,
+                    // even if due_date itself didn't change this call.
+                    "due_time" => {
+                        payload.insert("due_time".into(), task.due_time.clone().into());
+                        payload.entry("due_date").or_insert_with(|| task.due_date.clone().into());
+                    }
+                    "duration_minutes" => {
+                        payload.insert("duration_minutes".into(), task.duration_minutes.into());
+                    }
+                    "labels" => {
+                        match crate::db::labels::names_for_ids(pool, &task.labels).await {
+                            Ok(names) => { payload.insert("labels".into(), serde_json::json!(names)); }
+                            Err(e) => log::warn!("todoist observer: failed to resolve label names: {e}"),
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -258,6 +277,79 @@ mod tests {
         crate::db::tasks::update_task_status(&pool, &t.id, "blocked", Some("waiting")).await.unwrap();
         let ops: Vec<String> = outbox::pending_batch(&pool, 10).await.unwrap().into_iter().map(|r| r.op).collect();
         assert_eq!(ops, vec!["create"]); // only the creation op
+    }
+
+    #[tokio::test]
+    async fn due_time_change_enqueues_paired_due_date() {
+        let pool = test_pool().await;
+        activate(&pool).await;
+        let t = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "x".to_string(),
+                due_date: Some("2026-08-10".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        crate::db::tasks::update_local_task(
+            &pool,
+            &t.id,
+            UpdateTaskInput { due_time: Some("09:30".to_string()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        // The pending "create" row (still unsynced) coalesces this "update"
+        // into itself (see outbox::enqueue) — same local_id, one row.
+        let batch = outbox::pending_batch(&pool, 10).await.unwrap();
+        let row = batch.iter().find(|r| r.local_id == t.id).expect("outbox row for task");
+        assert_eq!(row.payload["due_time"], "09:30");
+        assert_eq!(row.payload["due_date"], "2026-08-10");
+    }
+
+    #[tokio::test]
+    async fn duration_change_enqueues_duration_minutes() {
+        let pool = test_pool().await;
+        activate(&pool).await;
+        let t = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput { content: "x".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        crate::db::tasks::update_local_task(
+            &pool,
+            &t.id,
+            UpdateTaskInput { duration_minutes: Some(45), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        let batch = outbox::pending_batch(&pool, 10).await.unwrap();
+        let row = batch.iter().find(|r| r.local_id == t.id).expect("outbox row for task");
+        assert_eq!(row.payload["duration_minutes"], 45);
+    }
+
+    #[tokio::test]
+    async fn label_assignment_enqueues_sorted_names_not_ids() {
+        let pool = test_pool().await;
+        activate(&pool).await;
+        let l1 = crate::db::labels::create_label(&pool, "zeta", "gray").await.unwrap();
+        let l2 = crate::db::labels::create_label(&pool, "alpha", "gray").await.unwrap();
+        let t = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput { content: "x".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        crate::db::labels::set_task_labels(&pool, &t.id, &[l1.id.clone(), l2.id.clone()])
+            .await
+            .unwrap();
+        // Same coalescing as the due_time/duration tests above: the "labels"
+        // update merges into the still-pending "create" row for this task.
+        let batch = outbox::pending_batch(&pool, 10).await.unwrap();
+        let row = batch.iter().find(|r| r.local_id == t.id).expect("outbox row for task");
+        assert_eq!(row.payload["labels"], serde_json::json!(["alpha", "zeta"]));
     }
 
     #[tokio::test]

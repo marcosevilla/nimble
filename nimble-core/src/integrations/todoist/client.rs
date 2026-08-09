@@ -3,8 +3,16 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TodoistDue {
     pub date: Option<String>,
+    #[serde(default)]
+    pub datetime: Option<String>,
     pub string: Option<String>,
     pub is_recurring: Option<bool>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct TodoistDuration {
+    pub amount: Option<i64>,
+    pub unit: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -31,6 +39,10 @@ pub struct TodoistItem {
     pub updated_at: Option<String>,
     #[serde(default)]
     pub due: Option<TodoistDue>,
+    #[serde(default)]
+    pub duration: Option<TodoistDuration>,
+    #[serde(default)]
+    pub labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

@@ -6,9 +6,12 @@ pub struct MergePlan {
     pub content: Option<String>,
     pub description: Option<String>,
     pub due_date: Option<Option<String>>, // Some(None) = clear the due date
+    pub due_time: Option<Option<String>>, // Some(None) = clear the due time
+    pub duration_minutes: Option<Option<i64>>, // Some(None) = clear the duration
     pub priority: Option<i64>,
     pub project_external_id: Option<String>,
     pub completed: Option<bool>,
+    pub labels: Option<Vec<String>>,
 }
 
 impl MergePlan {
@@ -16,9 +19,12 @@ impl MergePlan {
         self.content.is_none()
             && self.description.is_none()
             && self.due_date.is_none()
+            && self.due_time.is_none()
+            && self.duration_minutes.is_none()
             && self.priority.is_none()
             && self.project_external_id.is_none()
             && self.completed.is_none()
+            && self.labels.is_none()
     }
 }
 
@@ -64,6 +70,13 @@ pub fn merge_task(
         content: pick(&local.content, base.map(|b| &b.content), &remote.content, remote_wins_conflicts),
         description: pick(&local.description, base.map(|b| &b.description), &remote.description, remote_wins_conflicts),
         due_date: pick(&local.due_date, base.map(|b| &b.due_date), &remote.due_date, remote_wins_conflicts),
+        due_time: pick(&local.due_time, base.map(|b| &b.due_time), &remote.due_time, remote_wins_conflicts),
+        duration_minutes: pick(
+            &local.duration_minutes,
+            base.map(|b| &b.duration_minutes),
+            &remote.duration_minutes,
+            remote_wins_conflicts,
+        ),
         priority: pick(&local.priority, base.map(|b| &b.priority), &remote.priority, remote_wins_conflicts),
         project_external_id: pick(
             &local.project_external_id,
@@ -73,6 +86,7 @@ pub fn merge_task(
         )
         .flatten(),
         completed: pick(&local.checked, base.map(|b| &b.checked), &remote.checked, remote_wins_conflicts),
+        labels: pick(&local.labels, base.map(|b| &b.labels), &remote.labels, remote_wins_conflicts),
     }
 }
 
@@ -170,6 +184,56 @@ mod tests {
         let remote = snap("same-edit", None, 1);
         let plan = merge_task(&local, Some(&base), &remote, None, None);
         assert_eq!(plan.content.as_deref(), Some("same-edit"));
+    }
+
+    // ── Task 9: labels / due_time / duration_minutes ──
+
+    #[test]
+    fn labels_remote_only_change_applies() {
+        let base = TaskSnapshot { content: "a".into(), labels: vec!["work".into()], ..Default::default() };
+        let local = base.clone();
+        let remote = TaskSnapshot { labels: vec!["urgent".into(), "work".into()], ..base.clone() };
+        let plan = merge_task(&local, Some(&base), &remote, None, None);
+        assert_eq!(plan.labels, Some(vec!["urgent".to_string(), "work".to_string()]));
+    }
+
+    #[test]
+    fn labels_both_changed_uses_lww() {
+        let base = TaskSnapshot { content: "a".into(), labels: vec!["work".into()], ..Default::default() };
+        let local = TaskSnapshot { labels: vec!["local-only".into(), "work".into()], ..base.clone() };
+        let remote = TaskSnapshot { labels: vec!["remote-only".into(), "work".into()], ..base.clone() };
+        let older = crate::integrations::todoist::mappers::rfc3339_to_utc("2026-08-04T09:00:00Z");
+        let newer = crate::integrations::todoist::mappers::rfc3339_to_utc("2026-08-04T11:00:00Z");
+        let plan = merge_task(&local, Some(&base), &remote, older, newer);
+        assert_eq!(plan.labels, Some(vec!["remote-only".to_string(), "work".to_string()]));
+        let plan2 = merge_task(&local, Some(&base), &remote, newer, older);
+        assert_eq!(plan2.labels, None); // local newer -> keep local
+    }
+
+    #[test]
+    fn due_time_independent_of_due_date() {
+        let base = TaskSnapshot { due_date: Some("2026-08-05".into()), due_time: None, ..Default::default() };
+        let local = TaskSnapshot { due_date: Some("2026-08-09".into()), ..base.clone() }; // local reschedules date
+        let remote = TaskSnapshot { due_time: Some("09:00".into()), ..base.clone() }; // remote sets time
+        let plan = merge_task(&local, Some(&base), &remote, None, None);
+        assert_eq!(plan.due_time, Some(Some("09:00".to_string()))); // remote-only time change applies
+        assert_eq!(plan.due_date, None); // local reschedule kept (outbox will push it)
+    }
+
+    #[test]
+    fn duration_behaves_like_priority() {
+        let base = TaskSnapshot { duration_minutes: Some(30), ..Default::default() };
+        let local = base.clone();
+        let remote = TaskSnapshot { duration_minutes: Some(60), ..base.clone() };
+        let plan = merge_task(&local, Some(&base), &remote, None, None);
+        assert_eq!(plan.duration_minutes, Some(Some(60)));
+
+        // conflict -> LWW, same shape as priority
+        let local2 = TaskSnapshot { duration_minutes: Some(15), ..base.clone() };
+        let older = crate::integrations::todoist::mappers::rfc3339_to_utc("2026-08-04T09:00:00Z");
+        let newer = crate::integrations::todoist::mappers::rfc3339_to_utc("2026-08-04T11:00:00Z");
+        let plan_local_wins = merge_task(&local2, Some(&base), &remote, newer, older);
+        assert_eq!(plan_local_wins.duration_minutes, None);
     }
 
     #[test]

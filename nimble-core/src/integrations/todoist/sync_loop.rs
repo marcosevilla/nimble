@@ -177,7 +177,13 @@ pub fn build_commands(
                     args.insert("priority".into(), p.clone());
                 }
                 if let Some(d) = row.payload.get("due_date").and_then(|v| v.as_str()) {
-                    args.insert("due".into(), serde_json::json!({"date": d}));
+                    let t = row.payload.get("due_time").and_then(|v| v.as_str());
+                    let due = mappers::due_args(Some(d), t, None);
+                    args.insert("due".into(), due["due"].clone());
+                }
+                if let Some(minutes) = row.payload.get("duration_minutes").and_then(|v| v.as_i64()) {
+                    args.insert("duration".into(), minutes.into());
+                    args.insert("duration_unit".into(), "minute".into());
                 }
                 if let Some(p) = row.payload.get("project_local_id").and_then(|v| v.as_str()) {
                     if let Some(ext) = ctx.resolve_project_ref(p, &extra_temp_ids) {
@@ -208,12 +214,28 @@ pub fn build_commands(
                             args.insert(key.into(), v.clone());
                         }
                     }
-                    if row.payload.get("due_date").is_some() {
+                    if row.payload.get("due_date").is_some() || row.payload.get("due_time").is_some() {
                         let due = mappers::due_args(
-                            row.payload["due_date"].as_str(),
+                            row.payload.get("due_date").and_then(|v| v.as_str()),
+                            row.payload.get("due_time").and_then(|v| v.as_str()),
                             ctx.base_due.get(&row.local_id),
                         );
                         args.insert("due".into(), due["due"].clone());
+                    }
+                    if let Some(v) = row.payload.get("duration_minutes") {
+                        match v.as_i64() {
+                            Some(minutes) => {
+                                args.insert("duration".into(), minutes.into());
+                                args.insert("duration_unit".into(), "minute".into());
+                            }
+                            None => {
+                                args.insert("duration".into(), serde_json::Value::Null);
+                                args.insert("duration_unit".into(), serde_json::Value::Null);
+                            }
+                        }
+                    }
+                    if let Some(v) = row.payload.get("labels") {
+                        args.insert("labels".into(), v.clone());
                     }
                     Some(serde_json::json!({"type": "item_update", "uuid": row.command_uuid, "args": args}))
                 }
@@ -451,9 +473,40 @@ async fn find_task_by_external(
 /// SQL sidesteps the observer entirely.
 pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate::Result<SyncReport> {
     let mut report = SyncReport::default();
+
+    // Resolve/create every distinct remote label name to a local label id
+    // BEFORE opening the transaction below: `get_or_create_label_by_name`
+    // opens its own transaction, and the pool has as few as one connection
+    // (test pools always do) — doing this while apply_pull's own transaction
+    // holds that connection would deadlock.
+    let mut label_id_by_name: HashMap<String, String> = HashMap::new();
+    for item in &resp.items {
+        if item.is_deleted.unwrap_or(false) {
+            continue;
+        }
+        for name in &item.labels {
+            if !label_id_by_name.contains_key(name) {
+                let label = crate::db::labels::get_or_create_label_by_name(pool, name).await?;
+                label_id_by_name.insert(name.clone(), label.id);
+            }
+        }
+    }
+    // id -> name for every label, used to resolve an existing local task's
+    // current `task_labels` ids into the sorted names `TaskSnapshot` compares
+    // by (Todoist labels are compared/pushed by name, never by Nimble's
+    // local-only label id).
+    let label_name_by_id: HashMap<String, String> = crate::db::labels::list_labels(pool)
+        .await?
+        .into_iter()
+        .map(|l| (l.id, l.name))
+        .collect();
+
     let mut tx = pool.begin().await?;
     // (local_task_id, snapshot) pairs to sync_log AFTER commit
     let mut logged: Vec<(String, &'static str)> = Vec::new();
+    // (task_id, label_id, op) pairs for `task_labels` rows to sync_log AFTER
+    // commit — mirrors `logged` above but for the composite-key table.
+    let mut label_sync_ops: Vec<(String, String, &'static str)> = Vec::new();
 
     // 1. projects
     for p in &resp.projects {
@@ -564,8 +617,8 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
                     .bind(&project_id).fetch_one(&mut *tx).await?;
                 let new_id = uuid::Uuid::new_v4().to_string();
                 sqlx::query(
-                    "INSERT INTO local_tasks (id, content, description, project_id, priority, due_date, completed, status, position, external_id, external_source, remote_updated_at, synced_snapshot)
-                     VALUES (?, ?, ?, ?, ?, ?, 0, 'todo', ?, ?, 'todoist', ?, ?)",
+                    "INSERT INTO local_tasks (id, content, description, project_id, priority, due_date, due_time, duration_minutes, completed, status, position, external_id, external_source, remote_updated_at, synced_snapshot)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'todo', ?, ?, 'todoist', ?, ?)",
                 )
                 .bind(&new_id)
                 .bind(&remote.content)
@@ -573,6 +626,8 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
                 .bind(&project_id)
                 .bind(remote.priority)
                 .bind(&remote.due_date)
+                .bind(&remote.due_time)
+                .bind(remote.duration_minutes)
                 .bind(max.0)
                 .bind(&item.id)
                 .bind(&item.updated_at)
@@ -581,6 +636,16 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
                 .await?;
                 if let Some(parent_ext) = &remote.parent_external_id {
                     parent_links.push((item.id.clone(), parent_ext.clone()));
+                }
+                for name in &remote.labels {
+                    if let Some(label_id) = label_id_by_name.get(name) {
+                        sqlx::query("INSERT OR IGNORE INTO task_labels (task_id, label_id) VALUES (?, ?)")
+                            .bind(&new_id)
+                            .bind(label_id)
+                            .execute(&mut *tx)
+                            .await?;
+                        label_sync_ops.push((new_id.clone(), label_id.clone(), "INSERT"));
+                    }
                 }
                 logged.push((new_id, "INSERT"));
                 report.created += 1;
@@ -598,7 +663,26 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
                 .fetch_optional(&mut *tx)
                 .await?
                 .and_then(|(e,)| e);
-                let local_snap = mappers::local_to_snapshot(&local_task, project_ext_of_local, None, base.as_ref());
+                let local_label_ids: Vec<String> = sqlx::query_as::<_, (String,)>(
+                    "SELECT label_id FROM task_labels WHERE task_id = ?",
+                )
+                .bind(&local_task.id)
+                .fetch_all(&mut *tx)
+                .await?
+                .into_iter()
+                .map(|(id,)| id)
+                .collect();
+                let local_label_names: Vec<String> = local_label_ids
+                    .iter()
+                    .filter_map(|id| label_name_by_id.get(id).cloned())
+                    .collect();
+                let local_snap = mappers::local_to_snapshot(
+                    &local_task,
+                    project_ext_of_local,
+                    None,
+                    base.as_ref(),
+                    local_label_names,
+                );
                 let plan = merge::merge_task(
                     &local_snap,
                     base.as_ref(),
@@ -613,11 +697,65 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
                     sqlx::query("UPDATE local_tasks SET description = ? WHERE id = ?")
                         .bind(if d.is_empty() { None::<String> } else { Some(d.clone()) }).bind(&local_task.id).execute(&mut *tx).await?;
                 }
+                // Scope line (Task 9 ledger): recurrence does NOT round-trip.
+                // A local `recurrence_rule` computes its own next `due_date`
+                // on completion (see `update_task_status_at`'s recurrence
+                // branch); Todoist's own recurring `due` object represents a
+                // *different* recurrence engine's idea of the next date, so
+                // letting a pulled recurring due overwrite `due_date` here
+                // would fight with Nimble's own recurrence math. Guard: only
+                // for tasks that already carry a local recurrence_rule AND
+                // whose remote due is itself recurring.
+                let skip_due_date_for_recurrence_guard = local_task.recurrence_rule.is_some()
+                    && item.due.as_ref().and_then(|d| d.is_recurring).unwrap_or(false);
                 if let Some(due) = &plan.due_date {
-                    sqlx::query("UPDATE local_tasks SET due_date = ? WHERE id = ?").bind(due).bind(&local_task.id).execute(&mut *tx).await?;
+                    if !skip_due_date_for_recurrence_guard {
+                        sqlx::query("UPDATE local_tasks SET due_date = ? WHERE id = ?").bind(due).bind(&local_task.id).execute(&mut *tx).await?;
+                    }
+                }
+                if let Some(t) = &plan.due_time {
+                    sqlx::query("UPDATE local_tasks SET due_time = ? WHERE id = ?").bind(t).bind(&local_task.id).execute(&mut *tx).await?;
+                }
+                if let Some(d) = plan.duration_minutes {
+                    sqlx::query("UPDATE local_tasks SET duration_minutes = ? WHERE id = ?").bind(d).bind(&local_task.id).execute(&mut *tx).await?;
                 }
                 if let Some(p) = plan.priority {
                     sqlx::query("UPDATE local_tasks SET priority = ? WHERE id = ?").bind(p).bind(&local_task.id).execute(&mut *tx).await?;
+                }
+                // Labels: direct SQL against `task_labels`, never
+                // `db::labels::set_task_labels` — that fires the Todoist
+                // mutation observer, which would enqueue an outbox `update`
+                // op and echo the labels we just pulled straight back to
+                // Todoist (the same echo `apply_pull`'s doc comment already
+                // guards against for every other field). Mirrors
+                // `set_task_labels`'s delete-then-insert + diff-based
+                // sync_log semantics minus the observer call.
+                if let Some(names) = &plan.labels {
+                    let target_ids: std::collections::HashSet<String> = names
+                        .iter()
+                        .filter_map(|n| label_id_by_name.get(n).cloned())
+                        .collect();
+                    let current_ids: std::collections::HashSet<String> =
+                        local_label_ids.iter().cloned().collect();
+                    if target_ids != current_ids {
+                        sqlx::query("DELETE FROM task_labels WHERE task_id = ?")
+                            .bind(&local_task.id)
+                            .execute(&mut *tx)
+                            .await?;
+                        for id in &target_ids {
+                            sqlx::query("INSERT OR IGNORE INTO task_labels (task_id, label_id) VALUES (?, ?)")
+                                .bind(&local_task.id)
+                                .bind(id)
+                                .execute(&mut *tx)
+                                .await?;
+                        }
+                        for removed in current_ids.difference(&target_ids) {
+                            label_sync_ops.push((local_task.id.clone(), removed.clone(), "DELETE"));
+                        }
+                        for added in target_ids.difference(&current_ids) {
+                            label_sync_ops.push((local_task.id.clone(), added.clone(), "INSERT"));
+                        }
+                    }
                 }
                 if let Some(ext) = &plan.project_external_id {
                     let target: Option<(String,)> = sqlx::query_as("SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?")
@@ -725,6 +863,44 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
         crate::db::sync::append_sync_log(pool, "local_tasks", &row_id, op, None, snapshot.as_deref())
             .await
             .ok();
+    }
+
+    // 7. after commit: task_labels sync_log, same fire-and-forget contract —
+    // `task_labels` has no `id` column, so row_id is the composite
+    // "task_id::label_id" encoding (`task_labels_row_id`), same as
+    // `set_task_labels` uses for its own replication.
+    for (task_id, label_id, op) in label_sync_ops {
+        let snapshot = if op == "DELETE" {
+            None
+        } else {
+            let created_at: Option<(String,)> = sqlx::query_as(
+                "SELECT created_at FROM task_labels WHERE task_id = ? AND label_id = ?",
+            )
+            .bind(&task_id)
+            .bind(&label_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+            created_at.map(|(created_at,)| {
+                serde_json::json!({
+                    "task_id": task_id,
+                    "label_id": label_id,
+                    "created_at": created_at,
+                })
+                .to_string()
+            })
+        };
+        crate::db::sync::append_sync_log(
+            pool,
+            "task_labels",
+            &crate::db::sync::task_labels_row_id(&task_id, &label_id),
+            op,
+            None,
+            snapshot.as_deref(),
+        )
+        .await
+        .ok();
     }
     Ok(report)
 }
@@ -862,6 +1038,60 @@ mod push_tests {
     }
 
     #[test]
+    fn update_with_due_time_adds_datetime_to_due_args() {
+        let rows = vec![row("update", "t1", json!({"due_date": "2026-08-10", "due_time": "09:30"}), None)];
+        let ctx = ctx_with(&[("t1", Some("EXT-T1"))], &[]);
+        let (cmds, _) = build_commands(&rows, &ctx);
+        assert_eq!(cmds[0]["args"]["due"]["date"], "2026-08-10");
+        assert_eq!(cmds[0]["args"]["due"]["datetime"], "2026-08-10T09:30:00");
+    }
+
+    #[test]
+    fn update_with_duration_sends_minute_unit() {
+        let rows = vec![row("update", "t1", json!({"duration_minutes": 45}), None)];
+        let ctx = ctx_with(&[("t1", Some("EXT-T1"))], &[]);
+        let (cmds, _) = build_commands(&rows, &ctx);
+        assert_eq!(cmds[0]["args"]["duration"], 45);
+        assert_eq!(cmds[0]["args"]["duration_unit"], "minute");
+    }
+
+    #[test]
+    fn update_clearing_duration_sends_null() {
+        let rows = vec![row("update", "t1", json!({"duration_minutes": null}), None)];
+        let ctx = ctx_with(&[("t1", Some("EXT-T1"))], &[]);
+        let (cmds, _) = build_commands(&rows, &ctx);
+        assert!(cmds[0]["args"]["duration"].is_null());
+        assert!(cmds[0]["args"]["duration_unit"].is_null());
+    }
+
+    #[test]
+    fn update_with_labels_passes_names_through_untouched() {
+        let rows = vec![row("update", "t1", json!({"labels": ["alpha", "zeta"]}), None)];
+        let ctx = ctx_with(&[("t1", Some("EXT-T1"))], &[]);
+        let (cmds, _) = build_commands(&rows, &ctx);
+        assert_eq!(cmds[0]["args"]["labels"], json!(["alpha", "zeta"]));
+    }
+
+    #[test]
+    fn create_with_due_time_and_duration_builds_full_args() {
+        let rows = vec![row(
+            "create",
+            "t1",
+            json!({
+                "content": "c", "due_date": "2026-08-10", "due_time": "14:00",
+                "duration_minutes": 30, "project_local_id": "p1"
+            }),
+            Some("tmp-t1"),
+        )];
+        let ctx = ctx_with(&[("t1", None)], &[("p1", "EXT-P1")]);
+        let (cmds, _) = build_commands(&rows, &ctx);
+        assert_eq!(cmds[0]["args"]["due"]["date"], "2026-08-10");
+        assert_eq!(cmds[0]["args"]["due"]["datetime"], "2026-08-10T14:00:00");
+        assert_eq!(cmds[0]["args"]["duration"], 30);
+        assert_eq!(cmds[0]["args"]["duration_unit"], "minute");
+    }
+
+    #[test]
     fn move_to_already_current_project_is_dropped_as_no_op() {
         // Task 9 ledger ruling: Turso-pulled updates to linked tasks always enqueue a
         // `move` alongside `update`, even when the project didn't change. The push
@@ -953,6 +1183,93 @@ mod pull_tests {
         // token persisted
         let state = crate::integrations::get_state(&pool, "todoist").await.unwrap().unwrap();
         assert_eq!(state.sync_token.as_deref(), Some("T1"));
+    }
+
+    #[tokio::test]
+    async fn pull_creates_task_with_due_time_duration_and_labels() {
+        let pool = test_pool().await;
+        let r = resp(json!({
+            "sync_token": "T1",
+            "items": [{
+                "id": "R1", "content": "Standup", "checked": false, "is_deleted": false,
+                "due": {"date": "2026-08-10", "datetime": "2026-08-10T09:00:00", "string": "Aug 10", "is_recurring": false},
+                "duration": {"amount": 30, "unit": "minute"},
+                "labels": ["work", "urgent"]
+            }]
+        }));
+        apply_pull(&pool, &r).await.unwrap();
+
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let t = tasks.iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert_eq!(t.due_time.as_deref(), Some("09:00"));
+        assert_eq!(t.duration_minutes, Some(30));
+        let names = crate::db::labels::names_for_ids(&pool, &t.labels).await.unwrap();
+        assert_eq!(names, vec!["urgent".to_string(), "work".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn pull_applies_remote_label_change_without_echo() {
+        // Echo-prevention (same invariant as `pull_apply_never_enqueues_outbox_ops`,
+        // extended to labels): applying a pulled label change must go through
+        // direct SQL, never `db::labels::set_task_labels` — that fires the
+        // Todoist observer and would enqueue an outbox update carrying the
+        // very labels we just pulled, echoing them straight back.
+        let pool = test_pool().await;
+        crate::integrations::ensure_state(&pool, "todoist").await.unwrap();
+        crate::db::settings::set_setting(&pool, "todoist_api_token", "tok").await.unwrap();
+
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [
+            {"id": "R1", "content": "x", "checked": false, "is_deleted": false, "labels": ["work"]}
+        ]}))).await.unwrap();
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let t = tasks.iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert_eq!(crate::db::labels::names_for_ids(&pool, &t.labels).await.unwrap(), vec!["work".to_string()]);
+
+        apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [
+            {"id": "R1", "content": "x", "checked": false, "is_deleted": false, "labels": ["urgent", "work"],
+             "updated_at": "2026-08-04T12:00:00Z"}
+        ]}))).await.unwrap();
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let t = tasks.iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert_eq!(
+            crate::db::labels::names_for_ids(&pool, &t.labels).await.unwrap(),
+            vec!["urgent".to_string(), "work".to_string()]
+        );
+
+        assert!(
+            outbox::pending_batch(&pool, 100).await.unwrap().is_empty(),
+            "label changes applied from a pull must never enqueue an outbox op"
+        );
+    }
+
+    #[tokio::test]
+    async fn recurring_local_task_due_date_is_not_overwritten_by_recurring_remote_due() {
+        // Scope line (Task 9 ledger): recurrence does not round-trip. A task
+        // with a local `recurrence_rule` manages its own `due_date` on
+        // completion; a pulled recurring `due` object must not clobber it.
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [
+            {"id": "R1", "content": "Water plants", "checked": false, "is_deleted": false,
+             "due": {"date": "2026-08-04", "string": "Aug 4", "is_recurring": false}}
+        ]}))).await.unwrap();
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let t = tasks.iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        sqlx::query("UPDATE local_tasks SET recurrence_rule = ? WHERE id = ?")
+            .bind("every week")
+            .bind(&t.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [
+            {"id": "R1", "content": "Water plants", "checked": false, "is_deleted": false,
+             "updated_at": "2026-08-04T12:00:00Z",
+             "due": {"date": "2026-08-11", "string": "every week", "is_recurring": true}}
+        ]}))).await.unwrap();
+
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let t = tasks.iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert_eq!(t.due_date.as_deref(), Some("2026-08-04"), "recurrence guard must keep the local due_date");
     }
 
     #[tokio::test]
