@@ -10,6 +10,14 @@
 
 use chrono::{Datelike, Days, Months, NaiveDate};
 
+/// Sane upper bound on `interval`. No real recurring task needs a cadence
+/// measured in tens of thousands of years; this exists to prevent arithmetic
+/// overflow and out-of-range dates for absurd-but-technically-parseable
+/// strings like `"every 4294967295 months"`. Enforced by `parse_rule`, and
+/// re-enforced defensively in `next_occurrence` (see its doc comment) since
+/// `RecurrenceRule`'s fields are all `pub`.
+const MAX_INTERVAL: u32 = 100_000;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecurrenceRule {
     pub interval: u32,          // every N units, >= 1
@@ -53,7 +61,7 @@ pub fn parse_rule(s: &str) -> Option<RecurrenceRule> {
         _ => return None,
     };
 
-    if interval == 0 {
+    if interval == 0 || interval > MAX_INTERVAL {
         return None;
     }
 
@@ -152,22 +160,37 @@ fn parse_time(s: &str) -> Option<String> {
 }
 
 /// Next due date strictly after `today`, advancing by whole intervals from `current_due`.
+///
+/// Defensive note: `RecurrenceRule`'s fields are all `pub`, so a caller can
+/// build one without going through `parse_rule` (e.g. deserializing a
+/// stored/legacy rule, or a future task constructing one programmatically).
+/// `parse_rule` rejects `interval == 0` and absurdly large intervals, but
+/// this function can't rely on that — an `interval` of 0 would never advance
+/// `candidate` past `today` (infinite loop), and an unbounded `interval`
+/// could overflow the Month/Year arithmetic or exceed chrono's date range
+/// (panic). Clamping here to the same `[1, MAX_INTERVAL]` range the parser
+/// enforces makes this function total regardless of how the rule was built.
 pub fn next_occurrence(rule: &RecurrenceRule, current_due: NaiveDate, today: NaiveDate) -> NaiveDate {
+    let interval = rule.interval.clamp(1, MAX_INTERVAL);
     let mut candidate = current_due;
     loop {
-        candidate = add_interval(candidate, rule);
+        candidate = add_interval(candidate, rule.unit, interval);
         if candidate > today {
             return candidate;
         }
     }
 }
 
-fn add_interval(date: NaiveDate, rule: &RecurrenceRule) -> NaiveDate {
-    match rule.unit {
-        RecurrenceUnit::Day => date + Days::new(rule.interval as u64),
-        RecurrenceUnit::Week => date + Days::new(rule.interval as u64 * 7),
-        RecurrenceUnit::Month => add_months_clamped(date, rule.interval),
-        RecurrenceUnit::Year => add_months_clamped(date, rule.interval * 12),
+fn add_interval(date: NaiveDate, unit: RecurrenceUnit, interval: u32) -> NaiveDate {
+    match unit {
+        RecurrenceUnit::Day => date + Days::new(interval as u64),
+        RecurrenceUnit::Week => date + Days::new(interval as u64 * 7),
+        RecurrenceUnit::Month => add_months_clamped(date, interval),
+        // `interval` is already clamped to MAX_INTERVAL (100_000) by the
+        // caller, so `interval * 12` (max 1_200_000) can't overflow u32;
+        // saturating_mul is cheap extra insurance if that clamp is ever
+        // loosened without updating this comment.
+        RecurrenceUnit::Year => add_months_clamped(date, interval.saturating_mul(12)),
     }
 }
 
@@ -292,5 +315,50 @@ mod tests {
     fn year_leap_day_clamps_to_feb_28_on_non_leap_year() {
         let rule = parse_rule("every year").unwrap();
         assert_eq!(next_occurrence(&rule, d("2028-02-29"), d("2028-02-29")), d("2029-02-28"));
+    }
+
+    // --- Review fix: zero/absurd interval must never hang or panic ---
+    // `RecurrenceRule`'s fields are all `pub`, so these hand-build a rule
+    // rather than going through `parse_rule`, simulating a caller that
+    // deserializes a stored/legacy rule or constructs one directly.
+
+    #[test]
+    fn rejects_zero_interval_at_parse_time() {
+        assert_eq!(parse_rule("every 0 days"), None);
+        assert_eq!(parse_rule("every 0 weeks"), None);
+    }
+
+    #[test]
+    fn next_occurrence_does_not_hang_on_a_hand_built_zero_interval_rule() {
+        let rule = RecurrenceRule { interval: 0, unit: RecurrenceUnit::Day, time: None };
+        // Must terminate and behave as interval 1 rather than looping forever.
+        assert_eq!(next_occurrence(&rule, d("2026-08-09"), d("2026-08-09")), d("2026-08-10"));
+
+        let rule = RecurrenceRule { interval: 0, unit: RecurrenceUnit::Month, time: None };
+        assert_eq!(next_occurrence(&rule, d("2026-08-09"), d("2026-08-09")), d("2026-09-09"));
+    }
+
+    #[test]
+    fn rejects_absurdly_large_intervals_at_parse_time() {
+        for s in ["every 4294967295 months", "every 999999999 days", "every 100001 weeks"] {
+            assert_eq!(parse_rule(s), None, "should reject {s:?}");
+        }
+        // Right at the boundary should still parse.
+        assert!(parse_rule("every 100000 days").is_some());
+    }
+
+    #[test]
+    fn next_occurrence_does_not_panic_on_a_hand_built_huge_interval_rule() {
+        let rule = RecurrenceRule { interval: u32::MAX, unit: RecurrenceUnit::Year, time: None };
+        let result = next_occurrence(&rule, d("2026-08-09"), d("2026-08-09"));
+        assert!(result > d("2026-08-09"));
+
+        let rule = RecurrenceRule { interval: u32::MAX, unit: RecurrenceUnit::Month, time: None };
+        let result = next_occurrence(&rule, d("2026-08-09"), d("2026-08-09"));
+        assert!(result > d("2026-08-09"));
+
+        let rule = RecurrenceRule { interval: u32::MAX, unit: RecurrenceUnit::Week, time: None };
+        let result = next_occurrence(&rule, d("2026-08-09"), d("2026-08-09"));
+        assert!(result > d("2026-08-09"));
     }
 }
