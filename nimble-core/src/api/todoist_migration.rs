@@ -896,11 +896,37 @@ mod tests {
             duration: Some(TdDuration { amount: Some(10), unit: Some("minute".into()) }),
         };
 
+        // Non-recurring dated task: `due.string` is just Todoist's
+        // human-readable label for the date itself ("Aug 16"), not a
+        // recurrence rule — `is_recurring: false`. Guards against the
+        // `due.string` verbatim-copy leaking that date phrase into
+        // `recurrence_rule`, which would render a bogus recurrence chip on a
+        // one-off task.
+        let one_off_task = TdTask {
+            id: "td-task-2".into(),
+            content: "Renew passport".into(),
+            description: None,
+            project_id: Some("td-child".into()),
+            section_id: None,
+            parent_id: None,
+            priority: 1,
+            due: Some(TdDue {
+                date: Some("2026-08-16".into()),
+                datetime: Some("2026-08-16T14:00:00".into()),
+                string: Some("Aug 16".into()),
+                is_recurring: Some(false),
+            }),
+            labels: None,
+            order: 2,
+            checked: Some(false),
+            duration: None,
+        };
+
         let result = apply_migration(
             &pool,
             &[parent_project, child_project],
             &[section],
-            &[task],
+            &[task, one_off_task],
         )
         .await
         .unwrap();
@@ -971,5 +997,24 @@ mod tests {
         .map(|(n,)| n)
         .collect();
         assert_eq!(label_names, vec!["deep-work".to_string(), "waiting".to_string()]);
+
+        // Non-recurring dated task: due_date/due_time still land as
+        // first-class fields, but recurrence_rule must stay NULL — the due
+        // string is a date label ("Aug 16"), not a recurrence rule, and must
+        // not leak into a field that renders a recurrence chip.
+        let one_off_row: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT due_date, due_time, recurrence_rule
+             FROM local_tasks WHERE external_source = 'todoist' AND external_id = 'td-task-2'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let (one_off_due_date, one_off_due_time, one_off_recurrence_rule) = one_off_row;
+        assert_eq!(one_off_due_date.as_deref(), Some("2026-08-16"));
+        assert_eq!(one_off_due_time.as_deref(), Some("14:00"));
+        assert_eq!(
+            one_off_recurrence_rule, None,
+            "a non-recurring due.string (\"Aug 16\") must not land in recurrence_rule"
+        );
     }
 }
