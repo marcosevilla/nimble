@@ -1,13 +1,9 @@
 import { useCallback, useState } from 'react'
 import { useDataProvider } from '@/services/provider-context'
-import type {
-  TodoistMigrationOptions,
-  TodoistMigrationPreview,
-  TodoistMigrationResult,
-} from '@nimble/types'
+import type { TodoistMigrationPreview, TodoistMigrationResult } from '@nimble/types'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Label, Meta } from '@/components/shared/typography'
+import { Meta } from '@/components/shared/typography'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,16 +20,8 @@ import { cn } from '@/lib/utils'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { Download } from 'lucide-react'
 
-const DEFAULT_OPTIONS: TodoistMigrationOptions = {
-  flatten_nested_projects: true,
-  create_section_projects: true,
-  preserve_labels: true,
-  preserve_recurring: true,
-}
-
 export function TodoistMigrationSection() {
   const dp = useDataProvider()
-  const [options, setOptions] = useState<TodoistMigrationOptions>(DEFAULT_OPTIONS)
   const [preview, setPreview] = useState<TodoistMigrationPreview | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
@@ -57,7 +45,7 @@ export function TodoistMigrationSection() {
   const handleMigrate = useCallback(async () => {
     setMigrating(true)
     try {
-      const r = await dp.todoist.migrate(options)
+      const r = await dp.todoist.migrate()
       setResult(r)
       emitTasksChanged()
       const totalCreated = r.projects_created + r.tasks_created
@@ -78,11 +66,7 @@ export function TodoistMigrationSection() {
     } finally {
       setMigrating(false)
     }
-  }, [dp, options, handlePreview])
-
-  const setOption = (key: keyof TodoistMigrationOptions, value: boolean) => {
-    setOptions((prev) => ({ ...prev, [key]: value }))
-  }
+  }, [dp, handlePreview])
 
   return (
     <div className="space-y-5">
@@ -138,37 +122,6 @@ export function TodoistMigrationSection() {
             )}
           </div>
         )}
-      </div>
-
-      {/* Options */}
-      <div className="space-y-2">
-        <Label as="div">Options</Label>
-        <div className="space-y-1.5">
-          <OptionToggle
-            checked={options.flatten_nested_projects}
-            onChange={(v) => setOption('flatten_nested_projects', v)}
-            label="Flatten nested projects"
-            hint='Maps Todoist’s project tree to flat names like "Parent / Child".'
-          />
-          <OptionToggle
-            checked={options.create_section_projects}
-            onChange={(v) => setOption('create_section_projects', v)}
-            label="Create projects for sections"
-            hint='Each Todoist section becomes a local project "Project / Section".'
-          />
-          <OptionToggle
-            checked={options.preserve_labels}
-            onChange={(v) => setOption('preserve_labels', v)}
-            label="Preserve labels in descriptions"
-            hint="Labels (e.g. @waiting, @deep-work) are concatenated into each task’s description as #tags."
-          />
-          <OptionToggle
-            checked={options.preserve_recurring}
-            onChange={(v) => setOption('preserve_recurring', v)}
-            label="Preserve recurring rule in descriptions"
-            hint='The recurrence rule (e.g. "every weekday") is noted in the description. Only the next occurrence becomes a task.'
-          />
-        </div>
       </div>
 
       {/* Run */}
@@ -256,32 +209,5 @@ function PreviewRow({
         )}
       </span>
     </div>
-  )
-}
-
-function OptionToggle({
-  checked,
-  onChange,
-  label,
-  hint,
-}: {
-  checked: boolean
-  onChange: (v: boolean) => void
-  label: string
-  hint: string
-}) {
-  return (
-    <label className="flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-accent/10 transition-colors cursor-pointer">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 size-3.5 shrink-0 cursor-pointer"
-      />
-      <div className="flex-1 min-w-0 space-y-0.5">
-        <p className="text-body">{label}</p>
-        <p className="text-label text-muted-foreground">{hint}</p>
-      </div>
-    </label>
   )
 }

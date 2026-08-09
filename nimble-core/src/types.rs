@@ -382,25 +382,6 @@ pub struct ImportSummary {
 // ── Todoist Migration ──
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TodoistMigrationOptions {
-    pub flatten_nested_projects: bool,
-    pub create_section_projects: bool,
-    pub preserve_labels: bool,
-    pub preserve_recurring: bool,
-}
-
-impl Default for TodoistMigrationOptions {
-    fn default() -> Self {
-        Self {
-            flatten_nested_projects: true,
-            create_section_projects: true,
-            preserve_labels: true,
-            preserve_recurring: true,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TodoistMigrationPreview {
     pub projects_to_create: i32,
     pub projects_already_migrated: i32,

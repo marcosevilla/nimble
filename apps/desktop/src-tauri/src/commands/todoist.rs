@@ -1,9 +1,7 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
-pub use nimble_core::types::{
-    TodoistMigrationOptions, TodoistMigrationPreview, TodoistMigrationResult,
-};
+pub use nimble_core::types::{TodoistMigrationPreview, TodoistMigrationResult};
 
 /// Get the API token from settings
 async fn get_api_token(app: &AppHandle) -> Result<String, String> {
@@ -26,13 +24,10 @@ pub async fn preview_todoist_migration(
 }
 
 #[tauri::command]
-pub async fn migrate_todoist(
-    app: AppHandle,
-    options: TodoistMigrationOptions,
-) -> Result<TodoistMigrationResult, String> {
+pub async fn migrate_todoist(app: AppHandle) -> Result<TodoistMigrationResult, String> {
     let pool = app.state::<SqlitePool>();
     let token = get_api_token(&app).await?;
-    nimble_core::api::todoist_migration::migrate(pool.inner(), &token, options)
+    nimble_core::api::todoist_migration::migrate(pool.inner(), &token)
         .await
         .map_err(|e| e.to_string())
 }

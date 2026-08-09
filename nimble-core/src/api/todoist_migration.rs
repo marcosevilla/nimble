@@ -1,8 +1,14 @@
 //! One-time migration of Todoist tasks/projects into local storage.
 //!
-//! Writes to the `projects` and `local_tasks` tables, using the `external_id` /
-//! `external_source` columns (added in schema v15) for idempotency. Running the
-//! migration twice upserts in place — no duplicates.
+//! Writes to the `projects`, `sections`, `local_tasks`, `labels`, and
+//! `task_labels` tables, using the `external_id` / `external_source` columns
+//! (added in schema v15, extended to `sections` in v19) for idempotency.
+//! Running the migration twice upserts in place — no duplicates. Labels,
+//! recurrence, due times/durations, sections, and project nesting all land as
+//! first-class fields (see `apply_migration`) rather than being flattened
+//! into the task description — the description carries only the user's own
+//! prose, copied through verbatim (it's already markdown, same as Nimble's
+//! canonical description format).
 
 use std::collections::HashMap;
 
@@ -12,9 +18,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::db::sync;
-use crate::types::{
-    TodoistMigrationOptions, TodoistMigrationPreview, TodoistMigrationResult,
-};
+use crate::types::{TodoistMigrationPreview, TodoistMigrationResult};
 
 // ── Todoist API response shapes ──
 
@@ -60,13 +64,21 @@ struct TdTask {
     #[serde(default)]
     order: i64,
     checked: Option<bool>,
+    duration: Option<TdDuration>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 struct TdDue {
     date: Option<String>,
+    datetime: Option<String>,
     string: Option<String>,
     is_recurring: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct TdDuration {
+    amount: Option<i64>,
+    unit: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,79 +247,7 @@ async fn fetch_all_active_tasks(
     Ok(all.into_iter().filter(|t| !t.checked.unwrap_or(false)).collect())
 }
 
-// ── Helpers: project naming + description enrichment ──
-
-/// Flatten Todoist's project tree into names like "Parent / Child / Grandchild".
-fn build_project_names(
-    projects: &[TdProject],
-    flatten_nested: bool,
-) -> HashMap<String, String> {
-    let by_id: HashMap<&str, &TdProject> =
-        projects.iter().map(|p| (p.id.as_str(), p)).collect();
-
-    let mut names = HashMap::new();
-    for p in projects {
-        let name = if flatten_nested {
-            let mut chain = vec![p.name.clone()];
-            let mut current = p.parent_id.as_deref();
-            while let Some(pid) = current {
-                if let Some(parent) = by_id.get(pid) {
-                    chain.push(parent.name.clone());
-                    current = parent.parent_id.as_deref();
-                } else {
-                    break;
-                }
-            }
-            chain.reverse();
-            chain.join(" / ")
-        } else {
-            p.name.clone()
-        };
-        names.insert(p.id.clone(), name);
-    }
-    names
-}
-
-/// Concatenate labels and recurring notes into the task's description. Uses a
-/// clear separator so migration artifacts are visually distinct from the
-/// user's own prose.
-fn build_enriched_description(
-    original: &Option<String>,
-    labels: &[String],
-    recurring_note: Option<&str>,
-    preserve_labels: bool,
-    preserve_recurring: bool,
-) -> Option<String> {
-    let mut parts: Vec<String> = Vec::new();
-
-    if let Some(desc) = original {
-        if !desc.trim().is_empty() {
-            parts.push(desc.clone());
-        }
-    }
-
-    let mut metadata_lines: Vec<String> = Vec::new();
-    if preserve_labels && !labels.is_empty() {
-        let tags = labels.iter().map(|l| format!("#{}", l)).collect::<Vec<_>>().join(" ");
-        metadata_lines.push(format!("Labels: {}", tags));
-    }
-    if preserve_recurring {
-        if let Some(rec) = recurring_note {
-            metadata_lines.push(format!("Recurring: {}", rec));
-        }
-    }
-
-    if !metadata_lines.is_empty() {
-        parts.push("— imported from Todoist —".to_string());
-        parts.push(metadata_lines.join("\n"));
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("\n\n"))
-    }
-}
+// ── Helpers: field mapping ──
 
 /// Map Todoist priority (4=highest → 1=lowest) to local priority (4=highest → 1=lowest).
 /// Both use the same 1-4 scale with 4 as highest, so it's a direct pass-through.
@@ -321,6 +261,30 @@ fn normalize_due_date(td_due: &Option<TdDue>) -> Option<String> {
         .as_ref()
         .and_then(|d| d.date.as_ref())
         .map(|s| s[..s.len().min(10)].to_string())
+}
+
+/// Extracts "HH:MM" out of a Todoist `due.datetime` value. Mirrors
+/// `integrations::todoist::mappers::parse_due_time`'s "no offset, local wall
+/// clock" contract — this deliberately does NOT do timezone math, it just
+/// lifts the time component out of whatever `YYYY-MM-DDTHH:MM:SS[...]` string
+/// Todoist sent.
+fn parse_due_time(datetime: &str) -> Option<String> {
+    let time_part = datetime.split('T').nth(1)?;
+    if time_part.len() < 5 {
+        return None;
+    }
+    Some(time_part[..5].to_string())
+}
+
+/// Todoist's duration unit is "minute" or "day" — normalize both to minutes
+/// so `local_tasks.duration_minutes` is a single comparable scalar. Mirrors
+/// `integrations::todoist::mappers::duration_to_minutes`.
+fn duration_to_minutes(duration: &TdDuration) -> Option<i64> {
+    match (duration.amount, duration.unit.as_deref()) {
+        (Some(amount), Some("minute")) => Some(amount),
+        (Some(amount), Some("day")) => Some(amount * 24 * 60),
+        _ => None,
+    }
 }
 
 /// Return all Todoist IDs that have already been migrated into local_tasks.
@@ -391,8 +355,7 @@ pub async fn preview_migration(pool: &SqlitePool, token: &str) -> crate::Result<
         parents.len() as i32
     };
 
-    let names = build_project_names(&projects, true);
-    let mut project_names_preview: Vec<String> = names.values().cloned().collect();
+    let mut project_names_preview: Vec<String> = projects.iter().map(|p| p.name.clone()).collect();
     project_names_preview.sort();
 
     Ok(TodoistMigrationPreview {
@@ -410,11 +373,7 @@ pub async fn preview_migration(pool: &SqlitePool, token: &str) -> crate::Result<
 
 // ── Execute ──
 
-pub async fn migrate(
-    pool: &SqlitePool,
-    token: &str,
-    opts: TodoistMigrationOptions,
-) -> crate::Result<TodoistMigrationResult> {
+pub async fn migrate(pool: &SqlitePool, token: &str) -> crate::Result<TodoistMigrationResult> {
     let client = reqwest::Client::new();
     let (projects, sections, tasks) = tokio::try_join!(
         fetch_paginated_projects(&client, token),
@@ -422,6 +381,32 @@ pub async fn migrate(
         fetch_all_active_tasks(&client, token),
     )?;
 
+    apply_migration(pool, &projects, &sections, &tasks).await
+}
+
+/// Applies a pre-fetched set of Todoist projects/sections/tasks to local
+/// storage. Split out from `migrate` so it's testable with hand-built
+/// fixtures, without a live Todoist API round-trip.
+///
+/// Every write here is raw SQL against `projects`/`sections`/`local_tasks`/
+/// `task_labels` — never the `db::projects`/`db::tasks`/`db::labels` CRUD
+/// helpers (`get_or_create_label_by_name` is the one exception: it only
+/// touches the standalone `labels` table, so there's no Todoist-echo risk).
+/// This importer runs standalone, and several of those CRUD helpers fire the
+/// Todoist mutation observer unconditionally on update —
+/// `db::labels::set_task_labels`'s `Updated` path has no `external_id` guard
+/// (unlike its `Created` path), and `db::projects::update_project` enqueues
+/// an outbox op whenever the `name` field changes. A freshly-imported row
+/// already carries exactly the data Todoist has, so calling through the
+/// observer would enqueue an outbox op that echoes it straight back to
+/// Todoist. This mirrors the direct-SQL-plus-matching-sync_log approach
+/// `integrations::todoist::sync_loop::apply_pull` uses for the same reason.
+async fn apply_migration(
+    pool: &SqlitePool,
+    projects: &[TdProject],
+    sections: &[TdSection],
+    tasks: &[TdTask],
+) -> crate::Result<TodoistMigrationResult> {
     let mut result = TodoistMigrationResult {
         projects_created: 0,
         projects_updated: 0,
@@ -432,6 +417,21 @@ pub async fn migrate(
         errors: Vec::new(),
     };
 
+    // Resolve every distinct label name to a local label id up front.
+    // `get_or_create_label_by_name` opens its own transaction internally —
+    // fine here since nothing else in this function holds one open.
+    let mut label_id_by_name: HashMap<String, String> = HashMap::new();
+    for t in tasks {
+        if let Some(labels) = &t.labels {
+            for name in labels {
+                if !label_id_by_name.contains_key(name) {
+                    let label = crate::db::labels::get_or_create_label_by_name(pool, name).await?;
+                    label_id_by_name.insert(name.clone(), label.id);
+                }
+            }
+        }
+    }
+
     // Look up the current max position so new projects append to the end.
     let max_project_position: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(position), -1) FROM projects",
@@ -439,26 +439,13 @@ pub async fn migrate(
     .fetch_one(pool)
     .await?;
 
-    let project_names = build_project_names(&projects, opts.flatten_nested_projects);
-
-    // Todoist project_id → local project_id after upsert
+    // ── Projects pass 1: upsert every project by its own name, parent_id ──
+    // left untouched (resolved in pass 2 below, once every project has a
+    // local id).
     let mut todoist_to_local_project: HashMap<String, String> = HashMap::new();
     let mut next_position = max_project_position + 1;
 
-    // Sections grouped by project_id, used for section-project creation.
-    let mut sections_by_project: HashMap<String, Vec<TdSection>> = HashMap::new();
-    for s in &sections {
-        sections_by_project
-            .entry(s.project_id.clone())
-            .or_default()
-            .push(s.clone());
-    }
-    // (project_id, section_id) → local project_id for section-backed projects
-    let mut section_to_local_project: HashMap<(String, String), String> = HashMap::new();
-
-    // Projects pass
-    for p in &projects {
-        let local_name = project_names.get(&p.id).cloned().unwrap_or_else(|| p.name.clone());
+    for p in projects {
         let color = p.color.as_deref().map(todoist_color_to_hex).unwrap_or("#6366f1").to_string();
 
         // If it's Todoist's inbox, reuse the local 'inbox' project directly.
@@ -487,7 +474,7 @@ pub async fn migrate(
 
         let local_id = if let Some((id,)) = existing {
             sqlx::query("UPDATE projects SET name = ?, color = ? WHERE id = ?")
-                .bind(&local_name)
+                .bind(&p.name)
                 .bind(&color)
                 .bind(&id)
                 .execute(pool)
@@ -501,7 +488,7 @@ pub async fn migrate(
                  VALUES (?, ?, ?, ?, ?, 'todoist')",
             )
             .bind(&new_id)
-            .bind(&local_name)
+            .bind(&p.name)
             .bind(&color)
             .bind(next_position)
             .bind(&p.id)
@@ -512,51 +499,96 @@ pub async fn migrate(
             new_id
         };
 
-        todoist_to_local_project.insert(p.id.clone(), local_id.clone());
+        todoist_to_local_project.insert(p.id.clone(), local_id);
+    }
 
-        // Section-backed projects (opt-in)
-        if opts.create_section_projects {
-            if let Some(section_list) = sections_by_project.get(&p.id) {
-                for s in section_list {
-                    let section_project_name = format!("{} / {}", local_name, s.name);
-                    let section_external_id = format!("section:{}", s.id);
-                    let existing_s: Option<(String,)> = sqlx::query_as(
-                        "SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?",
-                    )
-                    .bind(&section_external_id)
-                    .fetch_optional(pool)
-                    .await?;
+    // ── Projects pass 2: nest children under their local parent now that ──
+    // every project has a local id. Todoist's project tree is already
+    // acyclic, so no cycle guard is needed here (unlike
+    // `db::projects::update_project`'s user-facing path).
+    for p in projects {
+        let Some(td_parent_id) = &p.parent_id else { continue };
+        let (Some(local_id), Some(local_parent_id)) = (
+            todoist_to_local_project.get(&p.id),
+            todoist_to_local_project.get(td_parent_id),
+        ) else { continue };
+        sqlx::query(
+            "UPDATE projects SET parent_id = ? WHERE id = ? AND (parent_id IS NULL OR parent_id != ?)",
+        )
+        .bind(local_parent_id)
+        .bind(local_id)
+        .bind(local_parent_id)
+        .execute(pool)
+        .await?;
+    }
 
-                    let s_local_id = if let Some((id,)) = existing_s {
-                        sqlx::query("UPDATE projects SET name = ? WHERE id = ?")
-                            .bind(&section_project_name)
-                            .bind(&id)
-                            .execute(pool)
-                            .await?;
-                        result.projects_updated += 1;
-                        id
-                    } else {
-                        let new_id = Uuid::new_v4().to_string();
-                        sqlx::query(
-                            "INSERT INTO projects (id, name, color, position, external_id, external_source)
-                             VALUES (?, ?, ?, ?, ?, 'todoist')",
-                        )
-                        .bind(&new_id)
-                        .bind(&section_project_name)
-                        .bind(&color)
-                        .bind(next_position)
-                        .bind(&section_external_id)
-                        .execute(pool)
-                        .await?;
-                        next_position += 1;
-                        result.projects_created += 1;
-                        new_id
-                    };
-                    section_to_local_project
-                        .insert((p.id.clone(), s.id.clone()), s_local_id);
-                }
-            }
+    // ── Sections: native `sections` rows (with `external_id`), never the ──
+    // old pseudo-project hack. Upsert by external_id so re-running the
+    // import never creates duplicate sections.
+    let mut todoist_to_local_section: HashMap<String, String> = HashMap::new();
+    for s in sections {
+        let local_project_id = todoist_to_local_project
+            .get(&s.project_id)
+            .cloned()
+            .unwrap_or_else(|| "inbox".to_string());
+
+        let existing: Option<(String,)> = sqlx::query_as(
+            "SELECT id FROM sections WHERE external_source = 'todoist' AND external_id = ?",
+        )
+        .bind(&s.id)
+        .fetch_optional(pool)
+        .await?;
+
+        let local_id = if let Some((id,)) = existing {
+            sqlx::query("UPDATE sections SET name = ?, project_id = ? WHERE id = ?")
+                .bind(&s.name)
+                .bind(&local_project_id)
+                .bind(&id)
+                .execute(pool)
+                .await?;
+            id
+        } else {
+            let new_id = Uuid::new_v4().to_string();
+            let position: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM sections WHERE project_id = ?",
+            )
+            .bind(&local_project_id)
+            .fetch_one(pool)
+            .await?;
+            sqlx::query(
+                "INSERT INTO sections (id, project_id, name, position, external_id, external_source)
+                 VALUES (?, ?, ?, ?, ?, 'todoist')",
+            )
+            .bind(&new_id)
+            .bind(&local_project_id)
+            .bind(&s.name)
+            .bind(position)
+            .bind(&s.id)
+            .execute(pool)
+            .await?;
+            new_id
+        };
+
+        // Sync log entry for the section row (fire-and-forget, mirrors
+        // `db::sections::create_section`'s own INSERT sync_log — sections
+        // have no Todoist mutation observer, so there's no echo risk here).
+        let section_row: Option<crate::types::Section> = sqlx::query_as(
+            "SELECT id, project_id, name, position, external_id, external_source, created_at
+             FROM sections WHERE id = ?",
+        )
+        .bind(&local_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+        if let Some(section) = section_row {
+            let snapshot = serde_json::to_string(&section).unwrap_or_default();
+            sync::append_sync_log(pool, "sections", &local_id, "INSERT", None, Some(&snapshot))
+                .await
+                .ok();
         }
+
+        todoist_to_local_section.insert(s.id.clone(), local_id);
     }
 
     // Tasks pass 1: upsert with parent_id left null; record Todoist parent refs separately.
@@ -564,51 +596,51 @@ pub async fn migrate(
     // Todoist task_id → Todoist parent_id (for linkage in pass 2)
     let mut child_to_td_parent: HashMap<String, String> = HashMap::new();
 
-    for t in &tasks {
-        // Target local project
-        let target_project = if let (Some(section_id), Some(project_id)) =
-            (t.section_id.as_ref(), t.project_id.as_ref())
-        {
-            if opts.create_section_projects {
-                section_to_local_project
-                    .get(&(project_id.clone(), section_id.clone()))
-                    .cloned()
-                    .or_else(|| todoist_to_local_project.get(project_id).cloned())
-                    .unwrap_or_else(|| "inbox".to_string())
-            } else {
-                todoist_to_local_project
-                    .get(project_id)
-                    .cloned()
-                    .unwrap_or_else(|| "inbox".to_string())
-            }
-        } else if let Some(project_id) = t.project_id.as_ref() {
-            todoist_to_local_project
-                .get(project_id)
-                .cloned()
-                .unwrap_or_else(|| "inbox".to_string())
+    for t in tasks {
+        let target_project = t
+            .project_id
+            .as_ref()
+            .and_then(|pid| todoist_to_local_project.get(pid).cloned())
+            .unwrap_or_else(|| "inbox".to_string());
+
+        let local_section_id: Option<String> = t
+            .section_id
+            .as_ref()
+            .and_then(|sid| todoist_to_local_section.get(sid).cloned());
+
+        let label_names = t.labels.clone().unwrap_or_default();
+        let had_labels = !label_names.is_empty();
+        let target_label_ids: std::collections::HashSet<String> = label_names
+            .iter()
+            .filter_map(|name| label_id_by_name.get(name).cloned())
+            .collect();
+
+        let is_recurring = t.due.as_ref().and_then(|d| d.is_recurring).unwrap_or(false);
+        // due.string carries Todoist's natural-language schedule description
+        // ("every 2 weeks @ 09:00", but also patterns our own recurrence
+        // engine can't advance, e.g. "every 3rd tuesday"). Stored verbatim
+        // regardless of whether it parses: an unparseable rule just sits
+        // inert (db::tasks::update_task_status_at's recurrence branch
+        // completes the task normally instead of rescheduling when it can't
+        // parse the rule) rather than blocking the import on it.
+        let recurrence_rule = if is_recurring {
+            t.due.as_ref().and_then(|d| d.string.clone())
         } else {
-            "inbox".to_string()
+            None
         };
 
-        let labels = t.labels.clone().unwrap_or_default();
-        let had_labels = !labels.is_empty();
-        let recurring_note = t
+        let due_date = normalize_due_date(&t.due);
+        let due_time = t
             .due
             .as_ref()
-            .filter(|d| d.is_recurring.unwrap_or(false))
-            .and_then(|d| d.string.clone());
-        let is_recurring = recurring_note.is_some();
-
-        let enriched_description = build_enriched_description(
-            &t.description,
-            &labels,
-            recurring_note.as_deref(),
-            opts.preserve_labels,
-            opts.preserve_recurring,
-        );
-
-        let due_date = normalize_due_date(&t.due);
+            .and_then(|d| d.datetime.as_deref())
+            .and_then(parse_due_time);
+        let duration_minutes = t.duration.as_ref().and_then(duration_to_minutes);
         let priority = map_priority(t.priority);
+        // Descriptions are markdown-canonical, and Todoist's are already
+        // markdown, so this copies through verbatim — no enrichment, no
+        // conversion. The user's own prose is the only thing that lands here.
+        let description = t.description.clone().filter(|d| !d.trim().is_empty());
 
         // Upsert by external_id
         let existing: Option<(String,)> = sqlx::query_as(
@@ -617,6 +649,7 @@ pub async fn migrate(
         .bind(&t.id)
         .fetch_optional(pool)
         .await?;
+        let is_new = existing.is_none();
 
         let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
@@ -624,14 +657,19 @@ pub async fn migrate(
             sqlx::query(
                 "UPDATE local_tasks
                  SET content = ?, description = ?, project_id = ?, priority = ?, due_date = ?,
+                     due_time = ?, duration_minutes = ?, recurrence_rule = ?, section_id = ?,
                      position = ?, updated_at = datetime('now')
                  WHERE id = ?",
             )
             .bind(&t.content)
-            .bind(&enriched_description)
+            .bind(&description)
             .bind(&target_project)
             .bind(priority)
             .bind(&due_date)
+            .bind(&due_time)
+            .bind(duration_minutes)
+            .bind(&recurrence_rule)
+            .bind(&local_section_id)
             .bind(t.order)
             .bind(&id)
             .execute(pool)
@@ -642,17 +680,22 @@ pub async fn migrate(
             let new_id = Uuid::new_v4().to_string();
             sqlx::query(
                 "INSERT INTO local_tasks
-                 (id, parent_id, content, description, project_id, priority, due_date,
+                 (id, parent_id, content, description, project_id, priority, due_date, due_time,
+                  duration_minutes, recurrence_rule, section_id,
                   completed, completed_at, status, linked_doc_id, position,
                   external_id, external_source, created_at, updated_at)
-                 VALUES (?, NULL, ?, ?, ?, ?, ?, 0, NULL, 'todo', NULL, ?, ?, 'todoist', ?, ?)",
+                 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 'todo', NULL, ?, ?, 'todoist', ?, ?)",
             )
             .bind(&new_id)
             .bind(&t.content)
-            .bind(&enriched_description)
+            .bind(&description)
             .bind(&target_project)
             .bind(priority)
             .bind(&due_date)
+            .bind(&due_time)
+            .bind(duration_minutes)
+            .bind(&recurrence_rule)
+            .bind(&local_section_id)
             .bind(t.order)
             .bind(&t.id)
             .bind(&now)
@@ -668,17 +711,101 @@ pub async fn migrate(
             child_to_td_parent.insert(t.id.clone(), td_parent.clone());
         }
 
-        if is_recurring && opts.preserve_recurring {
+        if is_recurring {
             result.recurring_preserved += 1;
         }
-        if had_labels && opts.preserve_labels {
+        if had_labels {
             result.labels_preserved += 1;
         }
 
-        // Sync log entry for cross-device replication.
-        sync::append_sync_log(pool, "local_tasks", &local_id, "INSERT", None, None)
-            .await
-            .ok();
+        // ── Labels: direct SQL against `task_labels`, never ──
+        // `db::labels::set_task_labels` — see this function's doc comment
+        // for why. Mirrors `sync_loop::apply_pull`'s delete-then-insert +
+        // diff-based sync_log approach for the same table.
+        let current_label_ids: std::collections::HashSet<String> = sqlx::query_as::<_, (String,)>(
+            "SELECT label_id FROM task_labels WHERE task_id = ?",
+        )
+        .bind(&local_id)
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|(id,)| id)
+        .collect();
+
+        if current_label_ids != target_label_ids {
+            sqlx::query("DELETE FROM task_labels WHERE task_id = ?")
+                .bind(&local_id)
+                .execute(pool)
+                .await?;
+            for label_id in &target_label_ids {
+                sqlx::query("INSERT OR IGNORE INTO task_labels (task_id, label_id) VALUES (?, ?)")
+                    .bind(&local_id)
+                    .bind(label_id)
+                    .execute(pool)
+                    .await?;
+            }
+            for removed in current_label_ids.difference(&target_label_ids) {
+                sync::append_sync_log(
+                    pool,
+                    "task_labels",
+                    &sync::task_labels_row_id(&local_id, removed),
+                    "DELETE",
+                    None,
+                    None,
+                )
+                .await
+                .ok();
+            }
+            for added in target_label_ids.difference(&current_label_ids) {
+                let created_at: Option<(String,)> = sqlx::query_as(
+                    "SELECT created_at FROM task_labels WHERE task_id = ? AND label_id = ?",
+                )
+                .bind(&local_id)
+                .bind(added)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten();
+                if let Some((created_at,)) = created_at {
+                    let snapshot = serde_json::json!({
+                        "task_id": local_id,
+                        "label_id": added,
+                        "created_at": created_at,
+                    })
+                    .to_string();
+                    sync::append_sync_log(
+                        pool,
+                        "task_labels",
+                        &sync::task_labels_row_id(&local_id, added),
+                        "INSERT",
+                        None,
+                        Some(&snapshot),
+                    )
+                    .await
+                    .ok();
+                }
+            }
+        }
+
+        // Sync log entry for the local_tasks row itself, using
+        // `task_sync_snapshot` (not a plain `serde_json::to_string`) —
+        // `LocalTask::labels` isn't a `local_tasks` column, and a snapshot
+        // carrying it fails every apply with "no such column: labels".
+        let task_row: Option<crate::types::LocalTask> = sqlx::query_as::<_, crate::types::LocalTask>(
+            &format!("SELECT {} FROM local_tasks WHERE id = ?", crate::db::tasks::SELECT_COLS),
+        )
+        .bind(&local_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+        if let Some(task) = task_row {
+            let snapshot = sync::task_sync_snapshot(&task);
+            let op = if is_new { "INSERT" } else { "UPDATE" };
+            sync::append_sync_log(pool, "local_tasks", &local_id, op, None, Some(&snapshot))
+                .await
+                .ok();
+        }
     }
 
     // Tasks pass 2: resolve parent_id now that all local ids exist.
@@ -715,4 +842,134 @@ pub async fn migrate(
     .await;
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::test_pool;
+
+    /// Task 10 fixture: one task with 2 labels + a recurring due (with a
+    /// datetime and a 10m duration) + a section, under a child project.
+    /// Everything must land as a first-class field — no flattening into the
+    /// description, and no "— imported from Todoist —" block.
+    #[tokio::test]
+    async fn import_maps_labels_recurrence_section_and_nesting_to_first_class_fields() {
+        let pool = test_pool().await;
+
+        let parent_project = TdProject {
+            id: "td-parent".into(),
+            name: "Work".into(),
+            color: Some("blue".into()),
+            parent_id: None,
+            is_inbox_project: Some(false),
+        };
+        let child_project = TdProject {
+            id: "td-child".into(),
+            name: "Client A".into(),
+            color: Some("red".into()),
+            parent_id: Some("td-parent".into()),
+            is_inbox_project: Some(false),
+        };
+        let section = TdSection {
+            id: "td-section".into(),
+            project_id: "td-child".into(),
+            name: "Sprint 1".into(),
+        };
+        let task = TdTask {
+            id: "td-task".into(),
+            content: "Ship the thing".into(),
+            description: Some("Some user prose.".into()),
+            project_id: Some("td-child".into()),
+            section_id: Some("td-section".into()),
+            parent_id: None,
+            priority: 3,
+            due: Some(TdDue {
+                date: Some("2026-08-10".into()),
+                datetime: Some("2026-08-10T09:00:00".into()),
+                string: Some("every 2 weeks @ 09:00".into()),
+                is_recurring: Some(true),
+            }),
+            labels: Some(vec!["deep-work".into(), "waiting".into()]),
+            order: 1,
+            checked: Some(false),
+            duration: Some(TdDuration { amount: Some(10), unit: Some("minute".into()) }),
+        };
+
+        let result = apply_migration(
+            &pool,
+            &[parent_project, child_project],
+            &[section],
+            &[task],
+        )
+        .await
+        .unwrap();
+        assert!(result.errors.is_empty(), "unexpected errors: {:?}", result.errors);
+
+        let row: (String, Option<String>, String, Option<String>, Option<i64>, Option<String>, Option<String>) =
+            sqlx::query_as(
+                "SELECT content, description, project_id, due_time, duration_minutes, recurrence_rule, section_id
+                 FROM local_tasks WHERE external_source = 'todoist' AND external_id = 'td-task'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let (content, description, project_id, due_time, duration_minutes, recurrence_rule, section_id) = row;
+
+        assert_eq!(content, "Ship the thing");
+        let description = description.expect("description carries the user's own prose");
+        assert!(
+            !description.contains("— imported from Todoist —"),
+            "description must not carry the enriched-description block: {description:?}"
+        );
+        assert_eq!(description, "Some user prose.");
+        assert_eq!(due_time.as_deref(), Some("09:00"));
+        assert_eq!(duration_minutes, Some(10));
+        assert_eq!(recurrence_rule.as_deref(), Some("every 2 weeks @ 09:00"));
+
+        // Section landed as a first-class `sections` row, not a fake project.
+        let section_id = section_id.expect("task must carry a first-class section_id");
+        let section_row: (String, String, Option<String>) = sqlx::query_as(
+            "SELECT name, project_id, external_id FROM sections WHERE id = ?",
+        )
+        .bind(&section_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(section_row.0, "Sprint 1");
+        assert_eq!(section_row.2.as_deref(), Some("td-section"));
+        assert_eq!(section_row.1, project_id, "section's project_id must match the task's local project");
+
+        // Project nesting: child project's parent_id must point at the parent's local id.
+        let parent_local_id: (String,) = sqlx::query_as(
+            "SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = 'td-parent'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let child_parent_id: (Option<String>,) =
+            sqlx::query_as("SELECT parent_id FROM projects WHERE id = ?")
+                .bind(&project_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(child_parent_id.0.as_deref(), Some(parent_local_id.0.as_str()));
+
+        // Labels landed as real label rows + task_labels assignments, not
+        // flattened into description text.
+        let label_names: Vec<String> = sqlx::query_as::<_, (String,)>(
+            "SELECT l.name FROM labels l
+             JOIN task_labels tl ON tl.label_id = l.id
+             JOIN local_tasks t ON t.id = tl.task_id
+             WHERE t.external_id = 'td-task'
+             ORDER BY l.name",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(n,)| n)
+        .collect();
+        assert_eq!(label_names, vec!["deep-work".to_string(), "waiting".to_string()]);
+    }
 }

@@ -45,7 +45,6 @@ export type {
   HabitHeatmapEntry,
   ImportSummary,
   SyncStatus,
-  TodoistMigrationOptions,
   TodoistMigrationPreview,
   TodoistMigrationResult,
   SyncReport,
@@ -55,7 +54,6 @@ export type {
 import type {
   Setting,
   ParsedTodayMd,
-  TodoistMigrationOptions,
   TodoistMigrationPreview,
   TodoistMigrationResult,
   CalendarEvent,
@@ -146,8 +144,8 @@ export async function previewTodoistMigration(): Promise<TodoistMigrationPreview
   return invoke<TodoistMigrationPreview>('preview_todoist_migration')
 }
 
-export async function migrateTodoist(options: TodoistMigrationOptions): Promise<TodoistMigrationResult> {
-  return invoke<TodoistMigrationResult>('migrate_todoist', { options })
+export async function migrateTodoist(): Promise<TodoistMigrationResult> {
+  return invoke<TodoistMigrationResult>('migrate_todoist')
 }
 
 export async function migratedTodoistIds(): Promise<string[]> {

@@ -400,13 +400,6 @@ export interface ImportSummary {
 
 // ── Todoist Migration ──
 
-export interface TodoistMigrationOptions {
-  flatten_nested_projects: boolean
-  create_section_projects: boolean
-  preserve_labels: boolean
-  preserve_recurring: boolean
-}
-
 export interface TodoistMigrationPreview {
   projects_to_create: number
   projects_already_migrated: number

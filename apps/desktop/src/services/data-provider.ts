@@ -49,7 +49,6 @@ import type {
   HabitHeatmapEntry,
   ImportSummary,
   SyncStatus,
-  TodoistMigrationOptions,
   TodoistMigrationPreview,
   TodoistMigrationResult,
   SyncReport,
@@ -60,7 +59,6 @@ import type {
 export type {
   Setting,
   ParsedTodayMd,
-  TodoistMigrationOptions,
   TodoistMigrationPreview,
   TodoistMigrationResult,
   CalendarEvent,
@@ -122,7 +120,7 @@ export interface DataProvider {
 
   todoist: {
     previewMigration(): Promise<TodoistMigrationPreview>
-    migrate(options: TodoistMigrationOptions): Promise<TodoistMigrationResult>
+    migrate(): Promise<TodoistMigrationResult>
     migratedIds(): Promise<string[]>
   }
 
