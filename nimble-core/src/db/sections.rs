@@ -56,6 +56,10 @@ pub async fn create_section(pool: &SqlitePool, project_id: &str, name: &str) -> 
     .fetch_one(pool)
     .await?;
 
+    // Sync log: INSERT
+    let snapshot = serde_json::to_string(&section).unwrap_or_default();
+    sync::append_sync_log(pool, "sections", &section.id, "INSERT", None, Some(&snapshot)).await.ok();
+
     Ok(section)
 }
 
@@ -81,6 +85,11 @@ pub async fn rename_section(pool: &SqlitePool, id: &str, name: &str) -> crate::R
     .bind(id)
     .fetch_one(pool)
     .await?;
+
+    // Sync log: UPDATE
+    let changed = serde_json::json!(["name"]).to_string();
+    let snapshot = serde_json::to_string(&section).unwrap_or_default();
+    sync::append_sync_log(pool, "sections", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
 
     Ok(section)
 }
@@ -143,10 +152,13 @@ pub async fn delete_section(pool: &SqlitePool, id: &str) -> crate::Result<()> {
 
     tx.commit().await?;
 
+    // Sync log: DELETE for the section row itself.
+    sync::append_sync_log(pool, "sections", id, "DELETE", None, None).await.ok();
+
     let changed = serde_json::json!(["section_id"]).to_string();
     let fields_changed_owned = vec!["section_id".to_string()];
     for task in &affected_tasks {
-        let snapshot = serde_json::to_string(task).unwrap_or_default();
+        let snapshot = sync::task_sync_snapshot(task);
         sync::append_sync_log(
             pool,
             "local_tasks",
@@ -199,7 +211,36 @@ pub async fn reorder_sections(pool: &SqlitePool, section_ids: &[String]) -> crat
             .await?;
     }
 
+    // Snapshot each reordered section post-update, still inside the
+    // transaction, so the sync_log calls below reflect the committed state.
+    let mut reordered_sections: Vec<Section> = Vec::with_capacity(section_ids.len());
+    for id in section_ids {
+        let section: Section = sqlx::query_as::<_, Section>(&format!(
+            "SELECT {} FROM sections WHERE id = ?",
+            SECTION_COLS
+        ))
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+        reordered_sections.push(section);
+    }
+
     tx.commit().await?;
+
+    let changed = serde_json::json!(["position"]).to_string();
+    for section in &reordered_sections {
+        let snapshot = serde_json::to_string(section).unwrap_or_default();
+        sync::append_sync_log(
+            pool,
+            "sections",
+            &section.id,
+            "UPDATE",
+            Some(&changed),
+            Some(&snapshot),
+        )
+        .await
+        .ok();
+    }
 
     Ok(())
 }

@@ -714,7 +714,11 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
             match sqlx::query_as::<_, crate::types::LocalTask>(&format!(
                 "SELECT {} FROM local_tasks WHERE id = ?", crate::db::tasks::SELECT_COLS
             )).bind(&row_id).fetch_optional(pool).await {
-                Ok(Some(t)) => serde_json::to_string(&t).ok(),
+                // `task_sync_snapshot` (not a plain serde_json::to_string) —
+                // `LocalTask::labels` isn't a `local_tasks` column, and a
+                // snapshot carrying it fails every apply with "no such
+                // column: labels" (see nimble-core/src/db/sync.rs).
+                Ok(Some(t)) => Some(crate::db::sync::task_sync_snapshot(&t)),
                 _ => None,
             }
         };

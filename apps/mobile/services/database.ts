@@ -377,6 +377,46 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE projects ADD COLUMN synced_snapshot TEXT;
     `,
   },
+  // Note: v18 (Obsidian vault index: vault_notes/vault_links/vault_tags +
+  // device-local vault_fts) was never mirrored to mobile — the vault feature
+  // has no mobile filesystem access story yet. This mirrors the existing
+  // v5 -> v7 gap above: `currentVersion` just skips straight from 17 to 19.
+  {
+    version: 19,
+    description: 'Task data-model parity: labels, sections, due_time, duration, recurrence, project nesting',
+    sql: `
+      CREATE TABLE IF NOT EXISTS labels (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        color TEXT NOT NULL DEFAULT 'gray',
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+      );
+      CREATE TABLE IF NOT EXISTS task_labels (
+        task_id TEXT NOT NULL,
+        label_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+        PRIMARY KEY (task_id, label_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_labels_label ON task_labels(label_id);
+      CREATE TABLE IF NOT EXISTS sections (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        external_id TEXT,
+        external_source TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_sections_project ON sections(project_id);
+      ALTER TABLE local_tasks ADD COLUMN due_time TEXT;
+      ALTER TABLE local_tasks ADD COLUMN duration_minutes INTEGER;
+      ALTER TABLE local_tasks ADD COLUMN recurrence_rule TEXT;
+      ALTER TABLE local_tasks ADD COLUMN section_id TEXT;
+      ALTER TABLE projects ADD COLUMN parent_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_local_tasks_section ON local_tasks(section_id);
+    `,
+  },
 ];
 
 let _db: Database | null = null;

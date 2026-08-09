@@ -57,7 +57,7 @@ pub async fn reorder_local_tasks(pool: &SqlitePool, task_ids: &[String]) -> crat
                 .ok()
                 .flatten();
         if let Some(task) = row {
-            let snapshot = serde_json::to_string(&task).unwrap_or_default();
+            let snapshot = sync::task_sync_snapshot(&task);
             sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
         }
     }
@@ -201,7 +201,7 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
         .await?;
 
     // Sync log: INSERT
-    let snapshot = serde_json::to_string(&task).unwrap_or_default();
+    let snapshot = sync::task_sync_snapshot(&task);
     sync::append_sync_log(pool, "local_tasks", &task.id, "INSERT", None, Some(&snapshot)).await.ok();
 
     // Todoist mutation observer: best-effort, enqueues an outbox create op if adapter active
@@ -306,7 +306,7 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
     // Sync log: UPDATE with changed columns
     if !fields_changed.is_empty() {
         let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
-        let snapshot = serde_json::to_string(&task).unwrap_or_default();
+        let snapshot = sync::task_sync_snapshot(&task);
         sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
 
         // Todoist mutation observer: best-effort
@@ -402,7 +402,7 @@ pub async fn update_task_status(
             .flatten();
     if let Some(task) = &row {
         let changed = serde_json::json!(["status", "completed", "completed_at"]).to_string();
-        let snapshot = serde_json::to_string(&task).unwrap_or_default();
+        let snapshot = sync::task_sync_snapshot(task);
         sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
     }
 

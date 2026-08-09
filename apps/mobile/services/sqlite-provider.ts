@@ -105,6 +105,7 @@ export function createSqliteProvider(): DataProvider {
           source: src,
           converted_to_task_id: null,
           routed_to: null,
+          context: null,
           created_at: now,
         };
 
@@ -158,6 +159,7 @@ export function createSqliteProvider(): DataProvider {
           name,
           color,
           position,
+          parent_id: null,
           external_id: null,
           external_source: null,
           remote_updated_at: null,

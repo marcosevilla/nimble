@@ -2,7 +2,41 @@ use sqlx::{SqlitePool, Column, Row};
 use uuid::Uuid;
 use chrono::Utc;
 
-use crate::types::{SyncLogEntry, SyncStatus};
+use crate::types::{LocalTask, SyncLogEntry, SyncStatus};
+
+/// Build a `sync_log` snapshot for a `local_tasks` row.
+///
+/// `LocalTask::labels` is a derived join over `task_labels` (loaded
+/// separately, not a `local_tasks` column — see its doc comment in
+/// `types.rs`), but a plain `serde_json::to_string(&task)` still includes it.
+/// `build_data_mutation_requests`/`apply_remote_change` build their
+/// `INSERT`'s column list directly from the snapshot's JSON keys, so an
+/// un-stripped snapshot produces `INSERT INTO local_tasks (..., labels) ...`
+/// against a table with no `labels` column — a `no such column` error on
+/// every apply, local or remote, for every task, not just labeled ones.
+/// Strip it here so the snapshot only ever carries real columns.
+pub(crate) fn task_sync_snapshot(task: &LocalTask) -> String {
+    let mut value = serde_json::to_value(task).unwrap_or_default();
+    if let Some(obj) = value.as_object_mut() {
+        obj.remove("labels");
+    }
+    serde_json::to_string(&value).unwrap_or_default()
+}
+
+/// `task_labels` has no `id` column (its PK is the composite `(task_id,
+/// label_id)`), so its `sync_log` `row_id` encodes both halves joined by
+/// `"::"`. Every other synced table uses a single `id` column value as
+/// `row_id` directly.
+pub(crate) fn task_labels_row_id(task_id: &str, label_id: &str) -> String {
+    format!("{task_id}::{label_id}")
+}
+
+/// Inverse of `task_labels_row_id`. Returns `None` for a malformed row_id
+/// (missing delimiter) rather than panicking — callers treat that as "nothing
+/// to apply" instead of crashing on a corrupt/foreign sync_log row.
+fn split_task_labels_row_id(row_id: &str) -> Option<(&str, &str)> {
+    row_id.split_once("::")
+}
 
 /// Append a sync log entry after a local mutation.
 /// This is fire-and-forget: callers use `.ok()` so sync failures
@@ -198,6 +232,36 @@ const VAULT_TABLE_DDL: [&str; 3] = [
     )",
 ];
 
+/// Remote DDL for the v19 tables (labels, task_labels, sections). Used both
+/// when initializing a fresh remote and when upgrading a remote that was
+/// initialized before v19 — keep it the single definition so the two paths
+/// can never drift apart. Mirrors `migrations.rs` version 19 exactly, minus
+/// its indexes (not required for correctness, same as `VAULT_TABLE_DDL`).
+const V19_TABLE_DDL: [&str; 3] = [
+    "CREATE TABLE IF NOT EXISTS labels (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        color TEXT NOT NULL DEFAULT 'gray',
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )",
+    "CREATE TABLE IF NOT EXISTS task_labels (
+        task_id TEXT NOT NULL,
+        label_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (task_id, label_id)
+    )",
+    "CREATE TABLE IF NOT EXISTS sections (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        external_id TEXT,
+        external_source TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )",
+];
+
 /// Create all synced tables on the remote Turso database.
 /// Only runs once — checks for `turso_initialized` setting.
 pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
@@ -234,6 +298,10 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             project_id TEXT NOT NULL DEFAULT 'inbox',
             priority INTEGER NOT NULL DEFAULT 1,
             due_date TEXT,
+            due_time TEXT,
+            duration_minutes INTEGER,
+            recurrence_rule TEXT,
+            section_id TEXT,
             completed INTEGER NOT NULL DEFAULT 0,
             completed_at TEXT,
             status TEXT NOT NULL DEFAULT 'todo',
@@ -254,6 +322,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             position INTEGER NOT NULL DEFAULT 0,
             goal_id TEXT,
             milestone_id TEXT,
+            parent_id TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             external_id TEXT,
             external_source TEXT,
@@ -407,6 +476,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     ];
 
     create_statements.extend_from_slice(&VAULT_TABLE_DDL);
+    create_statements.extend_from_slice(&V19_TABLE_DDL);
 
     // Build pipeline requests — one execute per statement
     let mut requests: Vec<serde_json::Value> = create_statements
@@ -558,6 +628,76 @@ async fn ensure_remote_vault_schema(
     Ok(())
 }
 
+/// Add the v19 tables (`labels`, `task_labels`, `sections`) and the v19
+/// columns on already-synced tables (`local_tasks.due_time`/
+/// `duration_minutes`/`recurrence_rule`/`section_id`, `projects.parent_id`)
+/// to a remote that was initialized before v19. `CREATE TABLE IF NOT EXISTS`
+/// and "duplicate column" tolerance make this idempotent/safe to retry.
+async fn upgrade_remote_v19_schema(turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let alter_statements = [
+        "ALTER TABLE local_tasks ADD COLUMN due_time TEXT",
+        "ALTER TABLE local_tasks ADD COLUMN duration_minutes INTEGER",
+        "ALTER TABLE local_tasks ADD COLUMN recurrence_rule TEXT",
+        "ALTER TABLE local_tasks ADD COLUMN section_id TEXT",
+        "ALTER TABLE projects ADD COLUMN parent_id TEXT",
+    ];
+
+    let mut requests: Vec<serde_json::Value> =
+        V19_TABLE_DDL.iter().map(|sql| turso_execute(sql, vec![])).collect();
+    requests.extend(alter_statements.iter().map(|sql| turso_execute(sql, vec![])));
+    requests.push(serde_json::json!({ "type": "close" }));
+
+    let body = turso_pipeline(turso_url, turso_token, requests).await?;
+
+    if let Some(results) = body.get("results").and_then(|v| v.as_array()) {
+        for (i, result) in results.iter().enumerate() {
+            if let Some("error") = result.get("type").and_then(|v| v.as_str()) {
+                let err_msg = result
+                    .pointer("/error/message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error");
+                // "duplicate column name" means the ALTER already landed on a
+                // previous run — expected and safe to ignore. The CREATE
+                // TABLE statements are already IF NOT EXISTS, so they never
+                // surface as errors here.
+                if !err_msg.to_lowercase().contains("duplicate column") {
+                    log::warn!("Turso v19 schema upgrade statement {} failed: {}", i, err_msg);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Gate the v19 remote upgrade behind a local setting so it hits Turso once
+/// per device. If it fails the setting is never written, so the next push
+/// retries. Mirrors `ensure_remote_vault_schema`'s v18 gate.
+async fn ensure_remote_v19_schema(
+    pool: &SqlitePool,
+    turso_url: &str,
+    turso_token: &str,
+) -> crate::Result<()> {
+    let done: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'turso_schema_v19_upgraded'")
+            .fetch_optional(pool)
+            .await?;
+    if done.is_some() {
+        return Ok(());
+    }
+
+    upgrade_remote_v19_schema(turso_url, turso_token).await?;
+
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_at) VALUES ('turso_schema_v19_upgraded', '1', datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')"
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 // ── Push ──
 
 /// Build INSERT OR REPLACE statements from a snapshot JSON for a given table.
@@ -573,6 +713,17 @@ fn build_data_mutation_requests(
             // Validate table name
             if sanitize_table_name(table_name).is_err() {
                 return vec![];
+            }
+            // task_labels has no `id` column — its row_id is the composite
+            // "task_id::label_id" encoding (see `task_labels_row_id`).
+            if table_name == "task_labels" {
+                return match split_task_labels_row_id(row_id) {
+                    Some((task_id, label_id)) => vec![turso_execute(
+                        "DELETE FROM task_labels WHERE task_id = ? AND label_id = ?",
+                        vec![turso_text(task_id), turso_text(label_id)],
+                    )],
+                    None => vec![],
+                };
             }
             let sql = format!("DELETE FROM {} WHERE id = ?", table_name);
             vec![turso_execute(&sql, vec![turso_text(row_id)])]
@@ -794,6 +945,10 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
 
     // v18: the vault tables may not exist on a remote initialized earlier.
     ensure_remote_vault_schema(pool, turso_url, turso_token).await?;
+
+    // v19: labels/task_labels/sections tables + local_tasks/projects columns
+    // may not exist on a remote initialized earlier.
+    ensure_remote_v19_schema(pool, turso_url, turso_token).await?;
 
     // Fetch all unsynced entries
     let entries: Vec<PushEntry> = sqlx::query_as(
@@ -1037,7 +1192,20 @@ async fn apply_remote_change(
 ) -> crate::Result<()> {
     match operation {
         "DELETE" => {
-            let sql = format!("DELETE FROM {} WHERE id = ?", sanitize_table_name(table_name)?);
+            let table = sanitize_table_name(table_name)?;
+            // task_labels has no `id` column — its row_id is the composite
+            // "task_id::label_id" encoding (see `task_labels_row_id`).
+            if table == "task_labels" {
+                if let Some((task_id, label_id)) = split_task_labels_row_id(row_id) {
+                    sqlx::query("DELETE FROM task_labels WHERE task_id = ? AND label_id = ?")
+                        .bind(task_id)
+                        .bind(label_id)
+                        .execute(pool)
+                        .await?;
+                }
+                return Ok(());
+            }
+            let sql = format!("DELETE FROM {} WHERE id = ?", table);
             sqlx::query(&sql).bind(row_id).execute(pool).await?;
         }
         "INSERT" | "UPDATE" => {
@@ -1112,6 +1280,9 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
         "vault_notes",
         "vault_links",
         "vault_tags",
+        "labels",
+        "task_labels",
+        "sections",
     ];
 
     if ALLOWED.contains(&name) {
@@ -1186,6 +1357,7 @@ pub async fn seed_existing_data(pool: &SqlitePool) -> crate::Result<u64> {
         "habits", "habit_logs", "documents", "doc_folders", "doc_notes",
         "capture_routes", "life_areas", "calendar_feeds", "activity_log",
         "vault_notes", "vault_links", "vault_tags",
+        "labels", "sections",
     ];
 
     let mut count: u64 = 0;
@@ -1273,6 +1445,62 @@ pub async fn seed_existing_data(pool: &SqlitePool) -> crate::Result<u64> {
                  VALUES (?, 'daily_state', ?, 'INSERT', NULL, ?, ?, ?, 0)"
             )
             .bind(&id).bind(date)
+            .bind(&snapshot).bind(&device_id).bind(&timestamp)
+            .execute(pool)
+            .await?;
+
+            count += 1;
+        }
+    }
+
+    // Also seed task_labels (composite PK task_id+label_id, no 'id' column —
+    // row_id is the "task_id::label_id" encoding from `task_labels_row_id`).
+    let tl_rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT task_id, label_id FROM task_labels")
+            .fetch_all(pool)
+            .await?;
+
+    for (task_id, label_id) in &tl_rows {
+        let row_id = task_labels_row_id(task_id, label_id);
+        let already_seeded: Option<(String,)> = sqlx::query_as(
+            "SELECT row_id FROM sync_log WHERE table_name = 'task_labels' AND row_id = ?",
+        )
+        .bind(&row_id)
+        .fetch_optional(pool)
+        .await?;
+        if already_seeded.is_some() {
+            continue;
+        }
+
+        let row_data: Option<sqlx::sqlite::SqliteRow> = sqlx::query(
+            "SELECT * FROM task_labels WHERE task_id = ? AND label_id = ?",
+        )
+        .bind(task_id)
+        .bind(label_id)
+        .fetch_optional(pool)
+        .await?;
+
+        if let Some(row) = row_data {
+            let columns = row.columns();
+            let mut map = serde_json::Map::new();
+            for col in columns {
+                let name = col.name();
+                let val: Option<String> = row.try_get(name).unwrap_or(None);
+                match val {
+                    Some(v) => { map.insert(name.to_string(), serde_json::Value::String(v)); }
+                    None => { map.insert(name.to_string(), serde_json::Value::Null); }
+                }
+            }
+            let snapshot = serde_json::to_string(&serde_json::Value::Object(map)).unwrap_or_default();
+
+            let id = Uuid::new_v4().to_string();
+            let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+
+            sqlx::query(
+                "INSERT INTO sync_log (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp, synced)
+                 VALUES (?, 'task_labels', ?, 'INSERT', NULL, ?, ?, ?, 0)"
+            )
+            .bind(&id).bind(&row_id)
             .bind(&snapshot).bind(&device_id).bind(&timestamp)
             .execute(pool)
             .await?;
@@ -1470,5 +1698,265 @@ mod vault_sync_tests {
         .await
         .unwrap();
         assert_eq!(count, 1);
+    }
+}
+
+#[cfg(test)]
+mod v19_sync_tests {
+    use crate::db::labels::{create_label, delete_label, set_task_labels};
+    use crate::db::sections::{create_section, delete_section, rename_section, reorder_sections};
+    use crate::db::projects::create_project;
+    use crate::db::tasks::create_local_task;
+    use crate::test_util::test_pool;
+    use crate::types::CreateTaskInput;
+
+    #[test]
+    fn v19_tables_are_allowed_for_sync() {
+        for table in ["labels", "task_labels", "sections"] {
+            assert!(
+                super::sanitize_table_name(table).is_ok(),
+                "{table} must be sync-allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn task_labels_delete_uses_composite_row_id() {
+        // task_labels has no `id` column — a generic "DELETE FROM t WHERE id = ?"
+        // would be wrong; this must build the composite WHERE clause instead.
+        let reqs = super::build_data_mutation_requests(
+            "task_labels",
+            &super::task_labels_row_id("task-1", "label-1"),
+            "DELETE",
+            &None,
+        );
+        assert_eq!(reqs.len(), 1);
+        let sql = reqs[0].pointer("/stmt/sql").and_then(|v| v.as_str()).unwrap_or_default();
+        assert!(sql.contains("task_id = ?") && sql.contains("label_id = ?"), "got {sql}");
+
+        // A malformed row_id (no delimiter) must be dropped, not panic or
+        // build a bogus statement.
+        let reqs = super::build_data_mutation_requests("task_labels", "not-composite", "DELETE", &None);
+        assert!(reqs.is_empty());
+    }
+
+    /// Regression: a plain `serde_json::to_string(&task)` snapshot carries
+    /// `LocalTask::labels` (not a `local_tasks` column), which broke every
+    /// apply — local or remote — with "no such column: labels" for every
+    /// task, not just labeled ones. `task_sync_snapshot` must strip it so a
+    /// real task snapshot round-trips through `apply_remote_change`.
+    #[tokio::test]
+    async fn task_sync_snapshot_strips_labels_and_applies_cleanly() {
+        let pool = test_pool().await;
+        let task = create_local_task(&pool, CreateTaskInput { content: "x".into(), ..Default::default() })
+            .await
+            .unwrap();
+
+        let snapshot = super::task_sync_snapshot(&task);
+        assert!(!snapshot.contains("\"labels\""), "snapshot must not carry the derived labels field: {snapshot}");
+
+        super::apply_remote_change(&pool, "local_tasks", &task.id, "UPDATE", Some(&snapshot))
+            .await
+            .expect("a stripped snapshot must apply without a schema error");
+    }
+
+    #[tokio::test]
+    async fn label_crud_appends_sync_log() {
+        let pool = test_pool().await;
+        let label = create_label(&pool, "deep work", "orange").await.unwrap();
+
+        let insert_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'labels' AND row_id = ? AND operation = 'INSERT'",
+        )
+        .bind(&label.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(insert_count, 1);
+
+        crate::db::labels::update_label(&pool, &label.id, Some("deeper work"), None)
+            .await
+            .unwrap();
+        let update_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'labels' AND row_id = ? AND operation = 'UPDATE'",
+        )
+        .bind(&label.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(update_count, 1);
+
+        delete_label(&pool, &label.id).await.unwrap();
+        let delete_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'labels' AND row_id = ? AND operation = 'DELETE'",
+        )
+        .bind(&label.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(delete_count, 1);
+    }
+
+    /// `set_task_labels` already fires a `local_tasks` UPDATE (pre-existing),
+    /// but the `task_labels` rows themselves need their own entries or the
+    /// join table never replicates to another device. Assigning fires an
+    /// INSERT; a later unassignment must fire a matching DELETE for the
+    /// removed pair (and none for the one that stayed).
+    #[tokio::test]
+    async fn set_task_labels_replicates_task_labels_rows() {
+        let pool = test_pool().await;
+        let l1 = create_label(&pool, "deep work", "orange").await.unwrap();
+        let l2 = create_label(&pool, "quick win", "yellow").await.unwrap();
+        let t = create_local_task(&pool, CreateTaskInput { content: "x".into(), ..Default::default() })
+            .await
+            .unwrap();
+
+        set_task_labels(&pool, &t.id, &[l1.id.clone(), l2.id.clone()]).await.unwrap();
+
+        let row_id_1 = super::task_labels_row_id(&t.id, &l1.id);
+        let row_id_2 = super::task_labels_row_id(&t.id, &l2.id);
+        for row_id in [&row_id_1, &row_id_2] {
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM sync_log WHERE table_name = 'task_labels' AND row_id = ? AND operation = 'INSERT'",
+            )
+            .bind(row_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(count, 1, "expected an INSERT sync_log entry for {row_id}");
+        }
+
+        // Unassign l1, keep l2.
+        set_task_labels(&pool, &t.id, &[l2.id.clone()]).await.unwrap();
+
+        let l1_deletes: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'task_labels' AND row_id = ? AND operation = 'DELETE'",
+        )
+        .bind(&row_id_1)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(l1_deletes, 1, "removed assignment must fire a DELETE");
+
+        let l2_deletes: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'task_labels' AND row_id = ? AND operation = 'DELETE'",
+        )
+        .bind(&row_id_2)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(l2_deletes, 0, "retained assignment must not fire a DELETE");
+    }
+
+    /// `delete_label` wipes every `task_labels` row referencing it — each
+    /// detached row needs its own DELETE too, not just the `labels` row.
+    #[tokio::test]
+    async fn delete_label_replicates_detached_task_labels_rows() {
+        let pool = test_pool().await;
+        let l1 = create_label(&pool, "deep work", "orange").await.unwrap();
+        let t = create_local_task(&pool, CreateTaskInput { content: "x".into(), ..Default::default() })
+            .await
+            .unwrap();
+        set_task_labels(&pool, &t.id, &[l1.id.clone()]).await.unwrap();
+
+        delete_label(&pool, &l1.id).await.unwrap();
+
+        let row_id = super::task_labels_row_id(&t.id, &l1.id);
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'task_labels' AND row_id = ? AND operation = 'DELETE'",
+        )
+        .bind(&row_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn section_crud_appends_sync_log() {
+        let pool = test_pool().await;
+        let p = create_project(&pool, "Errands", "blue", None).await.unwrap();
+        let s1 = create_section(&pool, &p.id, "Groceries").await.unwrap();
+        let s2 = create_section(&pool, &p.id, "Chores").await.unwrap();
+
+        for s in [&s1, &s2] {
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM sync_log WHERE table_name = 'sections' AND row_id = ? AND operation = 'INSERT'",
+            )
+            .bind(&s.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(count, 1);
+        }
+
+        rename_section(&pool, &s1.id, "Shopping").await.unwrap();
+        let rename_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'sections' AND row_id = ? AND operation = 'UPDATE'",
+        )
+        .bind(&s1.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rename_count, 1);
+
+        reorder_sections(&pool, &[s2.id.clone(), s1.id.clone()]).await.unwrap();
+        for s in [&s1, &s2] {
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM sync_log WHERE table_name = 'sections' AND row_id = ? AND changed_columns LIKE '%position%'",
+            )
+            .bind(&s.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(count, 1, "reorder must log a position UPDATE for {}", s.id);
+        }
+
+        delete_section(&pool, &s1.id).await.unwrap();
+        let delete_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'sections' AND row_id = ? AND operation = 'DELETE'",
+        )
+        .bind(&s1.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(delete_count, 1);
+    }
+
+    #[tokio::test]
+    async fn seed_existing_data_covers_labels_sections_and_task_labels() {
+        let pool = test_pool().await;
+        // Insert rows directly (bypassing CRUD, as if pre-existing before
+        // sync was enabled) so seeding is the only thing producing entries.
+        sqlx::query("INSERT INTO labels (id, name, color, position) VALUES ('l1', 'deep work', 'orange', 0)")
+            .execute(&pool).await.unwrap();
+        let p = create_project(&pool, "Errands", "blue", None).await.unwrap();
+        sqlx::query("INSERT INTO sections (id, project_id, name, position) VALUES ('s1', ?, 'Groceries', 0)")
+            .bind(&p.id)
+            .execute(&pool).await.unwrap();
+        let t = create_local_task(&pool, CreateTaskInput { content: "x".into(), ..Default::default() })
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO task_labels (task_id, label_id) VALUES (?, 'l1')")
+            .bind(&t.id)
+            .execute(&pool).await.unwrap();
+
+        super::seed_existing_data(&pool).await.unwrap();
+
+        let label_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'labels' AND row_id = 'l1'",
+        ).fetch_one(&pool).await.unwrap();
+        assert_eq!(label_count, 1);
+
+        let section_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'sections' AND row_id = 's1'",
+        ).fetch_one(&pool).await.unwrap();
+        assert_eq!(section_count, 1);
+
+        let tl_row_id = super::task_labels_row_id(&t.id, "l1");
+        let tl_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'task_labels' AND row_id = ?",
+        ).bind(&tl_row_id).fetch_one(&pool).await.unwrap();
+        assert_eq!(tl_count, 1);
     }
 }

@@ -44,6 +44,10 @@ pub async fn create_label(pool: &SqlitePool, name: &str, color: &str) -> crate::
     .fetch_one(pool)
     .await?;
 
+    // Sync log: INSERT
+    let snapshot = serde_json::to_string(&label).unwrap_or_default();
+    sync::append_sync_log(pool, "labels", &label.id, "INSERT", None, Some(&snapshot)).await.ok();
+
     Ok(label)
 }
 
@@ -53,12 +57,14 @@ pub async fn update_label(
     name: Option<&str>,
     color: Option<&str>,
 ) -> crate::Result<Label> {
+    let mut fields_changed = Vec::new();
     if let Some(name) = name {
         sqlx::query("UPDATE labels SET name = ? WHERE id = ?")
             .bind(name)
             .bind(id)
             .execute(pool)
             .await?;
+        fields_changed.push("name");
     }
     if let Some(color) = color {
         sqlx::query("UPDATE labels SET color = ? WHERE id = ?")
@@ -66,6 +72,7 @@ pub async fn update_label(
             .bind(id)
             .execute(pool)
             .await?;
+        fields_changed.push("color");
     }
 
     let label: Label = sqlx::query_as::<_, Label>(&format!(
@@ -76,12 +83,28 @@ pub async fn update_label(
     .fetch_one(pool)
     .await?;
 
+    // Sync log: UPDATE with changed columns
+    if !fields_changed.is_empty() {
+        let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
+        let snapshot = serde_json::to_string(&label).unwrap_or_default();
+        sync::append_sync_log(pool, "labels", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
+    }
+
     Ok(label)
 }
 
 /// Also deletes the label's `task_labels` rows so no task keeps a dangling
-/// reference to a label that no longer exists.
+/// reference to a label that no longer exists. Fires a `sync_log` DELETE for
+/// the `labels` row itself, plus one per detached `task_labels` row (using
+/// `sync::task_labels_row_id`'s composite encoding — that table has no `id`
+/// column) so both halves of the deletion replicate.
 pub async fn delete_label(pool: &SqlitePool, id: &str) -> crate::Result<()> {
+    let detached_task_ids: Vec<(String,)> =
+        sqlx::query_as("SELECT task_id FROM task_labels WHERE label_id = ?")
+            .bind(id)
+            .fetch_all(pool)
+            .await?;
+
     sqlx::query("DELETE FROM task_labels WHERE label_id = ?")
         .bind(id)
         .execute(pool)
@@ -91,6 +114,21 @@ pub async fn delete_label(pool: &SqlitePool, id: &str) -> crate::Result<()> {
         .bind(id)
         .execute(pool)
         .await?;
+
+    for (task_id,) in &detached_task_ids {
+        sync::append_sync_log(
+            pool,
+            "task_labels",
+            &sync::task_labels_row_id(task_id, id),
+            "DELETE",
+            None,
+            None,
+        )
+        .await
+        .ok();
+    }
+
+    sync::append_sync_log(pool, "labels", id, "DELETE", None, None).await.ok();
 
     Ok(())
 }
@@ -116,7 +154,7 @@ pub async fn get_or_create_label_by_name(pool: &SqlitePool, name: &str) -> crate
         .fetch_one(&mut *tx)
         .await?;
 
-    sqlx::query(
+    let insert_result = sqlx::query(
         "INSERT INTO labels (id, name, color, position)
          SELECT ?, ?, 'gray', ?
          WHERE NOT EXISTS (SELECT 1 FROM labels WHERE name = ? COLLATE NOCASE)",
@@ -127,6 +165,9 @@ pub async fn get_or_create_label_by_name(pool: &SqlitePool, name: &str) -> crate
     .bind(name)
     .execute(&mut *tx)
     .await?;
+    // Only a genuine INSERT needs a sync_log entry — a no-op (existing
+    // case-different match) has no new row to replicate.
+    let inserted = insert_result.rows_affected() > 0;
 
     // Re-select rather than trust `id`: if the INSERT no-opped because a
     // case-insensitive match already existed, this returns that row instead.
@@ -139,6 +180,11 @@ pub async fn get_or_create_label_by_name(pool: &SqlitePool, name: &str) -> crate
     .await?;
 
     tx.commit().await?;
+
+    if inserted {
+        let snapshot = serde_json::to_string(&label).unwrap_or_default();
+        sync::append_sync_log(pool, "labels", &label.id, "INSERT", None, Some(&snapshot)).await.ok();
+    }
 
     Ok(label)
 }
@@ -193,6 +239,22 @@ pub async fn set_task_labels(
         return Err(crate::Error::Other(format!("set_task_labels: no such task '{task_id}'")));
     }
 
+    // Capture the pre-mutation assignment set so removed ids can get their
+    // own `task_labels` sync_log DELETE after commit (see below) — the
+    // `local_tasks` UPDATE this function already fires signals "this task's
+    // labels changed" for the UI/observer, but never touches the
+    // `task_labels` table itself, so removed rows would otherwise never
+    // replicate to other devices.
+    let old_label_ids: Vec<String> = sqlx::query_as::<_, (String,)>(
+        "SELECT label_id FROM task_labels WHERE task_id = ?",
+    )
+    .bind(task_id)
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .map(|(label_id,)| label_id)
+    .collect();
+
     if !unique_ids.is_empty() {
         let placeholders = vec!["?"; unique_ids.len()].join(", ");
         let query = format!("SELECT id FROM labels WHERE id IN ({placeholders})");
@@ -240,23 +302,65 @@ pub async fn set_task_labels(
     .fetch_one(&mut *tx)
     .await?;
 
-    let label_rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT label_id FROM task_labels WHERE task_id = ? ORDER BY rowid",
+    // (label_id, created_at) for every row in the now-current assignment set —
+    // used both to populate `task.labels` and, after commit, to build each
+    // `task_labels` row's own sync_log snapshot.
+    let label_rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT label_id, created_at FROM task_labels WHERE task_id = ? ORDER BY rowid",
     )
     .bind(task_id)
     .fetch_all(&mut *tx)
     .await?;
-    task.labels = label_rows.into_iter().map(|(label_id,)| label_id).collect();
+    task.labels = label_rows.iter().map(|(label_id, _)| label_id.clone()).collect();
 
     tx.commit().await?;
 
     // Sync log: UPDATE — same shape as db::tasks::update_local_task's fields_changed path.
     // Runs after the transaction commits, so it only ever observes a fully-applied change.
     let changed = serde_json::json!(["labels"]).to_string();
-    let snapshot = serde_json::to_string(&task).unwrap_or_default();
+    let snapshot = sync::task_sync_snapshot(&task);
     sync::append_sync_log(pool, "local_tasks", task_id, "UPDATE", Some(&changed), Some(&snapshot))
         .await
         .ok();
+
+    // Sync log: the `local_tasks` UPDATE above signals the change to the UI/
+    // Todoist observer, but it never touches the `task_labels` table itself —
+    // the assignment rows need their own entries to actually replicate to
+    // other devices. `task_labels` has no `id` column, so each entry's
+    // row_id is the composite "task_id::label_id" encoding.
+    let new_label_ids: HashSet<&str> = label_rows.iter().map(|(id, _)| id.as_str()).collect();
+    for old_label_id in &old_label_ids {
+        if !new_label_ids.contains(old_label_id.as_str()) {
+            sync::append_sync_log(
+                pool,
+                "task_labels",
+                &sync::task_labels_row_id(task_id, old_label_id),
+                "DELETE",
+                None,
+                None,
+            )
+            .await
+            .ok();
+        }
+    }
+    for (label_id, created_at) in &label_rows {
+        let tl_snapshot = serde_json::json!({
+            "task_id": task_id,
+            "label_id": label_id,
+            "created_at": created_at,
+        })
+        .to_string();
+        sync::append_sync_log(
+            pool,
+            "task_labels",
+            &sync::task_labels_row_id(task_id, label_id),
+            "INSERT",
+            None,
+            Some(&tl_snapshot),
+        )
+        .await
+        .ok();
+    }
 
     // Todoist mutation observer: best-effort. No field mapping exists yet for
     // "labels" in observer::on_task_mutation's Updated payload builder, so
