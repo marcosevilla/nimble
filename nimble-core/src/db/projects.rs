@@ -32,11 +32,61 @@ pub async fn get_projects(pool: &SqlitePool) -> crate::Result<Vec<Project>> {
     Ok(rows)
 }
 
+/// Max hops walked when checking a candidate `parent_id` for cycles. One
+/// level of nesting is the design intent, but walking further makes any
+/// depth safe rather than silently accepting a cycle beyond hop 1.
+const MAX_ANCESTOR_WALK: u8 = 5;
+
+/// True if setting `id`'s parent to `new_parent_id` would make `id` its own
+/// ancestor. Walks up `new_parent_id`'s parent chain (including
+/// `new_parent_id` itself) up to `MAX_ANCESTOR_WALK` hops, looking for `id`.
+///
+/// `projects.parent_id` has no foreign key (v19 migration adds the column
+/// with a plain `ALTER TABLE`), so nothing at the SQLite layer stops a cycle
+/// from being written directly — this is the only guard.
+async fn would_create_cycle(
+    pool: &SqlitePool,
+    id: &str,
+    new_parent_id: &str,
+) -> crate::Result<bool> {
+    let mut current = new_parent_id.to_string();
+    for _ in 0..MAX_ANCESTOR_WALK {
+        if current == id {
+            return Ok(true);
+        }
+        let parent: Option<Option<String>> =
+            sqlx::query_scalar("SELECT parent_id FROM projects WHERE id = ?")
+                .bind(&current)
+                .fetch_optional(pool)
+                .await?;
+        match parent {
+            Some(Some(next)) => current = next,
+            // Reached a root (no parent) or the chain points at an unknown
+            // id — either way there's nowhere left to walk, so no cycle.
+            Some(None) | None => return Ok(false),
+        }
+    }
+    Ok(current == id)
+}
+
 pub async fn create_project(
     pool: &SqlitePool,
     name: &str,
     color: &str,
+    parent_id: Option<&str>,
 ) -> crate::Result<Project> {
+    if let Some(pid) = parent_id {
+        let parent_exists: Option<(String,)> = sqlx::query_as("SELECT id FROM projects WHERE id = ?")
+            .bind(pid)
+            .fetch_optional(pool)
+            .await?;
+        if parent_exists.is_none() {
+            return Err(crate::Error::Other(format!(
+                "create_project: no such parent project '{pid}'"
+            )));
+        }
+    }
+
     let id = Uuid::new_v4().to_string();
 
     let max_pos: i64 =
@@ -44,11 +94,12 @@ pub async fn create_project(
             .fetch_one(pool)
             .await?;
 
-    sqlx::query("INSERT INTO projects (id, name, color, position) VALUES (?, ?, ?, ?)")
+    sqlx::query("INSERT INTO projects (id, name, color, position, parent_id) VALUES (?, ?, ?, ?, ?)")
         .bind(&id)
         .bind(name)
         .bind(color)
         .bind(max_pos + 1)
+        .bind(parent_id)
         .execute(pool)
         .await?;
 
@@ -65,7 +116,7 @@ pub async fn create_project(
         name: name.to_string(),
         color: color.to_string(),
         position: max_pos + 1,
-        parent_id: None,
+        parent_id: parent_id.map(|s| s.to_string()),
         external_id: None,
         external_source: None,
         remote_updated_at: None,
@@ -91,6 +142,7 @@ pub async fn update_project(
     id: &str,
     name: Option<&str>,
     color: Option<&str>,
+    parent_id: Option<&str>,
 ) -> crate::Result<()> {
     let mut fields_changed = Vec::new();
     if let Some(name) = name {
@@ -108,6 +160,29 @@ pub async fn update_project(
             .execute(pool)
             .await?;
         fields_changed.push("color");
+    }
+    if let Some(pid) = parent_id {
+        let parent_exists: Option<(String,)> = sqlx::query_as("SELECT id FROM projects WHERE id = ?")
+            .bind(pid)
+            .fetch_optional(pool)
+            .await?;
+        if parent_exists.is_none() {
+            return Err(crate::Error::Other(format!(
+                "update_project: no such parent project '{pid}'"
+            )));
+        }
+        if would_create_cycle(pool, id, pid).await? {
+            return Err(crate::Error::Other(format!(
+                "update_project: setting parent to '{pid}' would make '{id}' its own ancestor"
+            )));
+        }
+
+        sqlx::query("UPDATE projects SET parent_id = ? WHERE id = ?")
+            .bind(pid)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        fields_changed.push("parent_id");
     }
 
     // Sync log: UPDATE
@@ -186,7 +261,7 @@ mod tests {
     #[tokio::test]
     async fn projects_expose_external_columns() {
         let pool = test_pool().await;
-        let p = super::create_project(&pool, "Errands", "#ff0000").await.unwrap();
+        let p = super::create_project(&pool, "Errands", "#ff0000", None).await.unwrap();
         assert_eq!(p.external_id, None);
 
         sqlx::query("UPDATE projects SET external_id = 'abc123', external_source = 'todoist' WHERE id = ?")
@@ -199,5 +274,62 @@ mod tests {
         let fetched = all.iter().find(|x| x.id == p.id).unwrap();
         assert_eq!(fetched.external_id.as_deref(), Some("abc123"));
         assert_eq!(fetched.external_source.as_deref(), Some("todoist"));
+    }
+
+    #[tokio::test]
+    async fn parent_id_persists_on_create_and_update() {
+        let pool = test_pool().await;
+        let parent = super::create_project(&pool, "Work", "blue", None).await.unwrap();
+        let child = super::create_project(&pool, "Client A", "green", Some(&parent.id))
+            .await
+            .unwrap();
+        assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
+
+        let all = super::get_projects(&pool).await.unwrap();
+        let fetched = all.iter().find(|p| p.id == child.id).unwrap();
+        assert_eq!(fetched.parent_id.as_deref(), Some(parent.id.as_str()));
+
+        // re-parent via update_project
+        let other = super::create_project(&pool, "Client B", "red", None).await.unwrap();
+        super::update_project(&pool, &child.id, None, None, Some(&other.id))
+            .await
+            .unwrap();
+        let all = super::get_projects(&pool).await.unwrap();
+        let fetched = all.iter().find(|p| p.id == child.id).unwrap();
+        assert_eq!(fetched.parent_id.as_deref(), Some(other.id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn update_project_rejects_self_parent() {
+        let pool = test_pool().await;
+        let a = super::create_project(&pool, "A", "blue", None).await.unwrap();
+        let err = super::update_project(&pool, &a.id, None, None, Some(&a.id)).await;
+        assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn update_project_rejects_two_hop_cycle() {
+        let pool = test_pool().await;
+        let a = super::create_project(&pool, "A", "blue", None).await.unwrap();
+        let b = super::create_project(&pool, "B", "green", None).await.unwrap();
+
+        // A.parent = B is fine (B has no parent yet)
+        super::update_project(&pool, &a.id, None, None, Some(&b.id)).await.unwrap();
+
+        // B.parent = A would make A its own ancestor (A -> B -> A) — must error
+        let err = super::update_project(&pool, &b.id, None, None, Some(&a.id)).await;
+        assert!(err.is_err());
+
+        // and must not have partially applied
+        let all = super::get_projects(&pool).await.unwrap();
+        let fetched_b = all.iter().find(|p| p.id == b.id).unwrap();
+        assert_eq!(fetched_b.parent_id, None);
+    }
+
+    #[tokio::test]
+    async fn create_project_rejects_unknown_parent() {
+        let pool = test_pool().await;
+        let err = super::create_project(&pool, "Orphan", "blue", Some("nonexistent")).await;
+        assert!(err.is_err());
     }
 }

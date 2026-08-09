@@ -14,6 +14,7 @@ export type {
   TaskStatus,
   LocalTask,
   Label,
+  Section,
   UpdateStatus,
   SaveResult,
   ActivityEntry,
@@ -66,6 +67,7 @@ import type {
   TaskStatus,
   LocalTask,
   Label,
+  Section,
   UpdateStatus,
   SaveResult,
   ActivityEntry,
@@ -229,16 +231,43 @@ export async function getProjects(): Promise<Project[]> {
   return invoke<Project[]>('get_projects')
 }
 
-export async function createProject(name: string, color: string): Promise<Project> {
-  return invoke<Project>('create_project', { name, color })
+export async function createProject(name: string, color: string, parentId?: string): Promise<Project> {
+  return invoke<Project>('create_project', { name, color, parentId })
 }
 
-export async function updateProject(id: string, name?: string, color?: string): Promise<void> {
-  return invoke<void>('update_project', { id, name, color })
+export async function updateProject(
+  id: string,
+  name?: string,
+  color?: string,
+  parentId?: string
+): Promise<void> {
+  return invoke<void>('update_project', { id, name, color, parentId })
 }
 
 export async function deleteProject(id: string): Promise<void> {
   return invoke<void>('delete_project', { id })
+}
+
+// ── Sections ──
+
+export async function listSections(projectId: string): Promise<Section[]> {
+  return invoke<Section[]>('list_sections', { projectId })
+}
+
+export async function createSection(projectId: string, name: string): Promise<Section> {
+  return invoke<Section>('create_section', { projectId, name })
+}
+
+export async function renameSection(id: string, name: string): Promise<Section> {
+  return invoke<Section>('rename_section', { id, name })
+}
+
+export async function deleteSection(id: string): Promise<void> {
+  return invoke<void>('delete_section', { id })
+}
+
+export async function reorderSections(sectionIds: string[]): Promise<void> {
+  return invoke<void>('reorder_sections', { sectionIds })
 }
 
 // ── Local Tasks ──

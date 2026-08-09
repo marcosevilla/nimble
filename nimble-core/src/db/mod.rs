@@ -9,6 +9,7 @@ pub mod habits;
 pub mod labels;
 pub mod migrations;
 pub mod projects;
+pub mod sections;
 pub mod settings;
 pub mod sync;
 pub mod tasks;

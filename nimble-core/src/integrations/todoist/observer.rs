@@ -264,7 +264,7 @@ mod tests {
     async fn project_change_enqueues_move() {
         let pool = test_pool().await;
         activate(&pool).await;
-        let p = crate::db::projects::create_project(&pool, "Errands", "#fff").await.unwrap();
+        let p = crate::db::projects::create_project(&pool, "Errands", "#fff", None).await.unwrap();
         let t = crate::db::tasks::create_local_task(
             &pool,
             CreateTaskInput { content: "x".to_string(), ..Default::default() },

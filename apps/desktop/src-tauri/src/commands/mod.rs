@@ -16,6 +16,7 @@ pub mod open_url;
 pub mod priorities;
 pub mod progress;
 pub mod projects;
+pub mod sections;
 pub mod settings;
 pub mod sync;
 pub mod todoist;

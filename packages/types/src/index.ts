@@ -79,6 +79,7 @@ export interface Project {
   name: string
   color: string
   position: number
+  parent_id: string | null
   external_id: string | null
   external_source: string | null
   remote_updated_at: string | null
@@ -117,6 +118,18 @@ export interface Label {
   name: string
   color: string
   position: number
+  created_at: string
+}
+
+// ── Sections ──
+
+export interface Section {
+  id: string
+  project_id: string
+  name: string
+  position: number
+  external_id: string | null
+  external_source: string | null
   created_at: string
 }
 

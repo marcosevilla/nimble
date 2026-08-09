@@ -16,9 +16,10 @@ pub async fn create_project(
     app: AppHandle,
     name: String,
     color: String,
+    parent_id: Option<String>,
 ) -> Result<Project, String> {
     let pool = app.state::<SqlitePool>();
-    nimble_core::db::projects::create_project(pool.inner(), &name, &color)
+    nimble_core::db::projects::create_project(pool.inner(), &name, &color, parent_id.as_deref())
         .await
         .map_err(|e| e.to_string())
 }
@@ -29,6 +30,7 @@ pub async fn update_project(
     id: String,
     name: Option<String>,
     color: Option<String>,
+    parent_id: Option<String>,
 ) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
     nimble_core::db::projects::update_project(
@@ -36,6 +38,7 @@ pub async fn update_project(
         &id,
         name.as_deref(),
         color.as_deref(),
+        parent_id.as_deref(),
     )
     .await
     .map_err(|e| e.to_string())
