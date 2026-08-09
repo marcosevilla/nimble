@@ -183,6 +183,7 @@ mod tests {
     use super::*;
     use crate::integrations::todoist::outbox;
     use crate::test_util::test_pool;
+    use crate::types::{CreateTaskInput, UpdateTaskInput};
 
     async fn activate(pool: &sqlx::SqlitePool) {
         crate::integrations::ensure_state(pool, "todoist").await.unwrap();
@@ -192,7 +193,12 @@ mod tests {
     #[tokio::test]
     async fn disabled_adapter_enqueues_nothing() {
         let pool = test_pool().await;
-        let t = crate::db::tasks::create_local_task(&pool, "x", None, None, None, None, None).await.unwrap();
+        let t = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput { content: "x".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
         on_task_mutation(&pool, TaskMutation::Created(&t)).await;
         assert!(outbox::pending_batch(&pool, 10).await.unwrap().is_empty());
     }
@@ -201,7 +207,17 @@ mod tests {
     async fn create_enqueues_item_create_payload() {
         let pool = test_pool().await;
         activate(&pool).await;
-        let t = crate::db::tasks::create_local_task(&pool, "Call vet", None, None, None, Some(3), Some("2026-08-06")).await.unwrap();
+        let t = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "Call vet".to_string(),
+                priority: Some(3),
+                due_date: Some("2026-08-06".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
         // create_local_task itself calls the observer (wired in step 4), so the op is already there
         let batch = outbox::pending_batch(&pool, 10).await.unwrap();
         assert_eq!(batch.len(), 1);
@@ -216,7 +232,12 @@ mod tests {
     async fn completion_toggle_enqueues_close_then_reopen() {
         let pool = test_pool().await;
         activate(&pool).await;
-        let t = crate::db::tasks::create_local_task(&pool, "x", None, None, None, None, None).await.unwrap();
+        let t = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput { content: "x".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
         crate::db::tasks::update_task_status(&pool, &t.id, "complete", None).await.unwrap();
         crate::db::tasks::update_task_status(&pool, &t.id, "todo", None).await.unwrap();
         let ops: Vec<String> = outbox::pending_batch(&pool, 10).await.unwrap().into_iter().map(|r| r.op).collect();
@@ -227,7 +248,12 @@ mod tests {
     async fn local_only_status_change_enqueues_nothing_extra() {
         let pool = test_pool().await;
         activate(&pool).await;
-        let t = crate::db::tasks::create_local_task(&pool, "x", None, None, None, None, None).await.unwrap();
+        let t = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput { content: "x".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
         crate::db::tasks::update_task_status(&pool, &t.id, "in_progress", None).await.unwrap();
         crate::db::tasks::update_task_status(&pool, &t.id, "blocked", Some("waiting")).await.unwrap();
         let ops: Vec<String> = outbox::pending_batch(&pool, 10).await.unwrap().into_iter().map(|r| r.op).collect();
@@ -239,8 +265,19 @@ mod tests {
         let pool = test_pool().await;
         activate(&pool).await;
         let p = crate::db::projects::create_project(&pool, "Errands", "#fff").await.unwrap();
-        let t = crate::db::tasks::create_local_task(&pool, "x", None, None, None, None, None).await.unwrap();
-        crate::db::tasks::update_local_task(&pool, &t.id, None, None, Some(&p.id), None, None, false, None).await.unwrap();
+        let t = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput { content: "x".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        crate::db::tasks::update_local_task(
+            &pool,
+            &t.id,
+            UpdateTaskInput { project_id: Some(p.id.clone()), ..Default::default() },
+        )
+        .await
+        .unwrap();
         let batch = outbox::pending_batch(&pool, 10).await.unwrap();
         // project create + task create + move
         let moves: Vec<_> = batch.iter().filter(|r| r.op == "move").collect();
@@ -252,7 +289,12 @@ mod tests {
     async fn seed_backfills_unlinked_open_tasks_once() {
         let pool = test_pool().await;
         // create BEFORE activation → no ops enqueued yet
-        crate::db::tasks::create_local_task(&pool, "old task", None, None, None, None, None).await.unwrap();
+        crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput { content: "old task".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
         activate(&pool).await;
         let (tasks_seeded, _projects_seeded) = seed_outbox_for_unlinked(&pool).await.unwrap();
         assert_eq!(tasks_seeded, 1);

@@ -25,7 +25,7 @@ pub struct Project {
 
 // ── Local Tasks ──
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct LocalTask {
     pub id: String,
     pub parent_id: Option<String>,
@@ -51,6 +51,31 @@ pub struct LocalTask {
     pub external_source: Option<String>,
     pub remote_updated_at: Option<String>,
     pub synced_snapshot: Option<String>,
+}
+
+/// Input for `db::tasks::create_local_task`. Struct form lets later tasks add
+/// fields without touching every caller.
+#[derive(Debug, Default, Deserialize)]
+pub struct CreateTaskInput {
+    pub content: String,
+    pub project_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub description: Option<String>,
+    pub priority: Option<i64>,
+    pub due_date: Option<String>,
+}
+
+/// Input for `db::tasks::update_local_task`. Struct form lets later tasks add
+/// fields without touching every caller.
+#[derive(Debug, Default, Deserialize)]
+pub struct UpdateTaskInput {
+    pub content: Option<String>,
+    pub description: Option<String>,
+    pub project_id: Option<String>,
+    pub priority: Option<i64>,
+    pub due_date: Option<String>,
+    pub clear_due_date: bool,
+    pub linked_doc_id: Option<String>,
 }
 
 // ── Labels ──

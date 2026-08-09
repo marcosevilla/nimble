@@ -43,12 +43,14 @@ pub async fn create_local_task(
     let pool = app.state::<SqlitePool>();
     nimble_core::db::tasks::create_local_task(
         pool.inner(),
-        &content,
-        project_id.as_deref(),
-        parent_id.as_deref(),
-        description.as_deref(),
-        priority,
-        due_date.as_deref(),
+        nimble_core::types::CreateTaskInput {
+            content,
+            project_id,
+            parent_id,
+            description,
+            priority,
+            due_date,
+        },
     )
     .await
     .map_err(|e| e.to_string())
@@ -70,13 +72,15 @@ pub async fn update_local_task(
     nimble_core::db::tasks::update_local_task(
         pool.inner(),
         &id,
-        content.as_deref(),
-        description.as_deref(),
-        project_id.as_deref(),
-        priority,
-        due_date.as_deref(),
-        clear_due_date.unwrap_or(false),
-        linked_doc_id.as_deref(),
+        nimble_core::types::UpdateTaskInput {
+            content,
+            description,
+            project_id,
+            priority,
+            due_date,
+            clear_due_date: clear_due_date.unwrap_or(false),
+            linked_doc_id,
+        },
     )
     .await
     .map_err(|e| e.to_string())

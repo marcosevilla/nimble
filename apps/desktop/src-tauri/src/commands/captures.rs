@@ -57,9 +57,11 @@ pub async fn convert_capture_to_task(
     // Create the task via the core crate
     let task = nimble_core::db::tasks::create_local_task(
         pool.inner(),
-        &content,
-        project_id.as_deref(),
-        None, None, None, None,
+        nimble_core::types::CreateTaskInput {
+            content,
+            project_id,
+            ..Default::default()
+        },
     )
     .await
     .map_err(|e| e.to_string())?;

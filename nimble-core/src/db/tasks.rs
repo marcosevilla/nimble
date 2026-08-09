@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::db::activity;
 use crate::db::sync;
-use crate::types::LocalTask;
+use crate::types::{CreateTaskInput, LocalTask, UpdateTaskInput};
 
 impl FromRow<'_, SqliteRow> for LocalTask {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
@@ -133,15 +133,21 @@ pub async fn get_local_tasks(
     Ok(rows)
 }
 
-pub async fn create_local_task(
-    pool: &SqlitePool,
-    content: &str,
-    project_id: Option<&str>,
-    parent_id: Option<&str>,
-    description: Option<&str>,
-    priority: Option<i64>,
-    due_date: Option<&str>,
-) -> crate::Result<LocalTask> {
+pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> crate::Result<LocalTask> {
+    let CreateTaskInput {
+        content,
+        project_id,
+        parent_id,
+        description,
+        priority,
+        due_date,
+    } = input;
+    let content = content.as_str();
+    let project_id = project_id.as_deref();
+    let parent_id = parent_id.as_deref();
+    let description = description.as_deref();
+    let due_date = due_date.as_deref();
+
     let id = Uuid::new_v4().to_string();
     let project_id = project_id.unwrap_or("inbox");
     let priority = priority.unwrap_or(1);
@@ -208,17 +214,22 @@ pub async fn create_local_task(
     Ok(task)
 }
 
-pub async fn update_local_task(
-    pool: &SqlitePool,
-    id: &str,
-    content: Option<&str>,
-    description: Option<&str>,
-    project_id: Option<&str>,
-    priority: Option<i64>,
-    due_date: Option<&str>,
-    clear_due_date: bool,
-    linked_doc_id: Option<&str>,
-) -> crate::Result<LocalTask> {
+pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInput) -> crate::Result<LocalTask> {
+    let UpdateTaskInput {
+        content,
+        description,
+        project_id,
+        priority,
+        due_date,
+        clear_due_date,
+        linked_doc_id,
+    } = input;
+    let content = content.as_deref();
+    let description = description.as_deref();
+    let project_id = project_id.as_deref();
+    let due_date = due_date.as_deref();
+    let linked_doc_id = linked_doc_id.as_deref();
+
     if let Some(content) = content {
         sqlx::query("UPDATE local_tasks SET content = ?, updated_at = datetime('now') WHERE id = ?")
             .bind(content)
@@ -481,13 +492,17 @@ pub async fn delete_local_task(pool: &SqlitePool, id: &str) -> crate::Result<()>
 #[cfg(test)]
 mod tests {
     use crate::test_util::test_pool;
+    use crate::types::{CreateTaskInput, UpdateTaskInput};
 
     #[tokio::test]
     async fn external_link_survives_task_edits() {
         let pool = test_pool().await;
-        let task = super::create_local_task(&pool, "Buy milk", None, None, None, None, None)
-            .await
-            .unwrap();
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput { content: "Buy milk".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
         assert_eq!(task.external_id, None);
         assert_eq!(task.external_source, None);
 
@@ -499,7 +514,9 @@ mod tests {
             .unwrap();
 
         let updated = super::update_local_task(
-            &pool, &task.id, Some("Buy oat milk"), None, None, None, None, false, None,
+            &pool,
+            &task.id,
+            UpdateTaskInput { content: Some("Buy oat milk".to_string()), ..Default::default() },
         )
         .await
         .unwrap();
@@ -520,7 +537,12 @@ mod tests {
         sqlx::query("SELECT provider, sync_token, last_sync_at, last_full_sync_at, last_error, enabled FROM integration_sync_state")
             .fetch_all(&pool).await.unwrap();
         // columns visible through the struct
-        let task = super::create_local_task(&pool, "t", None, None, None, None, None).await.unwrap();
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput { content: "t".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
         sqlx::query("UPDATE local_tasks SET synced_snapshot = '{}', remote_updated_at = '2026-08-04T00:00:00Z' WHERE id = ?")
             .bind(&task.id).execute(&pool).await.unwrap();
         let all = super::get_local_tasks(&pool, None, None, false).await.unwrap();
@@ -539,12 +561,22 @@ mod tests {
         crate::integrations::ensure_state(&pool, "todoist").await.unwrap();
         crate::db::settings::set_setting(&pool, "todoist_api_token", "tok").await.unwrap();
 
-        let parent = super::create_local_task(&pool, "Parent", None, None, None, None, None)
-            .await
-            .unwrap();
-        let child = super::create_local_task(&pool, "Child", None, Some(&parent.id), None, None, None)
-            .await
-            .unwrap();
+        let parent = super::create_local_task(
+            &pool,
+            CreateTaskInput { content: "Parent".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        let child = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "Child".to_string(),
+                parent_id: Some(parent.id.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
 
         // Both parent and child got pending 'create' ops from the observer.
         let batch = crate::integrations::todoist::outbox::pending_batch(&pool, 100)
@@ -585,12 +617,22 @@ mod tests {
         crate::integrations::ensure_state(&pool, "todoist").await.unwrap();
         crate::db::settings::set_setting(&pool, "todoist_api_token", "tok").await.unwrap();
 
-        let parent = super::create_local_task(&pool, "Parent", None, None, None, None, None)
-            .await
-            .unwrap();
-        let child = super::create_local_task(&pool, "Child", None, Some(&parent.id), None, None, None)
-            .await
-            .unwrap();
+        let parent = super::create_local_task(
+            &pool,
+            CreateTaskInput { content: "Parent".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        let child = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "Child".to_string(),
+                parent_id: Some(parent.id.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
 
         // Simulate the child having already been synced to Todoist in a
         // previous cycle: it has an external_id and its prior create/update
