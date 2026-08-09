@@ -185,6 +185,18 @@ pub fn build_commands(
                     args.insert("duration".into(), minutes.into());
                     args.insert("duration_unit".into(), "minute".into());
                 }
+                // Labels assigned at creation time (`CreateTaskInput::label_ids`)
+                // fire a separate `set_task_labels` call right after the task
+                // row is inserted, which enqueues its own "update" op — but
+                // that "update" merges into this still-pending "create" row
+                // (see outbox::enqueue's merge-into-pending-create behavior)
+                // rather than staying a separate row. Without reading `labels`
+                // here, a create+labels row would silently drop the labels on
+                // push, and the next pull (finding no remote labels, base =
+                // None on first contact) would then delete them locally too.
+                if let Some(v) = row.payload.get("labels") {
+                    args.insert("labels".into(), v.clone());
+                }
                 if let Some(p) = row.payload.get("project_local_id").and_then(|v| v.as_str()) {
                     if let Some(ext) = ctx.resolve_project_ref(p, &extra_temp_ids) {
                         let (k, v) = project_ref_args(&ext);
@@ -990,6 +1002,27 @@ mod push_tests {
         assert_eq!(cmds[0]["uuid"], "uuid-create-t1");
         assert_eq!(cmds[0]["args"]["content"], "c");
         assert_eq!(cmds[0]["args"]["project_id"], "EXT-P1");
+    }
+
+    #[test]
+    fn create_with_merged_labels_surfaces_labels_in_item_add() {
+        // Regression: labels assigned at creation time enqueue a follow-up
+        // "update" op (from `set_task_labels`) that merges into the
+        // still-pending "create" row (outbox::enqueue's merge-into-pending
+        // behavior) rather than staying separate — so a merged create row's
+        // payload carries a top-level "labels" key that the create builder
+        // must read, or labels silently never reach Todoist.
+        let rows = vec![row(
+            "create",
+            "t1",
+            json!({"content": "c", "project_local_id": "p1", "labels": ["alpha", "zeta"]}),
+            Some("tmp-t1"),
+        )];
+        let ctx = ctx_with(&[("t1", None)], &[("p1", "EXT-P1")]);
+        let (cmds, bad) = build_commands(&rows, &ctx);
+        assert!(bad.is_empty());
+        assert_eq!(cmds[0]["type"], "item_add");
+        assert_eq!(cmds[0]["args"]["labels"], json!(["alpha", "zeta"]));
     }
 
     #[test]
