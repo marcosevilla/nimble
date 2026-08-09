@@ -16,6 +16,11 @@ impl FromRow<'_, SqliteRow> for LocalTask {
             project_id: row.try_get("project_id")?,
             priority: row.try_get("priority")?,
             due_date: row.try_get("due_date")?,
+            due_time: row.try_get("due_time")?,
+            duration_minutes: row.try_get("duration_minutes")?,
+            recurrence_rule: row.try_get("recurrence_rule")?,
+            section_id: row.try_get("section_id")?,
+            labels: Vec::new(),
             completed: row.try_get::<i64, _>("completed")? != 0,
             completed_at: row.try_get("completed_at")?,
             status: row.try_get("status")?,
@@ -31,7 +36,7 @@ impl FromRow<'_, SqliteRow> for LocalTask {
     }
 }
 
-pub(crate) const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot";
+pub(crate) const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot";
 
 /// Reorder tasks within a project -- receives ordered list of task IDs
 pub async fn reorder_local_tasks(pool: &SqlitePool, task_ids: &[String]) -> crate::Result<()> {

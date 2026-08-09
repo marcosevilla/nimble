@@ -13,6 +13,7 @@ impl FromRow<'_, SqliteRow> for Project {
             name: row.try_get("name")?,
             color: row.try_get("color")?,
             position: row.try_get("position")?,
+            parent_id: row.try_get("parent_id")?,
             external_id: row.try_get("external_id")?,
             external_source: row.try_get("external_source")?,
             remote_updated_at: row.try_get("remote_updated_at")?,
@@ -23,7 +24,7 @@ impl FromRow<'_, SqliteRow> for Project {
 
 pub async fn get_projects(pool: &SqlitePool) -> crate::Result<Vec<Project>> {
     let rows: Vec<Project> = sqlx::query_as::<_, Project>(
-        "SELECT id, name, color, position, external_id, external_source, remote_updated_at, synced_snapshot FROM projects ORDER BY position, created_at",
+        "SELECT id, name, color, position, parent_id, external_id, external_source, remote_updated_at, synced_snapshot FROM projects ORDER BY position, created_at",
     )
     .fetch_all(pool)
     .await?;
@@ -64,6 +65,7 @@ pub async fn create_project(
         name: name.to_string(),
         color: color.to_string(),
         position: max_pos + 1,
+        parent_id: None,
         external_id: None,
         external_source: None,
         remote_updated_at: None,
@@ -111,7 +113,7 @@ pub async fn update_project(
     // Sync log: UPDATE
     if !fields_changed.is_empty() {
         let row: Option<Project> = sqlx::query_as::<_, Project>(
-            "SELECT id, name, color, position, external_id, external_source, remote_updated_at, synced_snapshot FROM projects WHERE id = ?"
+            "SELECT id, name, color, position, parent_id, external_id, external_source, remote_updated_at, synced_snapshot FROM projects WHERE id = ?"
         ).bind(id).fetch_optional(pool).await.ok().flatten();
         if let Some(project) = row {
             let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
@@ -140,7 +142,7 @@ pub async fn delete_project(pool: &SqlitePool, id: &str) -> crate::Result<()> {
     // Fetch the full project before deleting, so the observer can enqueue a
     // delete op (and read external_id) after the row is gone.
     let pre_delete_project: Option<Project> = sqlx::query_as::<_, Project>(
-        "SELECT id, name, color, position, external_id, external_source, remote_updated_at, synced_snapshot FROM projects WHERE id = ?"
+        "SELECT id, name, color, position, parent_id, external_id, external_source, remote_updated_at, synced_snapshot FROM projects WHERE id = ?"
     ).bind(id).fetch_optional(pool).await.ok().flatten();
 
     // Move tasks to Inbox before deleting

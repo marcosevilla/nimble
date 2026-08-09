@@ -16,6 +16,7 @@ pub struct Project {
     pub name: String,
     pub color: String,
     pub position: i64,
+    pub parent_id: Option<String>,
     pub external_id: Option<String>,
     pub external_source: Option<String>,
     pub remote_updated_at: Option<String>,
@@ -33,6 +34,12 @@ pub struct LocalTask {
     pub project_id: String,
     pub priority: i64,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,        // "HH:MM" 24h, None = all-day
+    pub duration_minutes: Option<i64>,
+    pub recurrence_rule: Option<String>, // human string, e.g. "every 2 weeks @ 09:00"
+    pub section_id: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,             // label ids; loaded separately, not a table column
     pub completed: bool,
     pub completed_at: Option<String>,
     pub status: String,
@@ -44,6 +51,30 @@ pub struct LocalTask {
     pub external_source: Option<String>,
     pub remote_updated_at: Option<String>,
     pub synced_snapshot: Option<String>,
+}
+
+// ── Labels ──
+
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+pub struct Label {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    pub position: i64,
+    pub created_at: String,
+}
+
+// ── Sections ──
+
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+pub struct Section {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub position: i64,
+    pub external_id: Option<String>,
+    pub external_source: Option<String>,
+    pub created_at: String,
 }
 
 // ── Activity ──

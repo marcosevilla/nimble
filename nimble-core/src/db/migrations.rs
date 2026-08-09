@@ -464,6 +464,42 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             CREATE VIRTUAL TABLE IF NOT EXISTS vault_fts USING fts5(note_id UNINDEXED, title, content)
         ",
     },
+    Migration {
+        version: 19,
+        description: "Task data-model parity: labels, sections, due_time, duration, recurrence, project nesting",
+        sql: "
+            CREATE TABLE IF NOT EXISTS labels (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                color TEXT NOT NULL DEFAULT 'gray',
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE TABLE IF NOT EXISTS task_labels (
+                task_id TEXT NOT NULL,
+                label_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                PRIMARY KEY (task_id, label_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_task_labels_label ON task_labels(label_id);
+            CREATE TABLE IF NOT EXISTS sections (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                external_id TEXT,
+                external_source TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_sections_project ON sections(project_id);
+            ALTER TABLE local_tasks ADD COLUMN due_time TEXT;
+            ALTER TABLE local_tasks ADD COLUMN duration_minutes INTEGER;
+            ALTER TABLE local_tasks ADD COLUMN recurrence_rule TEXT;
+            ALTER TABLE local_tasks ADD COLUMN section_id TEXT;
+            ALTER TABLE projects ADD COLUMN parent_id TEXT;
+            CREATE INDEX IF NOT EXISTS idx_local_tasks_section ON local_tasks(section_id)
+        ",
+    },
 ];
 
 pub async fn run_migrations(pool: &SqlitePool) -> crate::Result<()> {
@@ -559,5 +595,45 @@ mod v18_tests {
             .execute(&pool)
             .await;
         assert!(dup.is_err(), "path must be UNIQUE");
+    }
+}
+
+#[cfg(test)]
+mod v19_tests {
+    use crate::test_util::test_pool;
+
+    #[tokio::test]
+    async fn v19_tables_and_columns_exist() {
+        let pool = test_pool().await;
+        for table in ["labels", "task_labels", "sections"] {
+            let found: Option<(String,)> = sqlx::query_as(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            )
+            .bind(table)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+            assert!(found.is_some(), "missing table {table}");
+        }
+        // new columns accept writes
+        sqlx::query(
+            "INSERT INTO local_tasks (id, content, project_id, due_date, due_time, duration_minutes, recurrence_rule)
+             VALUES ('t1', 'x', 'inbox', '2026-08-16', '09:00', 10, 'every 2 weeks')",
+        )
+        .execute(&pool)
+        .await
+        .expect("v19 columns on local_tasks");
+        sqlx::query("INSERT INTO projects (id, name, color, position, parent_id) VALUES ('p2', 'Child', 'blue', 1, 'inbox')")
+            .execute(&pool)
+            .await
+            .expect("parent_id on projects");
+        // task_labels composite PK rejects duplicates
+        sqlx::query("INSERT INTO labels (id, name, color, position) VALUES ('l1', 'deep work', 'orange', 0)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO task_labels (task_id, label_id) VALUES ('t1', 'l1')")
+            .execute(&pool).await.unwrap();
+        let dup = sqlx::query("INSERT INTO task_labels (task_id, label_id) VALUES ('t1', 'l1')")
+            .execute(&pool).await;
+        assert!(dup.is_err(), "task_labels (task_id, label_id) must be unique");
     }
 }
