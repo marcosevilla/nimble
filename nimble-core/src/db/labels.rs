@@ -359,16 +359,59 @@ mod tests {
     /// Regression for review finding 3: two callers racing to
     /// get-or-create differently-cased names for the same label must
     /// converge on one row, not two.
+    ///
+    /// `test_pool()` is `max_connections(1)`, so two `tokio::join!`'d calls
+    /// against it never hold two live SQLite connections — the connection
+    /// pool itself serializes them regardless of whether the INSERT is
+    /// atomic, which would let this test pass even against the old, racy
+    /// SELECT-then-INSERT implementation (caught in review). To actually
+    /// exercise the race, this spins up its own file-backed pool with
+    /// `max_connections(2)` (separate `:memory:` connections don't share a
+    /// database, so a temp file is required) and a `busy_timeout` so a
+    /// blocked writer waits for the lock instead of failing immediately —
+    /// SQLite still serializes the two writers under the hood, but now via
+    /// its own real locking, which is the mechanism under test.
     #[tokio::test]
     async fn get_or_create_label_by_name_is_race_safe_under_concurrent_case_variants() {
-        let pool = test_pool().await;
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+        use std::str::FromStr;
+
+        let path = std::env::temp_dir().join(format!("nimble-labels-race-{}.db", Uuid::new_v4()));
+        let url = format!("sqlite://{}?mode=rwc", path.to_str().expect("temp path is utf-8"));
+        let options = SqliteConnectOptions::from_str(&url)
+            .expect("valid sqlite url")
+            .busy_timeout(std::time::Duration::from_secs(5));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect_with(options)
+            .await
+            .expect("file-backed sqlite pool with 2 real connections");
+        crate::db::migrations::run_migrations(&pool)
+            .await
+            .expect("migrations on race-test pool");
+
         let (a, b) = tokio::join!(
             get_or_create_label_by_name(&pool, "Deep Work"),
             get_or_create_label_by_name(&pool, "deep work"),
         );
-        let a = a.unwrap();
-        let b = b.unwrap();
-        assert_eq!(a.id, b.id);
-        assert_eq!(list_labels(&pool).await.unwrap().len(), 1);
+
+        // A blocked writer may still surface a busy/locked error despite the
+        // timeout under unlucky scheduling — that's an acceptable outcome.
+        // What must never happen, and what this test actually guards, is
+        // two successful calls resolving to two different label rows.
+        let ids: Vec<String> = [a, b].into_iter().filter_map(|r| r.ok()).map(|l| l.id).collect();
+        assert!(!ids.is_empty(), "at least one concurrent call must succeed");
+        assert!(
+            ids.windows(2).all(|w| w[0] == w[1]),
+            "concurrent case-variant calls must never resolve to different label ids: {ids:?}"
+        );
+        assert_eq!(
+            list_labels(&pool).await.unwrap().len(),
+            1,
+            "exactly one label row must exist, never two"
+        );
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
     }
 }
