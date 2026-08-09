@@ -13,6 +13,7 @@ export type {
   Project,
   TaskStatus,
   LocalTask,
+  Label,
   UpdateStatus,
   SaveResult,
   ActivityEntry,
@@ -64,6 +65,7 @@ import type {
   Project,
   TaskStatus,
   LocalTask,
+  Label,
   UpdateStatus,
   SaveResult,
   ActivityEntry,
@@ -302,6 +304,31 @@ export async function deleteLocalTask(id: string): Promise<void> {
 
 export async function reorderLocalTasks(taskIds: string[]): Promise<void> {
   return invoke<void>('reorder_local_tasks', { taskIds })
+}
+
+// ── Labels ──
+
+export async function listLabels(): Promise<Label[]> {
+  return invoke<Label[]>('list_labels')
+}
+
+export async function createLabel(name: string, color: string): Promise<Label> {
+  return invoke<Label>('create_label', { name, color })
+}
+
+export async function updateLabel(
+  id: string,
+  opts: { name?: string; color?: string },
+): Promise<Label> {
+  return invoke<Label>('update_label', { id, name: opts.name, color: opts.color })
+}
+
+export async function deleteLabel(id: string): Promise<void> {
+  return invoke<void>('delete_label', { id })
+}
+
+export async function setTaskLabels(taskId: string, labelIds: string[]): Promise<LocalTask> {
+  return invoke<LocalTask>('set_task_labels', { taskId, labelIds })
 }
 
 // ── Open URL ──

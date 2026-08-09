@@ -18,7 +18,7 @@ use tauri::{
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-use commands::{activity, ai, calendar, capture_routes, captures, demo, docs, focus, goals, habits, import, local_tasks, obsidian, open_url, priorities, progress, projects, settings, sync, todoist, todoist_sync, updater, vault};
+use commands::{activity, ai, calendar, capture_routes, captures, demo, docs, focus, goals, habits, import, labels, local_tasks, obsidian, open_url, priorities, progress, projects, settings, sync, todoist, todoist_sync, updater, vault};
 
 /// Show and focus the main window
 fn show_window(app: &tauri::AppHandle) {
@@ -399,6 +399,11 @@ pub fn run() {
             local_tasks::delete_local_task,
             local_tasks::update_task_status,
             local_tasks::reorder_local_tasks,
+            labels::list_labels,
+            labels::create_label,
+            labels::update_label,
+            labels::delete_label,
+            labels::set_task_labels,
             activity::log_activity,
             activity::get_activity_log,
             activity::get_activity_summary,

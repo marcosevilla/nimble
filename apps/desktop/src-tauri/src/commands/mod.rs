@@ -9,6 +9,7 @@ pub mod focus;
 pub mod goals;
 pub mod habits;
 pub mod import;
+pub mod labels;
 pub mod local_tasks;
 pub mod obsidian;
 pub mod open_url;

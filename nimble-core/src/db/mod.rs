@@ -6,6 +6,7 @@ pub mod docs;
 pub mod focus;
 pub mod goals;
 pub mod habits;
+pub mod labels;
 pub mod migrations;
 pub mod projects;
 pub mod settings;
