@@ -16,6 +16,7 @@ import type {
   HabitLog,
   GoalWithProgress,
   TaskStatus,
+  Label,
 } from '@nimble/types';
 import { getDatabase } from './database';
 import { generateUUID, appendSyncLog } from './sync-utils';
@@ -172,6 +173,13 @@ export function createSqliteProvider(): DataProvider {
       delete: () => stub('projects.delete'),
     },
 
+    labels: {
+      async list() {
+        const db = getDatabase();
+        return db.getAllAsync<Label>('SELECT * FROM labels ORDER BY position');
+      },
+    },
+
     tasks: {
       async list(opts) {
         const db = getDatabase();
@@ -192,13 +200,30 @@ export function createSqliteProvider(): DataProvider {
 
         sql += ' ORDER BY position';
 
-        const rows = await db.getAllAsync<Omit<LocalTask, 'completed'> & { completed: number }>(
-          sql,
-          params
+        const rows = await db.getAllAsync<
+          Omit<LocalTask, 'completed' | 'labels'> & { completed: number }
+        >(sql, params);
+
+        // Batch-load labels for every returned task with one aggregate
+        // query folded into a map, rather than one query per row — mirrors
+        // nimble-core's `get_local_tasks` (desktop Task 7's approach).
+        const labelRows = await db.getAllAsync<{ task_id: string; label_id: string }>(
+          'SELECT task_id, label_id FROM task_labels ORDER BY rowid'
         );
+        const labelsByTask = new Map<string, string[]>();
+        for (const { task_id, label_id } of labelRows) {
+          const existing = labelsByTask.get(task_id);
+          if (existing) {
+            existing.push(label_id);
+          } else {
+            labelsByTask.set(task_id, [label_id]);
+          }
+        }
+
         return rows.map((r) => ({
           ...r,
           completed: Boolean(r.completed),
+          labels: labelsByTask.get(r.id) ?? [],
         }));
       },
 
@@ -243,6 +268,11 @@ export function createSqliteProvider(): DataProvider {
           project_id: projectId,
           priority,
           due_date: opts.dueDate ?? null,
+          due_time: null,
+          duration_minutes: null,
+          recurrence_rule: null,
+          section_id: null,
+          labels: [],
           completed: false,
           completed_at: null,
           status,
@@ -305,14 +335,25 @@ export function createSqliteProvider(): DataProvider {
         );
 
         // Fetch updated task
-        const row = await db.getFirstAsync<Omit<LocalTask, 'completed'> & { completed: number }>(
-          'SELECT * FROM local_tasks WHERE id = ?',
-          [opts.id]
-        );
+        const row = await db.getFirstAsync<
+          Omit<LocalTask, 'completed' | 'labels'> & { completed: number }
+        >('SELECT * FROM local_tasks WHERE id = ?', [opts.id]);
 
         if (!row) throw new Error(`Task ${opts.id} not found`);
 
-        const task: LocalTask = { ...row, completed: Boolean(row.completed) };
+        // A plain update that doesn't touch labels must still return the
+        // task's existing labels, not an empty array — every task-returning
+        // fn carries `labels` (mirrors nimble-core's own guarantee).
+        const labelRows = await db.getAllAsync<{ label_id: string }>(
+          'SELECT label_id FROM task_labels WHERE task_id = ? ORDER BY rowid',
+          [opts.id]
+        );
+
+        const task: LocalTask = {
+          ...row,
+          completed: Boolean(row.completed),
+          labels: labelRows.map((l) => l.label_id),
+        };
         appendSyncLog('local_tasks', opts.id, 'UPDATE', changedColumns, task as unknown as Record<string, unknown>);
         return task;
       },

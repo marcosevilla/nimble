@@ -17,8 +17,9 @@ import {
 } from 'react-native';
 import { useDataProvider } from '../../services/provider-context';
 import { fullSync } from '../../services/sync';
-import type { Project, LocalTask, TaskStatus } from '@nimble/types';
+import type { Project, LocalTask, TaskStatus, Label } from '@nimble/types';
 import { colors, spacing, fontSize } from '../../constants/theme';
+import { labelColor } from '../../constants/labelColors';
 
 const priorityColors: Record<number, string> = {
   1: colors.priority1,
@@ -49,6 +50,7 @@ interface ProjectWithTasks extends Project {
 export default function TasksPage() {
   const dp = useDataProvider();
   const [projects, setProjects] = useState<ProjectWithTasks[]>([]);
+  const [labelsById, setLabelsById] = useState<Map<string, Label>>(new Map());
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -58,7 +60,10 @@ export default function TasksPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const projectList = await dp.projects.list();
+      const [projectList, labelList] = await Promise.all([
+        dp.projects.list(),
+        dp.labels.list(),
+      ]);
       const withTasks: ProjectWithTasks[] = [];
 
       for (const p of projectList) {
@@ -70,6 +75,7 @@ export default function TasksPage() {
       }
 
       setProjects(withTasks);
+      setLabelsById(new Map(labelList.map((l) => [l.id, l])));
     } catch (e) {
       console.error('Failed to load projects:', e);
     } finally {
@@ -228,9 +234,41 @@ export default function TasksPage() {
                           {task.status.replace('_', ' ')}
                         </Text>
                         {task.due_date && (
-                          <Text style={styles.taskMeta}>{task.due_date}</Text>
+                          <Text style={styles.taskMeta}>
+                            {task.due_date}
+                            {task.due_time ? ` · ${task.due_time}` : ''}
+                          </Text>
+                        )}
+                        {task.recurrence_rule && (
+                          <Text
+                            style={styles.recurrenceGlyph}
+                            accessibilityLabel="Recurring task"
+                          >
+                            ↻
+                          </Text>
                         )}
                       </View>
+                      {task.labels.length > 0 && (
+                        <View style={styles.taskLabelsRow}>
+                          {task.labels.map((labelId) => {
+                            const label = labelsById.get(labelId);
+                            if (!label) return null;
+                            return (
+                              <View key={labelId} style={styles.labelChip}>
+                                <View
+                                  style={[
+                                    styles.labelDot,
+                                    { backgroundColor: labelColor(label.color) },
+                                  ]}
+                                />
+                                <Text style={styles.labelChipText} numberOfLines={1}>
+                                  {label.name}
+                                </Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
                     </View>
                   </TouchableOpacity>
                 ))}
@@ -386,6 +424,38 @@ const styles = StyleSheet.create({
   taskMeta: {
     fontSize: fontSize.xs,
     color: colors.textMuted,
+  },
+  recurrenceGlyph: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+  },
+  taskLabelsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  labelChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.bgSurface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    maxWidth: 140,
+  },
+  labelDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  labelChipText: {
+    fontSize: fontSize.xs,
+    color: colors.textSecondary,
+    flexShrink: 1,
   },
   loadingText: {
     color: colors.textMuted,

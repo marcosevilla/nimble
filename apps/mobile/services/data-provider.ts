@@ -21,6 +21,7 @@ import type {
   ActivitySummary,
   Capture,
   CaptureRoute,
+  Label,
   RouteCaptureResult,
   DocFolder,
   Document,
@@ -103,6 +104,13 @@ export interface DataProvider {
     create(name: string, color: string): Promise<Project>;
     update(id: string, name?: string, color?: string): Promise<void>;
     delete(id: string): Promise<void>;
+  };
+
+  // Read-only for now — mobile only needs label name/color to render chips
+  // on task rows (R1 Task 15). Creation/management stays desktop-only until
+  // R4 brings full mobile parity.
+  labels: {
+    list(): Promise<Label[]>;
   };
 
   tasks: {
