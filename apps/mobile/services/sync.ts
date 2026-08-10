@@ -36,10 +36,36 @@ const ALLOWED_TABLES = [
   'capture_routes',
   'life_areas',
   'calendar_feeds',
+  // v19 (Task 6/15): labels, task_labels, sections — mirrors the Rust
+  // allowlist in nimble-core/src/db/sync.rs::sanitize_table_name. Without
+  // these, desktop-created labels/assignments/sections reach Turso but
+  // mobile's pull loop rejects them via isAllowedTable() before ever
+  // applying them locally.
+  'labels',
+  'task_labels',
+  'sections',
+  // Deliberately excluded (device-local, never synced): todoist_outbox,
+  // integration_sync_state, vault_fts — mirrors the Rust side, which also
+  // omits them from its own allowlist/pull path.
 ] as const;
 
 function isAllowedTable(name: string): boolean {
   return (ALLOWED_TABLES as readonly string[]).includes(name);
+}
+
+/**
+ * `task_labels` has no `id` column — its primary key is the composite
+ * `(task_id, label_id)`. Its `sync_log.row_id` encodes both halves joined
+ * by "::" (mirrors `nimble-core::db::sync::task_labels_row_id`/
+ * `split_task_labels_row_id`). Every other synced table's `row_id` is a
+ * plain `id` column value. Returns `null` for a malformed row_id (missing
+ * delimiter) rather than throwing — callers treat that as "nothing to
+ * apply", same as the Rust side.
+ */
+function splitTaskLabelsRowId(rowId: string): { taskId: string; labelId: string } | null {
+  const idx = rowId.indexOf('::');
+  if (idx === -1) return null;
+  return { taskId: rowId.slice(0, idx), labelId: rowId.slice(idx + 2) };
 }
 
 // ── Helpers ──
@@ -113,6 +139,17 @@ function buildTursoMutationStatements(
   if (!isAllowedTable(tableName)) return [];
 
   if (operation === 'DELETE') {
+    // task_labels has no `id` column — see `splitTaskLabelsRowId`.
+    if (tableName === 'task_labels') {
+      const parts = splitTaskLabelsRowId(rowId);
+      if (!parts) return [];
+      return [
+        tursoExecute('DELETE FROM task_labels WHERE task_id = ? AND label_id = ?', [
+          tursoText(parts.taskId),
+          tursoText(parts.labelId),
+        ]),
+      ];
+    }
     const sql = `DELETE FROM ${tableName} WHERE id = ?`;
     return [tursoExecute(sql, [tursoText(rowId)])];
   }
@@ -344,6 +381,17 @@ async function applyRemoteChange(
   }
 
   if (operation === 'DELETE') {
+    // task_labels has no `id` column — see `splitTaskLabelsRowId`.
+    if (tableName === 'task_labels') {
+      const parts = splitTaskLabelsRowId(rowId);
+      if (parts) {
+        await db.runAsync('DELETE FROM task_labels WHERE task_id = ? AND label_id = ?', [
+          parts.taskId,
+          parts.labelId,
+        ]);
+      }
+      return;
+    }
     await db.runAsync(`DELETE FROM ${tableName} WHERE id = ?`, [rowId]);
     return;
   }

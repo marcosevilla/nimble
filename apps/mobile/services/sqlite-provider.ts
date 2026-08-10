@@ -27,6 +27,20 @@ const stub = (name: string) => {
   return Promise.resolve(undefined as never);
 };
 
+/**
+ * Strips the derived `labels` field before building a `local_tasks`
+ * sync_log snapshot. `LocalTask.labels` is a join over `task_labels`, not
+ * a `local_tasks` column — an un-stripped snapshot would make
+ * `buildTursoMutationStatements`/`applyRemoteChange` in `sync.ts` build
+ * `INSERT INTO local_tasks (..., labels) ...` against a table with no
+ * `labels` column, erroring on every push/pull apply for every task, not
+ * just labeled ones. Mirrors `nimble-core::db::sync::task_sync_snapshot`.
+ */
+function taskSyncSnapshot(task: LocalTask): Record<string, unknown> {
+  const { labels: _labels, ...rest } = task;
+  return rest;
+}
+
 export function createSqliteProvider(): DataProvider {
   return {
     settings: {
@@ -286,7 +300,7 @@ export function createSqliteProvider(): DataProvider {
           synced_snapshot: null,
         };
 
-        appendSyncLog('local_tasks', id, 'INSERT', null, task as unknown as Record<string, unknown>);
+        appendSyncLog('local_tasks', id, 'INSERT', null, taskSyncSnapshot(task));
         return task;
       },
 
@@ -354,7 +368,7 @@ export function createSqliteProvider(): DataProvider {
           completed: Boolean(row.completed),
           labels: labelRows.map((l) => l.label_id),
         };
-        appendSyncLog('local_tasks', opts.id, 'UPDATE', changedColumns, task as unknown as Record<string, unknown>);
+        appendSyncLog('local_tasks', opts.id, 'UPDATE', changedColumns, taskSyncSnapshot(task));
         return task;
       },
 
