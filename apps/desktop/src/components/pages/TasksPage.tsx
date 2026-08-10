@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { SortableTaskList } from '@/components/tasks/SortableTaskList'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
@@ -12,7 +12,9 @@ import { ProjectDetailPage } from '@/components/tasks/ProjectDetailPage'
 import { IconButton } from '@/components/shared/IconButton'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { useLayoutStore } from '@/stores/layoutStore'
-import type { TaskStatus, LocalTask } from '@nimble/types'
+import { LabelChip } from '@/components/tasks/LabelPicker'
+import { listLabels } from '@/services/tauri'
+import type { TaskStatus, LocalTask, Label } from '@nimble/types'
 
 // ── Inline Task Creator ──
 
@@ -113,6 +115,9 @@ function AllTasksView({
   statusFilter,
   setStatusFilter,
   statusCounts,
+  visibleLabels,
+  selectedLabelIds,
+  toggleLabelFilter,
   tasksByProject,
   bestProject,
   handleAddTask,
@@ -125,6 +130,9 @@ function AllTasksView({
   statusFilter: TaskStatus | 'all'
   setStatusFilter: (v: TaskStatus | 'all') => void
   statusCounts: Record<string, number>
+  visibleLabels: Label[]
+  selectedLabelIds: string[]
+  toggleLabelFilter: (id: string) => void
   tasksByProject: Record<string, LocalTask[]>
   bestProject: string
   handleAddTask: (content: string, extra?: { projectId?: string }) => void
@@ -167,6 +175,19 @@ function AllTasksView({
           </button>
         )
       })}
+      {visibleLabels.length > 0 && (
+        <>
+          <div className="mx-1 h-4 w-px bg-border/20" />
+          {visibleLabels.map((label) => (
+            <LabelChip
+              key={label.id}
+              label={label}
+              selected={selectedLabelIds.includes(label.id)}
+              onClick={() => toggleLabelFilter(label.id)}
+            />
+          ))}
+        </>
+      )}
     </>
   )
 
@@ -216,16 +237,43 @@ export function TasksPage() {
   const { tasks, loading: tasksLoading, addTask, remove, refresh } = useLocalTasks()
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all')
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [labels, setLabels] = useState<Label[]>([])
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([])
 
   const sidebarCollapsed = useLayoutStore((s) => s.tasksProjectSidebarCollapsed)
   const setSidebarCollapsed = useLayoutStore((s) => s.setTasksProjectSidebarCollapsed)
 
   const loading = projectsLoading || tasksLoading
 
+  useEffect(() => {
+    listLabels().then(setLabels).catch(() => {})
+  }, [])
+
+  // Only surface labels that are actually applied to something — an empty
+  // label taxonomy in the filter row is just noise.
+  const usedLabelIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const t of tasks) for (const l of t.labels) set.add(l)
+    return set
+  }, [tasks])
+
+  const visibleLabels = useMemo(
+    () => labels.filter((l) => usedLabelIds.has(l.id)),
+    [labels, usedLabelIds],
+  )
+
+  const toggleLabelFilter = useCallback((id: string) => {
+    setSelectedLabelIds((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
+  }, [])
+
   const filteredTasks = useMemo(() => {
-    if (statusFilter === 'all') return tasks
-    return tasks.filter((t) => t.status === statusFilter)
-  }, [tasks, statusFilter])
+    return tasks.filter((t) => {
+      if (statusFilter !== 'all' && t.status !== statusFilter) return false
+      // Multi-select OR: a task matches if it carries ANY selected label.
+      if (selectedLabelIds.length > 0 && !t.labels.some((l) => selectedLabelIds.includes(l))) return false
+      return true
+    })
+  }, [tasks, statusFilter, selectedLabelIds])
 
   // Status counts for filter pills
   const statusCounts = useMemo(() => {
@@ -341,6 +389,9 @@ export function TasksPage() {
           statusFilter={statusFilter}
           setStatusFilter={setStatusFilter}
           statusCounts={statusCounts}
+          visibleLabels={visibleLabels}
+          selectedLabelIds={selectedLabelIds}
+          toggleLabelFilter={toggleLabelFilter}
           tasksByProject={tasksByProject}
           bestProject={bestProject}
           handleAddTask={handleAddTask}

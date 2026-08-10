@@ -1,11 +1,12 @@
-import { useCallback, useMemo, useState } from 'react'
-import { SortableTaskList } from '@/components/tasks/SortableTaskList'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
 import { STATUSES } from '@/components/tasks/StatusDropdown'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { cn } from '@/lib/utils'
 import { Plus } from 'lucide-react'
 import { Input } from '@/components/ui/input'
-import type { Project, LocalTask, TaskStatus } from '@nimble/types'
+import { listSections } from '@/services/tauri'
+import type { Project, LocalTask, TaskStatus, Section } from '@nimble/types'
 
 // ── Inline Task Creator ──
 
@@ -63,6 +64,25 @@ export function ProjectDetailPage({
   onUpdated,
 }: ProjectDetailPageProps) {
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all')
+  const [sections, setSections] = useState<Section[]>([])
+
+  const refreshSections = useCallback(() => {
+    listSections(project.id)
+      .then(setSections)
+      .catch(() => {})
+  }, [project.id])
+
+  useEffect(() => {
+    refreshSections()
+  }, [refreshSections])
+
+  // Sections can be created inline from the task editor (Task 11/13), so
+  // refresh the lane list whenever a task mutation comes back, not just on
+  // project switch.
+  const handleUpdated = useCallback(() => {
+    onUpdated()
+    refreshSections()
+  }, [onUpdated, refreshSections])
 
   const projectTasks = useMemo(() => {
     return tasks.filter((t) => t.project_id === project.id)
@@ -157,15 +177,15 @@ export function ProjectDetailPage({
               : `No ${statusFilter.replace('_', ' ')} tasks.`}
           </p>
         ) : (
-          <SortableTaskList
+          <SectionedTaskList
             tasks={filteredTasks}
-            allTasks={filteredTasks}
+            sections={sections}
             projects={allProjects}
             projectName={project.name}
             projectColor={project.color}
             onDelete={onDeleteTask}
             onAddSubtask={handleAddSubtask}
-            onUpdated={onUpdated}
+            onUpdated={handleUpdated}
           />
         )}
 

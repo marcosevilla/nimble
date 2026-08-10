@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { cn } from '@/lib/utils'
-import { Plus, PanelLeftClose, List, Pencil, Trash2, Check, X } from 'lucide-react'
+import { Plus, PanelLeftClose, List, Pencil, Trash2, Check, X, ChevronRight } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/shared/IconButton'
@@ -50,6 +50,27 @@ export function ProjectSidebar({
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
+  // Nesting: one level deep — child projects (parent_id set) render
+  // indented under their parent, collapsible via a disclosure chevron.
+  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set())
+  const toggleParentCollapsed = useCallback((id: string) => {
+    setCollapsedParents((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const rootProjects = projects.filter((p) => !p.parent_id)
+  const childrenByParent: Record<string, Project[]> = {}
+  for (const p of projects) {
+    if (p.parent_id) {
+      if (!childrenByParent[p.parent_id]) childrenByParent[p.parent_id] = []
+      childrenByParent[p.parent_id].push(p)
+    }
+  }
+
   // Count non-completed tasks per project
   const taskCountByProject: Record<string, number> = {}
   let totalActive = 0
@@ -58,6 +79,83 @@ export function ProjectSidebar({
       taskCountByProject[t.project_id] = (taskCountByProject[t.project_id] || 0) + 1
       totalActive++
     }
+  }
+
+  function renderProjectRow(
+    project: Project,
+    opts: { indent?: boolean; hasChildren?: boolean; collapsed?: boolean } = {},
+  ) {
+    const { indent = false, hasChildren = false, collapsed = false } = opts
+    const count = taskCountByProject[project.id] || 0
+    const isSelected = selectedProjectId === project.id
+    const isInbox = project.id === 'inbox'
+
+    // Delete confirm
+    if (confirmDeleteId === project.id) {
+      return (
+        <div key={project.id} className={cn('flex items-center gap-1 px-2 py-1', indent && 'pl-6')}>
+          <span className="text-label text-destructive flex-1">Delete {project.name}?</span>
+          <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => { onDeleteProject(project.id); setConfirmDeleteId(null); if (selectedProjectId === project.id) onSelectProject(null) }}>
+            <Check className="size-3" />
+          </Button>
+          <Button variant="ghost" size="icon-xs" onClick={() => setConfirmDeleteId(null)}>
+            <X className="size-3" />
+          </Button>
+        </div>
+      )
+    }
+
+    return (
+      <div
+        key={project.id}
+        className={cn(
+          'group flex w-full items-center gap-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer',
+          indent && 'pl-6',
+          isSelected
+            ? 'bg-accent/40 text-foreground'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
+        )}
+        onClick={() => onSelectProject(project.id)}
+      >
+        {hasChildren ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleParentCollapsed(project.id) }}
+            className="flex size-3.5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+            title={collapsed ? 'Expand' : 'Collapse'}
+          >
+            <ChevronRight className={cn('size-3 transition-transform', !collapsed && 'rotate-90')} />
+          </button>
+        ) : (
+          indent && <span className="size-3.5 shrink-0" />
+        )}
+        <span
+          className="size-2.5 rounded-full shrink-0"
+          style={{ backgroundColor: project.color }}
+        />
+        <span className="flex-1 text-body truncate">{project.name}</span>
+        <span className="text-label text-muted-foreground group-hover:hidden">{count}</span>
+
+        {/* Hover actions */}
+        <div className="hidden items-center gap-0.5 group-hover:flex" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setEditingProject(project)}
+            className="flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+            title="Edit project"
+          >
+            <Pencil className="size-2.5" />
+          </button>
+          {!isInbox && (
+            <button
+              onClick={() => setConfirmDeleteId(project.id)}
+              className="flex size-4 items-center justify-center rounded text-destructive/30 hover:text-destructive"
+              title="Delete"
+            >
+              <Trash2 className="size-2.5" />
+            </button>
+          )}
+        </div>
+      </div>
+    )
   }
 
   const handleCreateProject = useCallback(() => {
@@ -146,66 +244,16 @@ export function ProjectSidebar({
         {/* Divider */}
         <div className="h-px bg-border/10 my-1" />
 
-        {/* Projects */}
-        {projects.map((project) => {
-          const count = taskCountByProject[project.id] || 0
-          const isSelected = selectedProjectId === project.id
-          const isInbox = project.id === 'inbox'
-
-          // Delete confirm
-          if (confirmDeleteId === project.id) {
-            return (
-              <div key={project.id} className="flex items-center gap-1 px-2 py-1">
-                <span className="text-label text-destructive flex-1">Delete {project.name}?</span>
-                <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => { onDeleteProject(project.id); setConfirmDeleteId(null); if (selectedProjectId === project.id) onSelectProject(null) }}>
-                  <Check className="size-3" />
-                </Button>
-                <Button variant="ghost" size="icon-xs" onClick={() => setConfirmDeleteId(null)}>
-                  <X className="size-3" />
-                </Button>
-              </div>
-            )
+        {/* Projects — root projects first, each followed by its (one-level)
+            children indented pl-6 when not collapsed. */}
+        {rootProjects.flatMap((project) => {
+          const children = childrenByParent[project.id] ?? []
+          const isCollapsed = collapsedParents.has(project.id)
+          const rows = [renderProjectRow(project, { hasChildren: children.length > 0, collapsed: isCollapsed })]
+          if (children.length > 0 && !isCollapsed) {
+            rows.push(...children.map((child) => renderProjectRow(child, { indent: true })))
           }
-
-          return (
-            <div
-              key={project.id}
-              className={cn(
-                'group flex w-full items-center gap-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer',
-                isSelected
-                  ? 'bg-accent/40 text-foreground'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
-              )}
-              onClick={() => onSelectProject(project.id)}
-            >
-              <span
-                className="size-2.5 rounded-full shrink-0"
-                style={{ backgroundColor: project.color }}
-              />
-              <span className="flex-1 text-body truncate">{project.name}</span>
-              <span className="text-label text-muted-foreground group-hover:hidden">{count}</span>
-
-              {/* Hover actions */}
-              <div className="hidden items-center gap-0.5 group-hover:flex" onClick={(e) => e.stopPropagation()}>
-                <button
-                  onClick={() => setEditingProject(project)}
-                  className="flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-                  title="Edit project"
-                >
-                  <Pencil className="size-2.5" />
-                </button>
-                {!isInbox && (
-                  <button
-                    onClick={() => setConfirmDeleteId(project.id)}
-                    className="flex size-4 items-center justify-center rounded text-destructive/30 hover:text-destructive"
-                    title="Delete"
-                  >
-                    <Trash2 className="size-2.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-          )
+          return rows
         })}
 
         {/* New project input */}

@@ -9,14 +9,48 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
 
-export function LabelChip({ label, onRemove }: { label: Label; onRemove?: () => void }) {
-  return (
-    <span className={cn(
-      "inline-flex items-center gap-1.5 rounded-full border border-border/60",
-      "px-2 py-0.5 text-xs text-muted-foreground"
-    )}>
+// `onClick` and `onRemove` are mutually exclusive by convention — the
+// display/remove chip (LabelPicker's selected-labels row) never passes
+// `onClick`, and the filter-chip usage (label filter row) never passes
+// `onRemove` — a nested `<button>` for removal only ever renders inside
+// the plain `<span>` branch below.
+export function LabelChip({
+  label,
+  onRemove,
+  onClick,
+  selected,
+}: {
+  label: Label
+  onRemove?: () => void
+  onClick?: () => void
+  selected?: boolean
+}) {
+  const classes = cn(
+    'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs transition-colors',
+    selected
+      ? 'border-transparent bg-secondary text-secondary-foreground'
+      : 'border-border/60 text-muted-foreground',
+    onClick && !selected && 'cursor-pointer hover:text-foreground hover:bg-accent/20',
+  )
+
+  const swatchAndName = (
+    <>
       <span className="size-2 rounded-full" style={{ background: labelColor(label.color) }} />
       {label.name}
+    </>
+  )
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} aria-pressed={selected} className={classes}>
+        {swatchAndName}
+      </button>
+    )
+  }
+
+  return (
+    <span className={classes}>
+      {swatchAndName}
       {onRemove && (
         <button onClick={onRemove} className="ml-0.5 opacity-50 hover:opacity-100" aria-label={`Remove ${label.name}`}>×</button>
       )}

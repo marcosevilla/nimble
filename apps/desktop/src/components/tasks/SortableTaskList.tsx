@@ -32,7 +32,9 @@ interface SortableTaskItemProps {
   onUpdated?: () => void
 }
 
-function SortableTaskItem({
+// Exported so SectionedTaskList (Task 14's section-lane view) can reuse the
+// same drag-handle-plus-row markup instead of duplicating it.
+export function SortableTaskItem({
   task,
   projects,
   projectName,
