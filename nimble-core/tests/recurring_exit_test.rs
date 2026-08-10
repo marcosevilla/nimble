@@ -22,7 +22,7 @@ async fn edd_task_recurs_natively_twice() {
     let created = create_local_task(
         &pool,
         CreateTaskInput {
-            content: "Certify for EDD benefits (UI Online)".into(),
+            content: "🔴 Certify for EDD benefits (UI Online)".into(),
             due_date: Some("2026-08-16".into()),
             due_time: Some("09:00".into()),
             duration_minutes: Some(10),
