@@ -77,6 +77,24 @@ export function formatRecurrenceBase(rule: ParsedRecurrenceRule): string {
   return `every ${rule.interval} ${rule.unit}s`
 }
 
+/**
+ * Semantic equality for two recurrence_rule strings — used to decide whether
+ * an editor's recomposed rule actually differs from what's stored, rather
+ * than comparing raw text. Two parseable rules with the same
+ * interval/unit/time are equal even if their surface text differs (e.g. a
+ * Todoist-imported "every day at 9am" vs. this editor's canonical
+ * "every day @ 09:00" — same rule, different formatting). If either side
+ * doesn't parse, fall back to exact (trimmed) text comparison, so an
+ * unparseable/verbatim-preserved rule is only "changed" once actually
+ * edited.
+ */
+export function recurrenceRulesEqual(a: string, b: string): boolean {
+  const pa = parseRecurrenceRule(a)
+  const pb = parseRecurrenceRule(b)
+  if (pa && pb) return pa.interval === pb.interval && pa.unit === pb.unit && pa.time === pb.time
+  return a.trim() === b.trim()
+}
+
 function matchSingularUnit(unit: string): RecurrenceUnit | null {
   switch (unit) {
     case 'day': return 'day'

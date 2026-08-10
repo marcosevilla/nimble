@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { X, Plus } from 'lucide-react'
 import { PriorityBars } from '@/components/shared/PriorityBars'
-import { RECURRENCE_OPTIONS, parseRecurrenceRule, formatRecurrenceBase } from '@/lib/recurrence'
+import { RECURRENCE_OPTIONS, parseRecurrenceRule, formatRecurrenceBase, recurrenceRulesEqual } from '@/lib/recurrence'
 
 const PRIORITY_OPTIONS = [
   { value: 1, label: 'Normal' },
@@ -40,15 +40,16 @@ const DURATION_OPTIONS = [
 const NONE = '__none__'
 
 /** Splits a stored recurrence_rule into the canonical base string (for the
- * select) + whether it carries a time suffix (for the "at time" toggle).
- * Rules written from this editor are always canonical; a rule that doesn't
- * parse (e.g. hand-edited or an odd import) is kept verbatim as a "custom"
- * option rather than silently discarded. */
-function splitRecurrenceForEditing(rule: string | null): { base: string; atTime: boolean } {
-  if (!rule) return { base: '', atTime: false }
+ * select), whether it carries a time suffix (for the "at time" toggle), and
+ * that time itself (for seeding the due-time input — see below). Rules
+ * written from this editor are always canonical; a rule that doesn't parse
+ * (e.g. hand-edited or an odd import) is kept verbatim as a "custom" option
+ * rather than silently discarded. */
+function splitRecurrenceForEditing(rule: string | null): { base: string; atTime: boolean; time: string | null } {
+  if (!rule) return { base: '', atTime: false, time: null }
   const parsed = parseRecurrenceRule(rule)
-  if (parsed) return { base: formatRecurrenceBase(parsed), atTime: !!parsed.time }
-  return { base: rule, atTime: false }
+  if (parsed) return { base: formatRecurrenceBase(parsed), atTime: !!parsed.time, time: parsed.time }
+  return { base: rule, atTime: false, time: null }
 }
 
 function sameLabelSet(a: string[], b: string[]): boolean {
@@ -71,11 +72,18 @@ export function TaskEditor({ task, projects, onClose, onUpdated }: TaskEditorPro
   const [projectId, setProjectId] = useState(task.project_id)
   const [priority, setPriority] = useState(task.priority)
   const [dueDate, setDueDate] = useState(task.due_date ?? '')
-  const [dueTime, setDueTime] = useState(task.due_time ?? '')
+  // A Todoist-imported recurring task can have its time-of-day embedded only
+  // in recurrence_rule (copied verbatim from the provider's due.string) with
+  // due_time left null (derived independently from due.datetime) — fall
+  // back to the rule's own parsed time so the "at time" toggle and the due
+  // time input agree with each other from the moment the editor opens,
+  // instead of showing "on" + disabled and silently dropping the time on
+  // the next unrelated save.
+  const initialRecurrence = useMemo(() => splitRecurrenceForEditing(task.recurrence_rule), [task.recurrence_rule])
+  const [dueTime, setDueTime] = useState(task.due_time ?? initialRecurrence.time ?? '')
   const [durationMinutes, setDurationMinutes] = useState(
     task.duration_minutes != null ? String(task.duration_minutes) : '',
   )
-  const initialRecurrence = useMemo(() => splitRecurrenceForEditing(task.recurrence_rule), [task.recurrence_rule])
   const [recurrenceBase, setRecurrenceBase] = useState(initialRecurrence.base)
   const [recurrenceAtTime, setRecurrenceAtTime] = useState(initialRecurrence.atTime)
   const [labelIds, setLabelIds] = useState<string[]>(task.labels)
@@ -121,6 +129,21 @@ export function TaskEditor({ task, projects, onClose, onUpdated }: TaskEditorPro
     return [...RECURRENCE_OPTIONS, { value: recurrenceBase, label: recurrenceBase }]
   }, [recurrenceBase])
 
+  // Baseline dueTime is the same fallback used to seed the state above
+  // (task.due_time, or the recurrence rule's own embedded time when the
+  // column itself is empty) — comparing against the raw task.due_time here
+  // would falsely flag "dirty" the moment a recurrence rule supplies the
+  // only time-of-day this task has (see initialRecurrence's seeding above).
+  const initialDueTime = task.due_time ?? initialRecurrence.time ?? ''
+  const dueTimeChanged = dueTime !== initialDueTime
+  // Semantic, not textual, comparison — a stored rule like the Todoist
+  // import's "every day at 9am" and this editor's recomposed canonical
+  // "every day @ 09:00" describe the same rule and must not be treated as
+  // an edit (that's exactly what silently truncated the time before: a
+  // false "dirty" from formatting alone meant ANY unrelated save rewrote
+  // the rule using whatever local state happened to be sitting in dueTime).
+  const recurrenceChanged = !recurrenceRulesEqual(composedRecurrenceRule, task.recurrence_rule ?? '')
+
   // Track changes
   useEffect(() => {
     const changed =
@@ -129,13 +152,13 @@ export function TaskEditor({ task, projects, onClose, onUpdated }: TaskEditorPro
       projectId !== task.project_id ||
       priority !== task.priority ||
       dueDate !== (task.due_date ?? '') ||
-      dueTime !== (task.due_time ?? '') ||
+      dueTimeChanged ||
       durationMinutes !== (task.duration_minutes != null ? String(task.duration_minutes) : '') ||
-      composedRecurrenceRule !== (task.recurrence_rule ?? '') ||
+      recurrenceChanged ||
       sectionId !== (task.section_id ?? '') ||
       !sameLabelSet(labelIds, task.labels)
     setDirty(changed)
-  }, [content, description, projectId, priority, dueDate, dueTime, durationMinutes, composedRecurrenceRule, sectionId, labelIds, task])
+  }, [content, description, projectId, priority, dueDate, dueTimeChanged, durationMinutes, recurrenceChanged, sectionId, labelIds, task])
 
   const handleSave = useCallback(async () => {
     if (!dirty || saving) return
@@ -150,12 +173,19 @@ export function TaskEditor({ task, projects, onClose, onUpdated }: TaskEditorPro
         priority: priority !== task.priority ? priority : undefined,
         dueDate: dueDate || undefined,
         clearDueDate: !dueDate && !!task.due_date,
-        dueTime: dueTime || undefined,
-        clearDueTime: !dueTime && !!task.due_time,
+        // Gated on dueTimeChanged (against the recurrence-aware baseline
+        // above), not just truthiness — otherwise a due time seeded purely
+        // from an untouched recurrence rule would get written into the
+        // due_time column on every unrelated save.
+        dueTime: dueTimeChanged && dueTime ? dueTime : undefined,
+        clearDueTime: dueTimeChanged && !dueTime && !!task.due_time,
         durationMinutes: durationMinutes ? Number(durationMinutes) : undefined,
         clearDuration: !durationMinutes && task.duration_minutes != null,
-        recurrenceRule: composedRecurrenceRule || undefined,
-        clearRecurrence: !composedRecurrenceRule && !!task.recurrence_rule,
+        // Gated on recurrenceChanged (semantic comparison) so an untouched
+        // rule is never rewritten just because its canonical recomposition
+        // differs textually from the stored (e.g. imported) string.
+        recurrenceRule: recurrenceChanged && composedRecurrenceRule ? composedRecurrenceRule : undefined,
+        clearRecurrence: recurrenceChanged && !composedRecurrenceRule && !!task.recurrence_rule,
         sectionId: sectionId !== (task.section_id ?? '') ? sectionId || undefined : undefined,
         clearSection: !sectionId && !!task.section_id,
         labelIds: labelsChanged ? labelIds : undefined,
@@ -168,8 +198,8 @@ export function TaskEditor({ task, projects, onClose, onUpdated }: TaskEditorPro
       setSaving(false)
     }
   }, [
-    dirty, saving, task, content, description, projectId, priority, dueDate, dueTime,
-    durationMinutes, composedRecurrenceRule, sectionId, labelIds, onUpdated, onClose, dp,
+    dirty, saving, task, content, description, projectId, priority, dueDate, dueTime, dueTimeChanged,
+    durationMinutes, composedRecurrenceRule, recurrenceChanged, sectionId, labelIds, onUpdated, onClose, dp,
   ])
 
   // Guards against a double-submit if Enter and the resulting blur (input
