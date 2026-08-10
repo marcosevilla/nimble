@@ -271,7 +271,17 @@ pub fn run() {
                 let db_path = if demo_mode {
                     app_dir.join("demo.db")
                 } else {
-                    app_dir.join("nimble.db")
+                    let path = app_dir.join("nimble.db");
+                    // The pre-rename app stored data in daily-triage.db. Adopt it
+                    // once if nimble.db doesn't exist yet, so an update never
+                    // boots against an empty database.
+                    let legacy = app_dir.join("daily-triage.db");
+                    if !path.exists() && legacy.exists() {
+                        std::fs::copy(&legacy, &path)
+                            .expect("failed to adopt legacy daily-triage.db");
+                        log::info!("Adopted legacy database from {:?}", legacy);
+                    }
+                    path
                 };
                 let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
