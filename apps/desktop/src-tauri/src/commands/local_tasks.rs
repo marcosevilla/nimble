@@ -87,6 +87,7 @@ pub async fn update_local_task(
     clear_due_time: Option<bool>,
     clear_recurrence: Option<bool>,
     clear_section: Option<bool>,
+    clear_duration: Option<bool>,
 ) -> Result<LocalTask, String> {
     let pool = app.state::<SqlitePool>();
     nimble_core::db::tasks::update_local_task(
@@ -108,6 +109,7 @@ pub async fn update_local_task(
             clear_due_time: clear_due_time.unwrap_or(false),
             clear_recurrence: clear_recurrence.unwrap_or(false),
             clear_section: clear_section.unwrap_or(false),
+            clear_duration: clear_duration.unwrap_or(false),
         },
     )
     .await

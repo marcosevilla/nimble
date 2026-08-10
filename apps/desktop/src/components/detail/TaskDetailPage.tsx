@@ -10,7 +10,9 @@ import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { cn } from '@/lib/utils'
 import { StatusDropdown } from '@/components/tasks/StatusDropdown'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Sparkles, FileText, X as XIcon } from 'lucide-react'
+import { Sparkles, FileText, X as XIcon, Repeat } from 'lucide-react'
+import { taskToast } from '@/lib/taskToast'
+import { parseRecurrenceRule, predictReschedule } from '@/lib/recurrence'
 import { InlineTitle } from './InlineTitle'
 import { TiptapEditor } from '@/components/docs/TiptapEditor'
 import { DetailBreadcrumbs } from './DetailBreadcrumbs'
@@ -126,6 +128,19 @@ export function TaskDetailPage() {
     emitTasksChanged()
   }, [task, dp])
 
+  // Recurring tasks reschedule instead of completing (Task 8) — the row's
+  // due date just advances, no guilt copy, just a quiet confirmation of
+  // where it landed. Predicted client-side (see lib/recurrence) so the
+  // toast can fire immediately rather than waiting on a refetch; this
+  // mirrors the exact rule the backend is about to apply, so it stays right
+  // even if it never gets the chance to double check the server's answer.
+  const handleTaskCompleted = useCallback(() => {
+    if (!task) return
+    const nextDue = predictReschedule(task.recurrence_rule, task.due_date)
+    if (!nextDue) return
+    taskToast(`Rescheduled to ${format(parseISO(nextDue), 'MMM d')}`, task.id)
+  }, [task])
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -203,12 +218,18 @@ export function TaskDetailPage() {
         {task.due_date && (
           <Meta as="time">Due {format(parseISO(task.due_date), 'MMM d')}</Meta>
         )}
+        {task.recurrence_rule && parseRecurrenceRule(task.recurrence_rule) && (
+          <span className="flex items-center gap-1 text-meta text-muted-foreground">
+            <Repeat className="size-3" />
+            {task.recurrence_rule}
+          </span>
+        )}
       </div>
 
       {/* Status + Title */}
       <div className="flex items-start gap-3">
         <div className="mt-1">
-          <StatusDropdown taskId={task.id} status={task.status ?? 'todo'} size="md" />
+          <StatusDropdown taskId={task.id} status={task.status ?? 'todo'} size="md" onComplete={handleTaskCompleted} />
         </div>
         <div className="flex-1 min-w-0">
           <InlineTitle value={task.content} completed={task.completed} onSave={handleSaveTitle} />

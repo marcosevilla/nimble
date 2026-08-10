@@ -189,6 +189,11 @@ export interface DataProvider {
       description?: string
       priority?: number
       dueDate?: string
+      dueTime?: string
+      durationMinutes?: number
+      recurrenceRule?: string
+      sectionId?: string
+      labelIds?: string[]
     }): Promise<LocalTask>
     update(opts: {
       id: string
@@ -199,6 +204,15 @@ export interface DataProvider {
       dueDate?: string
       clearDueDate?: boolean
       linkedDocId?: string | null
+      dueTime?: string
+      durationMinutes?: number
+      recurrenceRule?: string
+      sectionId?: string
+      labelIds?: string[]
+      clearDueTime?: boolean
+      clearRecurrence?: boolean
+      clearSection?: boolean
+      clearDuration?: boolean
     }): Promise<LocalTask>
     updateStatus(id: string, status: TaskStatus, note?: string): Promise<void>
     complete(id: string): Promise<void>

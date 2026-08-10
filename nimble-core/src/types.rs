@@ -89,6 +89,7 @@ pub struct UpdateTaskInput {
     pub clear_due_time: bool,
     pub clear_recurrence: bool,
     pub clear_section: bool,
+    pub clear_duration: bool,
 }
 
 // ── Labels ──

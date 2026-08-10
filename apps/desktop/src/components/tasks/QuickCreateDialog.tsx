@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { PriorityBars } from '@/components/shared/PriorityBars'
+import { LabelPicker } from '@/components/tasks/LabelPicker'
 import { cn } from '@/lib/utils'
 
 const PRIORITY_OPTIONS = [
@@ -37,6 +38,8 @@ export function QuickCreateDialog({ open, onClose, onCreated }: QuickCreateDialo
   const [projectId, setProjectId] = useState('inbox')
   const [priority, setPriority] = useState(1)
   const [dueDate, setDueDate] = useState('')
+  const [dueTime, setDueTime] = useState('')
+  const [labelIds, setLabelIds] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
 
   // Reset form when dialog opens
@@ -47,8 +50,16 @@ export function QuickCreateDialog({ open, onClose, onCreated }: QuickCreateDialo
       setProjectId('inbox')
       setPriority(1)
       setDueDate('')
+      setDueTime('')
+      setLabelIds([])
     }
   }, [open])
+
+  // A time with no date is meaningless — dropping the date clears it too.
+  const handleDueDateChange = useCallback((value: string) => {
+    setDueDate(value)
+    if (!value) setDueTime('')
+  }, [])
 
   const handleSubmit = useCallback(async () => {
     const text = content.trim()
@@ -61,7 +72,9 @@ export function QuickCreateDialog({ open, onClose, onCreated }: QuickCreateDialo
         projectId,
         priority,
         dueDate: dueDate || undefined,
+        dueTime: dueDate && dueTime ? dueTime : undefined,
         description: description.trim() || undefined,
+        labelIds: labelIds.length ? labelIds : undefined,
       })
       taskToast('Task created', task.id)
       onClose()
@@ -71,7 +84,7 @@ export function QuickCreateDialog({ open, onClose, onCreated }: QuickCreateDialo
     } finally {
       setSubmitting(false)
     }
-  }, [content, projectId, priority, dueDate, submitting, onClose, onCreated, dp])
+  }, [content, projectId, priority, dueDate, dueTime, labelIds, submitting, onClose, onCreated, dp])
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -152,15 +165,32 @@ export function QuickCreateDialog({ open, onClose, onCreated }: QuickCreateDialo
             </div>
           </div>
 
-          {/* Due date */}
+          {/* Due date + time — capture first, enrich later: duration/recurrence/section stay in the full editor */}
           <div className="space-y-1.5">
             <label className="text-label text-muted-foreground">Due date</label>
-            <Input
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-              className="text-body w-auto"
-            />
+            <div className="flex items-center gap-1.5">
+              <Input
+                type="date"
+                value={dueDate}
+                onChange={(e) => handleDueDateChange(e.target.value)}
+                className="text-body w-auto"
+              />
+              {dueDate && (
+                <Input
+                  type="time"
+                  value={dueTime}
+                  onChange={(e) => setDueTime(e.target.value)}
+                  className="text-body w-auto"
+                  aria-label="Due time"
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Labels */}
+          <div className="space-y-1.5">
+            <label className="text-label text-muted-foreground">Labels</label>
+            <LabelPicker value={labelIds} onChange={setLabelIds} />
           </div>
 
           {/* Submit */}

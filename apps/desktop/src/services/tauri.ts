@@ -332,6 +332,7 @@ export async function updateLocalTask(opts: {
   clearDueTime?: boolean
   clearRecurrence?: boolean
   clearSection?: boolean
+  clearDuration?: boolean
 }): Promise<LocalTask> {
   return invoke<LocalTask>('update_local_task', opts)
 }

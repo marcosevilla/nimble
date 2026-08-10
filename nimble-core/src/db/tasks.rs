@@ -303,6 +303,7 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
         clear_due_time,
         clear_recurrence,
         clear_section,
+        clear_duration,
     } = input;
     let content = content.as_deref();
     let description = description.as_deref();
@@ -431,6 +432,16 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
             .execute(pool)
             .await?;
     }
+    // Independent of `clear_due_time` (which also nulls duration_minutes,
+    // see above) — this is the "duration only" clear path, e.g. the
+    // TaskEditor's duration select "clear" action on a task that keeps its
+    // due time.
+    if clear_duration {
+        sqlx::query("UPDATE local_tasks SET duration_minutes = NULL, updated_at = datetime('now') WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
 
     // Log activity with changed fields
     let mut fields_changed = Vec::new();
@@ -441,7 +452,7 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
     if linked_doc_id.is_some() { fields_changed.push("linked_doc_id"); }
     if due_date.is_some() || clear_due_date { fields_changed.push("due_date"); }
     if due_time.is_some() || clear_due_time { fields_changed.push("due_time"); }
-    if duration_minutes.is_some() || clear_due_time { fields_changed.push("duration_minutes"); }
+    if duration_minutes.is_some() || clear_due_time || clear_duration { fields_changed.push("duration_minutes"); }
     if recurrence_rule.is_some() || clear_recurrence { fields_changed.push("recurrence_rule"); }
     if section_id.is_some() || clear_section { fields_changed.push("section_id"); }
     if !fields_changed.is_empty() {
@@ -1286,6 +1297,36 @@ mod tests {
         assert_eq!(updated.duration_minutes, None);
         assert_eq!(updated.recurrence_rule, None);
         assert_eq!(updated.section_id, None);
+    }
+
+    /// `clear_duration` (Task 13's TaskEditor "clear" action on the duration
+    /// select) is the standalone counterpart to `clear_due_time` above —
+    /// it must null duration_minutes WITHOUT touching due_time, so a task
+    /// can keep a start time while dropping its block length.
+    #[tokio::test]
+    async fn clear_duration_nulls_duration_without_touching_due_time() {
+        let pool = test_pool().await;
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "x".to_string(),
+                due_time: Some("09:00".to_string()),
+                duration_minutes: Some(60),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let updated = super::update_local_task(
+            &pool,
+            &task.id,
+            UpdateTaskInput { clear_duration: true, ..Default::default() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.duration_minutes, None);
+        assert_eq!(updated.due_time, Some("09:00".to_string()));
     }
 
     #[tokio::test]

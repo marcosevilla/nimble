@@ -38,9 +38,14 @@ interface StatusDropdownProps {
   taskId: string
   status: TaskStatus
   size?: 'sm' | 'md'
+  /** Fired the moment the user picks "Complete" — before the exit animation
+   * and the mutation. Lets a caller that already knows this task is
+   * recurring (Task 13's ↻ affordance) show a "Rescheduled to <date>" toast
+   * without needing this component to know anything about recurrence. */
+  onComplete?: () => void
 }
 
-export function StatusDropdown({ taskId, status, size = 'sm' }: StatusDropdownProps) {
+export function StatusDropdown({ taskId, status, size = 'sm', onComplete }: StatusDropdownProps) {
   const dp = useDataProvider()
   const markTaskCompleting = useSelectionStore((s) => s.markTaskCompleting)
   const clearTaskCompleting = useSelectionStore((s) => s.clearTaskCompleting)
@@ -76,6 +81,7 @@ export function StatusDropdown({ taskId, status, size = 'sm' }: StatusDropdownPr
     // then fire the mutation so the list re-renders right as the row
     // finishes its 600ms slide-out.
     if (newStatus === 'complete') {
+      onComplete?.()
       playCompletionSound()
       markTaskCompleting(taskId)
       setTimeout(async () => {
@@ -97,7 +103,7 @@ export function StatusDropdown({ taskId, status, size = 'sm' }: StatusDropdownPr
     } catch (e) {
       toast.error(`Failed to update status: ${e}`)
     }
-  }, [taskId, status, dp, markTaskCompleting, clearTaskCompleting])
+  }, [taskId, status, dp, markTaskCompleting, clearTaskCompleting, onComplete])
 
   const handleBlockedSubmit = useCallback(async () => {
     try {
