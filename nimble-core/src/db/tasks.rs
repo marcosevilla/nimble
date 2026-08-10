@@ -895,7 +895,7 @@ pub async fn migrate_tasks_to_markdown(
                 .flatten();
         if let Some(task) = row {
             let changed = serde_json::json!(["description"]).to_string();
-            let snapshot = serde_json::to_string(&task).unwrap_or_default();
+            let snapshot = sync::task_sync_snapshot(&task);
             sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot))
                 .await
                 .ok();
@@ -994,6 +994,20 @@ mod md_migration_tests {
 
         let untouched = fetch(&pool, &md_task.id).await;
         assert_eq!(untouched.description.as_deref(), Some("already **markdown** from Todoist"));
+
+        // Regression: the backfill's sync_log snapshot must go through
+        // `task_sync_snapshot`, not a plain `serde_json::to_string(&task)`,
+        // or it carries a `labels` key that has no matching `local_tasks`
+        // column and breaks the Turso push (see `sync::task_sync_snapshot`'s
+        // doc comment).
+        let snapshot: String = sqlx::query_scalar(
+            "SELECT snapshot FROM sync_log WHERE table_name = 'local_tasks' AND row_id = ? AND operation = 'UPDATE' ORDER BY timestamp DESC LIMIT 1"
+        )
+        .bind(&html_task.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(!snapshot.contains("\"labels\""), "backfill snapshot must not carry the derived labels field: {snapshot}");
 
         // Idempotent: running again converts nothing further.
         let tmp2 = std::env::temp_dir().join(format!("nimble-test-backup2-{}.db", uuid::Uuid::new_v4()));
