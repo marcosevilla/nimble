@@ -23,3 +23,12 @@ notify = "8.2"
 notify-debouncer-full = "0.6"
 blake3 = "1.8"
 walkdir = "2.5"
+
+[dev-dependencies]
+# Self-dependency with the `test-util` feature enabled: integration tests
+# under tests/ link against a normal (non-`cfg(test)`) build of this crate,
+# so `test_util` needs an explicit feature gate to be visible to them too.
+nimble-core = { path = ".", features = ["test-util"] }
+
+[features]
+test-util = []

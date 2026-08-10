@@ -3,7 +3,7 @@ pub mod db;
 pub mod integrations;
 pub mod parsers;
 pub mod recurrence;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub mod test_util;
 pub mod types;
 pub mod vault;

@@ -66,7 +66,7 @@ nimble/
 - SQLite managed via sqlx (desktop Rust) and expo-sqlite (mobile TypeScript)
 - Versioned migration system in `nimble-core/src/db/migrations.rs` (Rust) and `apps/mobile/services/database.ts` (TypeScript mirror)
 - Both platforms share the same schema — keep migrations in sync
-- Current version: **18** (v1-13: core schema + v14: sync_log table + device_id + v15: external_id/external_source tracking on local_tasks/projects + v16: capture context column + v17: todoist_outbox, integration_sync_state, and remote_updated_at/synced_snapshot columns for two-way sync + v18: vault_notes/vault_links/vault_tags + device-local vault_fts (FTS5))
+- Current version: **19** (v1-13: core schema + v14: sync_log table + device_id + v15: external_id/external_source tracking on local_tasks/projects + v16: capture context column + v17: todoist_outbox, integration_sync_state, and remote_updated_at/synced_snapshot columns for two-way sync + v18: vault_notes/vault_links/vault_tags + device-local vault_fts (FTS5) + v19: labels/task_labels/sections tables, due_time/duration_minutes/recurrence_rule/section_id columns on local_tasks, and parent_id on projects for native Todoist-parity scheduling and project nesting)
 - `schema_version` table tracks what's been applied
 
 ## Key Tables
@@ -91,6 +91,9 @@ nimble/
 - `vault_links` — wikilink/embed edges between notes (deterministic ids, replaced on re-index)
 - `vault_tags` — inline + frontmatter tags per note (deterministic ids, replaced on re-index)
 - `vault_fts` — FTS5 index over note title+content. Device-local, never synced, written by `vault::index`, not by SQL triggers (the migration runner splits on `;`)
+- `labels` — native task labels (id, name, color, position)
+- `task_labels` — many-to-many join between `local_tasks` and `labels` (task_id, label_id)
+- `sections` — named groupings of tasks within a project (id, project_id, name, position), with external_id/external_source for Todoist import
 
 ## Task Status Workflow
 - Statuses: `backlog` → `todo` → `in_progress` → `blocked` → `complete`
@@ -98,6 +101,7 @@ nimble/
 - Focus mode auto-sets `in_progress` on start, `complete` on finish
 - Blocked status prompts for reason (logged to activity)
 - Status changes logged as `status_changed` activity events
+- Completing a recurring task (a parseable `recurrence_rule` plus a `due_date`) doesn't move it to `complete` — it reschedules `due_date` to the next occurrence and resets `status` to `todo`, logged as a `task_recurred` activity event instead of `status_changed`. A task with an unparseable rule, or no due date, falls through and completes normally — the rule is inert in that case.
 
 ## Style Guide
 - Use shadcn/ui components as base, customize with Tailwind

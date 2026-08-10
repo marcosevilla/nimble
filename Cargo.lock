@@ -2930,6 +2930,7 @@ dependencies = [
  "htmd",
  "ical",
  "log",
+ "nimble-core",
  "notify",
  "notify-debouncer-full",
  "reqwest",
