@@ -200,6 +200,20 @@ export function SectionedTaskList({
     [containers, containerOrder],
   )
 
+  // `position` is a single ordinal sequence shared across the WHOLE
+  // project (the flat "All Tasks" view sorts by it directly) — it is not
+  // scoped per lane. `reorder_local_tasks` blindly assigns 0..N-1 to
+  // exactly the ids it's given, so persisting only one lane's ids would
+  // renumber that subset into 0..N-1 and collide with every other lane's
+  // positions. Always splice the lanes back together in display order
+  // (unsectioned first, then sections by position, each lane in its
+  // current visual order) and persist that as one full-project list —
+  // mirrors what the pre-section flat reorder call already sent.
+  const buildFullOrder = useCallback(
+    (map: Record<string, string[]>) => containerOrder.flatMap((key) => map[key] ?? []),
+    [containerOrder],
+  )
+
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, over } = event
@@ -220,10 +234,11 @@ export function SectionedTaskList({
         if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return
 
         const newItems = arrayMove(items, oldIndex, newIndex)
-        setContainers((prev) => ({ ...prev, [sourceContainer]: newItems }))
+        const newContainers = { ...containers, [sourceContainer]: newItems }
+        setContainers(newContainers)
 
         try {
-          await dp.tasks.reorder(newItems)
+          await dp.tasks.reorder(buildFullOrder(newContainers))
         } catch {
           setContainers(prevContainers)
         }
@@ -237,11 +252,12 @@ export function SectionedTaskList({
       const overIndex = overId === destContainer ? destItems.length : destItems.indexOf(overId)
       destItems.splice(overIndex === -1 ? destItems.length : overIndex, 0, activeId)
 
-      setContainers((prev) => ({
-        ...prev,
+      const newContainers = {
+        ...containers,
         [sourceContainer]: sourceItems,
         [destContainer]: destItems,
-      }))
+      }
+      setContainers(newContainers)
 
       try {
         if (destContainer === UNSECTIONED) {
@@ -249,13 +265,17 @@ export function SectionedTaskList({
         } else {
           await dp.tasks.update({ id: activeId, sectionId: destContainer })
         }
-        await dp.tasks.reorder(destItems)
+        // Persist positions for every lane, not just the destination — the
+        // source lane's remainder needs re-numbering too, since it lost an
+        // item and its old position values are no longer a clean sequence
+        // relative to the rest of the project.
+        await dp.tasks.reorder(buildFullOrder(newContainers))
         onUpdated?.()
       } catch {
         setContainers(prevContainers)
       }
     },
-    [containers, findContainer, dp, onUpdated],
+    [containers, findContainer, buildFullOrder, dp, onUpdated],
   )
 
   return (
