@@ -60,12 +60,51 @@
 
   // ── Projects ─────────────────────────────────────────────────────────────
 
+  // R1 (schema v19): parent_id enables one-level project nesting; the
+  // external/sync columns exist on every row (null for native projects).
+  function project(o) {
+    return Object.assign(
+      {
+        id: '',
+        name: '',
+        color: '#8b93a7',
+        position: 0,
+        parent_id: null,
+        external_id: null,
+        external_source: null,
+        remote_updated_at: null,
+        synced_snapshot: null,
+      },
+      o,
+    )
+  }
+
   var PROJECTS = [
-    { id: 'inbox', name: 'Inbox', color: '#8b93a7', position: 0 },
-    { id: 'proj-portfolio', name: 'Portfolio', color: '#e2a33e', position: 1 },
-    { id: 'proj-taskapp', name: 'Task App', color: '#5e6ad2', position: 2 },
-    { id: 'proj-photo', name: 'Photography', color: '#d46a9e', position: 3 },
-    { id: 'proj-life', name: 'Life Admin', color: '#4cb782', position: 4 },
+    project({ id: 'inbox', name: 'Inbox', color: '#8b93a7', position: 0 }),
+    project({ id: 'proj-portfolio', name: 'Portfolio', color: '#e2a33e', position: 1 }),
+    project({ id: 'proj-taskapp', name: 'Nimble', color: '#5e6ad2', position: 2 }),
+    project({ id: 'proj-mobile', name: 'Mobile app', color: '#26b5ce', position: 3, parent_id: 'proj-taskapp' }),
+    project({ id: 'proj-photo', name: 'Photography', color: '#d46a9e', position: 4 }),
+    project({ id: 'proj-life', name: 'Life Admin', color: '#4cb782', position: 5 }),
+  ]
+
+  // ── Labels (R1) ──────────────────────────────────────────────────────────
+  // Colors are Todoist-style *names* (see apps/desktop/src/lib/labelColors.ts),
+  // not hex values.
+
+  var LABELS = [
+    { id: 'label-deep-work', name: 'deep-work', color: 'blue', position: 0, created_at: iso('2026-07-20') },
+    { id: 'label-design', name: 'design', color: 'grape', position: 1, created_at: iso('2026-07-20') },
+    { id: 'label-bug', name: 'bug', color: 'red', position: 2, created_at: iso('2026-07-21') },
+    { id: 'label-quick-win', name: 'quick-win', color: 'green', position: 3, created_at: iso('2026-07-22') },
+    { id: 'label-errand', name: 'errand', color: 'orange', position: 4, created_at: iso('2026-07-25') },
+  ]
+
+  // ── Sections (R1): per-project lanes ─────────────────────────────────────
+
+  var SECTIONS = [
+    { id: 'sec-now', project_id: 'proj-taskapp', name: 'In progress', position: 0, external_id: null, external_source: null, created_at: iso('2026-07-28') },
+    { id: 'sec-next', project_id: 'proj-taskapp', name: 'Up next', position: 1, external_id: null, external_source: null, created_at: iso('2026-07-28') },
   ]
 
   // ── Local tasks ──────────────────────────────────────────────────────────
@@ -81,6 +120,11 @@
         project_id: 'inbox',
         priority: 1,
         due_date: null,
+        due_time: null,
+        duration_minutes: null,
+        recurrence_rule: null,
+        section_id: null,
+        labels: [],
         completed: false,
         completed_at: null,
         status: 'todo',
@@ -88,6 +132,10 @@
         position: 0,
         created_at: iso(daysAgo(6), '10:15:00'),
         updated_at: iso(daysAgo(1), '18:40:00'),
+        external_id: null,
+        external_source: null,
+        remote_updated_at: null,
+        synced_snapshot: null,
       },
       o,
     )
@@ -102,6 +150,7 @@
       project_id: 'proj-portfolio',
       priority: 4,
       due_date: TODAY,
+      labels: ['label-deep-work', 'label-design'],
       status: 'in_progress',
       position: 0,
     }),
@@ -127,11 +176,22 @@
     task({
       id: 'task-04',
       content: 'Fix capture strip focus bug on second monitor',
+      // R1 Task 12: descriptions are markdown-canonical.
       description:
-        'The frameless capture window loses focus when summoned on the external display. Repro: shift-shift with Figma fullscreen on monitor 2.',
+        'The frameless capture window loses focus when summoned on the external display.\n\n' +
+        '**Repro**\n\n' +
+        '1. Figma fullscreen on monitor 2\n' +
+        '2. Summon the strip with `⌥⌘Space`\n' +
+        '3. Strip renders *without* keyboard focus\n\n' +
+        'Likely the `NSPanel` activation policy — check `dismiss_capture_strip` logs first.',
       project_id: 'proj-taskapp',
       priority: 3,
       due_date: TODAY,
+      due_time: '14:00',
+      duration_minutes: 45,
+      recurrence_rule: 'every week',
+      section_id: 'sec-now',
+      labels: ['label-bug', 'label-deep-work'],
       status: 'in_progress',
       position: 3,
     }),
@@ -141,6 +201,8 @@
       project_id: 'proj-taskapp',
       priority: 4,
       due_date: '2026-08-03',
+      section_id: 'sec-now',
+      labels: ['label-quick-win'],
       status: 'todo',
       position: 4,
     }),
@@ -149,6 +211,8 @@
       content: 'Design empty states for Goals page',
       project_id: 'proj-taskapp',
       priority: 2,
+      section_id: 'sec-next',
+      labels: ['label-design'],
       status: 'backlog',
       position: 5,
     }),
@@ -176,6 +240,7 @@
       project_id: 'proj-life',
       priority: 3,
       due_date: TODAY,
+      labels: ['label-errand', 'label-quick-win'],
       status: 'todo',
       position: 8,
     }),
@@ -230,8 +295,27 @@
       project_id: 'proj-taskapp',
       priority: 2,
       due_date: '2026-08-05',
+      labels: ['label-design'],
       status: 'todo',
       position: 14,
+    }),
+    task({
+      id: 'task-16',
+      content: 'Wire up mobile sync pull on app foreground',
+      project_id: 'proj-mobile',
+      priority: 3,
+      due_date: '2026-08-06',
+      status: 'todo',
+      position: 15,
+    }),
+    task({
+      id: 'task-17',
+      content: 'Test capture flow on iPhone simulator',
+      project_id: 'proj-mobile',
+      priority: 2,
+      labels: ['label-quick-win'],
+      status: 'backlog',
+      position: 16,
     }),
   ]
 
@@ -830,10 +914,70 @@
     // Projects
     get_projects: function () { return PROJECTS },
     create_project: function (args) {
-      return { id: newId('proj'), name: args.name, color: args.color, position: PROJECTS.length }
+      return project({
+        id: newId('proj'),
+        name: args.name,
+        color: args.color,
+        position: PROJECTS.length,
+        parent_id: (args && args.parentId) || null,
+      })
     },
     update_project: function () { return null },
     delete_project: function () { return null },
+
+    // Labels (R1)
+    list_labels: function () { return LABELS },
+    create_label: function (args) {
+      var label = {
+        id: newId('label'),
+        name: (args && args.name) || 'new label',
+        color: (args && args.color) || 'gray',
+        position: LABELS.length,
+        created_at: iso(TODAY, '11:20:00'),
+      }
+      LABELS.push(label)
+      return label
+    },
+    update_label: function (args) {
+      var l = LABELS.find(function (x) { return x.id === (args && args.id) }) || LABELS[0]
+      if (args) {
+        if (args.name !== undefined && args.name !== null) l.name = args.name
+        if (args.color !== undefined && args.color !== null) l.color = args.color
+      }
+      return Object.assign({}, l)
+    },
+    delete_label: function () { return null },
+    set_task_labels: function (args) {
+      var t = findTask(args && args.taskId) || TASKS[0]
+      t.labels = (args && args.labelIds) || []
+      t.updated_at = iso(TODAY, '11:25:00')
+      return Object.assign({}, t)
+    },
+
+    // Sections (R1)
+    list_sections: function (args) {
+      return SECTIONS.filter(function (s) { return s.project_id === (args && args.projectId) })
+    },
+    create_section: function (args) {
+      var section = {
+        id: newId('sec'),
+        project_id: (args && args.projectId) || 'proj-taskapp',
+        name: (args && args.name) || 'New section',
+        position: SECTIONS.length,
+        external_id: null,
+        external_source: null,
+        created_at: iso(TODAY, '11:30:00'),
+      }
+      SECTIONS.push(section)
+      return section
+    },
+    rename_section: function (args) {
+      var s = SECTIONS.find(function (x) { return x.id === (args && args.id) }) || SECTIONS[0]
+      if (args && args.name) s.name = args.name
+      return Object.assign({}, s)
+    },
+    delete_section: function () { return null },
+    reorder_sections: function () { return null },
 
     // Local tasks
     get_local_tasks: function (args) {
@@ -856,6 +1000,11 @@
         parent_id: (args && args.parentId) || null,
         priority: (args && args.priority) || 1,
         due_date: (args && args.dueDate) || null,
+        due_time: (args && args.dueTime) || null,
+        duration_minutes: (args && args.durationMinutes) || null,
+        recurrence_rule: (args && args.recurrenceRule) || null,
+        section_id: (args && args.sectionId) || null,
+        labels: (args && args.labelIds) || [],
         position: TASKS.length,
         created_at: iso(TODAY, '09:30:00'),
         updated_at: iso(TODAY, '09:30:00'),
@@ -872,6 +1021,15 @@
         if (args.dueDate) merged.due_date = args.dueDate
         if (args.clearDueDate) merged.due_date = null
         if (args.linkedDocId !== undefined) merged.linked_doc_id = args.linkedDocId
+        if (args.dueTime) merged.due_time = args.dueTime
+        if (args.clearDueTime) { merged.due_time = null; merged.duration_minutes = null }
+        if (args.durationMinutes !== undefined && args.durationMinutes !== null) merged.duration_minutes = args.durationMinutes
+        if (args.clearDuration) merged.duration_minutes = null
+        if (args.recurrenceRule) merged.recurrence_rule = args.recurrenceRule
+        if (args.clearRecurrence) merged.recurrence_rule = null
+        if (args.sectionId) merged.section_id = args.sectionId
+        if (args.clearSection) merged.section_id = null
+        if (args.labelIds !== undefined && args.labelIds !== null) merged.labels = args.labelIds
       }
       merged.updated_at = iso(TODAY, '10:00:00')
       return merged
@@ -1145,6 +1303,23 @@
     sync_test_connection: function () { return null },
     sync_initialize_remote: function () { return null },
     sync_seed_existing: function () { return 0 },
+
+    // Todoist two-way sync (R1-era)
+    get_todoist_sync_status: function () {
+      return {
+        enabled: true,
+        connected: true,
+        last_sync_at: iso(TODAY, '08:05:00'),
+        last_error: null,
+        pending_ops: 0,
+        error_ops: 0,
+        errors: [],
+      }
+    },
+    todoist_sync_now: function () {
+      return { skipped: null, pushed: 0, created: 0, updated: 0, deleted: 0, projects_upserted: 0 }
+    },
+    set_todoist_sync_enabled: function () { return null },
 
     // Demo mode
     demo_status: function () { return false },

@@ -7,12 +7,16 @@ import { CaptureStrip } from '@/components/shared/CaptureStrip'
 import { createTauriProvider } from '@/services/tauri-provider'
 import { DataProviderRoot, setDataProvider } from '@/services/provider-context'
 import { useAppStore } from '@/stores/appStore'
+import { useDetailStore } from '@/stores/detailStore'
+import { useSelectionStore } from '@/stores/selectionStore'
 
 // DEV-only: expose stores on window so the audit-loop Playwright session can
 // bypass onboarding (no Tauri runtime in a plain browser → invoke() throws →
 // SetupDialog blocks the UI). See nimble/docs/audit-loop-playbook.md.
+// detail/selection stores let capture scripts open the task detail page and
+// the inline TaskEditor deterministically.
 if (import.meta.env.DEV) {
-  ;(window as unknown as { __stores: unknown }).__stores = { useAppStore }
+  ;(window as unknown as { __stores: unknown }).__stores = { useAppStore, useDetailStore, useSelectionStore }
 }
 
 // Initialize the DataProvider before anything renders.
