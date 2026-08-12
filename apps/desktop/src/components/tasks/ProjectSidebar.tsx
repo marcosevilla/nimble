@@ -93,7 +93,7 @@ export function ProjectSidebar({
     // Delete confirm
     if (confirmDeleteId === project.id) {
       return (
-        <div key={project.id} className={cn('flex items-center gap-1 px-2 py-1', indent && 'pl-6')}>
+        <div key={project.id} className={cn('flex items-center gap-1 px-2 py-1', indent && 'pl-8')}>
           <span className="text-label text-destructive flex-1">Delete {project.name}?</span>
           <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => { onDeleteProject(project.id); setConfirmDeleteId(null); if (selectedProjectId === project.id) onSelectProject(null) }}>
             <Check className="size-3" />
@@ -109,31 +109,20 @@ export function ProjectSidebar({
       <div
         key={project.id}
         className={cn(
-          'group flex w-full items-center gap-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer',
-          indent && 'pl-6',
-          isSelected
-            ? 'bg-accent/40 text-foreground'
-            : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
+          'group flex h-9 w-full items-center gap-2 rounded-md pr-1.5 transition-colors cursor-pointer',
+          indent ? 'pl-8' : 'pl-2',
+          isSelected ? 'bg-muted' : 'hover:bg-muted/50',
         )}
         onClick={() => onSelectProject(project.id)}
       >
-        {hasChildren ? (
-          <button
-            onClick={(e) => { e.stopPropagation(); toggleParentCollapsed(project.id) }}
-            className="flex size-3.5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-            title={collapsed ? 'Expand' : 'Collapse'}
-          >
-            <ChevronRight className={cn('size-3 transition-transform', !collapsed && 'rotate-90')} />
-          </button>
-        ) : (
-          indent && <span className="size-3.5 shrink-0" />
-        )}
         <span
-          className="size-2.5 rounded-full shrink-0"
-          style={{ backgroundColor: project.color }}
-        />
-        <span className="flex-1 text-body truncate">{project.name}</span>
-        <span className="text-label text-muted-foreground group-hover:hidden">{count}</span>
+          className={cn(
+            'flex-1 min-w-0 truncate text-foreground',
+            isSelected ? 'text-meta-strong' : 'text-meta',
+          )}
+        >
+          {project.name}
+        </span>
 
         {/* Hover actions */}
         <div className="hidden items-center gap-0.5 group-hover:flex" onClick={(e) => e.stopPropagation()}>
@@ -154,6 +143,18 @@ export function ProjectSidebar({
             </button>
           )}
         </div>
+
+        {hasChildren ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleParentCollapsed(project.id) }}
+            className="flex w-3 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+            title={collapsed ? 'Expand' : 'Collapse'}
+          >
+            <ChevronRight className={cn('size-3 transition-transform', !collapsed && 'rotate-90')} />
+          </button>
+        ) : (
+          <span className="w-3 shrink-0 text-center text-meta text-muted-foreground">{count}</span>
+        )}
       </div>
     )
   }
@@ -200,7 +201,7 @@ export function ProjectSidebar({
 
   return (
     <div
-      className="relative flex flex-col border-r border-border/20 bg-muted/10 overflow-hidden"
+      className="relative flex flex-col border-r border-border/20 bg-sidebar overflow-hidden"
       style={{ width: sidebarWidth }}
     >
       {/* Header */}
@@ -230,22 +231,27 @@ export function ProjectSidebar({
         <button
           onClick={() => onSelectProject(null)}
           className={cn(
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
-            selectedProjectId === null
-              ? 'bg-accent/40 text-foreground'
-              : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
+            'flex h-9 w-full items-center gap-2 rounded-md pl-2 pr-1.5 text-left transition-colors',
+            selectedProjectId === null ? 'bg-muted' : 'hover:bg-muted/50',
           )}
         >
           <List className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="flex-1 text-body truncate">All Tasks</span>
-          <span className="text-label text-muted-foreground">{totalActive}</span>
+          <span
+            className={cn(
+              'flex-1 min-w-0 truncate text-foreground',
+              selectedProjectId === null ? 'text-meta-strong' : 'text-meta',
+            )}
+          >
+            All Tasks
+          </span>
+          <span className="w-3 shrink-0 text-center text-meta text-muted-foreground">{totalActive}</span>
         </button>
 
         {/* Divider */}
         <div className="h-px bg-border/10 my-1" />
 
         {/* Projects — root projects first, each followed by its (one-level)
-            children indented pl-6 when not collapsed. */}
+            children indented pl-8 when not collapsed. */}
         {rootProjects.flatMap((project) => {
           const children = childrenByParent[project.id] ?? []
           const isCollapsed = collapsedParents.has(project.id)
@@ -293,7 +299,7 @@ export function ProjectSidebar({
         <div className="border-t border-border/20 p-1.5">
           <button
             onClick={() => setNewProjectInput(true)}
-            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-meta text-muted-foreground hover:text-foreground hover:bg-accent/10 transition-colors"
+            className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-body text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
           >
             <Plus className="size-3" />
             New project
