@@ -1,10 +1,68 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { useDetailStore } from '@/stores/detailStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { TaskItem } from './TaskItem'
 import { TaskEditor } from './TaskEditor'
-import type { LocalTask, Project } from '@nimble/types'
+import { listLabels } from '@/services/tauri'
+import { labelColor } from '@/lib/labelColors'
+import type { LocalTask, Project, Label } from '@nimble/types'
+
+// ── Labels cache ──
+//
+// Same label list `LabelPicker.tsx` fetches via `listLabels()`, shared at
+// module scope so every visible row doesn't independently re-fetch the full
+// label table. Invalidated by the same 'tasks-changed' event
+// `emitTasksChanged` (hooks/useLocalTasks.ts) dispatches on any task
+// mutation — labels can be created inline mid-session via LabelPicker.
+const TASKS_CHANGED_EVENT = 'tasks-changed'
+
+let labelsCache: Label[] | null = null
+let labelsPromise: Promise<Label[]> | null = null
+
+function fetchLabels(force = false): Promise<Label[]> {
+  if (force) {
+    labelsCache = null
+    labelsPromise = null
+  }
+  if (labelsCache) return Promise.resolve(labelsCache)
+  if (!labelsPromise) {
+    labelsPromise = listLabels()
+      .then((ls) => {
+        labelsCache = ls
+        return ls
+      })
+      .catch((e) => {
+        labelsPromise = null
+        throw e
+      })
+  }
+  return labelsPromise
+}
+
+function useLabelsMap(): Map<string, Label> {
+  const [labels, setLabels] = useState<Label[]>(labelsCache ?? [])
+
+  useEffect(() => {
+    let cancelled = false
+    const load = (force: boolean) => {
+      fetchLabels(force)
+        .then((ls) => {
+          if (!cancelled) setLabels(ls)
+        })
+        .catch(() => {})
+    }
+    load(false)
+    const onChanged = () => load(true)
+    window.addEventListener(TASKS_CHANGED_EVENT, onChanged)
+    return () => {
+      cancelled = true
+      window.removeEventListener(TASKS_CHANGED_EVENT, onChanged)
+    }
+  }, [])
+
+  return useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels])
+}
 
 interface LocalTaskRowProps {
   task: LocalTask
@@ -17,6 +75,10 @@ interface LocalTaskRowProps {
   focused?: boolean
   isSubtask?: boolean
   subtaskStats?: { done: number; total: number }
+  /** dnd-kit `{...attributes, ...listeners}` from the sortable wrapper —
+   * passed straight through to TaskItem's grip. Undefined outside a
+   * sortable context (e.g. TodayPage's flat list). */
+  dragHandleProps?: Record<string, unknown>
 }
 
 export function LocalTaskRow({
@@ -29,6 +91,7 @@ export function LocalTaskRow({
   focused,
   isSubtask,
   subtaskStats,
+  dragHandleProps,
 }: LocalTaskRowProps) {
   const editingTaskId = useSelectionStore((s) => s.editingTaskId)
   const addingSubtaskTo = useSelectionStore((s) => s.addingSubtaskTo)
@@ -61,6 +124,16 @@ export function LocalTaskRow({
     [onUpdated, setEditingTask],
   )
 
+  const labelsMap = useLabelsMap()
+  const taskLabels = useMemo(
+    () =>
+      task.labels
+        .map((id) => labelsMap.get(id))
+        .filter((l): l is Label => !!l)
+        .map((l) => ({ name: l.name, color: labelColor(l.color) })),
+    [task.labels, labelsMap],
+  )
+
   return (
     <div>
       <TaskItem
@@ -77,9 +150,11 @@ export function LocalTaskRow({
           source: 'local',
           isSubtask,
           subtaskStats,
+          labels: taskLabels,
         }}
-        onContentClick={() => useDetailStore.getState().openTask(task.id)}
+        onOpen={() => useDetailStore.getState().openTask(task.id)}
         focused={focused}
+        dragHandleProps={dragHandleProps}
       />
 
       {editing && (

@@ -5,7 +5,7 @@ import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import type { TaskStatus } from '@nimble/types'
 import { format, parseISO, isToday, isTomorrow, isPast } from 'date-fns'
-import { CornerDownRight, ListTree, CheckCircle2 } from 'lucide-react'
+import { CornerDownRight, ListTree, CheckCircle2, GripVertical } from 'lucide-react'
 
 // ── Due Date Badge ──
 
@@ -33,15 +33,17 @@ function DueDateBadge({ date }: { date: string }) {
   )
 }
 
-// ── Project Badge ──
+// ── Label chip ──
 
-function ProjectBadge({ name, color }: { name: string; color?: string }) {
+/* Dot color comes straight from label data (resolved by the caller from the
+   backend's named-color palette) — the one sanctioned hardcoded-hex
+   exception, since a label's swatch is inherently data-driven. */
+function LabelChipPill({ name, color }: { name: string; color?: string }) {
   return (
-    <span className="flex shrink-0 items-center gap-1 rounded-md bg-muted/60 px-1.5 py-0.5 text-label text-muted-foreground">
-      <span
-        className="size-1.5 rounded-full"
-        style={{ backgroundColor: color ?? '#6366f1' }}
-      />
+    <span className="flex h-5 shrink-0 items-center gap-[5px] rounded-full bg-secondary px-2 text-meta text-muted-foreground">
+      {color && (
+        <span className="size-1.5 rounded-full" style={{ backgroundColor: color }} />
+      )}
       {name}
     </span>
   )
@@ -94,77 +96,85 @@ export interface TaskItemData {
   source: 'local' | 'todoist'
   isSubtask?: boolean
   subtaskStats?: { done: number; total: number }
+  labels?: { name: string; color: string }[]
 }
 
 interface TaskItemProps {
   task: TaskItemData
-  onContentClick?: () => void
+  /** Fired on click anywhere in the row body — opens task details. Interactive
+   * children (grip, checkbox, status) stop propagation so they don't trigger it. */
+  onOpen?: () => void
   allIds?: string[]
   focused?: boolean
   className?: string
+  /** dnd-kit `{...attributes, ...listeners}` from the sortable wrapper, spread
+   * onto the grip so only the grip — not the whole row — initiates a drag. */
+  dragHandleProps?: Record<string, unknown>
 }
 
-export function TaskItem({ task, onContentClick, allIds, focused, className }: TaskItemProps) {
+export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleProps }: TaskItemProps) {
   const isSelected = useSelectionStore((s) => s.selectedIds.has(task.id))
   const isCompleting = useSelectionStore((s) => s.completingTaskIds.has(task.id))
 
+  const completed = task.completed || task.status === 'complete'
+  const visibleLabels = task.labels?.slice(0, 2) ?? []
+  const overflowCount = (task.labels?.length ?? 0) - visibleLabels.length
+
   return (
     <div
+      onClick={onOpen}
       className={cn(
-        'group flex items-center gap-2 h-9 min-w-0 transition-colors hover:bg-accent/20',
+        'group flex h-10 items-center gap-3 min-w-0 border-b border-secondary transition-colors hover:bg-accent/20 cursor-default',
         focused && 'bg-accent/10',
         isSelected && 'bg-accent-blue/10',
         isCompleting && 'animate-task-complete',
         className,
       )}
     >
-      {/* Selection checkbox — in-flow so it can't overlap neighbouring
-          content. Fades in on hover or when selection is active. */}
+      {/* Hover cluster — grip then checkbox, both in fixed-width in-flow
+          slots so revealing them on hover/selection never shifts content. */}
+      <div className="flex w-4 shrink-0 items-center justify-center">
+        <GripVertical
+          aria-label="Drag to reorder"
+          className="size-3 shrink-0 cursor-grab text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+          onClick={(e) => e.stopPropagation()}
+          {...dragHandleProps}
+        />
+      </div>
       <SelectionCheckbox id={task.id} type="task" allIds={allIds} />
 
-      {/* Priority */}
-      <PriorityBars priority={task.priority} />
-
-      {/* Status */}
+      {/* Status (before priority per updated row anatomy) */}
       {task.source === 'local' && task.status ? (
         <StatusDropdown taskId={task.id} status={task.status} />
       ) : (
         <div className="w-4 shrink-0" />
       )}
 
+      {/* Priority */}
+      <PriorityBars priority={task.priority} />
+
       {/* Subtask indicator */}
       {task.isSubtask && <SubtaskBadge />}
 
-      {/* Task name */}
-      {onContentClick ? (
-        <button
-          onClick={onContentClick}
-          className={cn(
-            'flex-1 min-w-0 truncate text-body text-left bg-transparent border-none cursor-pointer hover:text-foreground',
-            (task.completed || task.status === 'complete') && 'text-muted-foreground line-through',
-          )}
-        >
-          {task.content}
-        </button>
-      ) : (
-        <span
-          className={cn(
-            'flex-1 min-w-0 truncate text-body',
-            (task.completed || task.status === 'complete') && 'text-muted-foreground line-through',
-          )}
-        >
-          {task.content}
-        </span>
-      )}
+      {/* Task name — the whole row handles click/open, so this is plain text */}
+      <span
+        className={cn(
+          'flex-1 min-w-0 truncate text-body',
+          completed && 'text-muted-foreground line-through',
+        )}
+      >
+        {task.content}
+      </span>
 
       {/* Right side metadata — flush right */}
-      <div className="flex shrink-0 items-center gap-2 ml-auto">
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         {task.subtaskStats && task.subtaskStats.total > 0 && (
           <SubtaskSummary done={task.subtaskStats.done} total={task.subtaskStats.total} />
         )}
-        {task.projectName && (
-          <ProjectBadge name={task.projectName} color={task.projectColor ?? undefined} />
-        )}
+        {visibleLabels.map((label, i) => (
+          <LabelChipPill key={`${label.name}-${i}`} name={label.name} color={label.color} />
+        ))}
+        {overflowCount > 0 && <LabelChipPill name={`+${overflowCount}`} />}
         {task.dueDate && <DueDateBadge date={task.dueDate} />}
       </div>
     </div>

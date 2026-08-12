@@ -17,7 +17,6 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { LocalTaskRow } from './LocalTaskRow'
 import { useDataProvider } from '@/services/provider-context'
-import { GripVertical } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { LocalTask, Project } from '@nimble/types'
 
@@ -67,20 +66,12 @@ export function SortableTaskItem({
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group/drag relative',
+        'relative',
         isDragging && 'z-10 opacity-80 bg-accent/30 rounded-md',
       )}
     >
-      {/* Drag handle — absolute-positioned outside the row, hover-only */}
-      <button
-        {...attributes}
-        {...listeners}
-        className="absolute -left-5 top-2.5 z-20 shrink-0 cursor-grab text-muted-foreground opacity-0 transition-opacity hover:text-muted-foreground active:cursor-grabbing group-hover/drag:opacity-100"
-        aria-label="Drag to reorder"
-      >
-        <GripVertical className="size-3.5" />
-      </button>
-
+      {/* Only the row's grip (rendered inside TaskItem via dragHandleProps)
+          initiates a drag — listeners are not spread on this container. */}
       <LocalTaskRow
         task={task}
         projects={projects}
@@ -90,6 +81,7 @@ export function SortableTaskItem({
         onDelete={onDelete}
         onAddSubtask={onAddSubtask}
         onUpdated={onUpdated}
+        dragHandleProps={{ ...attributes, ...listeners }}
       />
     </div>
   )
@@ -201,9 +193,9 @@ export function SortableTaskList({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <SortableContext items={items} strategy={verticalListSortingStrategy}>
-        {/* Left gutter (pl-5) leaves room for the absolute-positioned drag
-            handle that overflows the row's left edge. */}
-        <div className="divide-y divide-border/20 pl-5">
+        {/* No left gutter needed — the drag handle is now in-flow inside
+            each row (TaskItem's hover cluster), not absolute-positioned. */}
+        <div className="divide-y divide-border/20">
           {items.flatMap((id) => {
             const task = taskMap[id]
             if (!task) return []
