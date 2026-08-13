@@ -3,54 +3,68 @@ import { useDetailStore } from '@/stores/detailStore'
 import { useTaskDetail } from '@/hooks/useTaskDetail'
 import { useProjects } from '@/hooks/useLocalTasks'
 import { useDataProvider } from '@/services/provider-context'
-import type { LocalTask as LocalTaskType, Document } from '@nimble/types'
-import { useDocsStore } from '@/stores/docsStore'
+import type { Project, Section, Label } from '@nimble/types'
 import { useAppStore } from '@/stores/appStore'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { cn } from '@/lib/utils'
 import { StatusDropdown } from '@/components/tasks/StatusDropdown'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Sparkles, FileText, X as XIcon, Repeat } from 'lucide-react'
+import { Sparkles, Plus, Settings, ChevronLeft } from 'lucide-react'
 import { taskToast } from '@/lib/taskToast'
-import { parseRecurrenceRule, predictReschedule } from '@/lib/recurrence'
+import { predictReschedule } from '@/lib/recurrence'
 import { TaskComposerCard } from '@/components/tasks/TaskComposerCard'
 import { InlineTitle } from './InlineTitle'
 import { TiptapEditor } from '@/components/docs/TiptapEditor'
+import { Textarea } from '@/components/ui/textarea'
+import { MetadataChips, type ChipValues } from '@/components/tasks/MetadataChips'
+import { TaskItem, type TaskItemData } from '@/components/tasks/TaskItem'
+import { labelColor } from '@/lib/labelColors'
 import { DetailBreadcrumbs } from './DetailBreadcrumbs'
-import { TaskActionBar } from './TaskActionBar'
 import { TaskActivityLog } from './TaskActivityLog'
-import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { IconButton } from '@/components/shared/IconButton'
-import { PanelRight, MoreHorizontal } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 import { toast } from 'sonner'
 import { format, parseISO } from 'date-fns'
-
-import { PRIORITY_LABELS } from '@/lib/priorities'
-import { PriorityBars } from '@/components/shared/PriorityBars'
-import { Meta } from '@/components/shared/typography'
+import { listSections, listLabels } from '@/services/tauri'
 
 export function TaskDetailPage() {
   const dp = useDataProvider()
   const target = useDetailStore((s) => s.target)
-  const switchMode = useDetailStore((s) => s.switchMode)
+  const mode = useDetailStore((s) => s.mode)
   const close = useDetailStore((s) => s.close)
   const drillDown = useDetailStore((s) => s.drillDown)
 
   const { task, subtasks, project, loading } = useTaskDetail(target?.id ?? null)
+  const { task: parentTask } = useTaskDetail(task?.parent_id ?? null)
   const { projects } = useProjects()
 
   const [addingSubtask, setAddingSubtask] = useState(false)
   const [breakingDown, setBreakingDown] = useState(false)
-  const [linkedDocTitle, setLinkedDocTitle] = useState<string | null>(null)
 
-  // Load linked doc title
+  const [sections, setSections] = useState<Section[]>([])
+  const [labels, setLabels] = useState<Label[]>([])
+
   useEffect(() => {
-    if (task?.linked_doc_id) {
-      dp.docs.getDocument(task.linked_doc_id).then((doc) => setLinkedDocTitle(doc?.title ?? null)).catch(() => setLinkedDocTitle(null))
-    } else {
-      setLinkedDocTitle(null)
+    listLabels().then(setLabels).catch(() => setLabels([]))
+  }, [])
+
+  useEffect(() => {
+    if (!task?.project_id) {
+      setSections([])
+      return
     }
-  }, [task?.linked_doc_id, dp])
+    listSections(task.project_id).then(setSections).catch(() => setSections([]))
+  }, [task?.project_id])
+
+  const labelsMap = useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels])
 
   const handleSaveTitle = useCallback(async (content: string) => {
     if (!task) return
@@ -78,6 +92,9 @@ export function TaskDetailPage() {
     return initial.trim().startsWith('<') ? 'html' : 'markdown'
   }, [task?.id])
 
+  // Legacy-HTML path (descFormat === 'html') — UNTOUCHED. Same TiptapEditor,
+  // same debounced autosave via onChange, same lastSavedDesc guard. Task 9
+  // only replaces the editing surface for the markdown-canonical path below.
   const lastSavedDesc = useRef(task?.description ?? '')
   const handleSaveDescription = useCallback(async (description: string) => {
     if (!task) return
@@ -87,6 +104,57 @@ export function TaskDetailPage() {
     await dp.tasks.update({ id: task.id, description })
     // Don't emit tasksChanged here — avoids refresh loop with Tiptap
   }, [task, dp])
+
+  // Markdown-canonical path (Decision 15): raw string in, raw string out.
+  // Never touches Tiptap's markdown serializer on the write side — the
+  // display-only <TiptapEditor format="markdown"> below has no onChange, so
+  // there is no callback it could even reach.
+  const [descEditing, setDescEditing] = useState(false)
+  const [descDraft, setDescDraft] = useState('')
+  const descTextareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const startEditingDescription = useCallback(() => {
+    if (!task) return
+    setDescDraft(task.description ?? '')
+    setDescEditing(true)
+  }, [task])
+
+  const cancelEditingDescription = useCallback(() => {
+    setDescEditing(false)
+    setDescDraft(task?.description ?? '')
+  }, [task])
+
+  const saveDescriptionDraft = useCallback(async () => {
+    if (!task) return
+    setDescEditing(false)
+    if (descDraft === (task.description ?? '')) return
+    try {
+      await dp.tasks.update({ id: task.id, description: descDraft })
+      emitTasksChanged()
+    } catch (e) {
+      toast.error(`Failed to save description: ${e}`)
+    }
+  }, [task, dp, descDraft])
+
+  const handleDescKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelEditingDescription()
+    }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      saveDescriptionDraft()
+    }
+  }, [cancelEditingDescription, saveDescriptionDraft])
+
+  useEffect(() => {
+    if (!descEditing) return
+    requestAnimationFrame(() => {
+      const el = descTextareaRef.current
+      el?.focus()
+      el?.setSelectionRange(el.value.length, el.value.length)
+    })
+  }, [descEditing])
 
   const handleAIBreakdown = useCallback(async () => {
     if (!task) return
@@ -111,11 +179,163 @@ export function TaskDetailPage() {
     }
   }, [task, dp])
 
-  const handlePriorityChange = useCallback(async (priority: number) => {
+  // Unified chip patch handler — same dp.tasks.update() call every other
+  // field on this page already uses, just routed through MetadataChips'
+  // single onChange(patch) contract instead of one handler per field.
+  const handleChipChange = useCallback(async (patch: Partial<ChipValues>) => {
     if (!task) return
-    await dp.tasks.update({ id: task.id, priority })
-    emitTasksChanged()
+    const updates: Parameters<typeof dp.tasks.update>[0] = { id: task.id }
+    let touched = false
+
+    if (patch.priority !== undefined) {
+      updates.priority = patch.priority
+      touched = true
+    }
+    if (patch.due !== undefined) {
+      updates.dueDate = patch.due.dueDate ?? undefined
+      updates.clearDueDate = patch.due.dueDate === null
+      updates.dueTime = patch.due.dueTime ?? undefined
+      updates.clearDueTime = patch.due.dueTime === null
+      updates.durationMinutes = patch.due.durationMinutes ?? undefined
+      updates.clearDuration = patch.due.durationMinutes === null
+      updates.recurrenceRule = patch.due.recurrenceRule ?? undefined
+      updates.clearRecurrence = patch.due.recurrenceRule === null
+      touched = true
+    }
+    if (patch.labelIds !== undefined) {
+      updates.labelIds = patch.labelIds
+      touched = true
+    }
+    if (patch.sectionId !== undefined) {
+      updates.sectionId = patch.sectionId ?? undefined
+      updates.clearSection = patch.sectionId === null
+      touched = true
+    }
+    if (patch.linkedDocId !== undefined) {
+      updates.linkedDocId = patch.linkedDocId
+      touched = true
+    }
+    if (!touched) return
+
+    try {
+      await dp.tasks.update(updates)
+      emitTasksChanged()
+    } catch (e) {
+      toast.error(`Failed to update task: ${e}`)
+    }
   }, [task, dp])
+
+  const chipValues = useMemo<ChipValues>(() => ({
+    priority: task?.priority ?? 1,
+    due: {
+      dueDate: task?.due_date ?? null,
+      dueTime: task?.due_time ?? null,
+      durationMinutes: task?.duration_minutes ?? null,
+      recurrenceRule: task?.recurrence_rule ?? null,
+    },
+    labelIds: task?.labels ?? [],
+    projectId: task?.project_id,
+    sectionId: task?.section_id ?? null,
+    linkedDocId: task?.linked_doc_id ?? null,
+  }), [task])
+
+  // Breadcrumb (Decisions 2/3): full project ancestry chain (via parent_id,
+  // walked through useProjects) + the parent task if this is a subtask.
+  // Unlike the shared DetailBreadcrumbs (which replays the store's manually
+  // pushed drillDown history), this is derived fresh from task/project data
+  // every render — correct no matter how the viewer arrived at this task.
+  const projectChain = useMemo<Project[]>(() => {
+    if (!project) return []
+    const chain: Project[] = []
+    const seen = new Set<string>()
+    let current: Project | null = project
+    while (current && !seen.has(current.id)) {
+      chain.unshift(current)
+      seen.add(current.id)
+      current = current.parent_id ? projects.find((p) => p.id === current!.parent_id) ?? null : null
+    }
+    return chain
+  }, [project, projects])
+
+  interface BreadcrumbSegment { label: string; onClick: () => void }
+
+  const breadcrumbSegments = useMemo<BreadcrumbSegment[]>(() => {
+    const segments: BreadcrumbSegment[] = projectChain.map((p) => ({
+      label: p.name,
+      // No cross-page deep-link to a specific (possibly nested) project
+      // exists elsewhere in the app today (TasksPage's selected-project is
+      // local state, unreachable from outside) — land on Tasks / All Tasks
+      // rather than a dead click. See Task 9 report for the follow-up.
+      onClick: () => {
+        close()
+        useAppStore.getState().setCurrentPage('tasks')
+      },
+    }))
+    if (parentTask) {
+      segments.push({
+        label: parentTask.content,
+        onClick: () => useDetailStore.getState().openTask(parentTask.id, mode),
+      })
+    }
+    return segments
+  }, [projectChain, parentTask, mode, close])
+
+  const handleMoveToProject = useCallback(async (projectId: string) => {
+    if (!task) return
+    const targetProject = projects.find((p) => p.id === projectId)
+    try {
+      await dp.tasks.update({ id: task.id, projectId })
+      emitTasksChanged()
+      taskToast(`Moved to ${targetProject?.name ?? 'project'}`, task.id)
+    } catch (e) {
+      toast.error(`Failed to move: ${e}`)
+    }
+  }, [task, dp, projects])
+
+  const handleDuplicateTask = useCallback(async () => {
+    if (!task) return
+    try {
+      const created = await dp.tasks.create({
+        content: task.content,
+        description: task.description ?? undefined,
+        projectId: task.project_id,
+        parentId: task.parent_id ?? undefined,
+        priority: task.priority,
+        dueDate: task.due_date ?? undefined,
+        dueTime: task.due_time ?? undefined,
+        durationMinutes: task.duration_minutes ?? undefined,
+        recurrenceRule: task.recurrence_rule ?? undefined,
+        sectionId: task.section_id ?? undefined,
+        labelIds: task.labels.length ? task.labels : undefined,
+      })
+      if (task.linked_doc_id) {
+        await dp.tasks.update({ id: created.id, linkedDocId: task.linked_doc_id })
+      }
+      emitTasksChanged()
+      taskToast('Task duplicated', created.id)
+    } catch (e) {
+      toast.error(`Failed to duplicate: ${e}`)
+    }
+  }, [task, dp])
+
+  const handleCopyId = useCallback(() => {
+    if (!task) return
+    navigator.clipboard.writeText(task.id)
+    toast.success('Task ID copied')
+  }, [task])
+
+  const handleDeleteTask = useCallback(async () => {
+    if (!task) return
+    if (!window.confirm('Delete this task?')) return
+    try {
+      await dp.tasks.delete(task.id)
+      emitTasksChanged()
+      toast.success('Task deleted')
+      close()
+    } catch (e) {
+      toast.error(`Failed to delete: ${e}`)
+    }
+  }, [task, dp, close])
 
   // Recurring tasks reschedule instead of completing (Task 8) — the row's
   // due date just advances, no guilt copy, just a quiet confirmation of
@@ -150,69 +370,76 @@ export function TaskDetailPage() {
     )
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Header: breadcrumbs + actions */}
-      <div className="flex items-start justify-between">
-        <DetailBreadcrumbs />
-        <div className="flex items-center gap-0.5 shrink-0">
-          <IconButton
-            onClick={() => switchMode('sidebar')}
-            size="lg"
-            tone="subtle"
-            title="Pin to sidebar"
-          >
-            <PanelRight className="size-4" />
-          </IconButton>
-          <Popover>
-            <PopoverTrigger className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/20 transition-colors">
-              <MoreHorizontal className="size-4" />
-            </PopoverTrigger>
-            <PopoverContent side="bottom" align="end" sideOffset={4} className="w-44 gap-0 p-1">
-              <TaskActionBar task={task} projects={projects} onDeleted={close} />
-            </PopoverContent>
-          </Popover>
-        </div>
-      </div>
+  const subtaskItems: TaskItemData[] = subtasks.map((sub) => ({
+    id: sub.id,
+    content: sub.content,
+    priority: sub.priority,
+    completed: sub.completed,
+    status: sub.status,
+    dueDate: sub.due_date,
+    description: sub.description,
+    source: 'local',
+    labels: sub.labels
+      .map((id) => labelsMap.get(id))
+      .filter((l): l is Label => !!l)
+      .map((l) => ({ name: l.name, color: labelColor(l.color) })),
+  }))
 
-      {/* Project + metadata row */}
-      <div className="flex items-center gap-3 flex-wrap text-body">
-        {project && (
-          <div className="flex items-center gap-1.5">
-            <span className="size-2 rounded-full" style={{ backgroundColor: project.color }} />
-            <Meta>{project.name}</Meta>
-          </div>
-        )}
-        <Popover>
-          <PopoverTrigger className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-meta text-muted-foreground hover:text-foreground hover:bg-accent/20 transition-colors">
-            <PriorityBars priority={task.priority} />
-            {PRIORITY_LABELS[task.priority].label}
-          </PopoverTrigger>
-          <PopoverContent side="bottom" align="start" sideOffset={4} className="w-36 gap-0 p-1">
-            {[1, 2, 3, 4].map((p) => (
-              <button
-                key={p}
-                onClick={() => handlePriorityChange(p)}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-body transition-colors',
-                  task.priority === p ? 'bg-accent/40' : 'hover:bg-accent/20',
-                )}
-              >
-                <PriorityBars priority={p} />
-                {PRIORITY_LABELS[p].label}
-              </button>
+  return (
+    <div className="mx-auto w-full max-w-[600px] pt-[30px] flex flex-col gap-6">
+      {/* Top row: breadcrumb (left) + gear trigger (right) — no paperclip
+          (Decision 13), no other actions in the right cluster. */}
+      <div className="flex items-center justify-between gap-2 min-h-6">
+        {breadcrumbSegments.length > 0 ? (
+          <div className="flex min-w-0 items-center gap-1">
+            <ChevronLeft className="size-3 shrink-0 text-muted-foreground/70" />
+            {breadcrumbSegments.map((seg, i) => (
+              <span key={i} className="flex min-w-0 items-center gap-1">
+                {i > 0 && <span className="text-meta text-muted-foreground/70">/</span>}
+                <button
+                  type="button"
+                  onClick={seg.onClick}
+                  className="truncate max-w-[160px] text-meta text-muted-foreground/70 transition-colors hover:text-foreground"
+                >
+                  {seg.label}
+                </button>
+              </span>
             ))}
-          </PopoverContent>
-        </Popover>
-        {task.due_date && (
-          <Meta as="time">Due {format(parseISO(task.due_date), 'MMM d')}</Meta>
+          </div>
+        ) : (
+          <div />
         )}
-        {task.recurrence_rule && parseRecurrenceRule(task.recurrence_rule) && (
-          <span className="flex items-center gap-1 text-meta text-muted-foreground">
-            <Repeat className="size-3" />
-            {task.recurrence_rule}
-          </span>
-        )}
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label="Task actions"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Settings className="size-3" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" sideOffset={4} className="w-44">
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>Move to project…</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                {projects.filter((p) => p.id !== task.project_id).map((p) => (
+                  <DropdownMenuItem key={p.id} className="gap-2" onClick={() => handleMoveToProject(p.id)}>
+                    <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
+                    <span className="truncate">{p.name}</span>
+                  </DropdownMenuItem>
+                ))}
+                {projects.filter((p) => p.id !== task.project_id).length === 0 && (
+                  <p className="px-1.5 py-1 text-label text-muted-foreground">No other projects</p>
+                )}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuItem onClick={handleDuplicateTask}>Duplicate task</DropdownMenuItem>
+            <DropdownMenuItem onClick={handleCopyId}>Copy ID</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={handleDeleteTask}>
+              Delete task
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Status + Title */}
@@ -221,103 +448,139 @@ export function TaskDetailPage() {
           <StatusDropdown taskId={task.id} status={task.status ?? 'todo'} size="md" onComplete={handleTaskCompleted} />
         </div>
         <div className="flex-1 min-w-0">
-          <InlineTitle value={task.content} completed={task.completed} onSave={handleSaveTitle} />
+          <InlineTitle
+            value={task.content}
+            completed={task.completed}
+            onSave={handleSaveTitle}
+            className="text-display pl-4"
+          />
         </div>
       </div>
 
-      {/* Description */}
-      {/* Description — rich text with @mentions. Markdown-canonical: local_tasks.description
-          is markdown for every description saved from here forward (Todoist sync/import and
-          R3's CLI already write it verbatim, no conversion layer). Pre-existing HTML
-          descriptions keep loading/saving as HTML (descFormat above) until the Settings
-          backfill converts them — see Task 12 fix report. */}
-      <TiptapEditor
-        key={task.id}
-        content={task.description ?? ''}
-        onChange={handleSaveDescription}
-        placeholder="Add a description..."
-        format={descFormat}
+      {/* Metadata chips */}
+      <MetadataChips
+        values={chipValues}
+        onChange={handleChipChange}
+        context="details"
+        projects={projects}
+        sections={sections}
+        labels={labels}
       />
 
-      {/* Subtasks */}
-      <div className="space-y-2">
-        {subtasks.length > 0 && (
-          <div className="space-y-0.5">
-            {subtasks.map((sub) => (
-              <div
-                key={sub.id}
-                className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/10 transition-colors"
-              >
-                <StatusDropdown taskId={sub.id} status={sub.status ?? 'todo'} />
-                <button
-                  onClick={() => drillDown({ type: 'task', id: sub.id })}
-                  className={cn(
-                    'flex-1 min-w-0 truncate text-left text-body hover:text-foreground transition-colors',
-                    sub.completed && 'text-muted-foreground line-through',
-                  )}
-                >
-                  {sub.content}
-                </button>
-              </div>
-            ))}
-          </div>
+      {/* Description + Subtasks — 48px gap between the two blocks (frame 79:2009) */}
+      <div className="flex flex-col gap-12">
+        {/* Description — rich text with @mentions. Markdown-canonical
+            (descFormat === 'markdown'): display is a read-only rendered
+            markdown view; clicking anywhere swaps to a raw auto-grown
+            Textarea seeded with task.description, blur/⌘Enter saves the
+            RAW STRING verbatim, Esc reverts. Legacy-HTML tasks keep the
+            original always-editable Tiptap surface untouched. */}
+        {descFormat === 'markdown' ? (
+          descEditing ? (
+            <Textarea
+              ref={descTextareaRef}
+              value={descDraft}
+              onChange={(e) => setDescDraft(e.target.value)}
+              onBlur={saveDescriptionDraft}
+              onKeyDown={handleDescKeyDown}
+              placeholder="Description"
+              rows={1}
+              className={cn(
+                'min-h-0 resize-none border-none bg-transparent px-0 py-0 shadow-none outline-none',
+                'text-body placeholder:text-foreground/25',
+                'focus-visible:ring-0 focus-visible:border-none',
+              )}
+            />
+          ) : task.description ? (
+            // TiptapEditor's shared editorProps force a 200px min-height
+            // (sized for the docs editor) — override it for this compact,
+            // read-only display so the 48px description→subtask gap below
+            // is real space, not swallowed by dead min-height.
+            <div onClick={startEditingDescription} className="cursor-text [&_.tiptap-editor]:min-h-0">
+              <TiptapEditor key={task.id} content={task.description} format="markdown" />
+            </div>
+          ) : (
+            <p onClick={startEditingDescription} className="text-body text-foreground/25 cursor-text">
+              Description
+            </p>
+          )
+        ) : (
+          <TiptapEditor
+            key={task.id}
+            content={task.description ?? ''}
+            onChange={handleSaveDescription}
+            placeholder="Add a description..."
+            format="html"
+          />
         )}
 
-        {/* AI breakdown loading state */}
-        {breakingDown && (
-          <div className="space-y-2 py-2 animate-in fade-in duration-300">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-0.5">
-                <Sparkles className="size-3.5 text-purple-500 ai-star-1" />
-                <Sparkles className="size-3 text-purple-400 ai-star-2" />
-                <Sparkles className="size-2.5 text-purple-300 ai-star-3" />
-              </div>
-              <Meta>Breaking down with AI...</Meta>
-            </div>
-            <div className="space-y-1.5">
-              <Skeleton className="h-7 w-full rounded-md" />
-              <Skeleton className="h-7 w-5/6 rounded-md" />
-              <Skeleton className="h-7 w-4/6 rounded-md" />
-              <Skeleton className="h-7 w-5/6 rounded-md" />
-            </div>
-          </div>
-        )}
+        {/* Subtasks */}
+        <div className="flex flex-col">
+          <p className="text-body-strong pb-1">Subtask</p>
 
-        {/* Add subtask \u2014 Task 9 restyles this page; this just wires the
-            composer card into the mount point that used to hold the plain
-            input. "or break down with AI" used to be a \u2318B keybind scoped to
-            that input's focus; the composer card owns its own keydown
-            handling, so it's a standalone clickable affordance now instead. */}
-        {!breakingDown && (
-          <div>
-            {addingSubtask ? (
-              <TaskComposerCard
-                defaults={{ projectId: task.project_id, parentId: task.id }}
-                onClose={() => setAddingSubtask(false)}
-              />
-            ) : (
-              <div className="flex items-center gap-3">
-                <p
-                  onClick={() => setAddingSubtask(true)}
-                  className="text-body text-muted-foreground cursor-text hover:text-muted-foreground transition-colors py-1"
-                >
-                  Add a subtask...
-                </p>
-                <button
-                  type="button"
-                  onClick={handleAIBreakdown}
-                  className="text-label text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  or break down with AI
-                </button>
+          {subtaskItems.length > 0 && (
+            <div className="space-y-0.5">
+              {subtaskItems.map((item) => (
+                <TaskItem
+                  key={item.id}
+                  task={item}
+                  onOpen={() => drillDown({ type: 'task', id: item.id })}
+                  showGrip={false}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* AI breakdown loading state */}
+          {breakingDown && (
+            <div className="space-y-2 py-2 animate-in fade-in duration-300">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-0.5">
+                  <Sparkles className="size-3.5 text-purple-500 ai-star-1" />
+                  <Sparkles className="size-3 text-purple-400 ai-star-2" />
+                  <Sparkles className="size-2.5 text-purple-300 ai-star-3" />
+                </div>
+                <span className="text-meta text-muted-foreground">Breaking down with AI...</span>
               </div>
-            )}
-          </div>
-        )}
+              <div className="space-y-1.5">
+                <Skeleton className="h-7 w-full rounded-md" />
+                <Skeleton className="h-7 w-5/6 rounded-md" />
+                <Skeleton className="h-7 w-4/6 rounded-md" />
+                <Skeleton className="h-7 w-5/6 rounded-md" />
+              </div>
+            </div>
+          )}
+
+          {!breakingDown && (
+            <div className="pt-1">
+              {addingSubtask ? (
+                <TaskComposerCard
+                  defaults={{ projectId: task.project_id, parentId: task.id }}
+                  onClose={() => setAddingSubtask(false)}
+                />
+              ) : (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setAddingSubtask(true)}
+                    className="flex items-center gap-2 text-left text-meta text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <Plus className="size-3 shrink-0" />
+                    Add subtask
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAIBreakdown}
+                    className="text-label text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    or break down with AI
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-
-      {/* Linked doc */}
-      <LinkedDocSection task={task} linkedDocTitle={linkedDocTitle} />
 
       {/* Separator */}
       <div className="border-t border-border/30" />
@@ -325,106 +588,5 @@ export function TaskDetailPage() {
       {/* Activity log */}
       <TaskActivityLog taskId={task.id} />
     </div>
-  )
-}
-
-// ── Linked Doc Section ──
-
-function LinkedDocSection({ task, linkedDocTitle }: { task: LocalTaskType; linkedDocTitle: string | null }) {
-  const dp = useDataProvider()
-  const [showPicker, setShowPicker] = useState(false)
-  const [docs, setDocs] = useState<Document[]>([])
-  const [searchQuery, setSearchQuery] = useState('')
-
-  const loadDocs = useCallback(async () => {
-    try {
-      const allDocs = await dp.docs.getDocuments()
-      setDocs(allDocs)
-    } catch { /* skip */ }
-  }, [dp])
-
-  useEffect(() => {
-    if (showPicker) loadDocs()
-  }, [showPicker, loadDocs])
-
-  const filtered = searchQuery.trim()
-    ? docs.filter((d) => d.title.toLowerCase().includes(searchQuery.toLowerCase()))
-    : docs
-
-  const handleLink = useCallback(async (docId: string) => {
-    try {
-      await dp.tasks.update({ id: task.id, linkedDocId: docId })
-      emitTasksChanged()
-      setShowPicker(false)
-      setSearchQuery('')
-    } catch (e) {
-      toast.error(`Failed to link doc: ${e}`)
-    }
-  }, [task.id, dp])
-
-  const handleUnlink = useCallback(async () => {
-    try {
-      await dp.tasks.update({ id: task.id, linkedDocId: null })
-      emitTasksChanged()
-    } catch { /* skip */ }
-  }, [task.id, dp])
-
-  if (task.linked_doc_id && linkedDocTitle) {
-    return (
-      <div className="flex items-center gap-2">
-        <FileText className="size-3 shrink-0 text-muted-foreground" />
-        <button
-          onClick={() => {
-            useDocsStore.getState().selectDoc(task.linked_doc_id!)
-            useAppStore.getState().setCurrentPage('docs')
-          }}
-          className="text-meta text-accent-blue hover:underline"
-        >
-          {linkedDocTitle}
-        </button>
-        <button onClick={handleUnlink} className="text-muted-foreground hover:text-foreground">
-          <XIcon className="size-3" />
-        </button>
-      </div>
-    )
-  }
-
-  if (showPicker) {
-    return (
-      <div className="space-y-2">
-        <input
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Escape') { setShowPicker(false); setSearchQuery('') } }}
-          placeholder="Search docs..."
-          className="w-full bg-transparent text-body outline-none border-b border-border/20 py-1 placeholder:text-muted-foreground"
-          autoFocus
-        />
-        <div className="max-h-32 overflow-y-auto space-y-0.5">
-          {filtered.slice(0, 8).map((doc) => (
-            <button
-              key={doc.id}
-              onClick={() => handleLink(doc.id)}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-body hover:bg-accent/20 transition-colors"
-            >
-              <FileText className="size-3 shrink-0 text-muted-foreground" />
-              <span className="truncate">{doc.title || 'Untitled'}</span>
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <p className="text-meta text-muted-foreground py-1">No docs found</p>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <p
-      onClick={() => setShowPicker(true)}
-      className="text-meta text-muted-foreground cursor-pointer hover:text-muted-foreground transition-colors"
-    >
-      Link a doc...
-    </p>
   )
 }

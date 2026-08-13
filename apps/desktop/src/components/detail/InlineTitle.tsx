@@ -5,9 +5,13 @@ interface InlineTitleProps {
   value: string
   completed?: boolean
   onSave: (value: string) => void
+  /** Merged over the default `text-title` sizing via `cn()` — lets each
+   * detail page (Task 9 restyles Task Details to `text-display pl-4`
+   * without touching Goal/Capture, which still use the default). */
+  className?: string
 }
 
-export function InlineTitle({ value, completed, onSave }: InlineTitleProps) {
+export function InlineTitle({ value, completed, onSave, className }: InlineTitleProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -43,7 +47,7 @@ export function InlineTitle({ value, completed, onSave }: InlineTitleProps) {
         onChange={(e) => setDraft(e.target.value)}
         onBlur={save}
         onKeyDown={handleKeyDown}
-        className="w-full bg-transparent text-title outline-none"
+        className={cn('w-full bg-transparent text-title outline-none', className)}
       />
     )
   }
@@ -54,6 +58,7 @@ export function InlineTitle({ value, completed, onSave }: InlineTitleProps) {
       className={cn(
         'text-title cursor-text hover:bg-accent/10 rounded-md -mx-1 px-1 transition-colors',
         completed && 'text-muted-foreground line-through',
+        className,
       )}
     >
       {value}

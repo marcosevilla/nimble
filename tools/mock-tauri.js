@@ -991,8 +991,17 @@
       }
       return out
     },
+    // create/update/delete below mutate TASKS in place — a prior version
+    // returned a merged/new object without ever writing it back into TASKS,
+    // so every mutation "succeeded" (resolved with the right-looking object)
+    // but silently reverted on the next get_local_tasks() refetch. Found
+    // while verifying Task 9's description-edit round trip: save, reopen,
+    // and the reopened value was still the pre-edit one. Fixed for every
+    // task-mutation command here, not just update, since they all shared
+    // the same bug and every future task's harness verification depends on
+    // mutations actually persisting for the session.
     create_local_task: function (args) {
-      return task({
+      var t = task({
         id: newId('task'),
         content: (args && args.content) || 'New task',
         description: (args && args.description) || null,
@@ -1009,36 +1018,77 @@
         created_at: iso(TODAY, '09:30:00'),
         updated_at: iso(TODAY, '09:30:00'),
       })
+      TASKS.push(t)
+      return t
     },
     update_local_task: function (args) {
       var t = findTask(args && args.id) || TASKS[0]
-      var merged = Object.assign({}, t)
       if (args) {
-        if (args.content !== undefined && args.content !== null) merged.content = args.content
-        if (args.description !== undefined) merged.description = args.description
-        if (args.projectId) merged.project_id = args.projectId
-        if (args.priority !== undefined && args.priority !== null) merged.priority = args.priority
-        if (args.dueDate) merged.due_date = args.dueDate
-        if (args.clearDueDate) merged.due_date = null
-        if (args.linkedDocId !== undefined) merged.linked_doc_id = args.linkedDocId
-        if (args.dueTime) merged.due_time = args.dueTime
-        if (args.clearDueTime) { merged.due_time = null; merged.duration_minutes = null }
-        if (args.durationMinutes !== undefined && args.durationMinutes !== null) merged.duration_minutes = args.durationMinutes
-        if (args.clearDuration) merged.duration_minutes = null
-        if (args.recurrenceRule) merged.recurrence_rule = args.recurrenceRule
-        if (args.clearRecurrence) merged.recurrence_rule = null
-        if (args.sectionId) merged.section_id = args.sectionId
-        if (args.clearSection) merged.section_id = null
-        if (args.labelIds !== undefined && args.labelIds !== null) merged.labels = args.labelIds
+        if (args.content !== undefined && args.content !== null) t.content = args.content
+        if (args.description !== undefined) t.description = args.description
+        if (args.projectId) t.project_id = args.projectId
+        if (args.priority !== undefined && args.priority !== null) t.priority = args.priority
+        if (args.dueDate) t.due_date = args.dueDate
+        if (args.clearDueDate) t.due_date = null
+        if (args.linkedDocId !== undefined) t.linked_doc_id = args.linkedDocId
+        if (args.dueTime) t.due_time = args.dueTime
+        if (args.clearDueTime) { t.due_time = null; t.duration_minutes = null }
+        if (args.durationMinutes !== undefined && args.durationMinutes !== null) t.duration_minutes = args.durationMinutes
+        if (args.clearDuration) t.duration_minutes = null
+        if (args.recurrenceRule) t.recurrence_rule = args.recurrenceRule
+        if (args.clearRecurrence) t.recurrence_rule = null
+        if (args.sectionId) t.section_id = args.sectionId
+        if (args.clearSection) t.section_id = null
+        if (args.labelIds !== undefined && args.labelIds !== null) t.labels = args.labelIds
       }
-      merged.updated_at = iso(TODAY, '10:00:00')
-      return merged
+      t.updated_at = iso(TODAY, '10:00:00')
+      return Object.assign({}, t)
     },
-    update_task_status: function () { return null },
-    complete_local_task: function () { return null },
-    uncomplete_local_task: function () { return null },
-    delete_local_task: function () { return null },
-    reorder_local_tasks: function () { return null },
+    update_task_status: function (args) {
+      var t = findTask(args && args.id)
+      if (t && args && args.status) {
+        t.status = args.status
+        t.completed = args.status === 'complete'
+        t.completed_at = t.completed ? iso(TODAY, '10:05:00') : null
+        t.updated_at = iso(TODAY, '10:05:00')
+      }
+      return null
+    },
+    complete_local_task: function (args) {
+      var t = findTask(args && args.id)
+      if (t) {
+        t.completed = true
+        t.status = 'complete'
+        t.completed_at = iso(TODAY, '10:05:00')
+        t.updated_at = iso(TODAY, '10:05:00')
+      }
+      return null
+    },
+    uncomplete_local_task: function (args) {
+      var t = findTask(args && args.id)
+      if (t) {
+        t.completed = false
+        t.status = 'todo'
+        t.completed_at = null
+        t.updated_at = iso(TODAY, '10:05:00')
+      }
+      return null
+    },
+    delete_local_task: function (args) {
+      var id = args && args.id
+      for (var i = TASKS.length - 1; i >= 0; i--) {
+        if (TASKS[i].id === id || TASKS[i].parent_id === id) TASKS.splice(i, 1)
+      }
+      return null
+    },
+    reorder_local_tasks: function (args) {
+      var ids = (args && args.taskIds) || []
+      ids.forEach(function (id, i) {
+        var t = findTask(id)
+        if (t) t.position = i
+      })
+      return null
+    },
 
     // Misc
     open_url: function () { return null },
