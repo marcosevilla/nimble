@@ -155,6 +155,16 @@ export function TaskComposerCard({ defaults, onClose, onCreated, closeOnSave }: 
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
+        // Modal mount (QuickCreateDialog): this card sits inside the Dialog
+        // Popup, and Base UI's useDismiss/closeOnEscapeKeyDown doesn't check
+        // defaultPrevented — only stopping propagation keeps the Dialog from
+        // unconditionally closing itself (losing a dirty draft even when the
+        // user clicks Cancel on the confirm below). Stop it on both branches:
+        // the non-dirty branch already closes via our own onClose(), so
+        // letting the Dialog *also* handle the same Escape would just be a
+        // harmless double-close today, but stays correct if onClose ever
+        // stops being synchronous-with-unmount.
+        e.stopPropagation()
         if (dirty) {
           if (window.confirm('Discard this task?')) onClose()
         } else {
