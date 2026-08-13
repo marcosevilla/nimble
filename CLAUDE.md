@@ -121,6 +121,8 @@ nimble/
 - Don't use `<button>` inside `<TooltipTrigger>` — causes nested button crash in Tauri webview
 
 ## Known Gotchas
+- The browser QA harness (vite + mock-tauri) cannot catch Tauri **capability/permission** gaps — `data-tauri-drag-region` was silently dead in the real app for months because `core:window:allow-start-dragging` was missing from `src-tauri/capabilities/default.json`. Real-app dev-log checks are the only net for this class.
+- `tools/mock-tauri.js`'s `update_local_task` must mirror Rust's field-application ORDER (all sets before all clears; `clear_due_time` nulls both `due_time` AND `duration_minutes` — see `nimble-core/src/db/tasks.rs`). The mock previously applied clears first, which masked a real data-loss bug from every harness run.
 - Todoist API pagination cursors are base64-ish opaque tokens containing `+`, `/`, `=` — appending them to a URL via naive string concat mangles `+` into a space and breaks the next request (symptom: an exactly-500-task cap from Todoist's v1 API). Always build these URLs with `reqwest::Url::parse(...).query_pairs_mut().append_pair()`.
 - React flex truncation requires `min-w-0` on EVERY ancestor in the flex chain, not just the truncating element — missing it on `<main>` (a flex-1 child inside overflow-y-auto) lets intrinsic content width silently push the whole page wide into horizontal scroll. Add `overflow-x-hidden` on the scroll container as a belt-and-suspenders guarantee.
 - Mobile: `min-h-dvh` + `overflow-y-auto` does not enable scrolling if inner content uses `flex-1` without a constrained parent height. Use `h-dvh` + `flex flex-col` on the outer container so `flex-1` children get bounded remaining space.
