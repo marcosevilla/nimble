@@ -282,7 +282,7 @@ export function SectionedTaskList({
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <div className="space-y-4">
+      <div className="min-w-0">
         <TaskLane
           containerId={UNSECTIONED}
           itemIds={containers[UNSECTIONED] ?? []}

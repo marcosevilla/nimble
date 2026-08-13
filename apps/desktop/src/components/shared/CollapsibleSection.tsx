@@ -33,9 +33,11 @@ export function CollapsibleSection({
       <div className="group/section flex items-center">
         <CollapsibleTrigger
           className={cn(
-            'flex flex-1 items-center gap-1.5 text-left rounded-md px-2 transition-colors hover:bg-accent/20',
+            'flex flex-1 items-center gap-1.5 text-left transition-colors',
             '[&>svg:first-child]:data-[panel-open]:rotate-90',
-            variant === 'primary' ? 'py-2' : 'py-1.5',
+            variant === 'primary'
+              ? 'pt-5 pb-1 text-body-strong text-foreground'
+              : 'rounded-md px-2 py-1.5 hover:bg-accent/20',
           )}
         >
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-150" />

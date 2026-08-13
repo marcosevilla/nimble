@@ -27,8 +27,8 @@ function TaskCreator({
   }
 
   return (
-    <div className="flex items-center gap-2 py-1 pl-2">
-      <Plus className="size-3.5 text-muted-foreground shrink-0" />
+    <div className="pt-5 flex items-center gap-2 text-meta text-muted-foreground hover:text-foreground">
+      <Plus className="size-3 shrink-0" />
       <Input
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -160,15 +160,15 @@ export function ProjectDetailPage({
   )
 
   return (
-    <div className="flex-1 overflow-y-auto flex flex-col min-w-0">
+    <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-w-0">
       <PageHeader
         title={projectTitle}
         meta={`${topLevelCount} active task${topLevelCount !== 1 ? 's' : ''}`}
         backAction={{ label: 'All Tasks', onClick: onBack }}
         secondary={filterPills}
       />
-      <div className="py-6 flex-1">
-        <div className="w-full space-y-4">
+      <div className="py-6 flex-1 min-w-0">
+        <div className="w-full max-w-[600px] mx-auto min-w-0">
         {/* Task list */}
         {filteredTasks.length === 0 ? (
           <p className="text-body text-muted-foreground text-center py-8">
