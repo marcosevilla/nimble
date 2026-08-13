@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
-import { TaskComposerCard } from '@/components/tasks/TaskComposerCard'
 import { TaskListHeader } from '@/components/tasks/TaskListHeader'
 import { SelectionActionBar } from '@/components/tasks/SelectionActionBar'
 import { PageDragRegion } from '@/components/shared/PageDragRegion'
 import { listSections, listLabels } from '@/services/tauri'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView } from '@/lib/task-view'
+import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { Plus } from 'lucide-react'
 import type { Project, LocalTask, Section, Label } from '@nimble/types'
 
@@ -30,7 +30,6 @@ export function ProjectDetailPage({
 }: ProjectDetailPageProps) {
   const [sections, setSections] = useState<Section[]>([])
   const [labels, setLabels] = useState<Label[]>([])
-  const [composerOpen, setComposerOpen] = useState(false)
 
   // Lazy-initialized from localStorage; the parent remounts this component
   // (key={project.id} in TasksPage) on project switch, so this only ever
@@ -155,23 +154,18 @@ export function ProjectDetailPage({
               />
             )}
 
-            {/* "Add a task" row — replaces itself with the composer card */}
+            {/* "Add a task" row — opens the shared QuickCreateDialog modal,
+                seeded with this project, instead of swapping in an inline
+                composer (Marco QA round 3, item 3). */}
             <div className="pt-5">
-              {composerOpen ? (
-                <TaskComposerCard
-                  defaults={{ projectId: project.id }}
-                  onClose={() => setComposerOpen(false)}
-                />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setComposerOpen(true)}
-                  className="flex w-full items-center gap-2 text-left text-meta text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <Plus className="size-3 shrink-0" />
-                  Add a task...
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => useQuickCreateStore.getState().openCreate({ projectId: project.id })}
+                className="flex w-full items-center gap-2 text-left text-meta text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Plus className="size-3 shrink-0" />
+                Add a task...
+              </button>
             </div>
 
             <SelectionActionBar />

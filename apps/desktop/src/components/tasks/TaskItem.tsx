@@ -136,60 +136,73 @@ export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleP
     <div
       onClick={onOpen}
       className={cn(
-        'group flex h-10 items-center gap-3 min-w-0 border-b border-secondary transition-colors hover:bg-accent/20 cursor-default',
+        'group relative flex h-10 items-center min-w-0 transition-colors hover:bg-accent/20 cursor-default',
         focused && 'bg-accent/10',
         isSelected && 'bg-accent-blue/10',
         isCompleting && 'animate-task-complete',
         className,
       )}
     >
-      {/* Hover cluster — grip then checkbox, both in fixed-width in-flow
-          slots so revealing them on hover/selection never shifts content. */}
-      <div className="flex w-4 shrink-0 items-center justify-center">
-        {showGrip && (
-          <GripVertical
-            aria-label="Drag to reorder"
-            className="size-3 shrink-0 cursor-grab text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-            onClick={(e) => e.stopPropagation()}
-            {...dragHandleProps}
-          />
-        )}
-      </div>
-      {selectable && <SelectionCheckbox id={task.id} type="task" allIds={allIds} />}
-
-      {/* Status (before priority per updated row anatomy) */}
-      {task.source === 'local' && task.status ? (
-        <StatusDropdown taskId={task.id} status={task.status} />
-      ) : (
-        <div className="w-4 shrink-0" />
+      {/* Hover cluster — grip then checkbox, absolutely positioned to hang
+          OUTSIDE the list column to the left (Marco QA round 3, item 1).
+          They no longer occupy in-flow slots, so the status icon below stays
+          flush with the section/page title's `pl-4` left edge whether or
+          not the cluster is revealed. `right-full` pins the cluster's right
+          edge to this row's own left edge (before the content's `ml-4`), so
+          it never nudges the border or the status icon. */}
+      {(showGrip || selectable) && (
+        <div className="absolute right-full top-0 flex h-10 items-center gap-1 pr-2">
+          {showGrip && (
+            <GripVertical
+              aria-label="Drag to reorder"
+              className="size-3 shrink-0 cursor-grab text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+              onClick={(e) => e.stopPropagation()}
+              {...dragHandleProps}
+            />
+          )}
+          {selectable && <SelectionCheckbox id={task.id} type="task" allIds={allIds} />}
+        </div>
       )}
 
-      {/* Priority */}
-      <PriorityBars priority={task.priority} />
-
-      {/* Subtask indicator */}
-      {task.isSubtask && <SubtaskBadge />}
-
-      {/* Task name — the whole row handles click/open, so this is plain text */}
-      <span
-        className={cn(
-          'flex-1 min-w-0 truncate text-body',
-          completed && 'text-muted-foreground line-through',
+      {/* Content — offset via margin (not padding) so the border below
+          starts exactly at the status icon's left edge (matching the
+          section/page title's `pl-4` inset) instead of under the gutter or
+          the overhanging hover cluster. */}
+      <div className="flex flex-1 h-10 items-center gap-3 min-w-0 ml-4 border-b border-secondary">
+        {/* Status (before priority per updated row anatomy) */}
+        {task.source === 'local' && task.status ? (
+          <StatusDropdown taskId={task.id} status={task.status} />
+        ) : (
+          <div className="w-4 shrink-0" />
         )}
-      >
-        {task.content}
-      </span>
 
-      {/* Right side metadata — flush right */}
-      <div className="ml-auto flex shrink-0 items-center gap-2">
-        {task.subtaskStats && task.subtaskStats.total > 0 && (
-          <SubtaskSummary done={task.subtaskStats.done} total={task.subtaskStats.total} />
-        )}
-        {visibleLabels.map((label, i) => (
-          <LabelChipPill key={`${label.name}-${i}`} name={label.name} color={label.color} />
-        ))}
-        {overflowCount > 0 && <LabelChipPill name={`+${overflowCount}`} />}
-        {task.dueDate && <DueDateBadge date={task.dueDate} />}
+        {/* Priority */}
+        <PriorityBars priority={task.priority} />
+
+        {/* Subtask indicator */}
+        {task.isSubtask && <SubtaskBadge />}
+
+        {/* Task name — the whole row handles click/open, so this is plain text */}
+        <span
+          className={cn(
+            'flex-1 min-w-0 truncate text-body',
+            completed && 'text-muted-foreground line-through',
+          )}
+        >
+          {task.content}
+        </span>
+
+        {/* Right side metadata — flush right */}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {task.subtaskStats && task.subtaskStats.total > 0 && (
+            <SubtaskSummary done={task.subtaskStats.done} total={task.subtaskStats.total} />
+          )}
+          {visibleLabels.map((label, i) => (
+            <LabelChipPill key={`${label.name}-${i}`} name={label.name} color={label.color} />
+          ))}
+          {overflowCount > 0 && <LabelChipPill name={`+${overflowCount}`} />}
+          {task.dueDate && <DueDateBadge date={task.dueDate} />}
+        </div>
       </div>
     </div>
   )

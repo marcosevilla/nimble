@@ -55,6 +55,10 @@ function TaskLane({
 }: TaskLaneProps) {
   const { setNodeRef } = useDroppable({ id: containerId, disabled: !dragEnabled })
 
+  // Subtasks no longer render as nested rows in list surfaces (Marco QA
+  // round 3, item 2) — they live exclusively on the Task Details page.
+  // `subtaskMap` is still consulted here just for each parent row's
+  // `SubtaskSummary` count chip.
   const rows = itemIds.flatMap((id) => {
     const task = taskMap[id]
     if (!task) return []
@@ -85,17 +89,6 @@ function TaskLane({
           />
         )}
       </div>,
-      ...subtasks.map((sub) => (
-        <div key={sub.id}>
-          <LocalTaskRow
-            task={sub}
-            projectName={projectName}
-            projectColor={projectColor}
-            onDelete={onDelete}
-            isSubtask
-          />
-        </div>
-      )),
     ]
   })
 

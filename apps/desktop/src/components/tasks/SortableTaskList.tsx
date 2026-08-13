@@ -81,28 +81,6 @@ export function SortableTaskItem({
   )
 }
 
-function SubtaskRow({
-  task,
-  projectName,
-  projectColor,
-  onDelete,
-}: {
-  task: LocalTask
-  projectName?: string
-  projectColor?: string
-  onDelete: (id: string) => void
-}) {
-  return (
-    <LocalTaskRow
-      task={task}
-      projectName={projectName}
-      projectColor={projectColor}
-      onDelete={onDelete}
-      isSubtask
-    />
-  )
-}
-
 interface SortableTaskListProps {
   tasks: LocalTask[]
   allTasks: LocalTask[]
@@ -177,8 +155,11 @@ export function SortableTaskList({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <SortableContext items={items} strategy={verticalListSortingStrategy}>
-        {/* No left gutter needed — the drag handle is now in-flow inside
-            each row (TaskItem's hover cluster), not absolute-positioned. */}
+        {/* No left gutter needed — the drag handle is now absolutely
+            positioned outside the row (TaskItem's hover cluster). Subtasks
+            no longer render as nested rows here either (Marco QA round 3,
+            item 2) — `subtaskMap` is only consulted for each row's
+            `SubtaskSummary` count chip. */}
         <div>
           {items.flatMap((id) => {
             const task = taskMap[id]
@@ -202,18 +183,6 @@ export function SortableTaskList({
                   onAddSubtask={onAddSubtask}
                 />
               </div>,
-              ...subtasks.map((sub) => {
-                return (
-                  <div key={sub.id}>
-                    <SubtaskRow
-                      task={sub}
-                      projectName={projectName}
-                      projectColor={projectColor}
-                      onDelete={onDelete}
-                    />
-                  </div>
-                )
-              }),
             ]
           })}
         </div>

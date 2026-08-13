@@ -26,10 +26,6 @@ interface TaskComposerCardProps {
   defaults?: TaskComposerDefaults
   onClose: () => void
   onCreated?: (task: LocalTask) => void
-  /** Modal usage (QuickCreateDialog) closes on a successful save. Inline
-   * usage (list "Add a task" row, details "Add subtask") omits this and
-   * stays mounted with fields reset for rapid entry (Decision 16). */
-  closeOnSave?: boolean
 }
 
 function buildInitialChipValues(defaults?: TaskComposerDefaults): ChipValues {
@@ -64,16 +60,19 @@ function chipValuesEqual(a: ChipValues, b: ChipValues): boolean {
 }
 
 /**
- * Unified create-task card (Task 8) — replaces both the old inline task
- * editor and `QuickCreateDialog`'s form body. Create-only: editing an
- * existing task happens on Task Details (Decision 14 + 18), never here.
+ * Unified create-task card — replaces both the old inline task editor and
+ * `QuickCreateDialog`'s form body. Create-only: editing an existing task
+ * happens on Task Details, never here.
  *
- * Mounted three ways: inline in the 600px list column ("Add a task"),
- * inline on Task Details ("Add subtask", with `defaults.parentId`), and
- * inside a thin `Dialog` shell for the ⌘/Q quick-create modal
- * (`closeOnSave`).
+ * Modal-only (Marco QA round 3, item 3): mounted exclusively inside
+ * `QuickCreateDialog`'s `Dialog`, closing on a successful save. Every
+ * creation entry point (the "Q" shortcut, a list's "Add a task" row, a task
+ * detail's "Add subtask", with `defaults.parentId`) opens that shared
+ * dialog with its own defaults via `useQuickCreateStore` rather than
+ * mounting this card inline — the inline mount points this component used
+ * to support were removed by explicit design decision.
  */
-export function TaskComposerCard({ defaults, onClose, onCreated, closeOnSave }: TaskComposerCardProps) {
+export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerCardProps) {
   const dp = useDataProvider()
   const { projects } = useProjects()
 
@@ -90,7 +89,6 @@ export function TaskComposerCard({ defaults, onClose, onCreated, closeOnSave }: 
   const [labels, setLabels] = useState<Label[]>([])
   const [saving, setSaving] = useState(false)
 
-  const titleRef = useRef<HTMLInputElement>(null)
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -112,12 +110,6 @@ export function TaskComposerCard({ defaults, onClose, onCreated, closeOnSave }: 
 
   const canSave = title.trim() !== ''
 
-  const resetFields = useCallback(() => {
-    setTitle('')
-    setDescription('')
-    setChipValues(initialChipValues)
-  }, [initialChipValues])
-
   const handleSave = useCallback(async () => {
     if (!canSave || saving) return
     setSaving(true)
@@ -138,18 +130,13 @@ export function TaskComposerCard({ defaults, onClose, onCreated, closeOnSave }: 
       emitTasksChanged()
       taskToast('Task created', created.id)
       onCreated?.(created)
-      if (closeOnSave) {
-        onClose()
-      } else {
-        resetFields()
-        requestAnimationFrame(() => titleRef.current?.focus())
-      }
+      onClose()
     } catch (e) {
       toast.error(`Failed to create task: ${e}`)
     } finally {
       setSaving(false)
     }
-  }, [canSave, saving, dp, title, description, chipValues, defaults?.parentId, onCreated, closeOnSave, onClose, resetFields])
+  }, [canSave, saving, dp, title, description, chipValues, defaults?.parentId, onCreated, onClose])
 
   const handleCardKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -206,7 +193,6 @@ export function TaskComposerCard({ defaults, onClose, onCreated, closeOnSave }: 
 
         {/* Title */}
         <Input
-          ref={titleRef}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={handleTitleKeyDown}

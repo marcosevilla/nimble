@@ -9,9 +9,11 @@ import { cn } from '@/lib/utils'
 import { List, PanelLeftOpen } from 'lucide-react'
 import { ProjectSidebar } from '@/components/tasks/ProjectSidebar'
 import { ProjectDetailPage } from '@/components/tasks/ProjectDetailPage'
+import { TaskDetailPage } from '@/components/detail/TaskDetailPage'
 import { IconButton } from '@/components/shared/IconButton'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { useTasksNavStore } from '@/stores/tasksNavStore'
+import { useDetailStore } from '@/stores/detailStore'
 import { listLabels } from '@/services/tauri'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView, type GroupBy } from '@/lib/task-view'
 import type { LocalTask, Label } from '@nimble/types'
@@ -138,6 +140,14 @@ export function TasksPage() {
   }, [pendingProjectId])
   const [labels, setLabels] = useState<Label[]>([])
 
+  // Task details opened while on this page render in the content area below
+  // (instead of Dashboard replacing this whole page), so the project
+  // sidebar stays mounted and interactive (Marco QA round 3, item 4).
+  const detailTarget = useDetailStore((s) => s.target)
+  const detailMode = useDetailStore((s) => s.mode)
+  const closeDetail = useDetailStore((s) => s.close)
+  const showingDetail = detailTarget?.type === 'task' && detailMode === 'body'
+
   const sidebarCollapsed = useLayoutStore((s) => s.tasksProjectSidebarCollapsed)
   const setSidebarCollapsed = useLayoutStore((s) => s.setTasksProjectSidebarCollapsed)
 
@@ -169,6 +179,17 @@ export function TasksPage() {
     [tasks, addTask, refresh],
   )
 
+  // Selecting a project (from either sidebar variant) always shows that
+  // project's list — if a task detail is currently open in the content
+  // area, close it first so the list actually becomes visible.
+  const handleSelectProject = useCallback(
+    (id: string | null) => {
+      if (showingDetail) closeDetail()
+      setSelectedProjectId(id)
+    },
+    [showingDetail, closeDetail],
+  )
+
   // Find the selected project object
   const selectedProject = useMemo(() => {
     if (!selectedProjectId) return null
@@ -198,7 +219,7 @@ export function TasksPage() {
               All Tasks while the sidebar is collapsed. Always show it here
               regardless of collapsed state. */}
           <IconButton
-            onClick={() => setSelectedProjectId(null)}
+            onClick={() => handleSelectProject(null)}
             size="lg"
             title="All Tasks"
             className={cn(selectedProjectId === null && 'bg-accent/30 text-foreground')}
@@ -218,7 +239,7 @@ export function TasksPage() {
           projects={projects}
           tasks={tasks}
           selectedProjectId={selectedProjectId}
-          onSelectProject={setSelectedProjectId}
+          onSelectProject={handleSelectProject}
           onAddProject={addProject}
           onRenameProject={renameProject}
           onUpdateProjectColor={updateProjectColor}
@@ -227,7 +248,17 @@ export function TasksPage() {
       )}
 
       {/* Main content */}
-      {selectedProject ? (
+      {showingDetail && detailTarget ? (
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <PageDragRegion />
+          <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 p-6">
+            {/* Keyed by task id — same remount-per-task semantics Dashboard
+                used to provide via its own `key={`detail-${id}`}` wrapper,
+                now that this page stays mounted across detail open/close. */}
+            <TaskDetailPage key={detailTarget.id} />
+          </div>
+        </div>
+      ) : selectedProject ? (
         <ProjectDetailPage
           // Remount on project switch — each project's view state
           // (groupBy/filter, section list) is loaded fresh rather than
@@ -236,7 +267,7 @@ export function TasksPage() {
           project={selectedProject}
           tasks={tasks}
           allProjects={projects}
-          onSelectProject={setSelectedProjectId}
+          onSelectProject={handleSelectProject}
           onDeleteTask={remove}
           onAddSubtask={handleAddSubtask}
           onUpdated={refresh}

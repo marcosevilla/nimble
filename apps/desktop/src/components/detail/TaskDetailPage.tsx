@@ -13,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Sparkles, Plus, Settings, ChevronLeft } from 'lucide-react'
 import { taskToast } from '@/lib/taskToast'
 import { predictReschedule } from '@/lib/recurrence'
-import { TaskComposerCard } from '@/components/tasks/TaskComposerCard'
+import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { InlineTitle } from './InlineTitle'
 import { TiptapEditor } from '@/components/docs/TiptapEditor'
 import { Textarea } from '@/components/ui/textarea'
@@ -48,7 +48,6 @@ export function TaskDetailPage() {
   const { task: parentTask } = useTaskDetail(task?.parent_id ?? null)
   const { projects } = useProjects()
 
-  const [addingSubtask, setAddingSubtask] = useState(false)
   const [breakingDown, setBreakingDown] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
 
@@ -174,7 +173,6 @@ export function TaskDetailPage() {
       dp.activity.log('task_breakdown_applied', task.id, { subtask_count: created }).catch(() => {})
       toast.success(`Created ${created} subtasks`)
       emitTasksChanged()
-      setAddingSubtask(false)
     } catch (e) {
       toast.error(`Breakdown failed: ${e}`)
     } finally {
@@ -589,23 +587,23 @@ export function TaskDetailPage() {
 
           {!breakingDown && (
             <div className="pt-1">
-              {addingSubtask ? (
-                <TaskComposerCard
-                  defaults={{ projectId: task.project_id, parentId: task.id }}
-                  onClose={() => setAddingSubtask(false)}
-                />
-              ) : (
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setAddingSubtask(true)}
-                    className="flex items-center gap-2 text-left text-meta text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Plus className="size-3 shrink-0" />
-                    Add subtask
-                  </button>
-                </div>
-              )}
+              {/* Opens the shared QuickCreateDialog modal, seeded with this
+                  task as parent, instead of swapping in an inline composer
+                  (Marco QA round 3, item 3). */}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    useQuickCreateStore
+                      .getState()
+                      .openCreate({ projectId: task.project_id, parentId: task.id })
+                  }
+                  className="flex items-center gap-2 text-left text-meta text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Plus className="size-3 shrink-0" />
+                  Add subtask
+                </button>
+              </div>
             </div>
           )}
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/appStore'
@@ -10,6 +10,7 @@ import { HelpPanel } from '@/components/shared/HelpPanel'
 import { BulkActionBar } from '@/components/shared/BulkActionBar'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { QuickCreateDialog } from '@/components/tasks/QuickCreateDialog'
+import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { TodayPage } from '@/components/pages/TodayPage'
 import { TasksPage } from '@/components/pages/TasksPage'
 import { InboxPage } from '@/components/pages/InboxPage'
@@ -57,7 +58,6 @@ function PageContent({ page }: { page: string }) {
 export function Dashboard() {
   const currentPage = useAppStore((s) => s.currentPage)
   const setCurrentPage = useAppStore((s) => s.setCurrentPage)
-  const [quickCreateOpen, setQuickCreateOpen] = useState(false)
 
   // Load nav order from SQLite on mount
   const loadNavOrder = useLayoutStore((s) => s.loadNavOrder)
@@ -164,7 +164,7 @@ export function Dashboard() {
       // Q — open quick create dialog (only when not typing in an input)
       if (e.key === 'q' && !isInput && !meta) {
         e.preventDefault()
-        setQuickCreateOpen(true)
+        useQuickCreateStore.getState().openCreate()
         return
       }
 
@@ -212,7 +212,13 @@ export function Dashboard() {
         <div ref={scrollRef} className="flex flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
           {focusActive && !focusCompact ? (
             <FocusView />
-          ) : detailTarget && detailMode === 'body' ? (
+          ) : detailTarget && detailMode === 'body' && !(currentPage === 'tasks' && detailTarget.type === 'task') ? (
+            // Task details opened while ON the Tasks page render INSIDE
+            // TasksPage instead (see its `showingDetail` branch) so the
+            // project sidebar stays mounted and interactive (Marco QA
+            // round 3, item 4). Every other body-mode detail — including
+            // task details opened from other pages — keeps this full-width
+            // replacement behavior.
             <main key={`detail-${detailTarget.id}`} className="flex-1 min-w-0 p-6">
               <div className={cn('mx-auto w-full', contentMaxW)}>
                 {detailTarget.type === 'task' ? <TaskDetailPage /> : detailTarget.type === 'goal' ? <GoalDetailPage /> : <CaptureDetailPage />}
@@ -238,11 +244,8 @@ export function Dashboard() {
         )
       )}
 
-      {/* Quick create task dialog */}
-      <QuickCreateDialog
-        open={quickCreateOpen}
-        onClose={() => setQuickCreateOpen(false)}
-      />
+      {/* Quick create task dialog — self-contained via useQuickCreateStore */}
+      <QuickCreateDialog />
 
       {/* Bulk action bar — Tasks page has its own in-list SelectionActionBar
           (Task 10, Figma decision 5b) for task selection there; this global,
