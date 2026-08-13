@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
 import { TaskListHeader } from '@/components/tasks/TaskListHeader'
+import { SelectionActionBar } from '@/components/tasks/SelectionActionBar'
 import { PageDragRegion } from '@/components/shared/PageDragRegion'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
@@ -108,6 +109,8 @@ function AllTasksView({
                 onUpdated={refresh}
               />
             )}
+
+            <SelectionActionBar />
           </div>
         </div>
       </div>

@@ -244,8 +244,11 @@ export function Dashboard() {
         onClose={() => setQuickCreateOpen(false)}
       />
 
-      {/* Bulk action bar */}
-      <BulkActionBar />
+      {/* Bulk action bar — Tasks page has its own in-list SelectionActionBar
+          (Task 10, Figma decision 5b) for task selection there; this global,
+          viewport-fixed bar stays mounted for every other surface that still
+          drives selectionStore (e.g. Inbox's task + capture checkboxes). */}
+      {currentPage !== 'tasks' && <BulkActionBar />}
 
       {/* Help panel (shortcuts + roadmap) */}
       <HelpPanel />

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
 import { TaskComposerCard } from '@/components/tasks/TaskComposerCard'
 import { TaskListHeader } from '@/components/tasks/TaskListHeader'
+import { SelectionActionBar } from '@/components/tasks/SelectionActionBar'
 import { PageDragRegion } from '@/components/shared/PageDragRegion'
 import { listSections, listLabels } from '@/services/tauri'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView } from '@/lib/task-view'
@@ -172,6 +173,8 @@ export function ProjectDetailPage({
                 </button>
               )}
             </div>
+
+            <SelectionActionBar />
           </div>
         </div>
       </div>
