@@ -115,9 +115,16 @@ interface TaskItemProps {
    * drag reordering is disabled and a dead grip icon would be misleading.
    * Defaults to true so other call sites are unaffected. */
   showGrip?: boolean
+  /** Hides the SelectionCheckbox entirely — used by TaskDetailPage's subtask
+   * rows, which have no action bar mountable in body-mode detail (BulkActionBar
+   * is gated to the tasks list page, SelectionActionBar lives on list pages
+   * that are unmounted here), so a hover-revealed checkbox there would be a
+   * dead end only escapable via Escape. Defaults to true so list-page call
+   * sites keep selecting. */
+  selectable?: boolean
 }
 
-export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleProps, showGrip = true }: TaskItemProps) {
+export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleProps, showGrip = true, selectable = true }: TaskItemProps) {
   const isSelected = useSelectionStore((s) => s.selectedIds.has(task.id))
   const isCompleting = useSelectionStore((s) => s.completingTaskIds.has(task.id))
 
@@ -148,7 +155,7 @@ export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleP
           />
         )}
       </div>
-      <SelectionCheckbox id={task.id} type="task" allIds={allIds} />
+      {selectable && <SelectionCheckbox id={task.id} type="task" allIds={allIds} />}
 
       {/* Status (before priority per updated row anatomy) */}
       {task.source === 'local' && task.status ? (

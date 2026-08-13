@@ -354,7 +354,7 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
           defaultOpen={true}
           className="-mt-3!"
         >
-          <div className="divide-y divide-border/30">
+          <div>
             {topLevelLocal.map((task) => {
               const subs = subtaskMap[task.id] ?? []
               const done = subs.filter((s) => s.completed || s.status === 'complete').length

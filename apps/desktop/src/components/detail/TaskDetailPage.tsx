@@ -193,15 +193,39 @@ export function TaskDetailPage() {
       touched = true
     }
     if (patch.due !== undefined) {
-      updates.dueDate = patch.due.dueDate ?? undefined
-      updates.clearDueDate = patch.due.dueDate === null
-      updates.dueTime = patch.due.dueTime ?? undefined
-      updates.clearDueTime = patch.due.dueTime === null
-      updates.durationMinutes = patch.due.durationMinutes ?? undefined
-      updates.clearDuration = patch.due.durationMinutes === null
-      updates.recurrenceRule = patch.due.recurrenceRule ?? undefined
-      updates.clearRecurrence = patch.due.recurrenceRule === null
-      touched = true
+      // DueDatePopover always emits the full DueValue (every field, even
+      // ones untouched by this interaction) — deriving clear flags from
+      // "value is null" instead of "value CHANGED" meant e.g. setting
+      // Duration on a task with no due time sent clearDueTime: true, which
+      // the Rust backend applies AFTER setting duration_minutes and nulls
+      // both. Gate each set/clear on the incoming value actually differing
+      // from the task's current value (mirrors the retired TaskEditor's
+      // `dueTimeChanged && !dueTime && !!task.due_time` pattern), and only
+      // clear a field the task actually has — this also stops the 3-4
+      // no-op clear UPDATEs (activity-log + sync churn) on every due patch.
+      const due = patch.due
+      let dueTouched = false
+      if (due.dueDate !== (task.due_date ?? null)) {
+        updates.dueDate = due.dueDate ?? undefined
+        updates.clearDueDate = due.dueDate === null && !!task.due_date
+        dueTouched = true
+      }
+      if (due.dueTime !== (task.due_time ?? null)) {
+        updates.dueTime = due.dueTime ?? undefined
+        updates.clearDueTime = due.dueTime === null && !!task.due_time
+        dueTouched = true
+      }
+      if (due.durationMinutes !== (task.duration_minutes ?? null)) {
+        updates.durationMinutes = due.durationMinutes ?? undefined
+        updates.clearDuration = due.durationMinutes === null && task.duration_minutes != null
+        dueTouched = true
+      }
+      if (due.recurrenceRule !== (task.recurrence_rule ?? null)) {
+        updates.recurrenceRule = due.recurrenceRule ?? undefined
+        updates.clearRecurrence = due.recurrenceRule === null && !!task.recurrence_rule
+        dueTouched = true
+      }
+      if (dueTouched) touched = true
     }
     if (patch.labelIds !== undefined) {
       updates.labelIds = patch.labelIds
@@ -528,6 +552,7 @@ export function TaskDetailPage() {
                   task={item}
                   onOpen={() => drillDown({ type: 'task', id: item.id })}
                   showGrip={false}
+                  selectable={false}
                 />
               ))}
             </div>

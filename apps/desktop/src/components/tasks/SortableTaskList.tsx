@@ -179,7 +179,7 @@ export function SortableTaskList({
       <SortableContext items={items} strategy={verticalListSortingStrategy}>
         {/* No left gutter needed — the drag handle is now in-flow inside
             each row (TaskItem's hover cluster), not absolute-positioned. */}
-        <div className="divide-y divide-border/20">
+        <div>
           {items.flatMap((id) => {
             const task = taskMap[id]
             if (!task) return []

@@ -1023,6 +1023,14 @@
     },
     update_local_task: function (args) {
       var t = findTask(args && args.id) || TASKS[0]
+      // Ordering mirrors nimble-core/src/db/tasks.rs update_local_task
+      // exactly: all "set" updates apply first, then "clear" updates —
+      // and clearDueTime nulls BOTH due_time and duration_minutes, AFTER
+      // the duration_minutes set above it has already run. Get this order
+      // wrong (e.g. clearDueTime before the durationMinutes set) and the
+      // mock silently diverges from prod: setting Duration on a task with
+      // no due time would apply, then get wiped, instead of surfacing the
+      // real bug the harness is meant to catch.
       if (args) {
         if (args.content !== undefined && args.content !== null) t.content = args.content
         if (args.description !== undefined) t.description = args.description
@@ -1032,13 +1040,13 @@
         if (args.clearDueDate) t.due_date = null
         if (args.linkedDocId !== undefined) t.linked_doc_id = args.linkedDocId
         if (args.dueTime) t.due_time = args.dueTime
-        if (args.clearDueTime) { t.due_time = null; t.duration_minutes = null }
         if (args.durationMinutes !== undefined && args.durationMinutes !== null) t.duration_minutes = args.durationMinutes
-        if (args.clearDuration) t.duration_minutes = null
         if (args.recurrenceRule) t.recurrence_rule = args.recurrenceRule
-        if (args.clearRecurrence) t.recurrence_rule = null
         if (args.sectionId) t.section_id = args.sectionId
+        if (args.clearDueTime) { t.due_time = null; t.duration_minutes = null }
+        if (args.clearRecurrence) t.recurrence_rule = null
         if (args.clearSection) t.section_id = null
+        if (args.clearDuration) t.duration_minutes = null
         if (args.labelIds !== undefined && args.labelIds !== null) t.labels = args.labelIds
       }
       t.updated_at = iso(TODAY, '10:00:00')

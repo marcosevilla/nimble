@@ -102,7 +102,7 @@ function TaskLane({
   const body = (
     <div
       ref={dragEnabled ? setNodeRef : undefined}
-      className="divide-y divide-border/20 min-h-2"
+      className="min-h-2"
     >
       {itemIds.length === 0 && emptyLabel && (
         <p className="py-2 text-label text-muted-foreground">{emptyLabel}</p>
