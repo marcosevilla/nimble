@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { format, parseISO } from 'date-fns'
 import { X } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
@@ -93,6 +93,10 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
   const [customMinutes, setCustomMinutes] = useState('')
   const [customInterval, setCustomInterval] = useState('1')
   const [customUnit, setCustomUnit] = useState<RecurrenceUnit>('day')
+  // Sibling-control containers for the two custom-input blur races below —
+  // see commitCustomMinutes/commitCustomRecurrence.
+  const durationRowRef = useRef<HTMLDivElement>(null)
+  const repeatSectionRef = useRef<HTMLDivElement>(null)
 
   const selectedDate = value.dueDate ? parseISO(value.dueDate) : undefined
 
@@ -125,7 +129,18 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
     setCustomMinutes('')
   }
 
-  const commitCustomMinutes = () => {
+  // relatedTarget is the element about to receive focus. When it's a sibling
+  // control inside the same expanded row (a duration chip, a repeat preset,
+  // or the unit Select's trigger), that control's own click/select handler
+  // is about to run and should be the one to decide the value — committing
+  // here first would set durationMinutes/recurrenceRule AND collapse the row
+  // (unmounting the chip) before its click ever lands, so the click gets
+  // silently swallowed and the abandoned typed-but-not-confirmed value wins
+  // instead. Skip the blur-commit in that case and let the sibling's own
+  // handler run normally; only commit when focus is truly leaving the row
+  // (e.g. clicking the calendar, or clicking outside the popover).
+  const commitCustomMinutes = (relatedTarget?: EventTarget | null) => {
+    if (relatedTarget instanceof Node && durationRowRef.current?.contains(relatedTarget)) return
     const n = Number(customMinutes)
     if (customMinutes.trim() && Number.isFinite(n) && n > 0) {
       commitDuration(Math.round(n))
@@ -137,7 +152,8 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
     setExpanded(null)
   }
 
-  const commitCustomRecurrence = (unit: RecurrenceUnit) => {
+  const commitCustomRecurrence = (unit: RecurrenceUnit, relatedTarget?: EventTarget | null) => {
+    if (relatedTarget instanceof Node && repeatSectionRef.current?.contains(relatedTarget)) return
     const n = Number(customInterval)
     if (!Number.isFinite(n) || n <= 0) return
     commitRecurrence(formatRecurrenceBase({ interval: Math.round(n), unit, time: null }))
@@ -159,7 +175,7 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
         side="bottom"
         align="start"
         sideOffset={4}
-        className="w-[228px] rounded-[10px] border border-input bg-card p-2 shadow-[0px_6px_16px_-2px_rgba(0,0,0,0.12)]"
+        className="w-[228px] rounded-[10px] border border-input bg-card p-2 shadow-[0px_6px_16px_-2px_rgba(0,0,0,0.12)] ring-0"
       >
         <Calendar
           mode="single"
@@ -209,7 +225,7 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
 
           {/* Duration */}
           {expanded === 'duration' ? (
-            <div className="flex items-center gap-1">
+            <div ref={durationRowRef} className="flex items-center gap-1">
               {DURATION_PRESETS.map((preset) => (
                 <button
                   key={preset.value}
@@ -228,7 +244,7 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
                 inputMode="numeric"
                 value={customMinutes}
                 onChange={(e) => setCustomMinutes(e.target.value.replace(/[^0-9]/g, ''))}
-                onBlur={commitCustomMinutes}
+                onBlur={(e) => commitCustomMinutes(e.relatedTarget)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') commitCustomMinutes()
                 }}
@@ -263,7 +279,7 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
 
           {/* Repeat */}
           {expanded === 'repeat' ? (
-            <div className="flex flex-col gap-0.5">
+            <div ref={repeatSectionRef} className="flex flex-col gap-0.5">
               {REPEAT_PRESETS.map((preset) => (
                 <button
                   key={preset.value}
@@ -283,7 +299,7 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
                   inputMode="numeric"
                   value={customInterval}
                   onChange={(e) => setCustomInterval(e.target.value.replace(/[^0-9]/g, ''))}
-                  onBlur={() => commitCustomRecurrence(customUnit)}
+                  onBlur={(e) => commitCustomRecurrence(customUnit, e.relatedTarget)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') commitCustomRecurrence(customUnit)
                   }}
