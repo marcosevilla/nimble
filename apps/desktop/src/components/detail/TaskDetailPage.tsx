@@ -5,6 +5,7 @@ import { useProjects } from '@/hooks/useLocalTasks'
 import { useDataProvider } from '@/services/provider-context'
 import type { Project, Section, Label } from '@nimble/types'
 import { useAppStore } from '@/stores/appStore'
+import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { cn } from '@/lib/utils'
 import { StatusDropdown } from '@/components/tasks/StatusDropdown'
@@ -262,11 +263,12 @@ export function TaskDetailPage() {
   const breadcrumbSegments = useMemo<BreadcrumbSegment[]>(() => {
     const segments: BreadcrumbSegment[] = projectChain.map((p) => ({
       label: p.name,
-      // No cross-page deep-link to a specific (possibly nested) project
-      // exists elsewhere in the app today (TasksPage's selected-project is
-      // local state, unreachable from outside) — land on Tasks / All Tasks
-      // rather than a dead click. See Task 9 report for the follow-up.
+      // TasksPage's selected-project is local state (and the component is
+      // unmounted while a body-mode detail is open), so the target project
+      // travels through the one-shot tasksNavStore handoff instead of a
+      // prop or shared selection.
       onClick: () => {
+        useTasksNavStore.getState().requestProject(p.id)
         close()
         useAppStore.getState().setCurrentPage('tasks')
       },

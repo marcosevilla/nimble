@@ -10,6 +10,7 @@ import { ProjectSidebar } from '@/components/tasks/ProjectSidebar'
 import { ProjectDetailPage } from '@/components/tasks/ProjectDetailPage'
 import { IconButton } from '@/components/shared/IconButton'
 import { useLayoutStore } from '@/stores/layoutStore'
+import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { listLabels } from '@/services/tauri'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView, type GroupBy } from '@/lib/task-view'
 import type { LocalTask, Label } from '@nimble/types'
@@ -119,7 +120,19 @@ function AllTasksView({
 export function TasksPage() {
   const { projects, loading: projectsLoading, addProject, renameProject, updateProjectColor, removeProject } = useProjects()
   const { tasks, loading: tasksLoading, addTask, remove, refresh } = useLocalTasks()
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  // Seed from the one-shot cross-page handoff (e.g. a project breadcrumb
+  // click in TaskDetailPage) — the initializer only peeks, so it stays pure;
+  // the effect below does the consume, and also covers a request that
+  // arrives while this page is already mounted (sidebar-mode detail).
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    () => useTasksNavStore.getState().pendingProjectId,
+  )
+  const pendingProjectId = useTasksNavStore((s) => s.pendingProjectId)
+  useEffect(() => {
+    if (pendingProjectId === null) return
+    setSelectedProjectId(pendingProjectId)
+    useTasksNavStore.getState().clearPendingProject()
+  }, [pendingProjectId])
   const [labels, setLabels] = useState<Label[]>([])
 
   const sidebarCollapsed = useLayoutStore((s) => s.tasksProjectSidebarCollapsed)
