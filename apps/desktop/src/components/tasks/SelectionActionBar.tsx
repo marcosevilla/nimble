@@ -26,6 +26,29 @@ const PRIORITY_OPTIONS = [
 const ACTION_BUTTON =
   'h-7 rounded-md px-2 text-body text-foreground hover:bg-accent transition-colors inline-flex items-center outline-none'
 
+const s = (n: number) => (n !== 1 ? 's' : '')
+
+/**
+ * Every batch action below loops a best-effort per-id `dp` mutation (no
+ * atomic bulk command exists), so a partial failure is possible — a stale
+ * id, a dropped IPC call, etc. Reporting the *requested* count regardless of
+ * outcome would silently claim "Deleted 3 tasks" when only 2 actually
+ * deleted, which is actively misleading for an irreversible action.
+ *
+ * `describe(n)` renders the full sentence for `n` successes (each handler
+ * supplies its own verb/object, e.g. `(n) => \`Moved ${n} task${s(n)} to
+ * Life Admin\``) so pluralization and wording stay correct at any count.
+ * All-success → one `toast.success`. Any failure (partial or total) →
+ * `toast.error` with the real success count plus how many failed.
+ */
+function reportBatch(successCount: number, total: number, describe: (n: number) => string) {
+  if (successCount === total) {
+    toast.success(describe(successCount))
+    return
+  }
+  toast.error(`${describe(successCount)} — ${total - successCount} failed`)
+}
+
 /**
  * Floating multi-select action bar for the Tasks page (ProjectDetailPage +
  * TasksPage's All Tasks view). Sits inside the list's own scroll container
@@ -48,32 +71,36 @@ export function SelectionActionBar() {
 
   const handleComplete = useCallback(async () => {
     const ids = Array.from(selectedIds)
+    let successCount = 0
     for (const id of ids) {
       try {
         await dp.tasks.complete(id)
+        successCount++
       } catch {
-        /* skip — best-effort batch */
+        /* counted as failed below */
       }
     }
     emitTasksChanged()
     clear()
-    toast.success(`Completed ${ids.length} task${ids.length !== 1 ? 's' : ''}`)
+    reportBatch(successCount, ids.length, (n) => `Completed ${n} task${s(n)}`)
   }, [selectedIds, dp, clear])
 
   const handleMove = useCallback(
     async (projectId: string) => {
       const ids = Array.from(selectedIds)
-      const project = projects.find((p) => p.id === projectId)
+      const label = projects.find((p) => p.id === projectId)?.name ?? 'project'
+      let successCount = 0
       for (const id of ids) {
         try {
           await dp.tasks.update({ id, projectId })
+          successCount++
         } catch {
-          /* skip — best-effort batch */
+          /* counted as failed below */
         }
       }
       emitTasksChanged()
       clear()
-      toast.success(`Moved ${ids.length} task${ids.length !== 1 ? 's' : ''} to ${project?.name ?? 'project'}`)
+      reportBatch(successCount, ids.length, (n) => `Moved ${n} task${s(n)} to ${label}`)
     },
     [selectedIds, projects, dp, clear],
   )
@@ -81,36 +108,40 @@ export function SelectionActionBar() {
   const handlePriority = useCallback(
     async (priority: number) => {
       const ids = Array.from(selectedIds)
+      const label = PRIORITY_OPTIONS.find((o) => o.value === priority)?.label ?? 'priority'
+      let successCount = 0
       for (const id of ids) {
         try {
           await dp.tasks.update({ id, priority })
+          successCount++
         } catch {
-          /* skip — best-effort batch */
+          /* counted as failed below */
         }
       }
       emitTasksChanged()
       clear()
-      const label = PRIORITY_OPTIONS.find((o) => o.value === priority)?.label ?? 'priority'
-      toast.success(`Set ${ids.length} task${ids.length !== 1 ? 's' : ''} to ${label} priority`)
+      reportBatch(successCount, ids.length, (n) => `Set ${n} task${s(n)} to ${label} priority`)
     },
     [selectedIds, dp, clear],
   )
 
   const handleDelete = useCallback(async () => {
     const ids = Array.from(selectedIds)
-    if (!window.confirm(`Delete ${ids.length} task${ids.length !== 1 ? 's' : ''}? This can't be undone.`)) {
+    if (!window.confirm(`Delete ${ids.length} task${s(ids.length)}? This can't be undone.`)) {
       return
     }
+    let successCount = 0
     for (const id of ids) {
       try {
         await dp.tasks.delete(id)
+        successCount++
       } catch {
-        /* skip — best-effort batch */
+        /* counted as failed below */
       }
     }
     emitTasksChanged()
     clear()
-    toast.success(`Deleted ${ids.length} task${ids.length !== 1 ? 's' : ''}`)
+    reportBatch(successCount, ids.length, (n) => `Deleted ${n} task${s(n)}`)
   }, [selectedIds, dp, clear])
 
   if (selectionType !== 'task' || count === 0) return null
