@@ -97,6 +97,9 @@ interface LocalTaskRowProps {
    * passed straight through to TaskItem's grip. Undefined outside a
    * sortable context (e.g. TodayPage's flat list). */
   dragHandleProps?: Record<string, unknown>
+  /** Threaded straight through to TaskItem — see its doc comment. Defaults
+   * to true so other call sites are unaffected. */
+  showGrip?: boolean
 }
 
 export function LocalTaskRow({
@@ -110,6 +113,7 @@ export function LocalTaskRow({
   isSubtask,
   subtaskStats,
   dragHandleProps,
+  showGrip = true,
 }: LocalTaskRowProps) {
   const editingTaskId = useSelectionStore((s) => s.editingTaskId)
   const addingSubtaskTo = useSelectionStore((s) => s.addingSubtaskTo)
@@ -173,6 +177,7 @@ export function LocalTaskRow({
         onOpen={() => useDetailStore.getState().openTask(task.id)}
         focused={focused}
         dragHandleProps={dragHandleProps}
+        showGrip={showGrip}
       />
 
       {editing && (

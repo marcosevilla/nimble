@@ -110,9 +110,14 @@ interface TaskItemProps {
   /** dnd-kit `{...attributes, ...listeners}` from the sortable wrapper, spread
    * onto the grip so only the grip — not the whole row — initiates a drag. */
   dragHandleProps?: Record<string, unknown>
+  /** Hides the grip slot entirely (not just its hover affordance) — used by
+   * SectionedTaskList's non-section groupings (status/priority/due), where
+   * drag reordering is disabled and a dead grip icon would be misleading.
+   * Defaults to true so other call sites are unaffected. */
+  showGrip?: boolean
 }
 
-export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleProps }: TaskItemProps) {
+export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleProps, showGrip = true }: TaskItemProps) {
   const isSelected = useSelectionStore((s) => s.selectedIds.has(task.id))
   const isCompleting = useSelectionStore((s) => s.completingTaskIds.has(task.id))
 
@@ -134,12 +139,14 @@ export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleP
       {/* Hover cluster — grip then checkbox, both in fixed-width in-flow
           slots so revealing them on hover/selection never shifts content. */}
       <div className="flex w-4 shrink-0 items-center justify-center">
-        <GripVertical
-          aria-label="Drag to reorder"
-          className="size-3 shrink-0 cursor-grab text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-          onClick={(e) => e.stopPropagation()}
-          {...dragHandleProps}
-        />
+        {showGrip && (
+          <GripVertical
+            aria-label="Drag to reorder"
+            className="size-3 shrink-0 cursor-grab text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+            onClick={(e) => e.stopPropagation()}
+            {...dragHandleProps}
+          />
+        )}
       </div>
       <SelectionCheckbox id={task.id} type="task" allIds={allIds} />
 
