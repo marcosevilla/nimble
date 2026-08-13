@@ -15,10 +15,21 @@ import type { LocalTask, Project, Label } from '@nimble/types'
 // label table. Invalidated by the same 'tasks-changed' event
 // `emitTasksChanged` (hooks/useLocalTasks.ts) dispatches on any task
 // mutation — labels can be created inline mid-session via LabelPicker.
+//
+// The invalidation listener is registered exactly ONCE at module scope (not
+// once per mounted row) and rows subscribe to the shared cache instead of
+// each re-fetching independently — otherwise N visible rows would each add
+// their own listener and fire N near-simultaneous listLabels() IPC calls on
+// every unrelated mutation (e.g. a single drag reorder).
 const TASKS_CHANGED_EVENT = 'tasks-changed'
 
 let labelsCache: Label[] | null = null
 let labelsPromise: Promise<Label[]> | null = null
+const labelsSubscribers = new Set<(labels: Label[]) => void>()
+
+function notifyLabelsSubscribers(labels: Label[]) {
+  labelsSubscribers.forEach((fn) => fn(labels))
+}
 
 function fetchLabels(force = false): Promise<Label[]> {
   if (force) {
@@ -30,6 +41,7 @@ function fetchLabels(force = false): Promise<Label[]> {
     labelsPromise = listLabels()
       .then((ls) => {
         labelsCache = ls
+        notifyLabelsSubscribers(ls)
         return ls
       })
       .catch((e) => {
@@ -40,24 +52,30 @@ function fetchLabels(force = false): Promise<Label[]> {
   return labelsPromise
 }
 
+if (typeof window !== 'undefined') {
+  window.addEventListener(TASKS_CHANGED_EVENT, () => {
+    fetchLabels(true).catch(() => {})
+  })
+}
+
 function useLabelsMap(): Map<string, Label> {
   const [labels, setLabels] = useState<Label[]>(labelsCache ?? [])
 
   useEffect(() => {
     let cancelled = false
-    const load = (force: boolean) => {
-      fetchLabels(force)
+    labelsSubscribers.add(setLabels)
+    if (labelsCache) {
+      setLabels(labelsCache)
+    } else {
+      fetchLabels()
         .then((ls) => {
           if (!cancelled) setLabels(ls)
         })
         .catch(() => {})
     }
-    load(false)
-    const onChanged = () => load(true)
-    window.addEventListener(TASKS_CHANGED_EVENT, onChanged)
     return () => {
       cancelled = true
-      window.removeEventListener(TASKS_CHANGED_EVENT, onChanged)
+      labelsSubscribers.delete(setLabels)
     }
   }, [])
 

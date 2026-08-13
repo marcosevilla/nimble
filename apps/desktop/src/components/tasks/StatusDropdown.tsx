@@ -138,7 +138,17 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete }: Stat
         />
       </PopoverTrigger>
 
-      <PopoverContent side="bottom" align="start" sideOffset={4} className="w-44 gap-0 p-1">
+      {/* Portal detaches the DOM tree but not the React tree — clicks here
+          still bubble through React's synthetic event system up to the
+          row's onClick={onOpen}. Stop propagation at the wrapper so picking
+          any option (or Cancel/Set blocked) never opens task details. */}
+      <PopoverContent
+        side="bottom"
+        align="start"
+        sideOffset={4}
+        className="w-44 gap-0 p-1"
+        onClick={(e) => e.stopPropagation()}
+      >
         {showBlockedInput ? (
           <div className="p-2 space-y-2">
             <p className="text-meta text-muted-foreground">Why is this blocked?</p>

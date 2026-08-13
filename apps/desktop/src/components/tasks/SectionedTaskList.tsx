@@ -61,7 +61,9 @@ function TaskLane({
 
   return (
     <SortableContext id={containerId} items={itemIds} strategy={verticalListSortingStrategy}>
-      <div ref={setNodeRef} className="divide-y divide-border/20 pl-5 min-h-2">
+      {/* No left gutter — the drag handle is in-flow inside each row
+          (TaskItem's hover cluster), not absolute-positioned. */}
+      <div ref={setNodeRef} className="divide-y divide-border/20 min-h-2">
         {itemIds.length === 0 && emptyLabel && (
           <p className="py-2 text-label text-muted-foreground">{emptyLabel}</p>
         )}
