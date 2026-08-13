@@ -167,8 +167,34 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
           silently breaks click handling (same class of bug the codebase
           already avoids for TooltipTrigger). nativeButton={false} tells
           Base UI's useButton to add the button a11y semantics (role,
-          tabIndex, Enter/Space handling) onto the div host instead. */}
-      <PopoverTrigger className="contents" nativeButton={false} render={<div className="contents" />}>
+          tabIndex, Enter/Space handling) onto the div host instead.
+
+          `inline-flex`, NOT `contents` — a `display: contents` host has no
+          box, so `getBoundingClientRect()` on it collapses to a zero-size
+          rect at (0,0), and floating-ui (which Popover positioning is built
+          on) anchors the popup there instead of near the trigger — every
+          consumer's popover rendered pinned to the page's top-left corner.
+          `inline-flex items-center` gives a real, correctly-sized box
+          without disrupting the caller's inline layout (verified via
+          harness: contents anchored at x:0,y:0; inline-flex anchors flush
+          under the trigger).
+
+          tabIndex={-1} on the render div: useButton unconditionally adds
+          tabIndex=0 + role="button" to this host, which (now that the host
+          is a real, focusable box instead of an unfocusable `contents` one)
+          becomes a redundant Tab stop sitting in front of whatever real
+          control the caller nests inside `children` — e.g. MetadataChips'
+          chip buttons. The host doesn't need to be independently
+          reachable: its own click listener is what opens the popover, and
+          that still fires from a bubbled click OR a real nested button's
+          native Enter/Space-synthesized click, so removing this host from
+          the tab order doesn't break keyboard activation, only the extra
+          stop. */}
+      <PopoverTrigger
+        className="inline-flex items-center"
+        nativeButton={false}
+        render={<div className="inline-flex items-center" tabIndex={-1} />}
+      >
         {children}
       </PopoverTrigger>
       <PopoverContent

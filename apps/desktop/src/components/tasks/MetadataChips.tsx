@@ -201,13 +201,22 @@ function LabelsChips({
           every popover to the viewport's top-left corner instead of the
           chip. `inline-flex` keeps a real, correctly-sized box (verified via
           harness: contents anchored at x:0,y:0; inline-flex anchors flush
-          under the chip) without disrupting the row's inline flow. Real
-          <button>s inside handle focus themselves (see below), so the
-          host's own role="button"/tabIndex is vestigial but harmless. */}
+          under the chip) without disrupting the row's inline flow.
+
+          tabIndex={-1}: now that the host is a real (focusable) box instead
+          of an unfocusable `contents` one, useButton's unconditional
+          tabIndex=0 + role="button" on it becomes a REAL, redundant Tab
+          stop sitting directly in front of the real <button>s nested inside
+          (verified via harness: without this, Tab order was host → label1 →
+          clear1 → label2 → ..., an extra stop with no distinct action from
+          the first label chip). The host's own click listener still opens
+          the popover from a bubbled click or a real button's native
+          Enter/Space-synthesized click, so it doesn't need to be
+          independently tabbable. */}
       <PopoverTrigger
         className="inline-flex items-center gap-1.5"
         nativeButton={false}
-        render={<div className="inline-flex items-center gap-1.5" />}
+        render={<div className="inline-flex items-center gap-1.5" tabIndex={-1} />}
       >
         {/* Real <button>s, not <div>s — see the Due chip's comment above:
             display:contents trigger wrappers drop non-button children from
@@ -383,11 +392,14 @@ function LinkedDocChip({
     <Popover open={open} onOpenChange={onOpenChange}>
       {/* inline-flex, not contents — see LabelsChips' comment: a
           display:contents host collapses to a zero-size rect and pins the
-          popover to the viewport's top-left instead of anchoring to the chip. */}
+          popover to the viewport's top-left instead of anchoring to the chip.
+          tabIndex={-1} — see LabelsChips' comment: without it, the now-real
+          box picks up a redundant Tab stop in front of the real nested
+          <button>. */}
       <PopoverTrigger
         className="inline-flex items-center"
         nativeButton={false}
-        render={<div className="inline-flex items-center" />}
+        render={<div className="inline-flex items-center" tabIndex={-1} />}
       >
         {trigger}
       </PopoverTrigger>
