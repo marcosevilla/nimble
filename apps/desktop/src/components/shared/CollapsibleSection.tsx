@@ -54,7 +54,7 @@ export function CollapsibleSection({
         )}
       </div>
       <CollapsibleContent className="overflow-hidden transition-all duration-150 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0">
-        <div className="pl-2">{children}</div>
+        <div className={cn(variant === 'nested' && 'pl-2')}>{children}</div>
       </CollapsibleContent>
     </Collapsible>
   )

@@ -429,7 +429,7 @@ export function HabitsSection() {
       </div>
 
       {/* Heatmap (collapsible) */}
-      <CollapsibleSection title="Activity" defaultOpen={false}>
+      <CollapsibleSection title="Activity" defaultOpen={false} className="-mt-3!">
         {heatmapLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : (

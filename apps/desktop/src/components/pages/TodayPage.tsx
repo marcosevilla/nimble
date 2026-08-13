@@ -348,7 +348,12 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
       {completed > 0 && <ProgressBar completed={completed} total={total} />}
 
       {!localLoading && topLevelLocal.length > 0 && (
-        <CollapsibleSection title="Tasks" count={topLevelLocal.filter((t) => !t.completed).length} defaultOpen={true}>
+        <CollapsibleSection
+          title="Tasks"
+          count={topLevelLocal.filter((t) => !t.completed).length}
+          defaultOpen={true}
+          className="-mt-3!"
+        >
           <div className="divide-y divide-border/30">
             {topLevelLocal.map((task) => {
               const subs = subtaskMap[task.id] ?? []
