@@ -363,13 +363,11 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
                 <div key={task.id}>
                   <LocalTaskRow
                     task={task}
-                    projects={projects}
                     projectName={projectMap[task.project_id]?.name}
                     projectColor={projectMap[task.project_id]?.color}
                     subtaskStats={stats}
                     onDelete={removeLocal}
                     onAddSubtask={handleAddSubtask}
-                    onUpdated={refreshLocal}
                   />
                 </div>
               )

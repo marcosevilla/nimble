@@ -38,7 +38,7 @@ interface MetadataChipsProps {
   labels: { id: string; name: string; color: string }[]
 }
 
-// Mirrors TaskEditor.tsx:23 — Normal 1 / Medium 2 / High 3 / Urgent 4.
+// Normal 1 / Medium 2 / High 3 / Urgent 4.
 const PRIORITY_OPTIONS = [
   { value: 1, label: 'Normal' },
   { value: 2, label: 'Medium' },

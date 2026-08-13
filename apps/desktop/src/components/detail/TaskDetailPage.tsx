@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Sparkles, FileText, X as XIcon, Repeat } from 'lucide-react'
 import { taskToast } from '@/lib/taskToast'
 import { parseRecurrenceRule, predictReschedule } from '@/lib/recurrence'
+import { TaskComposerCard } from '@/components/tasks/TaskComposerCard'
 import { InlineTitle } from './InlineTitle'
 import { TiptapEditor } from '@/components/docs/TiptapEditor'
 import { DetailBreadcrumbs } from './DetailBreadcrumbs'
@@ -38,8 +39,7 @@ export function TaskDetailPage() {
   const { task, subtasks, project, loading } = useTaskDetail(target?.id ?? null)
   const { projects } = useProjects()
 
-  const [subInput, setSubInput] = useState('')
-  const [subInputFocused, setSubInputFocused] = useState(false)
+  const [addingSubtask, setAddingSubtask] = useState(false)
   const [breakingDown, setBreakingDown] = useState(false)
   const [linkedDocTitle, setLinkedDocTitle] = useState<string | null>(null)
 
@@ -103,24 +103,13 @@ export function TaskDetailPage() {
       dp.activity.log('task_breakdown_applied', task.id, { subtask_count: created }).catch(() => {})
       toast.success(`Created ${created} subtasks`)
       emitTasksChanged()
-      setSubInputFocused(false)
+      setAddingSubtask(false)
     } catch (e) {
       toast.error(`Breakdown failed: ${e}`)
     } finally {
       setBreakingDown(false)
     }
   }, [task, dp])
-
-  const handleAddSubtask = useCallback(async () => {
-    if (!task || !subInput.trim()) return
-    try {
-      await dp.tasks.create({ content: subInput.trim(), parentId: task.id, projectId: task.project_id })
-      emitTasksChanged()
-      setSubInput('')
-    } catch (e) {
-      toast.error(`Failed to add subtask: ${e}`)
-    }
-  }, [task, subInput, dp])
 
   const handlePriorityChange = useCallback(async (priority: number) => {
     if (!task) return
@@ -294,36 +283,37 @@ export function TaskDetailPage() {
           </div>
         )}
 
-        {/* Add subtask */}
-        {!breakingDown && <div>
-          {subInputFocused || subInput ? (
-            <div className="space-y-1">
-              <input
-                value={subInput}
-                onChange={(e) => setSubInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); handleAddSubtask() }
-                  if (e.key === 'Escape') { setSubInput(''); setSubInputFocused(false) }
-                  if (e.key === 'b' && e.metaKey) { e.preventDefault(); handleAIBreakdown() }
-                }}
-                onBlur={() => { if (!subInput) setSubInputFocused(false) }}
-                placeholder="Add a subtask..."
-                className="w-full bg-transparent text-body outline-none placeholder:text-muted-foreground py-1"
-                autoFocus
+        {/* Add subtask \u2014 Task 9 restyles this page; this just wires the
+            composer card into the mount point that used to hold the plain
+            input. "or break down with AI" used to be a \u2318B keybind scoped to
+            that input's focus; the composer card owns its own keydown
+            handling, so it's a standalone clickable affordance now instead. */}
+        {!breakingDown && (
+          <div>
+            {addingSubtask ? (
+              <TaskComposerCard
+                defaults={{ projectId: task.project_id, parentId: task.id }}
+                onClose={() => setAddingSubtask(false)}
               />
-              <p className="text-label text-muted-foreground">
-                or break down with AI <kbd className="rounded bg-muted/40 px-1 py-0.5 font-mono text-label">{'\u2318'}B</kbd>
-              </p>
-            </div>
-          ) : (
-            <p
-              onClick={() => setSubInputFocused(true)}
-              className="text-body text-muted-foreground cursor-text hover:text-muted-foreground transition-colors py-1"
-            >
-              Add a subtask...
-            </p>
-          )}
-        </div>}
+            ) : (
+              <div className="flex items-center gap-3">
+                <p
+                  onClick={() => setAddingSubtask(true)}
+                  className="text-body text-muted-foreground cursor-text hover:text-muted-foreground transition-colors py-1"
+                >
+                  Add a subtask...
+                </p>
+                <button
+                  type="button"
+                  onClick={handleAIBreakdown}
+                  className="text-label text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  or break down with AI
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Linked doc */}

@@ -18,30 +18,26 @@ import { CSS } from '@dnd-kit/utilities'
 import { LocalTaskRow } from './LocalTaskRow'
 import { useDataProvider } from '@/services/provider-context'
 import { cn } from '@/lib/utils'
-import type { LocalTask, Project } from '@nimble/types'
+import type { LocalTask } from '@nimble/types'
 
 interface SortableTaskItemProps {
   task: LocalTask
-  projects: Project[]
   projectName?: string
   projectColor?: string
   subtaskStats?: { done: number; total: number }
   onDelete: (id: string) => void
   onAddSubtask: (parentId: string, content: string) => void
-  onUpdated?: () => void
 }
 
 // Exported so SectionedTaskList (Task 14's section-lane view) can reuse the
 // same drag-handle-plus-row markup instead of duplicating it.
 export function SortableTaskItem({
   task,
-  projects,
   projectName,
   projectColor,
   subtaskStats,
   onDelete,
   onAddSubtask,
-  onUpdated,
 }: SortableTaskItemProps) {
   const {
     attributes,
@@ -74,13 +70,11 @@ export function SortableTaskItem({
           initiates a drag — listeners are not spread on this container. */}
       <LocalTaskRow
         task={task}
-        projects={projects}
         projectName={projectName}
         projectColor={projectColor}
         subtaskStats={subtaskStats}
         onDelete={onDelete}
         onAddSubtask={onAddSubtask}
-        onUpdated={onUpdated}
         dragHandleProps={{ ...attributes, ...listeners }}
       />
     </div>
@@ -89,27 +83,21 @@ export function SortableTaskItem({
 
 function SubtaskRow({
   task,
-  projects,
   projectName,
   projectColor,
   onDelete,
-  onUpdated,
 }: {
   task: LocalTask
-  projects: Project[]
   projectName?: string
   projectColor?: string
   onDelete: (id: string) => void
-  onUpdated?: () => void
 }) {
   return (
     <LocalTaskRow
       task={task}
-      projects={projects}
       projectName={projectName}
       projectColor={projectColor}
       onDelete={onDelete}
-      onUpdated={onUpdated}
       isSubtask
     />
   )
@@ -118,23 +106,19 @@ function SubtaskRow({
 interface SortableTaskListProps {
   tasks: LocalTask[]
   allTasks: LocalTask[]
-  projects: Project[]
   projectName?: string
   projectColor?: string
   onDelete: (id: string) => void
   onAddSubtask: (parentId: string, content: string) => void
-  onUpdated?: () => void
 }
 
 export function SortableTaskList({
   tasks,
   allTasks,
-  projects,
   projectName,
   projectColor,
   onDelete,
   onAddSubtask,
-  onUpdated,
 }: SortableTaskListProps) {
   const dp = useDataProvider()
   const topLevel = useMemo(() => tasks.filter((t) => !t.parent_id), [tasks])
@@ -211,13 +195,11 @@ export function SortableTaskList({
               <div key={id}>
                 <SortableTaskItem
                   task={task}
-                  projects={projects}
                   projectName={projectName}
                   projectColor={projectColor}
                   subtaskStats={stats}
                   onDelete={onDelete}
                   onAddSubtask={onAddSubtask}
-                  onUpdated={onUpdated}
                 />
               </div>,
               ...subtasks.map((sub) => {
@@ -225,11 +207,9 @@ export function SortableTaskList({
                   <div key={sub.id}>
                     <SubtaskRow
                       task={sub}
-                      projects={projects}
                       projectName={projectName}
                       projectColor={projectColor}
                       onDelete={onDelete}
-                      onUpdated={onUpdated}
                     />
                   </div>
                 )

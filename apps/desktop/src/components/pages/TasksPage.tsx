@@ -12,7 +12,7 @@ import { IconButton } from '@/components/shared/IconButton'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { listLabels } from '@/services/tauri'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView, type GroupBy } from '@/lib/task-view'
-import type { LocalTask, Label, Project } from '@nimble/types'
+import type { LocalTask, Label } from '@nimble/types'
 
 // Section/manual grouping don't have a coherent cross-project meaning here —
 // `sections` are scoped to a single project (see task-view.ts), so a merged
@@ -27,14 +27,12 @@ const ALL_TASKS_GROUP_BY: readonly GroupBy[] = ['status', 'priority', 'due']
 // ── All Tasks View ──
 
 function AllTasksView({
-  projects,
   tasks,
   visibleLabels,
   onDelete,
   onAddSubtask,
   refresh,
 }: {
-  projects: Project[]
   tasks: LocalTask[]
   visibleLabels: Label[]
   onDelete: (id: string) => void
@@ -104,7 +102,6 @@ function AllTasksView({
                 // ALL_TASKS_GROUP_BY — but kept explicit in case that ever
                 // changes.)
                 dragEnabled={false}
-                projects={projects}
                 onDelete={onDelete}
                 onAddSubtask={onAddSubtask}
                 onUpdated={refresh}
@@ -154,13 +151,6 @@ export function TasksPage() {
       refresh()
     },
     [tasks, addTask, refresh],
-  )
-
-  const handleAddTask = useCallback(
-    async (content: string, extra?: { projectId?: string }) => {
-      await addTask(content, extra)
-    },
-    [addTask],
   )
 
   // Find the selected project object
@@ -231,14 +221,12 @@ export function TasksPage() {
           tasks={tasks}
           allProjects={projects}
           onSelectProject={setSelectedProjectId}
-          onAddTask={handleAddTask}
           onDeleteTask={remove}
           onAddSubtask={handleAddSubtask}
           onUpdated={refresh}
         />
       ) : (
         <AllTasksView
-          projects={projects}
           tasks={tasks}
           visibleLabels={visibleLabels}
           onDelete={remove}

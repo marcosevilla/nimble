@@ -27,7 +27,7 @@ export interface ParsedRecurrenceRule {
   time: string | null // "HH:MM" 24h
 }
 
-/** Fixed canonical options for the TaskEditor recurrence select (base only, no time suffix). */
+/** Fixed canonical options for the recurrence selects (base only, no time suffix). */
 export const RECURRENCE_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'None' },
   { value: 'every day', label: 'Every day' },

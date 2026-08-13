@@ -1,53 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
+import { TaskComposerCard } from '@/components/tasks/TaskComposerCard'
 import { TaskListHeader } from '@/components/tasks/TaskListHeader'
 import { PageDragRegion } from '@/components/shared/PageDragRegion'
-import { Input } from '@/components/ui/input'
 import { listSections, listLabels } from '@/services/tauri'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView } from '@/lib/task-view'
 import { Plus } from 'lucide-react'
 import type { Project, LocalTask, Section, Label } from '@nimble/types'
-
-// ── Inline Task Creator ──
-
-function TaskCreator({
-  projectId,
-  onAdd,
-}: {
-  projectId: string
-  onAdd: (content: string, extra?: { projectId?: string }) => void
-}) {
-  const [value, setValue] = useState('')
-
-  const handleSubmit = () => {
-    const text = value.trim()
-    if (!text) return
-    onAdd(text, { projectId })
-    setValue('')
-  }
-
-  return (
-    <div className="pt-5 flex items-center gap-2 text-meta text-muted-foreground hover:text-foreground">
-      <Plus className="size-3 shrink-0" />
-      <Input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') handleSubmit()
-        }}
-        placeholder="Add a task..."
-        className="h-7 text-body border-none shadow-none bg-transparent px-0 focus-visible:ring-0"
-      />
-    </div>
-  )
-}
 
 interface ProjectDetailPageProps {
   project: Project
   tasks: LocalTask[]
   allProjects: Project[]
   onSelectProject: (id: string) => void
-  onAddTask: (content: string, extra?: { projectId?: string }) => void
   onDeleteTask: (id: string) => void
   onAddSubtask: (parentId: string, content: string) => void
   onUpdated: () => void
@@ -58,13 +23,13 @@ export function ProjectDetailPage({
   tasks,
   allProjects,
   onSelectProject,
-  onAddTask,
   onDeleteTask,
   onAddSubtask,
   onUpdated,
 }: ProjectDetailPageProps) {
   const [sections, setSections] = useState<Section[]>([])
   const [labels, setLabels] = useState<Label[]>([])
+  const [composerOpen, setComposerOpen] = useState(false)
 
   // Lazy-initialized from localStorage; the parent remounts this component
   // (key={project.id} in TasksPage) on project switch, so this only ever
@@ -181,7 +146,6 @@ export function ProjectDetailPage({
                 groups={groups}
                 allTasks={filteredTasks}
                 dragEnabled={dragEnabled}
-                projects={allProjects}
                 projectName={project.name}
                 projectColor={project.color}
                 onDelete={onDeleteTask}
@@ -190,8 +154,24 @@ export function ProjectDetailPage({
               />
             )}
 
-            {/* Inline task creator */}
-            <TaskCreator projectId={project.id} onAdd={onAddTask} />
+            {/* "Add a task" row — replaces itself with the composer card */}
+            <div className="pt-5">
+              {composerOpen ? (
+                <TaskComposerCard
+                  defaults={{ projectId: project.id }}
+                  onClose={() => setComposerOpen(false)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setComposerOpen(true)}
+                  className="flex w-full items-center gap-2 text-left text-meta text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Plus className="size-3 shrink-0" />
+                  Add a task...
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

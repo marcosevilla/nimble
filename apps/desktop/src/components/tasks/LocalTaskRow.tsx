@@ -3,10 +3,9 @@ import { Input } from '@/components/ui/input'
 import { useDetailStore } from '@/stores/detailStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { TaskItem } from './TaskItem'
-import { TaskEditor } from './TaskEditor'
 import { listLabels } from '@/services/tauri'
 import { labelColor } from '@/lib/labelColors'
-import type { LocalTask, Project, Label } from '@nimble/types'
+import type { LocalTask, Label } from '@nimble/types'
 
 // ── Labels cache ──
 //
@@ -84,12 +83,10 @@ function useLabelsMap(): Map<string, Label> {
 
 interface LocalTaskRowProps {
   task: LocalTask
-  projects?: Project[]
   projectName?: string
   projectColor?: string
   onDelete: (id: string) => void
   onAddSubtask?: (parentId: string, content: string) => void
-  onUpdated?: (task: LocalTask) => void
   focused?: boolean
   isSubtask?: boolean
   subtaskStats?: { done: number; total: number }
@@ -104,23 +101,18 @@ interface LocalTaskRowProps {
 
 export function LocalTaskRow({
   task,
-  projects = [],
   projectName,
   projectColor,
   onAddSubtask,
-  onUpdated,
   focused,
   isSubtask,
   subtaskStats,
   dragHandleProps,
   showGrip = true,
 }: LocalTaskRowProps) {
-  const editingTaskId = useSelectionStore((s) => s.editingTaskId)
   const addingSubtaskTo = useSelectionStore((s) => s.addingSubtaskTo)
-  const setEditingTask = useSelectionStore((s) => s.setEditingTask)
   const setAddingSubtaskTo = useSelectionStore((s) => s.setAddingSubtaskTo)
 
-  const editing = editingTaskId === task.id
   const showSubInput = addingSubtaskTo === task.id
 
   const [subInput, setSubInput] = useState('')
@@ -137,14 +129,6 @@ export function LocalTaskRow({
     setSubInput('')
     setAddingSubtaskTo(null)
   }, [subInput, task.id, onAddSubtask, setAddingSubtaskTo])
-
-  const handleUpdated = useCallback(
-    (updated: LocalTask) => {
-      onUpdated?.(updated)
-      setEditingTask(null)
-    },
-    [onUpdated, setEditingTask],
-  )
 
   const labelsMap = useLabelsMap()
   const taskLabels = useMemo(
@@ -180,18 +164,7 @@ export function LocalTaskRow({
         showGrip={showGrip}
       />
 
-      {editing && (
-        <div className="mt-1 mb-2">
-          <TaskEditor
-            task={task}
-            projects={projects}
-            onClose={() => setEditingTask(null)}
-            onUpdated={handleUpdated}
-          />
-        </div>
-      )}
-
-      {showSubInput && !editing && onAddSubtask && (
+      {showSubInput && onAddSubtask && (
         <div className="mt-0.5 mb-0.5">
           <Input
             value={subInput}

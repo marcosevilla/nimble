@@ -20,20 +20,18 @@ import { LocalTaskRow } from './LocalTaskRow'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { useDataProvider } from '@/services/provider-context'
 import { UNSECTIONED, type TaskGroup } from '@/lib/task-view'
-import type { LocalTask, Project } from '@nimble/types'
+import type { LocalTask } from '@nimble/types'
 
 interface TaskLaneProps {
   containerId: string
   itemIds: string[]
   taskMap: Record<string, LocalTask>
   subtaskMap: Record<string, LocalTask[]>
-  projects: Project[]
   projectName?: string
   projectColor?: string
   dragEnabled: boolean
   onDelete: (id: string) => void
   onAddSubtask: (parentId: string, content: string) => void
-  onUpdated?: () => void
   emptyLabel?: string
 }
 
@@ -48,13 +46,11 @@ function TaskLane({
   itemIds,
   taskMap,
   subtaskMap,
-  projects,
   projectName,
   projectColor,
   dragEnabled,
   onDelete,
   onAddSubtask,
-  onUpdated,
   emptyLabel,
 }: TaskLaneProps) {
   const { setNodeRef } = useDroppable({ id: containerId, disabled: !dragEnabled })
@@ -71,24 +67,20 @@ function TaskLane({
         {dragEnabled ? (
           <SortableTaskItem
             task={task}
-            projects={projects}
             projectName={projectName}
             projectColor={projectColor}
             subtaskStats={stats}
             onDelete={onDelete}
             onAddSubtask={onAddSubtask}
-            onUpdated={onUpdated}
           />
         ) : (
           <LocalTaskRow
             task={task}
-            projects={projects}
             projectName={projectName}
             projectColor={projectColor}
             subtaskStats={stats}
             onDelete={onDelete}
             onAddSubtask={onAddSubtask}
-            onUpdated={onUpdated}
             showGrip={false}
           />
         )}
@@ -97,11 +89,9 @@ function TaskLane({
         <div key={sub.id}>
           <LocalTaskRow
             task={sub}
-            projects={projects}
             projectName={projectName}
             projectColor={projectColor}
             onDelete={onDelete}
-            onUpdated={onUpdated}
             isSubtask
           />
         </div>
@@ -142,7 +132,6 @@ interface SectionedTaskListProps {
    * (status/priority/due) is a read-only view: no cross-lane drag, no
    * grip. */
   dragEnabled: boolean
-  projects: Project[]
   projectName?: string
   projectColor?: string
   onDelete: (id: string) => void
@@ -158,7 +147,6 @@ export function SectionedTaskList({
   groups,
   allTasks,
   dragEnabled,
-  projects,
   projectName,
   projectColor,
   onDelete,
@@ -309,13 +297,11 @@ export function SectionedTaskList({
             itemIds={itemIds}
             taskMap={taskMap}
             subtaskMap={subtaskMap}
-            projects={projects}
             projectName={projectName}
             projectColor={projectColor}
             dragEnabled={dragEnabled}
             onDelete={onDelete}
             onAddSubtask={onAddSubtask}
-            onUpdated={onUpdated}
             emptyLabel={dragEnabled ? 'No tasks in this section yet.' : undefined}
           />
         )

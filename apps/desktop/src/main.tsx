@@ -14,7 +14,7 @@ import { useSelectionStore } from '@/stores/selectionStore'
 // bypass onboarding (no Tauri runtime in a plain browser → invoke() throws →
 // SetupDialog blocks the UI). See nimble/docs/audit-loop-playbook.md.
 // detail/selection stores let capture scripts open the task detail page and
-// the inline TaskEditor deterministically.
+// the inline task composer card deterministically.
 if (import.meta.env.DEV) {
   ;(window as unknown as { __stores: unknown }).__stores = { useAppStore, useDetailStore, useSelectionStore }
 }

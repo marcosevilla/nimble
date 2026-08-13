@@ -107,9 +107,9 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
 
   const handleSelect = (date: Date | undefined) => {
     if (!date) {
-      // Mirrors TaskEditor.tsx's handleDueDateChange (~line 113): clearing
-      // the date also clears time + duration client-side (a time/duration
-      // with no date is meaningless). Recurrence is left untouched.
+      // Clearing the date also clears time + duration client-side (a
+      // time/duration with no date is meaningless). Recurrence is left
+      // untouched.
       onChange({ ...value, dueDate: null, dueTime: null, durationMinutes: null })
       return
     }

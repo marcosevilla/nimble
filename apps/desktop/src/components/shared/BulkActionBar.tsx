@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSelectionStore } from '@/stores/selectionStore'
+import { useDetailStore } from '@/stores/detailStore'
 import { useProjects } from '@/hooks/useLocalTasks'
 import { useFocusStore, type FocusConfig } from '@/stores/focusStore'
 import { useDataProvider } from '@/services/provider-context'
@@ -49,7 +50,6 @@ export function BulkActionBar() {
   const selectedIds = useSelectionStore((s) => s.selectedIds)
   const selectionType = useSelectionStore((s) => s.selectionType)
   const clear = useSelectionStore((s) => s.clear)
-  const setEditingTask = useSelectionStore((s) => s.setEditingTask)
   const setAddingSubtaskTo = useSelectionStore((s) => s.setAddingSubtaskTo)
   const markTaskCompleting = useSelectionStore((s) => s.markTaskCompleting)
   const clearTaskCompleting = useSelectionStore((s) => s.clearTaskCompleting)
@@ -152,12 +152,14 @@ export function BulkActionBar() {
     clear()
   }, [selectedIds, selectionType, clear, dp])
 
+  // Editing an existing task is create-only-composer's exclusion (Decision
+  // 14 + 18) — routes to opening Task Details instead of an inline editor.
   const handleEdit = useCallback(() => {
     if (selectionType !== 'task' || count !== 1) return
     const id = Array.from(selectedIds)[0]
-    setEditingTask(id)
+    useDetailStore.getState().openTask(id)
     clear()
-  }, [selectionType, count, selectedIds, setEditingTask, clear])
+  }, [selectionType, count, selectedIds, clear])
 
   const handleAddSubtask = useCallback(() => {
     if (selectionType !== 'task' || count !== 1 || !singleSelected) return
