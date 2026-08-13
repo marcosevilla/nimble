@@ -36,10 +36,15 @@ export function PriorityBars({ priority, size = 'sm', className, label }: Priori
     }
   }, [priority])
 
+  // Container height matches the tallest bar exactly (not a padded box) —
+  // `items-end` on a taller box shifts the visible bars' optical center
+  // below the box's own center, which is what a flex parent's
+  // `items-center` centers against. That mismatch is what made the chip's
+  // icon read as sitting low relative to the label text (QA item 6).
   const container =
     size === 'md'
-      ? 'w-4 h-4 gap-[2px]'
-      : 'w-3 h-3 gap-[1.5px]'
+      ? 'w-4 h-3.5 gap-[2px]'
+      : 'w-3 h-2 gap-[1.5px]'
 
   const heights = size === 'md'
     ? ['h-1.5', 'h-2.5', 'h-3.5']

@@ -32,6 +32,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { format, parseISO } from 'date-fns'
 import { listSections, listLabels } from '@/services/tauri'
@@ -49,6 +50,7 @@ export function TaskDetailPage() {
 
   const [addingSubtask, setAddingSubtask] = useState(false)
   const [breakingDown, setBreakingDown] = useState(false)
+  const [activityOpen, setActivityOpen] = useState(false)
 
   const [sections, setSections] = useState<Section[]>([])
   const [labels, setLabels] = useState<Label[]>([])
@@ -460,6 +462,8 @@ export function TaskDetailPage() {
             </DropdownMenuSub>
             <DropdownMenuItem onClick={handleDuplicateTask}>Duplicate task</DropdownMenuItem>
             <DropdownMenuItem onClick={handleCopyId}>Copy ID</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setActivityOpen(true)}>View activity…</DropdownMenuItem>
+            <DropdownMenuItem onClick={handleAIBreakdown}>Break down with AI</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onClick={handleDeleteTask}>
               Delete task
@@ -468,11 +472,11 @@ export function TaskDetailPage() {
         </DropdownMenu>
       </div>
 
-      {/* Status + Title */}
-      <div className="flex items-start gap-3">
-        <div className="mt-1">
-          <StatusDropdown taskId={task.id} status={task.status ?? 'todo'} size="md" onComplete={handleTaskCompleted} />
-        </div>
+      {/* Status + Title — status icon matches the row size (StatusDropdown's
+          default `sm`, same as TaskItem) and is vertically centered against
+          the title's line via items-center, not a manual mt- nudge. */}
+      <div className="flex items-center gap-2">
+        <StatusDropdown taskId={task.id} status={task.status ?? 'todo'} onComplete={handleTaskCompleted} />
         <div className="flex-1 min-w-0">
           <InlineTitle
             value={task.content}
@@ -512,7 +516,12 @@ export function TaskDetailPage() {
               placeholder="Description"
               rows={1}
               className={cn(
-                'min-h-0 resize-none border-none bg-transparent px-0 py-0 shadow-none outline-none',
+                'min-h-0 resize-none border-none bg-transparent py-0 shadow-none outline-none',
+                // -mx-1 px-1 nets to the same visual left edge as the display
+                // state's px-0 (net offset 0), but gives the caret/first
+                // glyph interior room so it isn't clipped by the page's
+                // overflow-x-hidden scroll container (Dashboard.tsx).
+                '-mx-1 px-1',
                 'text-body placeholder:text-foreground/25',
                 'focus-visible:ring-0 focus-visible:border-none',
               )}
@@ -595,13 +604,6 @@ export function TaskDetailPage() {
                     <Plus className="size-3 shrink-0" />
                     Add subtask
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleAIBreakdown}
-                    className="text-label text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    or break down with AI
-                  </button>
                 </div>
               )}
             </div>
@@ -609,11 +611,19 @@ export function TaskDetailPage() {
         </div>
       </div>
 
-      {/* Separator */}
-      <div className="border-t border-border/30" />
-
-      {/* Activity log */}
-      <TaskActivityLog taskId={task.id} />
+      {/* Activity log — moved off the page body into the gear menu's "View
+          activity…" item (Marco QA item 1); reuses the same TaskActivityLog
+          component inside a scrollable modal. */}
+      <Dialog open={activityOpen} onOpenChange={setActivityOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Activity</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[70vh] overflow-y-auto">
+            <TaskActivityLog taskId={task.id} />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

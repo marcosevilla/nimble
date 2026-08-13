@@ -449,7 +449,7 @@ export function MetadataChips({ values, onChange, context, projects = [], sectio
   const section = sections.find((s) => s.id === values.sectionId)
 
   return (
-    <div className={cn('flex flex-wrap items-center', context === 'composer' ? 'gap-1.5' : 'gap-4')}>
+    <div className={cn('flex flex-wrap items-center gap-1.5')}>
       <PriorityChip value={values.priority} onChange={(priority) => onChange({ priority })} />
       <DueChip value={values.due} onChange={(due) => onChange({ due })} />
       <LabelsChips labelIds={values.labelIds} labels={labels} onChange={(labelIds) => onChange({ labelIds })} />
