@@ -2,15 +2,27 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
 import { TaskListHeader } from '@/components/tasks/TaskListHeader'
+import { PageDragRegion } from '@/components/shared/PageDragRegion'
 import { Skeleton } from '@/components/ui/skeleton'
-import { PanelLeftOpen } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { List, PanelLeftOpen } from 'lucide-react'
 import { ProjectSidebar } from '@/components/tasks/ProjectSidebar'
 import { ProjectDetailPage } from '@/components/tasks/ProjectDetailPage'
 import { IconButton } from '@/components/shared/IconButton'
 import { useLayoutStore } from '@/stores/layoutStore'
-import { listLabels, listSections } from '@/services/tauri'
-import { filterTasks, groupTasks, loadTaskView, saveTaskView } from '@/lib/task-view'
-import type { LocalTask, Label, Project, Section } from '@nimble/types'
+import { listLabels } from '@/services/tauri'
+import { filterTasks, groupTasks, loadTaskView, saveTaskView, type GroupBy } from '@/lib/task-view'
+import type { LocalTask, Label, Project } from '@nimble/types'
+
+// Section/manual grouping don't have a coherent cross-project meaning here —
+// `sections` are scoped to a single project (see task-view.ts), so a merged
+// "section" lane in All Tasks would be an arbitrary, unlabeled interleaving
+// of unrelated projects' sections. Rather than disambiguate lane titles
+// (which the frozen `groupTasks(tasks, by, sections)` signature has no room
+// for) or build a project-grouped special case, the simplest, least
+// surprising fix is to just not offer those two modes here — per-project
+// section/manual grouping still works from ProjectDetailPage.
+const ALL_TASKS_GROUP_BY: readonly GroupBy[] = ['status', 'priority', 'due']
 
 // ── All Tasks View ──
 
@@ -29,8 +41,7 @@ function AllTasksView({
   onAddSubtask: (parentId: string, content: string) => void
   refresh: () => void
 }) {
-  const [sections, setSections] = useState<Section[]>([])
-  const [viewState, setViewState] = useState(() => loadTaskView('all', 'status'))
+  const [viewState, setViewState] = useState(() => loadTaskView('all', 'status', ALL_TASKS_GROUP_BY))
 
   useEffect(() => {
     saveTaskView('all', viewState)
@@ -43,73 +54,63 @@ function AllTasksView({
     setViewState((v) => ({ ...v, filter }))
   }, [])
 
-  // Sections are scoped per-project — merge every project's lanes into one
-  // flat list so a `section`/`manual` grouping can resolve titles for
-  // tasks from any project. (Cross-project drag stays disabled below —
-  // see `dragEnabled`.)
-  const refreshSections = useCallback(() => {
-    Promise.all(projects.map((p) => listSections(p.id)))
-      .then((lists) => setSections(lists.flat()))
-      .catch(() => {})
-  }, [projects])
-
-  useEffect(() => {
-    refreshSections()
-  }, [refreshSections])
-
-  const handleUpdated = useCallback(() => {
-    refresh()
-    refreshSections()
-  }, [refresh, refreshSections])
-
   const filteredTasks = useMemo(() => filterTasks(tasks, viewState.filter), [tasks, viewState.filter])
   const groups = useMemo(
-    () => groupTasks(filteredTasks, viewState.groupBy, sections),
-    [filteredTasks, viewState.groupBy, sections],
+    // `sections` is always [] — groupBy here is restricted to
+    // status/priority/due (ALL_TASKS_GROUP_BY), none of which consult it.
+    () => groupTasks(filteredTasks, viewState.groupBy, []),
+    [filteredTasks, viewState.groupBy],
   )
 
   return (
-    // scrollbar-gutter keeps centered content from shifting when the
-    // classic 6px scrollbar appears after async content loads
-    <div className="flex-1 overflow-y-auto flex flex-col min-w-0 [scrollbar-gutter:stable]">
-      <div className="py-6 flex-1">
-        <div className="w-full max-w-[600px] mx-auto min-w-0">
-          <TaskListHeader
-            title="Tasks"
-            groupBy={viewState.groupBy}
-            onGroupBy={setGroupBy}
-            filter={viewState.filter}
-            onFilter={setFilter}
-            labels={visibleLabels}
-          />
-
-          {filteredTasks.length === 0 ? (
-            <p className="text-body text-muted-foreground text-center py-8">
-              {tasks.length === 0 ? (
-                <>
-                  No tasks yet. Press <kbd className="rounded border border-border/30 px-1.5 py-0.5 text-meta font-mono">Q</kbd> to create one.
-                </>
-              ) : (
-                'No tasks match this filter.'
-              )}
-            </p>
-          ) : (
-            <SectionedTaskList
-              groups={groups}
-              allTasks={filteredTasks}
-              // All Tasks spans multiple projects, and section_id/position
-              // are only meaningful scoped to a single project — cross-lane
-              // drag here would silently assign a task to a section (or
-              // renumber positions) belonging to a different project. Stay
-              // read-only regardless of grouping; per-project drag still
-              // works from ProjectDetailPage.
-              dragEnabled={false}
-              projects={projects}
-              onDelete={onDelete}
-              onAddSubtask={onAddSubtask}
-              onUpdated={handleUpdated}
+    <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <PageDragRegion />
+      {/* scrollbar-gutter keeps centered content from shifting when the
+          classic 6px scrollbar appears after async content loads */}
+      <div className="flex-1 overflow-y-auto min-w-0 [scrollbar-gutter:stable]">
+        <div className="pb-6">
+          <div className="w-full max-w-[600px] mx-auto min-w-0">
+            <TaskListHeader
+              title="Tasks"
+              groupBy={viewState.groupBy}
+              onGroupBy={setGroupBy}
+              filter={viewState.filter}
+              onFilter={setFilter}
+              labels={visibleLabels}
+              availableGroupBy={ALL_TASKS_GROUP_BY}
             />
-          )}
+
+            {filteredTasks.length === 0 ? (
+              <p className="text-body text-muted-foreground text-center py-8">
+                {tasks.length === 0 ? (
+                  <>
+                    No tasks yet. Press <kbd className="rounded border border-border/30 px-1.5 py-0.5 text-meta font-mono">Q</kbd> to create one.
+                  </>
+                ) : (
+                  'No tasks match this filter.'
+                )}
+              </p>
+            ) : (
+              <SectionedTaskList
+                groups={groups}
+                allTasks={filteredTasks}
+                // All Tasks spans multiple projects, and section_id/position
+                // are only meaningful scoped to a single project — cross-lane
+                // drag here would silently assign a task to a section (or
+                // renumber positions) belonging to a different project. Stay
+                // read-only; per-project drag still works from
+                // ProjectDetailPage. (Moot today since section/manual aren't
+                // offered in this container's sort menu — see
+                // ALL_TASKS_GROUP_BY — but kept explicit in case that ever
+                // changes.)
+                dragEnabled={false}
+                projects={projects}
+                onDelete={onDelete}
+                onAddSubtask={onAddSubtask}
+                onUpdated={refresh}
+              />
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -184,7 +185,20 @@ export function TasksPage() {
     <div className="flex flex-1 h-full overflow-hidden">
       {/* Project sidebar */}
       {sidebarCollapsed ? (
-        <div className="flex flex-col items-center border-r border-border/20 bg-muted/10 py-2 px-1">
+        <div className="flex flex-col items-center gap-1 border-r border-border/20 bg-muted/10 py-2 px-1">
+          {/* Collapsing the sidebar hides ProjectSidebar's own "All Tasks"
+              row — the list header dropped its old PageHeader back-link
+              (Task 5), so without this a project view has no way back to
+              All Tasks while the sidebar is collapsed. Always show it here
+              regardless of collapsed state. */}
+          <IconButton
+            onClick={() => setSelectedProjectId(null)}
+            size="lg"
+            title="All Tasks"
+            className={cn(selectedProjectId === null && 'bg-accent/30 text-foreground')}
+          >
+            <List className="size-4" />
+          </IconButton>
           <IconButton
             onClick={() => setSidebarCollapsed(false)}
             size="lg"

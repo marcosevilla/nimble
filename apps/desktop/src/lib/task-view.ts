@@ -15,6 +15,15 @@ import type { LocalTask, Section, TaskStatus } from '@nimble/types'
 
 export type GroupBy = 'status' | 'priority' | 'due' | 'section' | 'manual'
 
+// Canonical list of every valid GroupBy value, in the order the sort menu
+// displays them — the single source of truth both for menu construction
+// (TaskListHeader) and for validating a persisted value (loadTaskView).
+export const ALL_GROUP_BY: readonly GroupBy[] = ['section', 'manual', 'status', 'priority', 'due']
+
+function isGroupBy(value: unknown): value is GroupBy {
+  return typeof value === 'string' && (ALL_GROUP_BY as readonly string[]).includes(value)
+}
+
 export interface TaskGroup {
   key: string
   title: string
@@ -48,7 +57,13 @@ const DUE_BUCKETS: { key: string; title: string }[] = [
 function dueBucketKey(task: LocalTask): string {
   if (!task.due_date) return 'no_date'
   const parsed = parseISO(task.due_date)
-  if (isPast(parsed) && !isToday(parsed)) return 'still_open'
+  const completed = task.completed || task.status === 'complete'
+  // "Still open" is a no-guilt label for genuinely open, past-due work —
+  // a completed task with a past due date isn't "still" anything, so it
+  // falls through to the same today/tomorrow/this-week/later bucketing as
+  // any other date instead of being lumped in here (a past date that isn't
+  // today lands in "later", the closest sensible catch-all).
+  if (!completed && isPast(parsed) && !isToday(parsed)) return 'still_open'
   if (isToday(parsed)) return 'today'
   if (isTomorrow(parsed)) return 'tomorrow'
   const days = differenceInCalendarDays(parsed, new Date())
@@ -112,6 +127,15 @@ export function groupTasks(tasks: LocalTask[], by: GroupBy, sections: Section[])
     case 'section':
     case 'manual':
       return groupBySection(topLevel, sections)
+
+    // Defensive fallback — `by` is typed as `GroupBy` so this is normally
+    // unreachable, but a persisted view-state value flows in from
+    // localStorage (see `loadTaskView`) without a compiler to enforce it.
+    // Render an empty list rather than `undefined`, which would otherwise
+    // white-screen the page the moment a caller runs `.map()` over the
+    // result.
+    default:
+      return []
   }
 }
 
@@ -145,18 +169,29 @@ export interface TaskViewState {
 
 const STORAGE_PREFIX = 'nimble.taskview.'
 
-/** `key` is a project id, or the literal `'all'` for the All Tasks view. */
-export function loadTaskView(key: string, defaultGroupBy: GroupBy): TaskViewState {
+/** `key` is a project id, or the literal `'all'` for the All Tasks view.
+ * `allowed` restricts which persisted `groupBy` values are accepted for
+ * this container (e.g. All Tasks doesn't offer `section`/`manual` — see
+ * `TaskListHeader`'s `availableGroupBy`) — anything outside it, or outside
+ * `GroupBy` entirely (a foreign/corrupt localStorage value), falls back to
+ * `defaultGroupBy` instead of propagating into `groupTasks`. */
+export function loadTaskView(
+  key: string,
+  defaultGroupBy: GroupBy,
+  allowed: readonly GroupBy[] = ALL_GROUP_BY,
+): TaskViewState {
   try {
     const raw = localStorage.getItem(STORAGE_PREFIX + key)
     if (!raw) return { groupBy: defaultGroupBy, filter: EMPTY_FILTER }
     const parsed = JSON.parse(raw) as Partial<TaskViewState>
+    const groupBy =
+      isGroupBy(parsed.groupBy) && allowed.includes(parsed.groupBy) ? parsed.groupBy : defaultGroupBy
     return {
-      groupBy: parsed.groupBy ?? defaultGroupBy,
+      groupBy,
       filter: {
-        statuses: parsed.filter?.statuses ?? [],
-        priorities: parsed.filter?.priorities ?? [],
-        labelIds: parsed.filter?.labelIds ?? [],
+        statuses: Array.isArray(parsed.filter?.statuses) ? parsed.filter!.statuses : [],
+        priorities: Array.isArray(parsed.filter?.priorities) ? parsed.filter!.priorities : [],
+        labelIds: Array.isArray(parsed.filter?.labelIds) ? parsed.filter!.labelIds : [],
       },
     }
   } catch {

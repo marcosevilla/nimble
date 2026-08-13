@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
 import { TaskListHeader } from '@/components/tasks/TaskListHeader'
+import { PageDragRegion } from '@/components/shared/PageDragRegion'
 import { Input } from '@/components/ui/input'
 import { listSections, listLabels } from '@/services/tauri'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView } from '@/lib/task-view'
@@ -155,40 +156,43 @@ export function ProjectDetailPage({
   )
 
   return (
-    <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-w-0">
-      <div className="py-6 flex-1 min-w-0">
-        <div className="w-full max-w-[600px] mx-auto min-w-0">
-          <TaskListHeader
-            title={project.name}
-            breadcrumb={breadcrumb}
-            groupBy={viewState.groupBy}
-            onGroupBy={setGroupBy}
-            filter={viewState.filter}
-            onFilter={setFilter}
-            labels={visibleLabels}
-          />
-
-          {/* Task list */}
-          {filteredTasks.length === 0 ? (
-            <p className="text-body text-muted-foreground text-center py-8">
-              {projectTasks.length === 0 ? 'No tasks in this project yet.' : 'No tasks match this filter.'}
-            </p>
-          ) : (
-            <SectionedTaskList
-              groups={groups}
-              allTasks={filteredTasks}
-              dragEnabled={dragEnabled}
-              projects={allProjects}
-              projectName={project.name}
-              projectColor={project.color}
-              onDelete={onDeleteTask}
-              onAddSubtask={handleAddSubtask}
-              onUpdated={handleUpdated}
+    <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <PageDragRegion />
+      <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0">
+        <div className="pb-6 min-w-0">
+          <div className="w-full max-w-[600px] mx-auto min-w-0">
+            <TaskListHeader
+              title={project.name}
+              breadcrumb={breadcrumb}
+              groupBy={viewState.groupBy}
+              onGroupBy={setGroupBy}
+              filter={viewState.filter}
+              onFilter={setFilter}
+              labels={visibleLabels}
             />
-          )}
 
-          {/* Inline task creator */}
-          <TaskCreator projectId={project.id} onAdd={onAddTask} />
+            {/* Task list */}
+            {filteredTasks.length === 0 ? (
+              <p className="text-body text-muted-foreground text-center py-8">
+                {projectTasks.length === 0 ? 'No tasks in this project yet.' : 'No tasks match this filter.'}
+              </p>
+            ) : (
+              <SectionedTaskList
+                groups={groups}
+                allTasks={filteredTasks}
+                dragEnabled={dragEnabled}
+                projects={allProjects}
+                projectName={project.name}
+                projectColor={project.color}
+                onDelete={onDeleteTask}
+                onAddSubtask={handleAddSubtask}
+                onUpdated={handleUpdated}
+              />
+            )}
+
+            {/* Inline task creator */}
+            <TaskCreator projectId={project.id} onAdd={onAddTask} />
+          </div>
         </div>
       </div>
     </div>

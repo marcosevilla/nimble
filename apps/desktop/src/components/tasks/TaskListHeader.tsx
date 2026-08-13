@@ -14,15 +14,15 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { STATUSES } from '@/components/tasks/StatusDropdown'
 import { labelColor } from '@/lib/labelColors'
-import { EMPTY_FILTER, type GroupBy, type TaskFilter } from '@/lib/task-view'
+import { ALL_GROUP_BY, EMPTY_FILTER, type GroupBy, type TaskFilter } from '@/lib/task-view'
 
-const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
-  { value: 'section', label: 'Section' },
-  { value: 'manual', label: 'Manual' },
-  { value: 'status', label: 'Status' },
-  { value: 'priority', label: 'Priority' },
-  { value: 'due', label: 'Due date' },
-]
+const GROUP_BY_LABELS: Record<GroupBy, string> = {
+  section: 'Section',
+  manual: 'Manual',
+  status: 'Status',
+  priority: 'Priority',
+  due: 'Due date',
+}
 
 const PRIORITY_OPTIONS: { value: number; label: string }[] = [
   { value: 4, label: 'Urgent' },
@@ -43,6 +43,12 @@ interface TaskListHeaderProps {
   filter: TaskFilter
   onFilter: (f: TaskFilter) => void
   labels: { id: string; name: string; color: string }[]
+  /** Restricts which options the sort menu offers — defaults to all 5.
+   * All Tasks passes a narrower list since `section`/`manual` don't have a
+   * coherent cross-project meaning (see task-view.ts). The caller is
+   * responsible for keeping a persisted `groupBy` consistent with this via
+   * `loadTaskView`'s `allowed` param — this prop only controls the menu. */
+  availableGroupBy?: readonly GroupBy[]
 }
 
 export function TaskListHeader({
@@ -53,10 +59,11 @@ export function TaskListHeader({
   filter,
   onFilter,
   labels,
+  availableGroupBy = ALL_GROUP_BY,
 }: TaskListHeaderProps) {
   const hasBreadcrumb = !!breadcrumb && breadcrumb.length > 0
   const activeCount = filter.statuses.length + filter.priorities.length + filter.labelIds.length
-  const groupByLabel = GROUP_BY_OPTIONS.find((o) => o.value === groupBy)?.label ?? groupBy
+  const groupByLabel = GROUP_BY_LABELS[groupBy] ?? groupBy
 
   const toggleStatus = (s: (typeof STATUSES)[number]['value']) => {
     onFilter({
@@ -116,9 +123,9 @@ export function TaskListHeader({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40">
               <DropdownMenuRadioGroup value={groupBy} onValueChange={(v) => onGroupBy(v as GroupBy)}>
-                {GROUP_BY_OPTIONS.map((o) => (
-                  <DropdownMenuRadioItem key={o.value} value={o.value}>
-                    {o.label}
+                {availableGroupBy.map((v) => (
+                  <DropdownMenuRadioItem key={v} value={v}>
+                    {GROUP_BY_LABELS[v]}
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>
@@ -193,10 +200,12 @@ export function TaskListHeader({
         </div>
       </div>
 
-      {/* Second row — display title. The drag region lives here (not the
-          top row, which is packed with interactive breadcrumb/menu
-          triggers) so the frameless window stays draggable from this page. */}
-      <div className="pt-1 pb-4" data-tauri-drag-region>
+      {/* Second row — display title. No drag region here — this header
+          scrolls with the list, so a `data-tauri-drag-region` on it would
+          go undraggable the moment the page scrolls. The window's drag
+          surface is `PageDragRegion`, rendered outside the scroll
+          container by each page shell. */}
+      <div className="pt-1 pb-4">
         <h1 className="pl-4 text-display truncate">{title}</h1>
       </div>
     </div>
