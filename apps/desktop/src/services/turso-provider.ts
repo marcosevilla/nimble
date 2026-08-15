@@ -37,9 +37,9 @@ import type { DataProvider } from '@nimble/types'
 // mirrors the ordering/filtering of the matching fn in nimble-core/src/db/,
 // so a web list comes back in the same order as the desktop one. They all
 // share the transport in `turso/client.ts` — do not add another fetch path.
-import { listTasks } from '@/services/turso/tasks'
+import { createTask, listTasks, setTaskStatus } from '@/services/turso/tasks'
 import { listProjects } from '@/services/turso/projects'
-import { listCaptures } from '@/services/turso/captures'
+import { createCapture, listCaptures } from '@/services/turso/captures'
 import { listLabels } from '@/services/turso/labels'
 import { listSections } from '@/services/turso/sections'
 
@@ -109,7 +109,7 @@ export function createTursoProvider(): DataProvider {
     // v1 IN — step 3 (list) and step 4 (create).
     captures: {
       list: listCaptures,
-      create: ni('captures.create'),
+      create: createCapture,
       convertToTask: ni('captures.convertToTask'),
       delete: ni('captures.delete'),
       readQuickCaptures: ni('captures.readQuickCaptures'),
@@ -155,11 +155,14 @@ export function createTursoProvider(): DataProvider {
     // rows, §5).
     tasks: {
       list: listTasks,
-      create: ni('tasks.create'),
+      create: createTask,
       update: ni('tasks.update'),
-      updateStatus: ni('tasks.updateStatus'),
-      complete: ni('tasks.complete'),
-      uncomplete: ni('tasks.uncomplete'),
+      // `note` is accepted and ignored: it exists only to be written to
+      // activity_log, which web does not write yet. Dropping it changes no task
+      // state — the status transition itself is applied in full.
+      updateStatus: (id, status) => setTaskStatus(id, status),
+      complete: (id) => setTaskStatus(id, 'complete'),
+      uncomplete: (id) => setTaskStatus(id, 'todo'),
       delete: ni('tasks.delete'),
       reorder: ni('tasks.reorder'),
       previewMarkdownMigration: ni('tasks.previewMarkdownMigration'),
