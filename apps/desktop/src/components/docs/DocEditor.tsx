@@ -1,18 +1,19 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useDocsStore } from '@/stores/docsStore'
-import { useDataProvider } from '@/services/provider-context'
+import { useDataProvider, getDataProvider } from '@/services/provider-context'
 import { TiptapEditor } from './TiptapEditor'
 import { DocNoteEntry } from './DocNoteEntry'
 import { VaultNoteEditor } from './VaultNoteEditor'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DocNote } from '@nimble/types'
-import { getSetting } from '@/services/tauri'
 
 let cachedFormat: 'html' | 'markdown' | null = null
 async function getDocsFormat(): Promise<'html' | 'markdown'> {
   if (cachedFormat) return cachedFormat
-  const v = await getSetting('docs_content_format')
+  // Module-scope helper — resolve the provider lazily at call time, never at
+  // module eval (the provider isn't set until app startup).
+  const v = await getDataProvider().settings.get('docs_content_format')
   cachedFormat = v === 'markdown' ? 'markdown' : 'html'
   return cachedFormat
 }

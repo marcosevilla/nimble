@@ -3,7 +3,7 @@ import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
 import { TaskListHeader } from '@/components/tasks/TaskListHeader'
 import { SelectionActionBar } from '@/components/tasks/SelectionActionBar'
 import { PageDragRegion } from '@/components/shared/PageDragRegion'
-import { listSections, listLabels } from '@/services/tauri'
+import { useDataProvider } from '@/services/provider-context'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView } from '@/lib/task-view'
 import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { Plus } from 'lucide-react'
@@ -28,6 +28,7 @@ export function ProjectDetailPage({
   onAddSubtask,
   onUpdated,
 }: ProjectDetailPageProps) {
+  const dp = useDataProvider()
   const [sections, setSections] = useState<Section[]>([])
   const [labels, setLabels] = useState<Label[]>([])
 
@@ -48,18 +49,19 @@ export function ProjectDetailPage({
   }, [])
 
   const refreshSections = useCallback(() => {
-    listSections(project.id)
+    dp.sections
+      .list(project.id)
       .then(setSections)
       .catch(() => {})
-  }, [project.id])
+  }, [dp, project.id])
 
   useEffect(() => {
     refreshSections()
   }, [refreshSections])
 
   useEffect(() => {
-    listLabels().then(setLabels).catch(() => {})
-  }, [])
+    dp.labels.list().then(setLabels).catch(() => {})
+  }, [dp])
 
   // Sections can be created inline from the task editor (Task 11/13), so
   // refresh the lane list whenever a task mutation comes back, not just on

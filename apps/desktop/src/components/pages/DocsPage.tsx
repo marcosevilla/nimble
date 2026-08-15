@@ -1,4 +1,8 @@
 import { useEffect } from 'react'
+// Window-to-window event bus, not data access — the web build aliases
+// '@tauri-apps/api/event' to a no-op stub (src/platform/), so this stays
+// portable. Not part of the DataProvider seam.
+// eslint-disable-next-line no-restricted-imports
 import { listen } from '@tauri-apps/api/event'
 import { useDocsStore } from '@/stores/docsStore'
 import { FolderTree } from '@/components/docs/FolderTree'

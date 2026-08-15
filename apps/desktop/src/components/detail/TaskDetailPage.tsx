@@ -35,7 +35,6 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { format, parseISO } from 'date-fns'
-import { listSections, listLabels } from '@/services/tauri'
 
 export function TaskDetailPage() {
   const dp = useDataProvider()
@@ -55,16 +54,16 @@ export function TaskDetailPage() {
   const [labels, setLabels] = useState<Label[]>([])
 
   useEffect(() => {
-    listLabels().then(setLabels).catch(() => setLabels([]))
-  }, [])
+    dp.labels.list().then(setLabels).catch(() => setLabels([]))
+  }, [dp])
 
   useEffect(() => {
     if (!task?.project_id) {
       setSections([])
       return
     }
-    listSections(task.project_id).then(setSections).catch(() => setSections([]))
-  }, [task?.project_id])
+    dp.sections.list(task.project_id).then(setSections).catch(() => setSections([]))
+  }, [dp, task?.project_id])
 
   const labelsMap = useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels])
 

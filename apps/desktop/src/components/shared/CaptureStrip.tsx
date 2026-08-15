@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+// The capture strip is a separate always-on-top Tauri window: the event bus
+// and window sizing below are desktop shell machinery with no web equivalent,
+// so they deliberately sit outside the DataProvider seam.
+// eslint-disable-next-line no-restricted-imports
 import { emit, listen } from '@tauri-apps/api/event'
+// eslint-disable-next-line no-restricted-imports
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window'
 import { AnimatePresence, motion } from 'motion/react'
 import { Check, CornerDownLeft } from 'lucide-react'
 import { useDataProvider } from '@/services/provider-context'
+// Likewise desktop-only: hides the strip window itself. Intentionally NOT on
+// DataProvider — there is no window to dismiss on the web.
+// eslint-disable-next-line no-restricted-imports
 import { dismissCaptureStrip } from '@/services/tauri'
 
 // Mirror the main window's theme — localStorage is shared across windows,

@@ -20,4 +20,35 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  // ── DataProvider seam ──
+  //
+  // UI components must go through the DataProvider abstraction
+  // (`useDataProvider()` / `getDataProvider()` from
+  // `@/services/provider-context`) so the same components can run on desktop
+  // (Tauri) and on the web client. Reaching for `@tauri-apps/*` or the
+  // `@/services/tauri` invoke wrappers from a component hard-wires it to the
+  // desktop shell. If something genuinely has no web equivalent, keep it out
+  // of `src/components/**` — or add a narrow, commented eslint-disable.
+  {
+    files: ['src/components/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@tauri-apps/*', '@tauri-apps/**'],
+              message:
+                'Components must not import Tauri APIs directly — use the DataProvider (useDataProvider()/getDataProvider() from @/services/provider-context) so the component also works on the web client.',
+            },
+            {
+              group: ['@/services/tauri', '**/services/tauri'],
+              message:
+                'Components must not import invoke wrappers from @/services/tauri — use the DataProvider (useDataProvider()/getDataProvider() from @/services/provider-context). Types belong in @nimble/types.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ])

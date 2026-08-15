@@ -4,7 +4,6 @@ import { useDataProvider } from '@/services/provider-context'
 import { useProjects } from '@/hooks/useLocalTasks'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { taskToast } from '@/lib/taskToast'
-import { listSections, listLabels } from '@/services/tauri'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
@@ -92,8 +91,8 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    listLabels().then(setLabels).catch(() => setLabels([]))
-  }, [])
+    dp.labels.list().then(setLabels).catch(() => setLabels([]))
+  }, [dp])
 
   // Sections are scoped to whichever project is currently selected in the
   // chip row, not just the mount point's default — reload on every change.
@@ -102,8 +101,8 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
       setSections([])
       return
     }
-    listSections(chipValues.projectId).then(setSections).catch(() => setSections([]))
-  }, [chipValues.projectId])
+    dp.sections.list(chipValues.projectId).then(setSections).catch(() => setSections([]))
+  }, [dp, chipValues.projectId])
 
   const dirty =
     title.trim() !== '' || description.trim() !== '' || !chipValuesEqual(chipValues, initialChipValues)

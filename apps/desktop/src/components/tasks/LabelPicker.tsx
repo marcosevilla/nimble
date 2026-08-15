@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { labelColor, DEFAULT_LABEL_COLOR } from '@/lib/labelColors'
-import { listLabels, createLabel } from '@/services/tauri'
+import { useDataProvider } from '@/services/provider-context'
 import type { Label } from '@nimble/types'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
@@ -64,6 +64,7 @@ interface LabelPickerProps {
 }
 
 export function LabelPicker({ value, onChange }: LabelPickerProps) {
+  const dp = useDataProvider()
   const [open, setOpen] = useState(false)
   const [labels, setLabels] = useState<Label[]>([])
   const [loading, setLoading] = useState(true)
@@ -71,11 +72,12 @@ export function LabelPicker({ value, onChange }: LabelPickerProps) {
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
-    listLabels()
+    dp.labels
+      .list()
       .then(setLabels)
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }, [dp])
 
   const selectedLabels = useMemo(
     () => value.map((id) => labels.find((l) => l.id === id)).filter((l): l is Label => !!l),
@@ -117,7 +119,7 @@ export function LabelPicker({ value, onChange }: LabelPickerProps) {
 
     setCreating(true)
     try {
-      const label = await createLabel(trimmed, DEFAULT_LABEL_COLOR)
+      const label = await dp.labels.create(trimmed, DEFAULT_LABEL_COLOR)
       setLabels((prev) => [...prev, label])
       onChange([...value, label.id])
       setQuery('')

@@ -14,7 +14,7 @@ import { IconButton } from '@/components/shared/IconButton'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { useDetailStore } from '@/stores/detailStore'
-import { listLabels } from '@/services/tauri'
+import { useDataProvider } from '@/services/provider-context'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView, type GroupBy } from '@/lib/task-view'
 import type { LocalTask, Label } from '@nimble/types'
 
@@ -123,6 +123,7 @@ function AllTasksView({
 // ── Tasks Page ──
 
 export function TasksPage() {
+  const dp = useDataProvider()
   const { projects, loading: projectsLoading, addProject, renameProject, updateProjectColor, removeProject } = useProjects()
   const { tasks, loading: tasksLoading, addTask, remove, refresh } = useLocalTasks()
   // Seed from the one-shot cross-page handoff (e.g. a project breadcrumb
@@ -154,8 +155,8 @@ export function TasksPage() {
   const loading = projectsLoading || tasksLoading
 
   useEffect(() => {
-    listLabels().then(setLabels).catch(() => {})
-  }, [])
+    dp.labels.list().then(setLabels).catch(() => {})
+  }, [dp])
 
   // Only surface labels that are actually applied to something — an empty
   // label taxonomy in the filter menu is just noise.

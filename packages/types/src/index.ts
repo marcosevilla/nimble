@@ -5,6 +5,11 @@
  * These types mirror the Rust structs and SQLite schema.
  */
 
+// ── DataProvider ──
+// The one cross-client data-access contract. Lives in its own module so the
+// domain types below stay importable without pulling in the interface.
+export type { DataProvider } from './data-provider'
+
 // ── Settings ──
 
 export interface Setting {

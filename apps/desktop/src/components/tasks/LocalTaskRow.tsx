@@ -3,13 +3,13 @@ import { Input } from '@/components/ui/input'
 import { useDetailStore } from '@/stores/detailStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { TaskItem } from './TaskItem'
-import { listLabels } from '@/services/tauri'
+import { getDataProvider } from '@/services/provider-context'
 import { labelColor } from '@/lib/labelColors'
 import type { LocalTask, Label } from '@nimble/types'
 
 // ── Labels cache ──
 //
-// Same label list `LabelPicker.tsx` fetches via `listLabels()`, shared at
+// Same label list `LabelPicker.tsx` fetches via `dp.labels.list()`, shared at
 // module scope so every visible row doesn't independently re-fetch the full
 // label table. Invalidated by the same 'tasks-changed' event
 // `emitTasksChanged` (hooks/useLocalTasks.ts) dispatches on any task
@@ -18,7 +18,7 @@ import type { LocalTask, Label } from '@nimble/types'
 // The invalidation listener is registered exactly ONCE at module scope (not
 // once per mounted row) and rows subscribe to the shared cache instead of
 // each re-fetching independently — otherwise N visible rows would each add
-// their own listener and fire N near-simultaneous listLabels() IPC calls on
+// their own listener and fire N near-simultaneous label list calls on
 // every unrelated mutation (e.g. a single drag reorder).
 const TASKS_CHANGED_EVENT = 'tasks-changed'
 
@@ -37,7 +37,10 @@ function fetchLabels(force = false): Promise<Label[]> {
   }
   if (labelsCache) return Promise.resolve(labelsCache)
   if (!labelsPromise) {
-    labelsPromise = listLabels()
+    // Module-scope cache — resolve the provider lazily at call time, never at
+    // module eval (the provider isn't set until app startup).
+    labelsPromise = getDataProvider()
+      .labels.list()
       .then((ls) => {
         labelsCache = ls
         notifyLabelsSubscribers(ls)

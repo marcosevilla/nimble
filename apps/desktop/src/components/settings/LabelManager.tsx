@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { labelColor, LABEL_COLOR_OPTIONS, DEFAULT_LABEL_COLOR } from '@/lib/labelColors'
-import { listLabels, createLabel, updateLabel, deleteLabel } from '@/services/tauri'
+import { useDataProvider } from '@/services/provider-context'
 import type { Label } from '@nimble/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,6 +23,7 @@ import { Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 export function LabelManager() {
+  const dp = useDataProvider()
   const [labels, setLabels] = useState<Label[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -31,18 +32,19 @@ export function LabelManager() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    listLabels()
+    dp.labels
+      .list()
       .then(setLabels)
       .catch((e) => toast.error(`Failed to load labels: ${e}`))
       .finally(() => setLoading(false))
-  }, [])
+  }, [dp])
 
   const handleCreate = useCallback(async () => {
     const trimmed = newName.trim()
     if (!trimmed || saving) return
     setSaving(true)
     try {
-      const label = await createLabel(trimmed, newColor)
+      const label = await dp.labels.create(trimmed, newColor)
       setLabels((prev) => [...prev, label])
       toast.success(`Label created: "${trimmed}"`)
       setNewName('')
@@ -53,37 +55,37 @@ export function LabelManager() {
     } finally {
       setSaving(false)
     }
-  }, [newName, newColor, saving])
+  }, [dp, newName, newColor, saving])
 
   const handleRename = useCallback(async (id: string, name: string): Promise<boolean> => {
     try {
-      const updated = await updateLabel(id, { name })
+      const updated = await dp.labels.update(id, { name })
       setLabels((prev) => prev.map((l) => (l.id === id ? updated : l)))
       return true
     } catch (e) {
       toast.error(`Failed to rename label: ${e}`)
       return false
     }
-  }, [])
+  }, [dp])
 
   const handleColorChange = useCallback(async (id: string, color: string) => {
     try {
-      const updated = await updateLabel(id, { color })
+      const updated = await dp.labels.update(id, { color })
       setLabels((prev) => prev.map((l) => (l.id === id ? updated : l)))
     } catch (e) {
       toast.error(`Failed to update label color: ${e}`)
     }
-  }, [])
+  }, [dp])
 
   const handleDelete = useCallback(async (label: Label) => {
     try {
-      await deleteLabel(label.id)
+      await dp.labels.delete(label.id)
       setLabels((prev) => prev.filter((l) => l.id !== label.id))
       toast.success(`Label deleted: "${label.name}"`)
     } catch (e) {
       toast.error(`Failed to delete label: ${e}`)
     }
-  }, [])
+  }, [dp])
 
   if (loading) {
     return (
