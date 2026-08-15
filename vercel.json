@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build:web",
-  "outputDirectory": "dist-web",
+  "buildCommand": "npm run build:web --workspace @nimble/desktop",
+  "outputDirectory": "apps/desktop/dist-web",
   "framework": null,
   "functions": {
     "api/*.ts": {

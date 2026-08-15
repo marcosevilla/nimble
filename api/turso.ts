@@ -16,6 +16,8 @@
  *   TURSO_TOKEN  the database auth token
  */
 
+import type { VercelRequest, VercelResponse } from '@vercel/node'
+
 /* ------------------------------------------------------------------ */
 /* Safety filter                                                       */
 /* ------------------------------------------------------------------ */
@@ -173,39 +175,54 @@ function validatePipeline(body: unknown): Rejection | null {
 /* Handler                                                             */
 /* ------------------------------------------------------------------ */
 
-function json(status: number, payload: unknown): Response {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
-}
-
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204 })
+/**
+ * This handler uses the Node signature `(req, res)`, NOT the Web signature
+ * `(Request) => Response`. It was originally written the Web way, which looks
+ * supported and type-checks fine, but on Vercel's Node runtime the returned
+ * `Response` is simply discarded: nothing ever ends the response, so the
+ * function hangs until FUNCTION_INVOCATION_TIMEOUT (deployed) or returns
+ * NO_RESPONSE_FROM_FUNCTION (vercel dev). Marking api/ as ESM does not change
+ * this. Reply through `res` — do not `return` a Response here.
+ */
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'OPTIONS') {
+    res.status(204).end()
+    return
   }
-  if (request.method !== 'POST') {
-    return json(405, { error: 'Method not allowed' })
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' })
+    return
   }
 
   const tursoUrl = process.env.TURSO_URL
   const tursoToken = process.env.TURSO_TOKEN
   if (!tursoUrl || !tursoToken) {
-    return json(500, { error: 'Server is missing TURSO_URL / TURSO_TOKEN' })
+    res.status(500).json({ error: 'Server is missing TURSO_URL / TURSO_TOKEN' })
+    return
   }
 
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return json(400, { error: 'Invalid JSON body' })
+  // Vercel parses an application/json body into req.body for us, but a client
+  // that omits the header leaves it a raw string — handle both.
+  let body: unknown = req.body
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body)
+    } catch {
+      res.status(400).json({ error: 'Invalid JSON body' })
+      return
+    }
+  }
+  if (body === undefined || body === null) {
+    res.status(400).json({ error: 'Invalid JSON body' })
+    return
   }
 
   const rejection = validatePipeline(body)
   if (rejection) {
     // The SQL is echoed back because this only ever fires on our own client's
     // bugs; it's the fastest way to find the offending statement.
-    return json(403, { error: `Rejected by proxy: ${rejection.reason}`, sql: rejection.sql })
+    res.status(403).json({ error: `Rejected by proxy: ${rejection.reason}`, sql: rejection.sql })
+    return
   }
 
   // libsql:// -> https://, strip trailing slashes (matches the mobile client)
@@ -222,16 +239,14 @@ export default async function handler(request: Request): Promise<Response> {
       body: JSON.stringify(body),
     })
   } catch (err) {
-    return json(502, { error: `Upstream request failed: ${(err as Error).message}` })
+    res.status(502).json({ error: `Upstream request failed: ${(err as Error).message}` })
+    return
   }
 
   // Return verbatim so the client sees exactly what Turso said.
   const text = await upstream.text()
-  return new Response(text, {
-    status: upstream.status,
-    headers: {
-      'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
-      'Cache-Control': 'no-store',
-    },
-  })
+  res.status(upstream.status)
+  res.setHeader('Content-Type', upstream.headers.get('content-type') ?? 'application/json')
+  res.setHeader('Cache-Control', 'no-store')
+  res.send(text)
 }

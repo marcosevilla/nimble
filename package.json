@@ -1,8 +1,14 @@
 {
   "name": "nimble",
   "private": true,
-  "workspaces": ["apps/desktop", "packages/*"],
+  "workspaces": [
+    "apps/desktop",
+    "packages/*"
+  ],
   "scripts": {
     "update-app": "bash tools/update-app.sh"
+  },
+  "devDependencies": {
+    "@vercel/node": "^5.3.24"
   }
 }

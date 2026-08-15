@@ -1,0 +1,39 @@
+# Keeps the deployment upload inside Vercel's 10MB limit. The repo root carries
+# a 24GB Rust `target/`, 385MB of node_modules, and ~30 agent-tool dotfile dirs.
+#
+# This is a block-list on purpose. An allow-list (`/*` + `!/api/**`) does NOT
+# work here: Vercel's uploader prunes an ignored directory and negation does not
+# bring it back, so `!/api/` silently shipped a deployment with no api/ at all.
+# Verify changes against the deployment file list, not by reading the patterns.
+
+# Every dotfile and dot-directory: .git, .claude, .vite, .DS_Store, and the
+# ~30 agent-tool config dirs (.roo, .kiro, .windsurf, …).
+.*
+
+# Rust / Tauri — the web target builds none of it
+/target
+/nimble-core
+/Cargo.toml
+/Cargo.lock
+/apps/desktop/src-tauri
+
+# Dormant Expo app (unplugged from npm workspaces 2026-08-14)
+/apps/mobile
+
+# Docs, skills and local tooling
+/docs
+/tools
+/skills
+/skills-lock.json
+/CLAUDE.md
+/apps/desktop/docs
+
+# Build outputs — Vercel rebuilds these
+/apps/desktop/dist
+/apps/desktop/dist-web
+
+# Stale pre-monorepo lockfile; the root one is authoritative
+/apps/desktop/package-lock.json
+
+# Vercel runs its own install
+node_modules
