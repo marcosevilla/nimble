@@ -1,7 +1,7 @@
 {
   "name": "nimble",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": ["apps/desktop", "packages/*"],
   "scripts": {
     "update-app": "bash tools/update-app.sh"
   }

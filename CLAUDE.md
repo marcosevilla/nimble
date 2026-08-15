@@ -13,7 +13,7 @@ Nimble (formerly "Daily Triage") — a personal daily triage and briefing macOS 
 
 ## Commands
 - `cd apps/desktop && npm run tauri dev` — Start full Tauri desktop app
-- `cd apps/mobile && npx expo start` — Start Expo mobile dev server
+- ~~`cd apps/mobile && npx expo start`~~ — **mobile app is DORMANT as of 2026-08-14** (unplugged from npm workspaces; see `apps/mobile/DORMANT.md`)
 - `cd apps/desktop && npm run build` — Build desktop frontend for production
 - `cd apps/desktop && npm run tauri build` — Build distributable .app
 - **No test suite yet** — no unit or integration tests
@@ -141,7 +141,8 @@ nimble/
 - Desktop: `TauriProvider` delegates to `services/tauri.ts` invoke wrappers
 - Mobile: `SqliteProvider` talks directly to expo-sqlite
 - Stores access provider via `getDataProvider()` (module-level, not React context)
-- 26 desktop UI components still call invoke wrappers directly from tauri.ts (Wave B migration pending — all stores + hooks are fully decoupled as of 2026-04-16)
+- **9** desktop files still import from `@/services/tauri` directly (verified 2026-08-14; the long-standing "26 components" figure was stale). 6 of the 9 exist because mobile's `DataProvider` copy has a `labels` domain the desktop interface lacks. All stores + hooks are fully decoupled as of 2026-04-16.
+- ⚠️ `apps/mobile/services/data-provider.ts` is a **parallel copy**, not a shared import, and has already drifted from the desktop interface. If a third client is added, move the interface into `packages/types` rather than copying it again.
 
 ## Sync Protocol
 - Every mutation appends to `sync_log` (fire-and-forget, never blocks the mutation)
