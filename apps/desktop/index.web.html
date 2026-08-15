@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nimble</title>
+    <script>
+      ;(function(){
+        var t=localStorage.getItem('theme');
+        var a=localStorage.getItem('accent_theme')||'warm';
+        var d=window.matchMedia('(prefers-color-scheme:dark)').matches;
+        if(t==='dark'||(t!=='light'&&d))document.documentElement.classList.add('dark');
+        document.documentElement.classList.add('theme-'+a);
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.web.tsx"></script>
+  </body>
+</html>
