@@ -300,6 +300,29 @@ No `LIMIT`, no cursor, no batching, and the entire result set is deserialized in
 
 **Not fixed here, as instructed.**
 
+### 6.1 Empirical confirmation — added 2026-08-15
+
+The analysis above is correct, but it was later restated elsewhere (the Todoist ticket, and the project memory note) as *"the Mac cannot receive; the pull is wedged today; there is a four-month backlog to drain."* That restatement is **wrong**, and the measurement below is the disproof. Recording it here so the stronger claim doesn't get reintroduced.
+
+Counts by `device_id`, read directly from both databases:
+
+| `device_id` | Local `sync_log` | Remote `sync_log` |
+|---|---|---|
+| `4e7a9f30-…` (this Mac) | 34,113 | 34,047 |
+| `mobile-d697e168` | 2 | 4 |
+
+**Rows the pull would actually return: `SELECT COUNT(*) … WHERE timestamp > '2026-04-05T06:20:35.108Z' AND device_id != '<this Mac>'` → `0`.**
+
+Three consequences:
+
+1. **The ~34,100 figure is the Mac's own writes.** The pull filters `device_id != :my_device_id`, so those rows were never pullable and never constituted a backlog. Any reasoning that treats 34,100 as "rows waiting to be drained" has conflated the push corpus with the pull corpus.
+2. **The frozen watermark is benign, not evidence of failure.** `last_pull_timestamp` equals *exactly* the timestamp of the last `mobile-d697e168` row (`2026-04-05T06:20:35.108Z`). The Mac pulled that row successfully and has had nothing foreign to pull since. A pull returning zero rows does not advance a watermark, and should not. "Frozen for four months" and "wedged" are not the same claim, and only the first is true.
+3. **The trigger condition is unchanged and still real.** Everything in §6 about what happens *when* a second device starts writing stands. This is a correctly-identified latent bug; it simply was never an active outage, and never gated any other work.
+
+**Status: fixed** on branch `web-client` (`84e0981`). `MAX_PULL_ROWS = 200` as a SQL `LIMIT`, with the watermark persisted per chunk, and a composite `(timestamp, id)` keyset cursor so a chunk boundary inside a group of rows sharing one millisecond neither skips rows (`timestamp >`) nor loops forever (`timestamp >=`).
+
+That work also found a second defect not described above, and this one *was* silently active: a statement-level Turso failure returns **HTTP 200 with `results[0].type == "error"`**, and the old parse called `.unwrap_or_default()` on the rows pointer — so a failed query was indistinguishable from a successful empty pull and returned `Ok(0)`. Any future pull failure would have been invisible for the same reason the schema-upgrade gates in §4 latch silently. Same root pattern, third instance: **a 2xx response carrying a statement-level error, treated as success.** Worth a sweep for other `.unwrap_or_default()` uses on Turso response parsing.
+
 ---
 
 ## Appendix — evidence gathered
