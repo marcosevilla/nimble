@@ -58,10 +58,17 @@ function App() {
   // applies a remote change. Note: this re-triggers emitTasksChanged's
   // debounced push, but that push finds an empty outbox and is a cheap
   // no-op — not worth guarding against unless it proves chatty in practice.
+  // `remote-sync-applied` is the Turso equivalent: the device sync pulled rows
+  // that changed underneath the UI (a task completed on the phone, say), so the
+  // lists have to re-read. Kept as a separate event rather than reusing the
+  // Todoist one so the log and any future handler can tell the two apart.
   useEffect(() => {
-    const unlisten = listen('todoist-sync-applied', () => emitTasksChanged())
+    const unlisteners = [
+      listen('todoist-sync-applied', () => emitTasksChanged()),
+      listen('remote-sync-applied', () => emitTasksChanged()),
+    ]
     return () => {
-      unlisten.then((f) => f())
+      unlisteners.forEach((u) => u.then((f) => f()))
     }
   }, [])
 

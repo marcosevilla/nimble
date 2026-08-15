@@ -315,9 +315,14 @@ pub fn run() {
                 });
             }
 
-            // --- Todoist background sync: 5-minute interval, min 60s apart ---
+            // --- Background sync: 5-minute interval, min 60s apart ---
             // First tick fires immediately (tokio::time::interval semantics),
             // covering an on-launch sync without a separate code path.
+            //
+            // Both integrations run here. Turso is the device-to-device sync, so
+            // leaving it out (as this loop did until 2026-08-15) meant local
+            // changes reached the cloud only when someone pressed the button on
+            // the Settings page, and remote changes never arrived at all.
             {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -326,6 +331,7 @@ pub fn run() {
                     loop {
                         interval.tick().await; // first tick fires immediately → covers on-launch sync
                         crate::sync_runner::run_if_due_and_emit(&handle, 60).await;
+                        crate::sync_runner::run_turso_sync_if_due(&handle, 60).await;
                     }
                 });
             }
@@ -353,15 +359,19 @@ pub fn run() {
                         dismiss_capture_strip_inner(&window.app_handle().clone());
                     }
                 }
-                // Window regaining focus is a good moment to catch up on
-                // Todoist sync (e.g. changes made on mobile/web while this
-                // window was backgrounded) — gated by the same min-interval
-                // as the background loop so refocusing repeatedly can't spam
-                // the API.
+                // Window regaining focus is a good moment to catch up on both
+                // syncs (e.g. changes made on mobile/web while this window was
+                // backgrounded) — gated by the same min-interval as the
+                // background loop so refocusing repeatedly can't spam the API.
+                //
+                // For the web client this is the trigger that matters most: it is
+                // how a task captured on the phone shows up within seconds of
+                // coming back to the Mac, rather than on the next 5-minute tick.
                 WindowEvent::Focused(true) => {
                     let app = window.app_handle().clone();
                     tauri::async_runtime::spawn(async move {
                         crate::sync_runner::run_if_due_and_emit(&app, 60).await;
+                        crate::sync_runner::run_turso_sync_if_due(&app, 60).await;
                     });
                 }
                 _ => {}
