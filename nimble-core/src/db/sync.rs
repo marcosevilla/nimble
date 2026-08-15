@@ -864,8 +864,64 @@ fn plan_batches(sizes: &[usize]) -> Vec<usize> {
     batches
 }
 
-/// Send one batch of entries to Turso and, only once the POST returned 2xx,
-/// mark exactly those entries `synced = 1`. Returns how many were marked.
+/// Which pipeline statements a single `sync_log` entry contributed.
+///
+/// Recorded while the batch is assembled, so the response can be attributed
+/// back to individual entries. Without it a batch is all-or-nothing and there
+/// is no way to tell which entry a failed statement belonged to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EntrySpan {
+    /// Index of this entry's first statement in the pipeline.
+    start: usize,
+    /// How many statements it contributed: its data mutations plus its one
+    /// `sync_log` insert. Always at least 1.
+    len: usize,
+    /// False when the entry produced no data mutation at all — an unparseable
+    /// snapshot, or a table name that failed validation. Such an entry can
+    /// never succeed, however often it is retried.
+    has_data_mutation: bool,
+}
+
+/// Decide which entries of a batch may be marked `synced = 1`.
+///
+/// `statement_ok[i]` is whether pipeline statement `i` came back `ok`.
+///
+/// An entry is marked only once EVERY statement it produced succeeded. This is
+/// the rule that was missing: the previous version logged failed statements and
+/// then marked the whole batch synced regardless. Because `push` only ever
+/// selects `WHERE synced = 0`, a rejected write was never retried — it diverged
+/// silently and permanently. Measured cost on this database before the fix:
+/// 16 projects and 317 tasks absent from Turso while every local entry claimed
+/// to be synced, traced to logged `no column named external_id` errors.
+///
+/// Two deliberate asymmetries:
+///  - A missing result (the response carried fewer results than we sent) counts
+///    as NOT ok, so a truncated response retries rather than silently drops.
+///  - An entry with no data mutation is marked anyway. Retrying cannot parse an
+///    invalid snapshot, and leaving it unsynced would wedge the queue behind a
+///    poison pill forever. The caller logs it at error level instead.
+///
+/// Pure, so the attribution rules are testable without touching the network.
+fn entries_safe_to_mark(spans: &[EntrySpan], statement_ok: &[bool]) -> Vec<bool> {
+    spans
+        .iter()
+        .map(|span| {
+            if !span.has_data_mutation {
+                return true;
+            }
+            (span.start..span.start + span.len)
+                .all(|i| statement_ok.get(i).copied().unwrap_or(false))
+        })
+        .collect()
+}
+
+/// Send one batch of entries to Turso and mark `synced = 1` on exactly those
+/// entries whose statements all succeeded. Returns how many were marked.
+///
+/// Entries with a failed statement stay `synced = 0` and go out again on the
+/// next push — which re-runs the remote schema upgrades first, so the common
+/// cause (a snapshot naming a column the remote table does not have yet)
+/// heals itself instead of silently losing the write.
 ///
 /// Marking per batch (rather than after the whole run) is what makes progress
 /// survive a mid-run failure: a batch that landed stays landed, and the next
@@ -877,11 +933,30 @@ async fn push_batch(
     entries: &[PushEntry],
 ) -> crate::Result<u64> {
     let mut statements: Vec<serde_json::Value> = Vec::new();
+    let mut spans: Vec<EntrySpan> = Vec::with_capacity(entries.len());
 
     for (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp) in entries {
+        let start = statements.len();
+
         // 1. Apply the actual data mutation on Turso's copy of the table
         let mutation_requests = build_data_mutation_requests(table_name, row_id, operation, snapshot);
+        let has_data_mutation = !mutation_requests.is_empty();
         statements.extend(mutation_requests);
+
+        if !has_data_mutation {
+            // The row cannot be reconstructed from this entry, so it will never
+            // reach Turso. Say so loudly: it is marked synced below purely to
+            // stop it blocking every future push, not because it succeeded.
+            log::error!(
+                "Turso push: sync_log entry {} ({} {} on {}) produced no data mutation — \
+                 its row will NOT reach Turso. Marking synced anyway; retrying cannot \
+                 repair an unparseable snapshot or a rejected table name.",
+                id,
+                operation,
+                row_id,
+                table_name
+            );
+        }
 
         // 2. Insert the sync_log entry on Turso (so other devices can pull it)
         statements.push(turso_execute(
@@ -897,6 +972,12 @@ async fn push_batch(
                 turso_text(timestamp),
             ],
         ));
+
+        spans.push(EntrySpan {
+            start,
+            len: statements.len() - start,
+            has_data_mutation,
+        });
     }
 
     // Add a "close" to end the pipeline
@@ -905,8 +986,18 @@ async fn push_batch(
     // Send the pipeline — check for errors in the response
     let body = turso_pipeline(turso_url, turso_token, statements).await?;
 
-    // Check if any result was an error
-    if let Some(results) = body.get("results").and_then(|v| v.as_array()) {
+    // Turso answers with HTTP 200 even when individual statements failed, so
+    // the per-statement types are the only signal that a write was rejected.
+    let results = body.get("results").and_then(|v| v.as_array());
+    let statement_ok: Vec<bool> = results
+        .map(|rs| {
+            rs.iter()
+                .map(|r| r.get("type").and_then(|v| v.as_str()) != Some("error"))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if let Some(results) = results {
         for (i, result) in results.iter().enumerate() {
             if let Some("error") = result.get("type").and_then(|v| v.as_str()) {
                 let err_msg = result
@@ -914,21 +1005,38 @@ async fn push_batch(
                     .and_then(|v| v.as_str())
                     .unwrap_or("Unknown error");
                 log::warn!("Turso pipeline statement {} failed: {}", i, err_msg);
-                // Don't fail the whole push for individual statement errors
-                // (e.g., constraint violations on already-synced data)
             }
         }
     }
 
-    // Mark this batch's entries as synced before the caller sends the next one.
-    for (id, ..) in entries {
+    // Mark ONLY the entries whose every statement landed. The rest keep
+    // `synced = 0` and go out again on the next push. Marking unconditionally
+    // here is what silently and permanently dropped rejected writes.
+    let safe_to_mark = entries_safe_to_mark(&spans, &statement_ok);
+
+    let mut marked: u64 = 0;
+    for ((id, ..), ok) in entries.iter().zip(safe_to_mark.iter()) {
+        if !ok {
+            continue;
+        }
         sqlx::query("UPDATE sync_log SET synced = 1 WHERE id = ?")
             .bind(id)
             .execute(pool)
             .await?;
+        marked += 1;
     }
 
-    Ok(entries.len() as u64)
+    let retrying = entries.len() as u64 - marked;
+    if retrying > 0 {
+        log::warn!(
+            "Turso push: {} of {} entries were rejected and stay unsynced; \
+             the next push retries them after re-running the remote schema upgrades",
+            retrying,
+            entries.len()
+        );
+    }
+
+    Ok(marked)
 }
 
 /// Push unsynced local entries to Turso via its HTTP API.
@@ -1733,7 +1841,8 @@ pub async fn get_pending_entries(pool: &SqlitePool) -> crate::Result<Vec<SyncLog
 #[cfg(test)]
 mod push_batching_tests {
     use super::{
-        entry_payload_bytes, plan_batches, PushEntry, MAX_BATCH_BYTES, MAX_BATCH_ENTRIES,
+        entries_safe_to_mark, entry_payload_bytes, plan_batches, EntrySpan, PushEntry,
+        MAX_BATCH_BYTES, MAX_BATCH_ENTRIES,
     };
 
     fn entry(snapshot_len: usize) -> PushEntry {
@@ -1752,6 +1861,77 @@ mod push_batching_tests {
     #[test]
     fn nothing_to_push_plans_no_batches() {
         assert!(plan_batches(&[]).is_empty());
+    }
+
+    /// One entry contributing `len` statements starting at `start`, with a real
+    /// data mutation — the ordinary case.
+    fn span(start: usize, len: usize) -> EntrySpan {
+        EntrySpan { start, len, has_data_mutation: true }
+    }
+
+    #[test]
+    fn a_fully_successful_batch_marks_every_entry() {
+        // Two entries, two statements each (mutation + sync_log insert).
+        let spans = [span(0, 2), span(2, 2)];
+        assert_eq!(
+            entries_safe_to_mark(&spans, &[true, true, true, true]),
+            vec![true, true]
+        );
+    }
+
+    #[test]
+    fn a_failed_statement_leaves_its_own_entry_unsynced_and_spares_the_rest() {
+        // Entry 1's data mutation is rejected (statement 2). Its sync_log insert
+        // still succeeds — which is exactly why checking "did the POST return
+        // 2xx" was not enough to catch this.
+        let spans = [span(0, 2), span(2, 2), span(4, 2)];
+        let ok = [true, true, false, true, true, true];
+        assert_eq!(
+            entries_safe_to_mark(&spans, &ok),
+            vec![true, false, true],
+            "only the entry owning the failed statement may stay unsynced"
+        );
+    }
+
+    /// The concrete regression: on 2026-08-03 sixteen `projects` rows were
+    /// rejected with `table projects has no column named external_id`, were
+    /// logged as warnings, and were then marked synced anyway — so they never
+    /// retried and stayed absent from Turso until repaired by hand.
+    #[test]
+    fn the_regression_that_lost_sixteen_projects_stays_unsynced_for_retry() {
+        let spans: Vec<EntrySpan> = (0..16).map(|i| span(i * 2, 2)).collect();
+        // Every data mutation rejected; every sync_log insert accepted.
+        let ok: Vec<bool> = (0..32).map(|i| i % 2 == 1).collect();
+        let marked = entries_safe_to_mark(&spans, &ok);
+        assert!(
+            marked.iter().all(|m| !m),
+            "no entry may be marked synced when its data mutation was rejected"
+        );
+    }
+
+    #[test]
+    fn a_truncated_response_retries_rather_than_dropping() {
+        // Two entries sent, results for only the first came back.
+        let spans = [span(0, 2), span(2, 2)];
+        assert_eq!(
+            entries_safe_to_mark(&spans, &[true, true]),
+            vec![true, false],
+            "a missing result must count as failure, not as success"
+        );
+    }
+
+    #[test]
+    fn an_unparseable_entry_is_marked_rather_than_wedging_the_queue() {
+        // No data mutation could be built, so only the sync_log insert went out.
+        // Retrying can never fix it; leaving it unsynced would block the queue
+        // behind a poison pill on every future push.
+        let spans = [EntrySpan { start: 0, len: 1, has_data_mutation: false }];
+        assert_eq!(entries_safe_to_mark(&spans, &[true]), vec![true]);
+    }
+
+    #[test]
+    fn an_empty_batch_marks_nothing() {
+        assert!(entries_safe_to_mark(&[], &[]).is_empty());
     }
 
     #[test]
