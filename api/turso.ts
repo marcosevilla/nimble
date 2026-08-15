@@ -16,7 +16,37 @@
  *   TURSO_TOKEN  the database auth token
  */
 
-import type { VercelRequest, VercelResponse } from '@vercel/node'
+/* ------------------------------------------------------------------ */
+/* Handler types                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Minimal structural types for Vercel's Node runtime handler.
+ *
+ * Declared here rather than imported from `@vercel/node`, which drags the whole
+ * Vercel builder toolchain (build-utils, python-analysis, hono, …) in for two
+ * type names — nine npm audit advisories in exchange for no build-time value,
+ * since this file sits outside `tsconfig.app.json`'s `include` and `tsc -b`
+ * never type-checks it. Vercel supplies the real runtime at deploy time; these
+ * only have to describe the surface this handler actually touches.
+ */
+interface VercelRequest {
+  method?: string
+  /**
+   * Vercel parses an `application/json` body into this for us. A client that
+   * omits the header leaves it a raw string, which the handler also accepts.
+   */
+  body?: unknown
+}
+
+interface VercelResponse {
+  /** Chainable, so `res.status(405).json(...)` works. */
+  status(code: number): VercelResponse
+  setHeader(name: string, value: string): void
+  json(body: unknown): void
+  send(body: string): void
+  end(): void
+}
 
 /* ------------------------------------------------------------------ */
 /* Safety filter                                                       */

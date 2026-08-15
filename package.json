@@ -7,8 +7,5 @@
   ],
   "scripts": {
     "update-app": "bash tools/update-app.sh"
-  },
-  "devDependencies": {
-    "@vercel/node": "^5.3.24"
   }
 }
