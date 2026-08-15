@@ -1,8 +1,9 @@
 /**
  * TursoProvider — the web client's DataProvider implementation.
  *
- * SKELETON (step 2 of docs/web-client-architecture-decision.md §7). Every
- * method rejects. Reads land in step 3, writes in step 4.
+ * Step 3 of docs/web-client-architecture-decision.md §7. The five v1 list
+ * methods — tasks, projects, captures, labels, sections — are implemented
+ * against Turso; every other method still rejects. Writes land in step 4.
  *
  * Two deliberate choices worth reading before extending this file:
  *
@@ -31,6 +32,16 @@
  */
 
 import type { DataProvider } from '@nimble/types'
+
+// Read implementations, one module per domain. Each owns its own SQL and
+// mirrors the ordering/filtering of the matching fn in nimble-core/src/db/,
+// so a web list comes back in the same order as the desktop one. They all
+// share the transport in `turso/client.ts` — do not add another fetch path.
+import { listTasks } from '@/services/turso/tasks'
+import { listProjects } from '@/services/turso/projects'
+import { listCaptures } from '@/services/turso/captures'
+import { listLabels } from '@/services/turso/labels'
+import { listSections } from '@/services/turso/sections'
 
 /** Thrown (as a rejection) by every not-yet-implemented provider method. */
 export class WebNotImplementedError extends Error {
@@ -97,7 +108,7 @@ export function createTursoProvider(): DataProvider {
 
     // v1 IN — step 3 (list) and step 4 (create).
     captures: {
-      list: ni('captures.list'),
+      list: listCaptures,
       create: ni('captures.create'),
       convertToTask: ni('captures.convertToTask'),
       delete: ni('captures.delete'),
@@ -115,7 +126,7 @@ export function createTursoProvider(): DataProvider {
 
     // v1 IN — projects.list in step 3.
     projects: {
-      list: ni('projects.list'),
+      list: listProjects,
       create: ni('projects.create'),
       update: ni('projects.update'),
       delete: ni('projects.delete'),
@@ -123,7 +134,7 @@ export function createTursoProvider(): DataProvider {
 
     // v1 IN — labels.list in step 3, setForTask in step 5.
     labels: {
-      list: ni('labels.list'),
+      list: listLabels,
       create: ni('labels.create'),
       update: ni('labels.update'),
       delete: ni('labels.delete'),
@@ -132,7 +143,7 @@ export function createTursoProvider(): DataProvider {
 
     // v1 IN — sections.list in step 3.
     sections: {
-      list: ni('sections.list'),
+      list: listSections,
       create: ni('sections.create'),
       rename: ni('sections.rename'),
       delete: ni('sections.delete'),
@@ -143,7 +154,7 @@ export function createTursoProvider(): DataProvider {
     // step 5. reorder is explicitly OUT of v1 (rewrites `position` across many
     // rows, §5).
     tasks: {
-      list: ni('tasks.list'),
+      list: listTasks,
       create: ni('tasks.create'),
       update: ni('tasks.update'),
       updateStatus: ni('tasks.updateStatus'),

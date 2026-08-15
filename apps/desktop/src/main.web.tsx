@@ -42,6 +42,17 @@ if (import.meta.env.DEV) {
 const tursoProvider = createTursoProvider()
 setDataProvider(tursoProvider)
 
+// Web opens on Tasks, not Today. Today is the guided morning review, and it is
+// built on calendar events and AI priorities — neither of which the web target
+// can reach (§5: no local calendar feeds, no Anthropic key in the browser), so
+// it would open on a page that is structurally empty here. Tasks is backed by
+// the reads this build actually implements.
+//
+// Set on the store rather than changing its `currentPage` default, which is
+// shared with the desktop build. Safe to do at boot because appStore is not
+// persisted — this is a starting page, not an override of a remembered one.
+useAppStore.getState().setCurrentPage('tasks')
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <DataProviderRoot provider={tursoProvider}>
