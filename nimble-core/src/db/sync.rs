@@ -1019,77 +1019,310 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
 
 // ── Pull ──
 
-/// Pull remote changes from Turso that originated on other devices.
-/// Applies each change to the local DB using last-write-wins.
-/// Returns the count of applied entries.
-pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<u64> {
-    let device_id = get_or_create_device_id(pool).await?;
+/// Max `sync_log` rows fetched from Turso in one pull request.
+///
+/// The pull had no LIMIT at all: it asked for everything newer than
+/// `last_pull_timestamp` in a single pipeline request and held the whole result
+/// set — snapshots included — in memory. With a four-month-stale watermark and a
+/// ~34k-row backlog that request is large enough to fail, and a failed request
+/// never advanced the watermark, so the next pull re-issued the identical
+/// failing request forever.
+///
+/// 200 mirrors `MAX_BATCH_ENTRIES` on the push side deliberately. A pull row
+/// carries its snapshot **once** (push sends it twice — data mutation plus
+/// sync_log insert), so a 200-row pull response is strictly smaller than a
+/// 200-entry push request, a bound already proven in production. Unlike push we
+/// cannot bound the response by bytes in advance — the row count is the only
+/// lever the server-side LIMIT gives us — which is another reason to keep the
+/// count conservative rather than raising it to shorten the drain.
+const MAX_PULL_ROWS: usize = 200;
 
-    // Get last pull timestamp from settings
+/// Where the last pull stopped, as a **composite** keyset cursor.
+///
+/// A bare timestamp cannot page safely: several `sync_log` rows routinely share
+/// one millisecond, and a chunk boundary can land in the middle of such a group.
+/// `timestamp > watermark` would then skip the rest of the group, while
+/// `timestamp >= watermark` would re-read it forever. Pairing the timestamp with
+/// the row `id` (the `sync_log` primary key) makes the ordering total, so
+/// `(timestamp, id) > (cursor.timestamp, cursor.entry_id)` advances past exactly
+/// the rows already handled and no others.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PullCursor {
+    timestamp: String,
+    /// `sync_log.id` of the last row handled at `timestamp`. Empty means "start
+    /// of that millisecond" — every id sorts after `""`, so nothing is skipped.
+    entry_id: String,
+}
+
+/// Settings key holding the encoded composite cursor. `last_pull_timestamp`
+/// stays the canonical, human-readable watermark (the sync status UI reads it);
+/// this key only carries the extra id half.
+const PULL_CURSOR_KEY: &str = "last_pull_cursor";
+
+const PULL_EPOCH: &str = "1970-01-01T00:00:00.000Z";
+
+/// Encode a cursor as `"<timestamp>|<entry_id>"`. Timestamps and UUIDs never
+/// contain `|`, so the split is unambiguous.
+fn encode_pull_cursor(cursor: &PullCursor) -> String {
+    format!("{}|{}", cursor.timestamp, cursor.entry_id)
+}
+
+/// Rebuild the cursor from the two settings values.
+///
+/// The stored id is honoured **only** when the timestamp embedded alongside it
+/// still matches `last_pull_timestamp`. That self-check makes a torn write (the
+/// two settings rows are written back to back, not atomically) harmless in both
+/// orders: a mismatch degrades to `entry_id = ""`, which re-reads that one
+/// millisecond — idempotent, since applying a snapshot is `INSERT OR REPLACE`
+/// and recording the entry is `INSERT OR IGNORE` — instead of skipping rows.
+fn decode_pull_cursor(last_pull: &str, stored: Option<&str>) -> PullCursor {
+    let entry_id = stored
+        .and_then(|s| s.split_once('|'))
+        .filter(|(ts, _)| *ts == last_pull)
+        .map(|(_, id)| id.to_string())
+        .unwrap_or_default();
+
+    PullCursor {
+        timestamp: last_pull.to_string(),
+        entry_id,
+    }
+}
+
+/// Load the pull cursor from settings.
+async fn load_pull_cursor(pool: &SqlitePool) -> crate::Result<PullCursor> {
     let last_pull: String = sqlx::query_scalar(
-        "SELECT COALESCE((SELECT value FROM settings WHERE key = 'last_pull_timestamp'), '1970-01-01T00:00:00.000Z')"
+        "SELECT COALESCE((SELECT value FROM settings WHERE key = 'last_pull_timestamp'), ?)"
     )
+    .bind(PULL_EPOCH)
     .fetch_one(pool)
     .await?;
 
-    // Query Turso for entries from other devices since last pull
+    let stored: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM settings WHERE key = ?"
+    )
+    .bind(PULL_CURSOR_KEY)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None);
+
+    Ok(decode_pull_cursor(&last_pull, stored.as_deref()))
+}
+
+/// Persist the cursor. Called once per applied chunk — that per-chunk commit is
+/// what makes an interrupted drain resumable instead of restarting.
+async fn save_pull_cursor(pool: &SqlitePool, cursor: &PullCursor) -> crate::Result<()> {
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')"
+    )
+    .bind(PULL_CURSOR_KEY)
+    .bind(encode_pull_cursor(cursor))
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_at) VALUES ('last_pull_timestamp', ?, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')"
+    )
+    .bind(&cursor.timestamp)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Fetch one bounded chunk of remote `sync_log` rows strictly after `cursor`.
+async fn fetch_pull_chunk(
+    turso_url: &str,
+    turso_token: &str,
+    device_id: &str,
+    cursor: &PullCursor,
+) -> crate::Result<Vec<serde_json::Value>> {
+    // Keyset pagination on (timestamp, id): the second disjunct is what carries
+    // us across a chunk boundary that fell inside a group of rows sharing one
+    // timestamp.
+    let sql = format!(
+        "SELECT id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp \
+         FROM sync_log \
+         WHERE (timestamp > ? OR (timestamp = ? AND id > ?)) AND device_id != ? \
+         ORDER BY timestamp ASC, id ASC LIMIT {}",
+        MAX_PULL_ROWS
+    );
+
     let requests = vec![
         turso_execute(
-            "SELECT id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp FROM sync_log WHERE timestamp > ? AND device_id != ? ORDER BY timestamp ASC",
-            vec![turso_text(&last_pull), turso_text(&device_id)],
+            &sql,
+            vec![
+                turso_text(&cursor.timestamp),
+                turso_text(&cursor.timestamp),
+                turso_text(&cursor.entry_id),
+                turso_text(device_id),
+            ],
         ),
         serde_json::json!({ "type": "close" }),
     ];
 
     let body = turso_pipeline(turso_url, turso_token, requests).await?;
 
-    // Parse the pipeline response: results[0].response.result.rows
-    let rows = body
+    // A statement-level failure comes back as HTTP 200 with an error result, so
+    // `turso_pipeline` cannot catch it. Treating that as "no rows" is how an
+    // oversized request looked like a successful empty pull.
+    if body.pointer("/results/0/type").and_then(|v| v.as_str()) == Some("error") {
+        let msg = body
+            .pointer("/results/0/error/message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown error");
+        return Err(crate::Error::Api(format!("Turso pull failed: {}", msg)));
+    }
+
+    Ok(body
         .pointer("/results/0/response/result/rows")
         .and_then(|v| v.as_array())
         .cloned()
-        .unwrap_or_default();
+        .unwrap_or_default())
+}
+
+/// Pull remote changes from Turso that originated on other devices.
+/// Applies each change to the local DB using last-write-wins.
+///
+/// Rows are drained in chunks of `MAX_PULL_ROWS`, and the watermark is persisted
+/// after every chunk, so an interrupted or failed drain resumes where it stopped
+/// rather than re-issuing the whole request. Returns the count of applied
+/// entries; on a chunk failure it stops and returns the error, keeping the
+/// progress already committed.
+pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<u64> {
+    let device_id = get_or_create_device_id(pool).await?;
+    let mut cursor = load_pull_cursor(pool).await?;
 
     let mut applied: u64 = 0;
-    let mut max_timestamp = last_pull.clone();
+    let mut seen: u64 = 0;
 
-    for row in &rows {
-        let cols = match row.as_array() {
-            Some(c) => c,
-            None => continue,
+    loop {
+        let rows = match fetch_pull_chunk(turso_url, turso_token, &device_id, &cursor).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                // Stop, but keep the chunks that already landed: their cursor is
+                // persisted, so the next pull resumes from there instead of
+                // retrying the whole backlog.
+                log::warn!(
+                    "Turso pull failed after {} applied ({} rows seen): {}",
+                    applied,
+                    seen,
+                    e
+                );
+                return Err(e);
+            }
         };
 
-        // Each column is { "type": "text", "value": "..." } or { "type": "null" }
-        let get_text = |idx: usize| -> Option<String> {
-            cols.get(idx)
-                .and_then(|c| c.get("value"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        };
+        if rows.is_empty() {
+            break;
+        }
 
-        let entry_id = match get_text(0) { Some(v) => v, None => continue };
-        let table_name = match get_text(1) { Some(v) => v, None => continue };
-        let row_id = match get_text(2) { Some(v) => v, None => continue };
-        let operation = match get_text(3) { Some(v) => v, None => continue };
-        let changed_columns = get_text(4);
-        let snapshot = get_text(5);
-        let remote_device_id = match get_text(6) { Some(v) => v, None => continue };
-        let timestamp = match get_text(7) { Some(v) => v, None => continue };
+        let chunk_len = rows.len();
+        // Cursor position reached within this chunk. Advanced for every row we
+        // *saw*, applied or not — a row we skip (LWW) or fail to apply must not
+        // pin the watermark, or one poison row wedges the drain permanently,
+        // which is the failure mode this fix exists to remove.
+        let mut chunk_cursor: Option<PullCursor> = None;
 
-        // LWW check: skip if local has a newer sync_log entry for the same (table_name, row_id)
-        let local_newer: Option<(String,)> = sqlx::query_as(
-            "SELECT timestamp FROM sync_log WHERE table_name = ? AND row_id = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT 1"
-        )
-        .bind(&table_name)
-        .bind(&row_id)
-        .bind(&timestamp)
-        .fetch_optional(pool)
-        .await
-        .unwrap_or(None);
+        for row in &rows {
+            let cols = match row.as_array() {
+                Some(c) => c,
+                None => continue,
+            };
 
-        if local_newer.is_some() {
-            log::info!("Skipping remote change {} — local has newer entry for {}/{}", entry_id, table_name, row_id);
-            // Still record the entry so we don't pull it again
+            // Each column is { "type": "text", "value": "..." } or { "type": "null" }
+            let get_text = |idx: usize| -> Option<String> {
+                cols.get(idx)
+                    .and_then(|c| c.get("value"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            };
+
+            // id + timestamp first: they are the cursor, so a row missing
+            // anything else can still be stepped over.
+            let entry_id = match get_text(0) { Some(v) => v, None => continue };
+            let timestamp = match get_text(7) { Some(v) => v, None => continue };
+            chunk_cursor = Some(PullCursor {
+                timestamp: timestamp.clone(),
+                entry_id: entry_id.clone(),
+            });
+            seen += 1;
+
+            let table_name = match get_text(1) { Some(v) => v, None => continue };
+            let row_id = match get_text(2) { Some(v) => v, None => continue };
+            let operation = match get_text(3) { Some(v) => v, None => continue };
+            let changed_columns = get_text(4);
+            let snapshot = get_text(5);
+            let remote_device_id = match get_text(6) { Some(v) => v, None => continue };
+
+            // LWW check: skip if local has a newer sync_log entry for the same (table_name, row_id)
+            let local_newer: Option<(String,)> = sqlx::query_as(
+                "SELECT timestamp FROM sync_log WHERE table_name = ? AND row_id = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT 1"
+            )
+            .bind(&table_name)
+            .bind(&row_id)
+            .bind(&timestamp)
+            .fetch_optional(pool)
+            .await
+            .unwrap_or(None);
+
+            if local_newer.is_some() {
+                log::info!("Skipping remote change {} — local has newer entry for {}/{}", entry_id, table_name, row_id);
+                // Still record the entry so we don't pull it again
+                let _ = sqlx::query(
+                    "INSERT OR IGNORE INTO sync_log (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp, synced)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)"
+                )
+                .bind(&entry_id)
+                .bind(&table_name)
+                .bind(&row_id)
+                .bind(&operation)
+                .bind(&changed_columns)
+                .bind(&snapshot)
+                .bind(&remote_device_id)
+                .bind(&timestamp)
+                .execute(pool)
+                .await;
+
+                continue;
+            }
+
+            // For local_tasks deletes, capture external_id BEFORE the row dies so the
+            // observer can still enqueue a Todoist delete op referencing it.
+            let pre_delete_external_id: Option<String> = if operation == "DELETE" && table_name == "local_tasks" {
+                sqlx::query_scalar("SELECT external_id FROM local_tasks WHERE id = ?")
+                    .bind(&row_id)
+                    .fetch_optional(pool)
+                    .await
+                    .ok()
+                    .flatten()
+            } else {
+                None
+            };
+
+            // Apply the change locally
+            if let Err(e) = apply_remote_change(pool, &table_name, &row_id, &operation, snapshot.as_deref()).await {
+                log::warn!("Failed to apply remote change {}: {}", entry_id, e);
+                continue;
+            }
+
+            // Todoist mutation observer: best-effort, mirrors phone-originated changes
+            crate::integrations::todoist::observer::on_turso_row_applied(
+                pool,
+                &table_name,
+                &row_id,
+                pre_delete_external_id,
+                operation == "DELETE",
+            )
+            .await;
+
+            // Vault: a note row applied from another device needs its device-local
+            // FTS entry refreshed (links/tags are re-derived when the Mac re-parses
+            // the file).
+            crate::vault::index::on_turso_row_applied(pool, &table_name, &row_id).await;
+
+            // Record entry in local sync_log as already synced (so we don't push it back)
             let _ = sqlx::query(
                 "INSERT OR IGNORE INTO sync_log (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp, synced)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)"
@@ -1105,77 +1338,37 @@ pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
             .execute(pool)
             .await;
 
-            if timestamp > max_timestamp {
-                max_timestamp = timestamp;
+            applied += 1;
+        }
+
+        match chunk_cursor {
+            Some(next) => {
+                // Commit progress before requesting the next chunk.
+                cursor = next;
+                save_pull_cursor(pool, &cursor).await?;
             }
-            continue;
+            None => {
+                // Every row in the chunk lacked an id or timestamp — pathological
+                // data. Continuing would re-request the identical chunk forever,
+                // so stop and leave the watermark untouched.
+                log::error!(
+                    "Turso pull: chunk of {} rows yielded no usable cursor; stopping drain at {}",
+                    chunk_len,
+                    cursor.timestamp
+                );
+                break;
+            }
         }
 
-        // For local_tasks deletes, capture external_id BEFORE the row dies so the
-        // observer can still enqueue a Todoist delete op referencing it.
-        let pre_delete_external_id: Option<String> = if operation == "DELETE" && table_name == "local_tasks" {
-            sqlx::query_scalar("SELECT external_id FROM local_tasks WHERE id = ?")
-                .bind(&row_id)
-                .fetch_optional(pool)
-                .await
-                .ok()
-                .flatten()
-        } else {
-            None
-        };
-
-        // Apply the change locally
-        if let Err(e) = apply_remote_change(pool, &table_name, &row_id, &operation, snapshot.as_deref()).await {
-            log::warn!("Failed to apply remote change {}: {}", entry_id, e);
-            continue;
+        if chunk_len < MAX_PULL_ROWS {
+            break;
         }
 
-        // Todoist mutation observer: best-effort, mirrors phone-originated changes
-        crate::integrations::todoist::observer::on_turso_row_applied(
-            pool,
-            &table_name,
-            &row_id,
-            pre_delete_external_id,
-            operation == "DELETE",
-        )
-        .await;
-
-        // Vault: a note row applied from another device needs its device-local
-        // FTS entry refreshed (links/tags are re-derived when the Mac re-parses
-        // the file).
-        crate::vault::index::on_turso_row_applied(pool, &table_name, &row_id).await;
-
-        // Record entry in local sync_log as already synced (so we don't push it back)
-        let _ = sqlx::query(
-            "INSERT OR IGNORE INTO sync_log (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp, synced)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)"
-        )
-        .bind(&entry_id)
-        .bind(&table_name)
-        .bind(&row_id)
-        .bind(&operation)
-        .bind(&changed_columns)
-        .bind(&snapshot)
-        .bind(&remote_device_id)
-        .bind(&timestamp)
-        .execute(pool)
-        .await;
-
-        if timestamp > max_timestamp {
-            max_timestamp = timestamp;
-        }
-        applied += 1;
-    }
-
-    // Update last_pull_timestamp
-    if max_timestamp > last_pull {
-        sqlx::query(
-            "INSERT INTO settings (key, value, updated_at) VALUES ('last_pull_timestamp', ?, datetime('now'))
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')"
-        )
-        .bind(&max_timestamp)
-        .execute(pool)
-        .await?;
+        log::info!(
+            "Turso pull: {} rows drained so far (cursor {}), fetching next chunk",
+            seen,
+            cursor.timestamp
+        );
     }
 
     Ok(applied)
@@ -1633,6 +1826,84 @@ mod push_batching_tests {
         // insert; a size bound that counted it once would under-measure by ~2x.
         let e = entry(1000);
         assert_eq!(entry_payload_bytes(&e), 2000);
+    }
+}
+
+#[cfg(test)]
+mod pull_cursor_tests {
+    use super::{decode_pull_cursor, encode_pull_cursor, PullCursor};
+
+    #[test]
+    fn a_fresh_client_starts_at_the_beginning_of_the_watermark_millisecond() {
+        // No stored cursor: the id half is empty, and every UUID sorts after
+        // "", so `id > ''` re-reads the whole millisecond rather than skipping
+        // rows the old `timestamp >` comparison would have dropped.
+        let c = decode_pull_cursor("2026-04-05T06:20:35.108Z", None);
+        assert_eq!(c.timestamp, "2026-04-05T06:20:35.108Z");
+        assert_eq!(c.entry_id, "");
+    }
+
+    #[test]
+    fn a_matching_stored_cursor_keeps_its_id_half() {
+        let c = decode_pull_cursor(
+            "2026-04-05T06:20:35.108Z",
+            Some("2026-04-05T06:20:35.108Z|abc-123"),
+        );
+        assert_eq!(c.entry_id, "abc-123");
+    }
+
+    #[test]
+    fn a_torn_write_degrades_to_a_re_read_never_to_a_skip() {
+        // The two settings rows are written back to back, not atomically. If
+        // only one landed, the embedded timestamp no longer matches and the id
+        // must be discarded — re-reading one millisecond is idempotent, whereas
+        // trusting a stale id against a different timestamp would skip rows.
+        let stale = decode_pull_cursor(
+            "2026-04-06T00:00:00.000Z",
+            Some("2026-04-05T06:20:35.108Z|abc-123"),
+        );
+        assert_eq!(stale.entry_id, "");
+        assert_eq!(stale.timestamp, "2026-04-06T00:00:00.000Z");
+
+        let garbage = decode_pull_cursor("2026-04-06T00:00:00.000Z", Some("not-a-cursor"));
+        assert_eq!(garbage.entry_id, "");
+    }
+
+    #[test]
+    fn encoding_round_trips() {
+        let c = PullCursor {
+            timestamp: "2026-04-05T06:20:35.108Z".to_string(),
+            entry_id: "3f2a-9c".to_string(),
+        };
+        let encoded = encode_pull_cursor(&c);
+        assert_eq!(encoded, "2026-04-05T06:20:35.108Z|3f2a-9c");
+        assert_eq!(decode_pull_cursor(&c.timestamp, Some(&encoded)), c);
+    }
+
+    #[test]
+    fn duplicate_timestamps_are_ordered_by_id_so_a_boundary_neither_skips_nor_loops() {
+        // Three rows share one millisecond and a chunk boundary falls after the
+        // second. The keyset predicate the query uses is
+        // `(ts > cur.ts) OR (ts = cur.ts AND id > cur.id)`; model it here.
+        let ts = "2026-04-05T06:20:35.108Z";
+        let group = [("a", ts), ("b", ts), ("c", ts), ("d", "2026-04-05T06:20:35.109Z")];
+
+        let cursor = PullCursor {
+            timestamp: ts.to_string(),
+            entry_id: "b".to_string(),
+        };
+        let next: Vec<&str> = group
+            .iter()
+            .filter(|(id, row_ts)| {
+                *row_ts > cursor.timestamp.as_str()
+                    || (*row_ts == cursor.timestamp.as_str() && *id > cursor.entry_id.as_str())
+            })
+            .map(|(id, _)| *id)
+            .collect();
+
+        // "c" survives (a bare `timestamp >` would have dropped it) and "b" does
+        // not reappear (a bare `timestamp >=` would have looped on it forever).
+        assert_eq!(next, vec!["c", "d"]);
     }
 }
 
