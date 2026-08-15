@@ -141,8 +141,11 @@ nimble/
 - Desktop: `TauriProvider` delegates to `services/tauri.ts` invoke wrappers
 - Mobile: `SqliteProvider` talks directly to expo-sqlite
 - Stores access provider via `getDataProvider()` (module-level, not React context)
-- **9** desktop files still import from `@/services/tauri` directly (verified 2026-08-14; the long-standing "26 components" figure was stale). 6 of the 9 exist because mobile's `DataProvider` copy has a `labels` domain the desktop interface lacks. All stores + hooks are fully decoupled as of 2026-04-16.
-- ⚠️ `apps/mobile/services/data-provider.ts` is a **parallel copy**, not a shared import, and has already drifted from the desktop interface. If a third client is added, move the interface into `packages/types` rather than copying it again.
+- **The interface lives in `packages/types` (`@nimble/types`)** as of 2026-08-15 — THE single definition. `apps/desktop/src/services/data-provider.ts` is now just a type-only re-export shim. Drift between an implementation and the contract is a compile error.
+- Runtime provider access is `@/services/provider-context` (`useDataProvider` / `getDataProvider`). The type-only/runtime split is deliberate — see the Known Gotchas entry.
+- **Exactly 1** desktop file still imports `@/services/tauri`: `CaptureStrip.tsx`, for `dismissCaptureStrip`. Deliberate — it drives the always-on-top capture window, which has no web equivalent, so it does not belong on `DataProvider`. An ESLint `no-restricted-imports` rule over `src/components/**` bans `@tauri-apps/*` and `@/services/tauri`; that one site carries a documented disable. **Don't add another** — put the capability on `DataProvider` instead.
+- Implementations: `TauriProvider` (desktop, delegates to invoke wrappers) and `TursoProvider` (web, `services/turso-provider.ts` — currently a skeleton where every method rejects).
+- ⚠️ `apps/mobile/services/data-provider.ts` is still a **stale parallel copy** (mobile is DORMANT). It has drifted badly: missing the `todoist`, `vault` and `sections` domains entirely, `captures.create` lacks the v16 `context` param, and `tasks.create/update` lack every R1/v19 field. If mobile is ever revived, delete that copy and import from `@nimble/types` — but expect to fix all of the above first.
 
 ## Sync Protocol
 - Every mutation appends to `sync_log` (fire-and-forget, never blocks the mutation)
