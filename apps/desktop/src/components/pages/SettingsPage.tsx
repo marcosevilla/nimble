@@ -858,6 +858,9 @@ function SyncSection() {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [syncResult, setSyncResult] = useState<string | null>(null)
+  // True when the provider has no sync surface at all, as opposed to having one
+  // that is merely unconfigured. See the catch in `load` below.
+  const [unavailable, setUnavailable] = useState(false)
 
   const refreshStatus = async () => {
     try {
@@ -879,8 +882,23 @@ function SyncSection() {
         if (url) setTursoUrl(url)
         if (token) setTursoToken(token)
         setStatus(syncStatus)
-      } catch {
-        // Sync table might not exist on first run before migration
+      } catch (err) {
+        // Two very different failures used to land here identically.
+        //
+        // On the web build these methods REJECT: there is no sync surface in the
+        // browser at all, because Turso credentials live in Vercel environment
+        // variables server-side and the page reaches the database through
+        // /api/turso. Falling through to the default state rendered "Not
+        // configured", which reads as "your sync is broken" when in fact it is
+        // working — that message is what the whole `unavailable` flag exists to
+        // avoid.
+        //
+        // On desktop the same catch legitimately fires when the sync table does
+        // not exist yet, on first run before migration. That case really is
+        // unconfigured and should keep saying so.
+        if (err instanceof Error && err.name === 'WebNotImplementedError') {
+          setUnavailable(true)
+        }
       } finally {
         setLoading(false)
       }
@@ -977,6 +995,28 @@ function SyncSection() {
 
   const isConfigured = status?.turso_configured ?? false
   const isInitialized = status?.remote_initialized ?? false
+
+  // Nothing below this point applies in the browser: there are no credentials to
+  // enter, no remote to initialize, and no manual push/pull to run. Render the
+  // explanation instead of a form that cannot save and buttons that stay
+  // disabled.
+  if (unavailable) {
+    return (
+      <section id="sync" className="space-y-4 scroll-mt-6">
+        <SectionHeader
+          title="Sync"
+          description="Sync data across devices using Turso (hosted SQLite). Single-user, last-write-wins."
+        />
+        <div className="flex items-center gap-2">
+          <span className="size-2 rounded-full bg-green-500" />
+          <span className="text-body text-muted-foreground">
+            Managed server-side — this page is reading and writing Turso already.
+            Credentials and sync settings live on the desktop app.
+          </span>
+        </div>
+      </section>
+    )
+  }
 
   return (
     <section id="sync" className="space-y-4 scroll-mt-6">
