@@ -21,6 +21,13 @@ pub struct Project {
     pub external_source: Option<String>,
     pub remote_updated_at: Option<String>,
     pub synced_snapshot: Option<String>,
+    // Real `projects` columns (migrations.rs v9 ALTERs) even though no code
+    // path sets them yet — they must ride in sync snapshots, because
+    // receivers apply snapshots with INSERT OR REPLACE and a column absent
+    // from the snapshot is blanked on every other device the day something
+    // does set it.
+    pub goal_id: Option<String>,
+    pub milestone_id: Option<String>,
 }
 
 // ── Local Tasks ──

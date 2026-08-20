@@ -519,6 +519,11 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
     // (task_id, label_id, op) pairs for `task_labels` rows to sync_log AFTER
     // commit — mirrors `logged` above but for the composite-key table.
     let mut label_sync_ops: Vec<(String, String, &'static str)> = Vec::new();
+    // (project_id, op) pairs to sync_log AFTER commit. Todoist-imported
+    // projects previously got NO sync_log rows (raw SQL bypassing the
+    // db::projects CRUD that feeds sync_log), so they never reached Turso —
+    // measured 2026-08-15 as 34 of 52 projects missing remotely.
+    let mut project_sync_ops: Vec<(String, &'static str)> = Vec::new();
 
     // 1. projects
     for p in &resp.projects {
@@ -533,23 +538,48 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
         .await?;
         match existing {
             Some((local_id,)) => {
-                sqlx::query("UPDATE projects SET name = ? WHERE id = ? AND name != ?")
+                let res = sqlx::query("UPDATE projects SET name = ? WHERE id = ? AND name != ?")
                     .bind(&p.name).bind(&local_id).bind(&p.name)
                     .execute(&mut *tx).await?;
+                if res.rows_affected() > 0 {
+                    project_sync_ops.push((local_id, "UPDATE"));
+                } else {
+                    // Self-heal: projects imported before sync_log emission
+                    // existed (the measured 34-of-52 gap) have no sync_log
+                    // row and would otherwise stay absent from Turso. Scope
+                    // caveat: the Todoist pull is INCREMENTAL (sync_token),
+                    // so this only reaches projects that appear in a delta —
+                    // a never-touched legacy project heals via a re-import
+                    // or Settings' Seed Existing Data, not here.
+                    let has_log: Option<(i64,)> = sqlx::query_as(
+                        "SELECT 1 FROM sync_log WHERE table_name = 'projects' AND row_id = ? LIMIT 1",
+                    )
+                    .bind(&local_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    if has_log.is_none() {
+                        project_sync_ops.push((local_id, "INSERT"));
+                    }
+                }
             }
             None if p.inbox_project.unwrap_or(false) => {
-                sqlx::query("UPDATE projects SET external_id = ?, external_source = 'todoist' WHERE id = 'inbox'")
+                let res = sqlx::query("UPDATE projects SET external_id = ?, external_source = 'todoist' WHERE id = 'inbox'")
                     .bind(&p.id).execute(&mut *tx).await?;
+                if res.rows_affected() > 0 {
+                    project_sync_ops.push(("inbox".to_string(), "UPDATE"));
+                }
             }
             None => {
                 let max: (i64,) = sqlx::query_as("SELECT COALESCE(MAX(position), 0) + 1 FROM projects")
                     .fetch_one(&mut *tx).await?;
+                let new_id = uuid::Uuid::new_v4().to_string();
                 sqlx::query("INSERT INTO projects (id, name, color, position, external_id, external_source) VALUES (?, ?, '#8b8b8b', ?, ?, 'todoist')")
-                    .bind(uuid::Uuid::new_v4().to_string())
+                    .bind(&new_id)
                     .bind(&p.name)
                     .bind(max.0)
                     .bind(&p.id)
                     .execute(&mut *tx).await?;
+                project_sync_ops.push((new_id, "INSERT"));
                 report.projects_upserted += 1;
             }
         }
@@ -572,9 +602,11 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
             };
             let max: (i64,) = sqlx::query_as("SELECT COALESCE(MAX(position), 0) + 1 FROM projects")
                 .fetch_one(&mut *tx).await?;
+            let new_id = uuid::Uuid::new_v4().to_string();
             sqlx::query("INSERT INTO projects (id, name, color, position, external_id, external_source) VALUES (?, ?, '#8b8b8b', ?, ?, 'todoist')")
-                .bind(uuid::Uuid::new_v4().to_string()).bind(&name).bind(max.0).bind(&pseudo_ext)
+                .bind(&new_id).bind(&name).bind(max.0).bind(&pseudo_ext)
                 .execute(&mut *tx).await?;
+            project_sync_ops.push((new_id, "INSERT"));
             report.projects_upserted += 1;
         }
     }
@@ -914,6 +946,15 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
         .await
         .ok();
     }
+
+    // 8. after commit: projects sync_log. Without this, Todoist-imported
+    // projects exist only locally and every other device renders their tasks
+    // under a missing project. The Todoist observer is deliberately NOT
+    // fired — these rows CAME from Todoist, and an observer op would echo
+    // them straight back (same echo rule as labels).
+    for (project_id, op) in project_sync_ops {
+        crate::db::projects::log_project_sync(pool, &project_id, op).await;
+    }
     Ok(report)
 }
 
@@ -1238,6 +1279,58 @@ mod pull_tests {
         assert_eq!(t.duration_minutes, Some(30));
         let names = crate::db::labels::names_for_ids(&pool, &t.labels).await.unwrap();
         assert_eq!(names, vec!["urgent".to_string(), "work".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn pulled_projects_get_sync_log_rows_without_outbox_echo() {
+        // Pulled Todoist projects must produce sync_log rows so they reach
+        // Turso — previously they were raw-SQL inserts with NO sync_log at
+        // all, so other devices rendered their tasks under missing projects
+        // (measured 2026-08-15: 34 of 52 projects absent remotely). Same
+        // echo rule as labels: no outbox op for rows that came FROM Todoist.
+        let pool = test_pool().await;
+        crate::integrations::ensure_state(&pool, "todoist").await.unwrap();
+        crate::db::settings::set_setting(&pool, "todoist_api_token", "tok").await.unwrap();
+
+        apply_pull(&pool, &resp(json!({
+            "sync_token": "T1",
+            "projects": [{"id": "P1", "name": "Errands"}],
+            "items": []
+        }))).await.unwrap();
+
+        let projects = crate::db::projects::get_projects(&pool).await.unwrap();
+        let p = projects.iter().find(|p| p.external_id.as_deref() == Some("P1")).unwrap();
+
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT operation, snapshot FROM sync_log WHERE table_name = 'projects' AND row_id = ?",
+        )
+        .bind(&p.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 1, "exactly one sync_log entry for the pulled project");
+        assert_eq!(rows[0].0, "INSERT");
+        let v: serde_json::Value = serde_json::from_str(&rows[0].1).unwrap();
+        assert_eq!(v["name"], "Errands");
+        assert!(v.get("id").is_some() && v.get("position").is_some(), "snapshot must be the full row");
+
+        // An unchanged re-pull logs nothing; a remote rename logs an UPDATE.
+        apply_pull(&pool, &resp(json!({"sync_token": "T2", "projects": [{"id": "P1", "name": "Errands"}], "items": []}))).await.unwrap();
+        apply_pull(&pool, &resp(json!({"sync_token": "T3", "projects": [{"id": "P1", "name": "Chores"}], "items": []}))).await.unwrap();
+        let ops: Vec<String> = sqlx::query_scalar(
+            "SELECT operation FROM sync_log WHERE table_name = 'projects' AND row_id = ?",
+        )
+        .bind(&p.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(ops.iter().filter(|o| *o == "INSERT").count(), 1);
+        assert_eq!(ops.iter().filter(|o| *o == "UPDATE").count(), 1);
+
+        assert!(
+            outbox::pending_batch(&pool, 100).await.unwrap().is_empty(),
+            "projects applied from a pull must never enqueue an outbox op"
+        );
     }
 
     #[tokio::test]

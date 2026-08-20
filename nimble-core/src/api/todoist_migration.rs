@@ -444,6 +444,13 @@ async fn apply_migration(
     // local id).
     let mut todoist_to_local_project: HashMap<String, String> = HashMap::new();
     let mut next_position = max_project_position + 1;
+    // (project_id, op) pairs to sync_log after pass 2, so each snapshot
+    // includes the parent_id nesting resolves. Without these entries the
+    // imported projects never reach Turso (raw SQL bypasses the db::projects
+    // CRUD that feeds sync_log — measured 2026-08-15 as 34 of 52 projects
+    // missing remotely). No Todoist observer here either: these rows CAME
+    // from Todoist, an observer op would echo them straight back.
+    let mut project_sync_ops: Vec<(String, &'static str)> = Vec::new();
 
     for p in projects {
         let color = p.color.as_deref().map(todoist_color_to_hex).unwrap_or("#6366f1").to_string();
@@ -453,14 +460,21 @@ async fn apply_migration(
         if is_td_inbox {
             todoist_to_local_project.insert(p.id.clone(), "inbox".to_string());
             // Still mark local inbox as externally tracked so re-runs know.
-            sqlx::query(
+            // Value-guarded (SQLite counts value-identical UPDATEs as
+            // affected rows) so a re-import doesn't log a stale-snapshot
+            // UPDATE for inbox every run.
+            let res = sqlx::query(
                 "UPDATE projects SET external_id = ?, external_source = 'todoist'
-                 WHERE id = 'inbox' AND (external_source IS NULL OR external_source = 'todoist')",
+                 WHERE id = 'inbox' AND (external_source IS NULL OR external_source = 'todoist')
+                   AND (external_id IS NOT ? OR external_source IS NULL)",
             )
             .bind(&p.id)
+            .bind(&p.id)
             .execute(pool)
-            .await
-            .ok();
+            .await;
+            if res.map(|r| r.rows_affected() > 0).unwrap_or(false) {
+                project_sync_ops.push(("inbox".to_string(), "UPDATE"));
+            }
             continue;
         }
 
@@ -473,13 +487,39 @@ async fn apply_migration(
         .await?;
 
         let local_id = if let Some((id,)) = existing {
-            sqlx::query("UPDATE projects SET name = ?, color = ? WHERE id = ?")
-                .bind(&p.name)
-                .bind(&color)
+            // Value-guarded so a no-op re-import logs nothing: an
+            // unconditional UPDATE would stamp a fresh LWW timestamp on the
+            // stale local row and silently revert newer edits made from
+            // another device (web) since the last pull.
+            let res = sqlx::query(
+                "UPDATE projects SET name = ?, color = ? WHERE id = ? AND (name != ? OR color != ?)",
+            )
+            .bind(&p.name)
+            .bind(&color)
+            .bind(&id)
+            .bind(&p.name)
+            .bind(&color)
+            .execute(pool)
+            .await?;
+            if res.rows_affected() > 0 {
+                result.projects_updated += 1;
+                project_sync_ops.push((id.clone(), "UPDATE"));
+            } else {
+                // Self-heal: a project inserted by a run that failed before
+                // the deferred log flush, or by a pre-fix import that never
+                // logged at all, exists locally with NO sync_log row — the
+                // value guard above would otherwise keep it absent from
+                // Turso forever.
+                let has_log: Option<(i64,)> = sqlx::query_as(
+                    "SELECT 1 FROM sync_log WHERE table_name = 'projects' AND row_id = ? LIMIT 1",
+                )
                 .bind(&id)
-                .execute(pool)
+                .fetch_optional(pool)
                 .await?;
-            result.projects_updated += 1;
+                if has_log.is_none() {
+                    project_sync_ops.push((id.clone(), "INSERT"));
+                }
+            }
             id
         } else {
             let new_id = Uuid::new_v4().to_string();
@@ -496,6 +536,7 @@ async fn apply_migration(
             .await?;
             next_position += 1;
             result.projects_created += 1;
+            project_sync_ops.push((new_id.clone(), "INSERT"));
             new_id
         };
 
@@ -512,7 +553,7 @@ async fn apply_migration(
             todoist_to_local_project.get(&p.id),
             todoist_to_local_project.get(td_parent_id),
         ) else { continue };
-        sqlx::query(
+        let res = sqlx::query(
             "UPDATE projects SET parent_id = ? WHERE id = ? AND (parent_id IS NULL OR parent_id != ?)",
         )
         .bind(local_parent_id)
@@ -520,6 +561,23 @@ async fn apply_migration(
         .bind(local_parent_id)
         .execute(pool)
         .await?;
+        if res.rows_affected() > 0 {
+            project_sync_ops.push((local_id.clone(), "UPDATE"));
+        }
+    }
+
+    // Sync log for every project pass 1/2 touched — one entry per project,
+    // first op wins (an INSERT later nested in pass 2 stays an INSERT), and
+    // the snapshot is read AFTER pass 2 so it carries the resolved parent_id.
+    // Fire-and-forget, mirrors the sections block below.
+    {
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (project_id, op) in &project_sync_ops {
+            if !seen.insert(project_id.clone()) {
+                continue;
+            }
+            crate::db::projects::log_project_sync(pool, project_id, op).await;
+        }
     }
 
     // ── Sections: native `sections` rows (with `external_id`), never the ──
@@ -539,13 +597,35 @@ async fn apply_migration(
         .fetch_optional(pool)
         .await?;
 
+        // Which op (if any) to log for this section — decided per branch so a
+        // no-op re-import logs nothing (an unconditional fresh-timestamped
+        // entry would LWW-revert a newer rename from another device), while a
+        // section missing its sync_log row self-heals as INSERT.
+        let mut section_log_op: Option<&'static str> = None;
         let local_id = if let Some((id,)) = existing {
-            sqlx::query("UPDATE sections SET name = ?, project_id = ? WHERE id = ?")
+            let res = sqlx::query(
+                "UPDATE sections SET name = ?, project_id = ? WHERE id = ? AND (name IS NOT ? OR project_id IS NOT ?)",
+            )
                 .bind(&s.name)
                 .bind(&local_project_id)
                 .bind(&id)
+                .bind(&s.name)
+                .bind(&local_project_id)
                 .execute(pool)
                 .await?;
+            if res.rows_affected() > 0 {
+                section_log_op = Some("UPDATE");
+            } else {
+                let has_log: Option<(i64,)> = sqlx::query_as(
+                    "SELECT 1 FROM sync_log WHERE table_name = 'sections' AND row_id = ? LIMIT 1",
+                )
+                .bind(&id)
+                .fetch_optional(pool)
+                .await?;
+                if has_log.is_none() {
+                    section_log_op = Some("INSERT");
+                }
+            }
             id
         } else {
             let new_id = Uuid::new_v4().to_string();
@@ -566,26 +646,29 @@ async fn apply_migration(
             .bind(&s.id)
             .execute(pool)
             .await?;
+            section_log_op = Some("INSERT");
             new_id
         };
 
-        // Sync log entry for the section row (fire-and-forget, mirrors
-        // `db::sections::create_section`'s own INSERT sync_log — sections
-        // have no Todoist mutation observer, so there's no echo risk here).
-        let section_row: Option<crate::types::Section> = sqlx::query_as(
-            "SELECT id, project_id, name, position, external_id, external_source, created_at
-             FROM sections WHERE id = ?",
-        )
-        .bind(&local_id)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten();
-        if let Some(section) = section_row {
-            let snapshot = serde_json::to_string(&section).unwrap_or_default();
-            sync::append_sync_log(pool, "sections", &local_id, "INSERT", None, Some(&snapshot))
-                .await
-                .ok();
+        // Sync log entry for the section row when this run actually changed
+        // or backfilled it (fire-and-forget; sections have no Todoist
+        // mutation observer, so there's no echo risk here).
+        if let Some(op) = section_log_op {
+            let section_row: Option<crate::types::Section> = sqlx::query_as(
+                "SELECT id, project_id, name, position, external_id, external_source, created_at
+                 FROM sections WHERE id = ?",
+            )
+            .bind(&local_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+            if let Some(section) = section_row {
+                let snapshot = serde_json::to_string(&section).unwrap_or_default();
+                sync::append_sync_log(pool, "sections", &local_id, op, None, Some(&snapshot))
+                    .await
+                    .ok();
+            }
         }
 
         todoist_to_local_section.insert(s.id.clone(), local_id);
@@ -595,6 +678,13 @@ async fn apply_migration(
     let mut todoist_to_local_task: HashMap<String, String> = HashMap::new();
     // Todoist task_id → Todoist parent_id (for linkage in pass 2)
     let mut child_to_td_parent: HashMap<String, String> = HashMap::new();
+    // (task_id, op) pairs to sync_log AFTER pass 2 — deferred for the same
+    // reason as project_sync_ops: the snapshot must carry the parent_id that
+    // pass 2 resolves, and each task must get exactly ONE entry. A pass-1
+    // entry plus a pass-2 re-log can land in the same millisecond, and
+    // neither push nor a receiver's pull orders same-timestamp entries for
+    // one row deterministically — the stale flat snapshot could apply last.
+    let mut task_sync_ops: Vec<(String, &'static str)> = Vec::new();
 
     for t in tasks {
         let target_project = t
@@ -649,17 +739,23 @@ async fn apply_migration(
         .bind(&t.id)
         .fetch_optional(pool)
         .await?;
-        let is_new = existing.is_none();
-
         let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
         let local_id = if let Some((id,)) = existing {
-            sqlx::query(
+            // Value-guarded like the projects branch: an unconditional UPDATE
+            // + re-log on every re-import would stamp a fresh LWW timestamp
+            // on the stale local row of EVERY Todoist-linked task and
+            // silently revert newer edits made from another device since the
+            // last pull. (`IS NOT` = null-safe inequality.)
+            let res = sqlx::query(
                 "UPDATE local_tasks
                  SET content = ?, description = ?, project_id = ?, priority = ?, due_date = ?,
                      due_time = ?, duration_minutes = ?, recurrence_rule = ?, section_id = ?,
                      position = ?, updated_at = datetime('now')
-                 WHERE id = ?",
+                 WHERE id = ? AND (content IS NOT ? OR description IS NOT ? OR project_id IS NOT ?
+                    OR priority IS NOT ? OR due_date IS NOT ? OR due_time IS NOT ?
+                    OR duration_minutes IS NOT ? OR recurrence_rule IS NOT ? OR section_id IS NOT ?
+                    OR position IS NOT ?)",
             )
             .bind(&t.content)
             .bind(&description)
@@ -672,9 +768,36 @@ async fn apply_migration(
             .bind(&local_section_id)
             .bind(t.order)
             .bind(&id)
+            .bind(&t.content)
+            .bind(&description)
+            .bind(&target_project)
+            .bind(priority)
+            .bind(&due_date)
+            .bind(&due_time)
+            .bind(duration_minutes)
+            .bind(&recurrence_rule)
+            .bind(&local_section_id)
+            .bind(t.order)
             .execute(pool)
             .await?;
-            result.tasks_updated += 1;
+            if res.rows_affected() > 0 {
+                result.tasks_updated += 1;
+                task_sync_ops.push((id.clone(), "UPDATE"));
+            } else {
+                // Self-heal: a task inserted by a run that died before the
+                // deferred flush exists locally with no sync_log row and
+                // would otherwise stay absent from Turso (mirrors the
+                // projects self-heal above).
+                let has_log: Option<(i64,)> = sqlx::query_as(
+                    "SELECT 1 FROM sync_log WHERE table_name = 'local_tasks' AND row_id = ? LIMIT 1",
+                )
+                .bind(&id)
+                .fetch_optional(pool)
+                .await?;
+                if has_log.is_none() {
+                    task_sync_ops.push((id.clone(), "INSERT"));
+                }
+            }
             id
         } else {
             let new_id = Uuid::new_v4().to_string();
@@ -703,6 +826,7 @@ async fn apply_migration(
             .execute(pool)
             .await?;
             result.tasks_created += 1;
+            task_sync_ops.push((new_id.clone(), "INSERT"));
             new_id
         };
 
@@ -787,25 +911,6 @@ async fn apply_migration(
             }
         }
 
-        // Sync log entry for the local_tasks row itself, using
-        // `task_sync_snapshot` (not a plain `serde_json::to_string`) —
-        // `LocalTask::labels` isn't a `local_tasks` column, and a snapshot
-        // carrying it fails every apply with "no such column: labels".
-        let task_row: Option<crate::types::LocalTask> = sqlx::query_as::<_, crate::types::LocalTask>(
-            &format!("SELECT {} FROM local_tasks WHERE id = ?", crate::db::tasks::SELECT_COLS),
-        )
-        .bind(&local_id)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten();
-        if let Some(task) = task_row {
-            let snapshot = sync::task_sync_snapshot(&task);
-            let op = if is_new { "INSERT" } else { "UPDATE" };
-            sync::append_sync_log(pool, "local_tasks", &local_id, op, None, Some(&snapshot))
-                .await
-                .ok();
-        }
     }
 
     // Tasks pass 2: resolve parent_id now that all local ids exist.
@@ -814,16 +919,52 @@ async fn apply_migration(
             todoist_to_local_task.get(child_td_id),
             todoist_to_local_task.get(parent_td_id),
         ) {
-            sqlx::query("UPDATE local_tasks SET parent_id = ? WHERE id = ?")
-                .bind(parent_local)
-                .bind(child_local)
-                .execute(pool)
-                .await?;
+            // Value-guarded like the project nesting pass. No inline sync_log:
+            // the deferred flush below reads the row AFTER this reparent, so
+            // each task's one entry carries the resolved parent_id. The op
+            // push matters for a hierarchy-only change (fields identical, so
+            // pass 1 pushed nothing) — the flush dedup keeps one entry.
+            let res = sqlx::query(
+                "UPDATE local_tasks SET parent_id = ? WHERE id = ? AND (parent_id IS NULL OR parent_id != ?)",
+            )
+            .bind(parent_local)
+            .bind(child_local)
+            .bind(parent_local)
+            .execute(pool)
+            .await?;
+            if res.rows_affected() > 0 {
+                task_sync_ops.push((child_local.clone(), "UPDATE"));
+            }
         } else {
             result.errors.push(format!(
                 "Orphan subtask — Todoist task {} has parent {} but parent was not migrated",
                 child_td_id, parent_td_id
             ));
+        }
+    }
+
+    // Flush the deferred task sync_log entries — one per task, snapshot read
+    // after pass 2 so it carries the resolved parent_id. `log_task_sync`
+    // uses `task_sync_snapshot` (LocalTask::labels isn't a real column).
+    {
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (task_id, op) in &task_sync_ops {
+            if !seen.insert(task_id.clone()) {
+                continue;
+            }
+            let task_row: Option<crate::types::LocalTask> =
+                sqlx::query_as::<_, crate::types::LocalTask>(&format!(
+                    "SELECT {} FROM local_tasks WHERE id = ?",
+                    crate::db::tasks::SELECT_COLS
+                ))
+                .bind(task_id)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten();
+            if let Some(task) = task_row {
+                crate::db::tasks::log_task_sync(pool, &task, op, None).await;
+            }
         }
     }
 
@@ -848,6 +989,219 @@ async fn apply_migration(
 mod tests {
     use super::*;
     use crate::test_util::test_pool;
+
+    /// Imported projects must produce sync_log rows, or they exist only
+    /// locally and never reach Turso (measured 2026-08-15: 34 of 52 projects
+    /// absent remotely, every one Todoist-imported). One entry per project —
+    /// pass-2 nesting must not double-log — with the snapshot carrying the
+    /// resolved local parent_id.
+    #[tokio::test]
+    async fn import_writes_sync_log_rows_for_projects() {
+        let pool = test_pool().await;
+        let parent_project = TdProject {
+            id: "td-parent".into(),
+            name: "Work".into(),
+            color: Some("blue".into()),
+            parent_id: None,
+            is_inbox_project: Some(false),
+        };
+        let child_project = TdProject {
+            id: "td-child".into(),
+            name: "Client A".into(),
+            color: Some("red".into()),
+            parent_id: Some("td-parent".into()),
+            is_inbox_project: Some(false),
+        };
+
+        apply_migration(&pool, &[parent_project, child_project], &[], &[]).await.unwrap();
+
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT row_id, operation, snapshot FROM sync_log WHERE table_name = 'projects'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 2, "one sync_log entry per imported project, no pass-2 duplicates");
+        assert!(rows.iter().all(|(_, op, _)| op == "INSERT"));
+
+        let projects = crate::db::projects::get_projects(&pool).await.unwrap();
+        let parent = projects.iter().find(|p| p.external_id.as_deref() == Some("td-parent")).unwrap();
+        let child = projects.iter().find(|p| p.external_id.as_deref() == Some("td-child")).unwrap();
+        let child_snapshot = &rows.iter().find(|(id, _, _)| id == &child.id).unwrap().2;
+        let v: serde_json::Value = serde_json::from_str(child_snapshot).unwrap();
+        assert_eq!(
+            v["parent_id"],
+            serde_json::json!(parent.id),
+            "snapshot must be read after pass 2 so it carries the resolved parent_id"
+        );
+        assert_eq!(v["name"], "Client A");
+    }
+
+    /// A no-op re-import must log NOTHING: an unconditional UPDATE would
+    /// stamp a fresh LWW timestamp on the stale local row and silently
+    /// revert newer edits made from another device since the last pull.
+    #[tokio::test]
+    async fn rerunning_an_unchanged_import_writes_no_new_sync_log_rows() {
+        let pool = test_pool().await;
+        let project = TdProject {
+            id: "td-p".into(),
+            name: "Work".into(),
+            color: Some("blue".into()),
+            parent_id: None,
+            is_inbox_project: Some(false),
+        };
+        let inbox = TdProject {
+            id: "td-inbox".into(),
+            name: "Inbox".into(),
+            color: None,
+            parent_id: None,
+            is_inbox_project: Some(true),
+        };
+
+        let task = TdTask {
+            id: "td-t".into(),
+            content: "A task".into(),
+            description: None,
+            project_id: Some("td-p".into()),
+            section_id: None,
+            parent_id: None,
+            priority: 1,
+            due: None,
+            labels: None,
+            order: 1,
+            checked: Some(false),
+            duration: None,
+        };
+        let section = TdSection { id: "td-s".into(), project_id: "td-p".into(), name: "S1".into() };
+
+        apply_migration(&pool, &[inbox.clone(), project.clone()], &[section.clone()], &[task.clone()])
+            .await
+            .unwrap();
+        let count_after_first: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name IN ('projects', 'local_tasks', 'sections')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        apply_migration(&pool, &[inbox, project], &[section], &[task]).await.unwrap();
+        let count_after_second: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name IN ('projects', 'local_tasks', 'sections')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            count_after_first, count_after_second,
+            "an unchanged re-import must not re-log projects, tasks, or sections — a fresh-timestamped stale snapshot LWW-clobbers newer edits from other devices"
+        );
+    }
+
+    /// Imported subtasks must reach Turso NESTED, and via exactly ONE
+    /// sync_log entry per task: task logging is deferred until after pass-2
+    /// reparenting so the snapshot carries the resolved parent_id. (Two
+    /// same-row entries could share a millisecond, where neither push nor a
+    /// receiver's pull orders them deterministically — a stale flat snapshot
+    /// could apply last and flatten the hierarchy on other devices.)
+    #[tokio::test]
+    async fn import_logs_each_task_once_with_resolved_parent_id() {
+        let pool = test_pool().await;
+        let project = TdProject {
+            id: "td-p".into(),
+            name: "Work".into(),
+            color: None,
+            parent_id: None,
+            is_inbox_project: Some(false),
+        };
+        let parent_task = TdTask {
+            id: "td-parent-task".into(),
+            content: "Parent".into(),
+            description: None,
+            project_id: Some("td-p".into()),
+            section_id: None,
+            parent_id: None,
+            priority: 1,
+            due: None,
+            labels: None,
+            order: 1,
+            checked: Some(false),
+            duration: None,
+        };
+        let subtask = TdTask {
+            id: "td-sub-task".into(),
+            content: "Child".into(),
+            description: None,
+            project_id: Some("td-p".into()),
+            section_id: None,
+            parent_id: Some("td-parent-task".into()),
+            priority: 1,
+            due: None,
+            labels: None,
+            order: 2,
+            checked: Some(false),
+            duration: None,
+        };
+
+        apply_migration(&pool, &[project], &[], &[parent_task, subtask]).await.unwrap();
+
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let parent = tasks.iter().find(|t| t.external_id.as_deref() == Some("td-parent-task")).unwrap();
+        let child = tasks.iter().find(|t| t.external_id.as_deref() == Some("td-sub-task")).unwrap();
+        assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
+
+        // Exactly one entry for the child, and its snapshot is the nested one.
+        let snapshots: Vec<String> = sqlx::query_scalar(
+            "SELECT snapshot FROM sync_log WHERE table_name = 'local_tasks' AND row_id = ?",
+        )
+        .bind(&child.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            snapshots.len(),
+            1,
+            "one entry per imported task — a second same-millisecond entry has no deterministic apply order"
+        );
+        let v: serde_json::Value = serde_json::from_str(&snapshots[0]).unwrap();
+        assert_eq!(
+            v["parent_id"],
+            serde_json::json!(parent.id),
+            "the snapshot must be read after pass-2 reparenting"
+        );
+    }
+
+    /// Self-heal: a project that exists locally with NO sync_log row (a
+    /// pre-fix import, or a run that died before the deferred flush) must be
+    /// backfilled by a re-import even though its fields are unchanged —
+    /// otherwise the value guards keep it absent from Turso forever.
+    #[tokio::test]
+    async fn rerunning_import_backfills_projects_that_have_no_sync_log_rows() {
+        let pool = test_pool().await;
+        let project = TdProject {
+            id: "td-p".into(),
+            name: "Work".into(),
+            color: Some("blue".into()),
+            parent_id: None,
+            is_inbox_project: Some(false),
+        };
+
+        apply_migration(&pool, &[project.clone()], &[], &[]).await.unwrap();
+        // Simulate the pre-fix state: the row exists, its log entries don't.
+        sqlx::query("DELETE FROM sync_log WHERE table_name = 'projects'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        apply_migration(&pool, &[project], &[], &[]).await.unwrap();
+
+        let ops: Vec<String> = sqlx::query_scalar(
+            "SELECT operation FROM sync_log WHERE table_name = 'projects'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(ops, vec!["INSERT".to_string()], "the unlogged project must be re-logged once");
+    }
 
     /// Task 10 fixture: one task with 2 labels + a recurring due (with a
     /// datetime and a 10m duration) + a section, under a child project.

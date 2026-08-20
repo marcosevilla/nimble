@@ -61,6 +61,25 @@ impl FromRow<'_, SqliteRow> for LocalTask {
 
 pub(crate) const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot";
 
+/// Snapshot a task row and append its sync_log entry, warning on failure —
+/// sync_log IS the retry mechanism, so a silently swallowed append can leave
+/// the row permanently absent from Turso with nothing counted as "unsynced".
+/// Mirrors `db::projects::log_project_sync`; takes the already-loaded row
+/// because most callers have it in hand (e.g. from `RETURNING {SELECT_COLS}`).
+pub(crate) async fn log_task_sync(
+    pool: &SqlitePool,
+    task: &LocalTask,
+    operation: &str,
+    changed_columns: Option<&str>,
+) {
+    let snapshot = sync::task_sync_snapshot(task);
+    if let Err(e) =
+        sync::append_sync_log(pool, "local_tasks", &task.id, operation, changed_columns, Some(&snapshot)).await
+    {
+        log::warn!("log_task_sync: sync_log append failed for task {}: {e}", task.id);
+    }
+}
+
 /// Reorder tasks within a project -- receives ordered list of task IDs
 pub async fn reorder_local_tasks(pool: &SqlitePool, task_ids: &[String]) -> crate::Result<()> {
     for (i, id) in task_ids.iter().enumerate() {
@@ -547,6 +566,22 @@ pub async fn update_task_status_at(
 
     // Update status + completed flag
     let is_complete = status == "complete";
+
+    // Re-completing an already-complete task is a no-op. Without this, a
+    // bulk-complete over a selection containing a completed task re-stamps
+    // its completed_at AND emits a fresh-timestamped sync_log snapshot —
+    // which LWW-outranks (and silently reverts) a reopen made on another
+    // device that hasn't pulled here yet. The `old == "complete"` half keeps
+    // the repair path open for rows stuck at completed=1/status!='complete'.
+    if is_complete && was_completed && old == "complete" {
+        return Ok(());
+    }
+
+    // Subtasks the completion cascade below actually changes — captured so the
+    // sync_log write at the bottom can log each one. Logging only the parent
+    // left subtask completions invisible to Turso: the Mac showed them
+    // complete, every other device still showed them open.
+    let mut cascaded_subtasks: Vec<LocalTask> = Vec::new();
     if is_complete {
         // Recurrence check, ahead of the normal completion path: a recurring
         // task (rule parses AND has a due date) reschedules instead of
@@ -568,8 +603,14 @@ pub async fn update_task_status_at(
                     let next_due_str = next_due.format("%Y-%m-%d").to_string();
                     let new_due_time = rule.time.clone().or(existing_due_time);
 
+                    // `completed = 0, completed_at = NULL` matters for the
+                    // zombie state completed=1/status='todo' (reachable when
+                    // the completion cascade marks a RECURRING subtask
+                    // complete and it is later re-completed): without the
+                    // reset, the row would claim to be open while every
+                    // open-task list (all filter completed = 0) hides it.
                     sqlx::query(
-                        "UPDATE local_tasks SET due_date = ?, due_time = ?, status = 'todo', updated_at = datetime('now', 'localtime') WHERE id = ?",
+                        "UPDATE local_tasks SET due_date = ?, due_time = ?, status = 'todo', completed = 0, completed_at = NULL, updated_at = datetime('now', 'localtime') WHERE id = ?",
                     )
                     .bind(&next_due_str)
                     .bind(&new_due_time)
@@ -600,6 +641,8 @@ pub async fn update_task_status_at(
                             "due_date".to_string(),
                             "due_time".to_string(),
                             "status".to_string(),
+                            "completed".to_string(),
+                            "completed_at".to_string(),
                         ];
                         let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
                         let snapshot = sync::task_sync_snapshot(task);
@@ -637,12 +680,20 @@ pub async fn update_task_status_at(
         .execute(pool)
         .await?;
 
-        // Also complete all subtasks
-        sqlx::query(
-            "UPDATE local_tasks SET status = 'complete', completed = 1, completed_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime') WHERE parent_id = ?",
-        )
+        // Also complete all still-open subtasks. `completed = 0` matches the
+        // web client's cascade (turso/tasks.ts `setTaskStatus`): re-completing
+        // a parent must not re-stamp `completed_at` on already-complete
+        // children, and it keeps the sync_log entries below scoped to rows
+        // that actually changed. RETURNING the full row makes capture and
+        // mutation one statement — a subtask inserted between a separate
+        // SELECT and this UPDATE would be completed without ever being
+        // logged — and it returns the post-update state, so no re-read.
+        cascaded_subtasks = sqlx::query_as::<_, LocalTask>(&format!(
+            "UPDATE local_tasks SET status = 'complete', completed = 1, completed_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime') WHERE parent_id = ? AND completed = 0 RETURNING {}",
+            SELECT_COLS
+        ))
         .bind(id)
-        .execute(pool)
+        .fetch_all(pool)
         .await?;
     } else {
         sqlx::query(
@@ -680,6 +731,18 @@ pub async fn update_task_status_at(
         let changed = serde_json::json!(["status", "completed", "completed_at"]).to_string();
         let snapshot = sync::task_sync_snapshot(task);
         sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
+    }
+
+    // Sync log: one UPDATE per subtask the completion cascade changed, with a
+    // full post-update snapshot each (receivers upsert whole rows, so a
+    // partial snapshot would blank the other columns). Mirrors the web
+    // client's `setTaskStatus`, which was doing this before desktop did. The
+    // Todoist observer is deliberately NOT fired per subtask — Todoist
+    // cascades a parent completion to its subtasks server-side, so per-child
+    // ops would be redundant echoes.
+    let changed = serde_json::json!(["status", "completed", "completed_at"]).to_string();
+    for sub in &cascaded_subtasks {
+        log_task_sync(pool, sub, "UPDATE", Some(&changed)).await;
     }
 
     // Todoist mutation observer: best-effort
@@ -1116,6 +1179,181 @@ mod tests {
         assert_eq!(fetched.recurrence_rule.as_deref(), Some("every day"));
         assert_eq!(fetched.section_id.as_deref(), Some(section.id.as_str()));
         assert_eq!(fetched.labels, vec![label.id]);
+    }
+
+    /// Completing a parent cascades to its open subtasks — and each cascaded
+    /// subtask must get its OWN sync_log UPDATE entry with a full snapshot.
+    /// Logging only the parent (the pre-fix behavior) left subtask
+    /// completions invisible to Turso: the Mac showed them complete, every
+    /// other device still showed them open.
+    #[tokio::test]
+    async fn completing_a_parent_writes_a_sync_log_entry_per_cascaded_subtask() {
+        let pool = test_pool().await;
+        let parent = super::create_local_task(
+            &pool,
+            CreateTaskInput { content: "parent".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        let sub_open = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "open sub".to_string(),
+                parent_id: Some(parent.id.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let sub_done = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "already done".to_string(),
+                parent_id: Some(parent.id.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // Pre-complete one subtask, then clear sync_log so the assertions
+        // below see only what the parent completion writes.
+        super::update_task_status(&pool, &sub_done.id, "complete", None).await.unwrap();
+        sqlx::query("DELETE FROM sync_log").execute(&pool).await.unwrap();
+
+        super::update_task_status(&pool, &parent.id, "complete", None).await.unwrap();
+
+        let logged_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT row_id FROM sync_log WHERE table_name = 'local_tasks' AND operation = 'UPDATE'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(logged_ids.contains(&parent.id), "parent completion must be logged");
+        assert!(
+            logged_ids.contains(&sub_open.id),
+            "cascaded subtask completion must be logged — this is the cross-device bug"
+        );
+        assert!(
+            !logged_ids.contains(&sub_done.id),
+            "an already-complete subtask didn't change and must not be re-logged"
+        );
+
+        // Full-row snapshot: receivers upsert whole rows, so a partial
+        // snapshot would blank every omitted column on other devices. And it
+        // must go through `task_sync_snapshot` (no `labels` pseudo-column).
+        let snapshot: String = sqlx::query_scalar(
+            "SELECT snapshot FROM sync_log WHERE table_name = 'local_tasks' AND row_id = ?",
+        )
+        .bind(&sub_open.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&snapshot).unwrap();
+        assert_eq!(v["status"], "complete");
+        assert_eq!(v["completed"], serde_json::json!(true));
+        assert_eq!(v["content"], "open sub");
+        assert!(v.get("id").is_some() && v.get("project_id").is_some());
+        assert!(v.get("labels").is_none(), "snapshot must not carry the labels pseudo-column");
+
+        // The DB rows themselves: both subtasks complete, the pre-completed
+        // one keeps its original completed_at (no re-stamp on re-complete).
+        let sub_rows: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT id, completed FROM local_tasks WHERE parent_id = ?",
+        )
+        .bind(&parent.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(sub_rows.iter().all(|(_, c)| *c == 1));
+    }
+
+    /// Re-completing an already-complete task must be a full no-op: no
+    /// completed_at re-stamp and no fresh-timestamped sync_log entry, which
+    /// would LWW-outrank (and silently revert) a reopen made on another
+    /// device that hasn't been pulled yet.
+    #[tokio::test]
+    async fn recompleting_a_complete_task_is_a_noop() {
+        let pool = test_pool().await;
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput { content: "t".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        super::update_task_status(&pool, &task.id, "complete", None).await.unwrap();
+        let stamp1: Option<String> =
+            sqlx::query_scalar("SELECT completed_at FROM local_tasks WHERE id = ?")
+                .bind(&task.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        sqlx::query("DELETE FROM sync_log").execute(&pool).await.unwrap();
+
+        super::update_task_status(&pool, &task.id, "complete", None).await.unwrap();
+
+        let stamp2: Option<String> =
+            sqlx::query_scalar("SELECT completed_at FROM local_tasks WHERE id = ?")
+                .bind(&task.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stamp1, stamp2, "completed_at must not be re-stamped");
+        let log_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_log")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(log_count, 0, "a no-op re-complete must not emit sync_log entries");
+    }
+
+    /// Completing a zombie row (completed=1 but status!='complete' — reachable
+    /// when the cascade completes a RECURRING subtask that is later
+    /// re-completed) must repair it: the recurrence branch resets
+    /// completed/completed_at alongside status='todo', so the row never
+    /// claims to be open while hidden from every open-task list.
+    #[tokio::test]
+    async fn completing_a_recurring_zombie_resets_completed_flag() {
+        let pool = test_pool().await;
+        let task = super::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "recurring".to_string(),
+                due_date: Some("2026-08-10".to_string()),
+                recurrence_rule: Some("every day".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        // Force the zombie state a cascade over a recurring subtask creates.
+        sqlx::query("UPDATE local_tasks SET completed = 1, completed_at = datetime('now'), status = 'todo' WHERE id = ?")
+            .bind(&task.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        super::update_task_status_at(
+            &pool,
+            &task.id,
+            "complete",
+            None,
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 19).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let (completed, completed_at, status, due): (i64, Option<String>, String, Option<String>) =
+            sqlx::query_as(
+                "SELECT completed, completed_at, status, due_date FROM local_tasks WHERE id = ?",
+            )
+            .bind(&task.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(completed, 0, "recurrence must clear the completed flag");
+        assert_eq!(completed_at, None);
+        assert_eq!(status, "todo");
+        assert_eq!(due.as_deref(), Some("2026-08-20"), "due date advances past today");
     }
 
     /// `create_local_task` must reject a `section_id` that doesn't belong to
@@ -1728,6 +1966,13 @@ mod tests {
         .await
         .unwrap();
         let changed: Vec<String> = serde_json::from_str(&logged[0].0).unwrap();
-        assert_eq!(changed, vec!["due_date", "due_time", "status"]);
+        // completed/completed_at joined the list when the recurrence branch
+        // started resetting them (zombie-row repair) — the Todoist observer
+        // ignores both names, so this stays distinct from a normal completion
+        // in effect as well as in shape.
+        assert_eq!(
+            changed,
+            vec!["due_date", "due_time", "status", "completed", "completed_at"]
+        );
     }
 }

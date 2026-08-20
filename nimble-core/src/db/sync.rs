@@ -171,6 +171,49 @@ async fn turso_pipeline(
         .map_err(|e| crate::Error::Api(format!("Turso response parse failed: {}", e)))
 }
 
+/// Scan a Turso pipeline response for statement-level errors. Turso answers
+/// HTTP 200 even when individual statements fail — `results[i].type ==
+/// "error"` is the only signal a write was rejected, and reading rows without
+/// checking it makes a failed statement indistinguishable from a successful
+/// empty one. Every NEW caller that treats the whole pipeline as one unit
+/// must go through this. Sites with their own checks, deliberately: `push`
+/// needs per-entry partial success (`entries_safe_to_mark`), and
+/// `test_connection`/the pull's chunk fetch check `results[0]` inline
+/// because they also read data out of that result.
+///
+/// `ignore_duplicate_column` tolerates "duplicate column name" errors so
+/// idempotent `ALTER TABLE ADD COLUMN` retries stay safe to re-run.
+fn check_pipeline_statement_errors(
+    body: &serde_json::Value,
+    context: &str,
+    ignore_duplicate_column: bool,
+) -> crate::Result<()> {
+    // No results array at all is ALSO a failure: a 2xx JSON response without
+    // one (wrong endpoint, a proxy answering for Turso) must not pass and
+    // latch a caller's gate — that's the silent-latch class this helper
+    // exists to close.
+    let Some(results) = body.get("results").and_then(|v| v.as_array()) else {
+        return Err(crate::Error::Api(format!(
+            "{context}: Turso response carried no results array"
+        )));
+    };
+    for (i, result) in results.iter().enumerate() {
+        if result.get("type").and_then(|v| v.as_str()) == Some("error") {
+            let err_msg = result
+                .pointer("/error/message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown error");
+            if ignore_duplicate_column && err_msg.to_lowercase().contains("duplicate column") {
+                continue;
+            }
+            return Err(crate::Error::Api(format!(
+                "{context}: Turso statement {i} failed: {err_msg}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 // ── Test Connection ──
 
 /// Test connection to Turso by running SELECT 1.
@@ -278,7 +321,20 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
         // since the remote's first initialization (external_id, external_source,
         // remote_updated_at, synced_snapshot, captures.context) must be added
         // out-of-band via idempotent ALTERs. Safe to call on every invocation.
-        return upgrade_remote_schema(turso_url, turso_token).await;
+        match upgrade_remote_schema(turso_url, turso_token).await {
+            // "no such table" means the latched gate is lying: the remote
+            // lost its tables (DB recreated/emptied) or a half-init latched
+            // under the old unchecked parsing. Nothing in the app ever
+            // clears `turso_initialized`, so without this fall-through every
+            // Initialize click would error forever one branch away from the
+            // idempotent CREATEs that fix it.
+            Err(e) if e.to_string().to_lowercase().contains("no such table") => {
+                log::warn!(
+                    "Turso remote is missing tables behind a latched init gate — re-initializing: {e}"
+                );
+            }
+            other => return other,
+        }
     }
 
     // All CREATE TABLE statements for synced tables
@@ -485,7 +541,12 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
         .collect();
     requests.push(serde_json::json!({ "type": "close" }));
 
-    turso_pipeline(turso_url, turso_token, requests).await?;
+    let body = turso_pipeline(turso_url, turso_token, requests).await?;
+    // Strict-fail BEFORE writing the local gate: a statement-level error in a
+    // 2xx response must not latch `turso_initialized`, or a half-created
+    // remote never gets retried (the same silent-latch class as the schema
+    // upgrade gates below).
+    check_pipeline_statement_errors(&body, "Turso remote init", false)?;
 
     // Mark as initialized locally
     sqlx::query(
@@ -501,7 +562,9 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
 /// Idempotent remote-schema upgrade: adds columns that were introduced after a
 /// remote may have already been initialized. libSQL has no `ADD COLUMN IF NOT
 /// EXISTS`, so this tolerates "duplicate column name" errors from Turso and
-/// only warns on anything else.
+/// hard-fails on anything else — the caller's gate must never latch on a
+/// failed run (a warn-and-`Ok` here is what permanently latched v17/v19
+/// gates; see the 2xx-with-statement-error family in the sync docs).
 async fn upgrade_remote_schema(turso_url: &str, turso_token: &str) -> crate::Result<()> {
     let alter_statements = [
         "ALTER TABLE local_tasks ADD COLUMN external_id TEXT",
@@ -523,21 +586,10 @@ async fn upgrade_remote_schema(turso_url: &str, turso_token: &str) -> crate::Res
 
     let body = turso_pipeline(turso_url, turso_token, requests).await?;
 
-    if let Some(results) = body.get("results").and_then(|v| v.as_array()) {
-        for (i, result) in results.iter().enumerate() {
-            if let Some("error") = result.get("type").and_then(|v| v.as_str()) {
-                let err_msg = result
-                    .pointer("/error/message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown error");
-                // "duplicate column name" means the ALTER already landed on a
-                // previous run — expected and safe to ignore.
-                if !err_msg.to_lowercase().contains("duplicate column") {
-                    log::warn!("Turso schema upgrade statement {} failed: {}", i, err_msg);
-                }
-            }
-        }
-    }
+    // "duplicate column name" means the ALTER already landed on a previous
+    // run — expected and safe to ignore. Anything else must fail the run so
+    // the v17 gate is never written and the next push retries.
+    check_pipeline_statement_errors(&body, "Turso v17 schema upgrade", true)?;
 
     Ok(())
 }
@@ -583,20 +635,7 @@ async fn create_remote_vault_tables(turso_url: &str, turso_token: &str) -> crate
 
     let body = turso_pipeline(turso_url, turso_token, requests).await?;
 
-    if let Some(results) = body.get("results").and_then(|v| v.as_array()) {
-        for (i, result) in results.iter().enumerate() {
-            if let Some("error") = result.get("type").and_then(|v| v.as_str()) {
-                let err_msg = result
-                    .pointer("/error/message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown error");
-                log::warn!("Turso vault-table statement {i} failed: {err_msg}");
-                return Err(crate::Error::Api(format!(
-                    "Turso vault schema upgrade failed: {err_msg}"
-                )));
-            }
-        }
-    }
+    check_pipeline_statement_errors(&body, "Turso vault schema upgrade", false)?;
 
     Ok(())
 }
@@ -649,23 +688,11 @@ async fn upgrade_remote_v19_schema(turso_url: &str, turso_token: &str) -> crate:
 
     let body = turso_pipeline(turso_url, turso_token, requests).await?;
 
-    if let Some(results) = body.get("results").and_then(|v| v.as_array()) {
-        for (i, result) in results.iter().enumerate() {
-            if let Some("error") = result.get("type").and_then(|v| v.as_str()) {
-                let err_msg = result
-                    .pointer("/error/message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown error");
-                // "duplicate column name" means the ALTER already landed on a
-                // previous run — expected and safe to ignore. The CREATE
-                // TABLE statements are already IF NOT EXISTS, so they never
-                // surface as errors here.
-                if !err_msg.to_lowercase().contains("duplicate column") {
-                    log::warn!("Turso v19 schema upgrade statement {} failed: {}", i, err_msg);
-                }
-            }
-        }
-    }
+    // "duplicate column name" = the ALTER already landed on a previous run —
+    // expected and safe to ignore (the CREATE TABLEs are IF NOT EXISTS and
+    // never error). Anything else must fail the run so the v19 gate is never
+    // written and the next push retries.
+    check_pipeline_statement_errors(&body, "Turso v19 schema upgrade", true)?;
 
     Ok(())
 }
@@ -700,7 +727,52 @@ async fn ensure_remote_v19_schema(
 
 // ── Push ──
 
-/// Build INSERT OR REPLACE statements from a snapshot JSON for a given table.
+/// Conflict target (primary-key columns) per synced table, for building the
+/// snapshot-apply upserts below.
+fn conflict_target(table_name: &str) -> &'static str {
+    match table_name {
+        "task_labels" => "task_id, label_id",
+        "daily_state" => "date",
+        _ => "id",
+    }
+}
+
+/// Build the SQL that applies a snapshot: `INSERT ... ON CONFLICT(pk) DO
+/// UPDATE SET <each non-PK column> = excluded.<column>`.
+///
+/// ⚠️ Never "simplify" this back to `INSERT OR REPLACE`: REPLACE deletes the
+/// existing row before inserting, and with foreign keys ON (sqlx's default)
+/// that DELETE fires `ON DELETE CASCADE` — applying a project snapshot
+/// cascade-deleted every task in the project on the receiving device, and a
+/// parent task's snapshot cascade-deleted its subtasks. `DO UPDATE` mutates
+/// the row in place, so no cascade fires and columns absent from the
+/// snapshot keep their local values instead of being blanked.
+fn build_snapshot_upsert_sql(table_name: &str, columns: &[&str]) -> String {
+    let placeholders: Vec<&str> = columns.iter().map(|_| "?").collect();
+    let target = conflict_target(table_name);
+    let pk_cols: Vec<&str> = target.split(", ").collect();
+    let set_clauses: Vec<String> = columns
+        .iter()
+        .filter(|c| !pk_cols.contains(c))
+        .map(|c| format!("{c} = excluded.{c}"))
+        .collect();
+    let action = if set_clauses.is_empty() {
+        "DO NOTHING".to_string()
+    } else {
+        format!("DO UPDATE SET {}", set_clauses.join(", "))
+    };
+    format!(
+        "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT({}) {}",
+        table_name,
+        columns.join(", "),
+        placeholders.join(", "),
+        target,
+        action
+    )
+}
+
+/// Build snapshot-apply statements for a given table (see
+/// `build_snapshot_upsert_sql` for why these are conflict-target upserts).
 /// Returns a vector of Turso execute requests to apply the data mutation.
 fn build_data_mutation_requests(
     table_name: &str,
@@ -750,14 +822,8 @@ fn build_data_mutation_requests(
             }
 
             let columns: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
-            let placeholders: Vec<&str> = columns.iter().map(|_| "?").collect();
 
-            let sql = format!(
-                "INSERT OR REPLACE INTO {} ({}) VALUES ({})",
-                table_name,
-                columns.join(", "),
-                placeholders.join(", ")
-            );
+            let sql = build_snapshot_upsert_sql(table_name, &columns);
 
             let args: Vec<serde_json::Value> = columns
                 .iter()
@@ -1049,14 +1115,27 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     // Guard against C1: on an already-initialized remote, ensure the columns
     // this branch added (external_id, external_source, remote_updated_at,
     // synced_snapshot, captures.context) exist before we try to write them.
-    ensure_remote_schema_upgraded(pool, turso_url, turso_token).await?;
+    //
+    // A failed upgrade must NOT latch its gate (the ensure_* fns handle
+    // that), and it must not block the data push either: post-6b7f493, a
+    // statement that needs a missing column fails per-entry and stays
+    // `synced = 0` for retry, so pushing what CAN land is strictly better
+    // than turning one persistent gate error into total silent sync loss.
+    // The unlatched gate retries on every push until it succeeds.
+    if let Err(e) = ensure_remote_schema_upgraded(pool, turso_url, turso_token).await {
+        log::warn!("Turso v17 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
 
     // v18: the vault tables may not exist on a remote initialized earlier.
-    ensure_remote_vault_schema(pool, turso_url, turso_token).await?;
+    if let Err(e) = ensure_remote_vault_schema(pool, turso_url, turso_token).await {
+        log::warn!("Turso v18 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
 
     // v19: labels/task_labels/sections tables + local_tasks/projects columns
     // may not exist on a remote initialized earlier.
-    ensure_remote_v19_schema(pool, turso_url, turso_token).await?;
+    if let Err(e) = ensure_remote_v19_schema(pool, turso_url, turso_token).await {
+        log::warn!("Turso v19 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
 
     // Fetch all unsynced entries
     let entries: Vec<PushEntry> = sqlx::query_as(
@@ -1117,6 +1196,18 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
         .bind(&now)
         .execute(pool)
         .await?;
+    }
+
+    // An all-rejected push is a failure, not "Pushed 0": push_batch returns
+    // Ok while leaving statement-rejected entries unsynced for retry, so
+    // without this check a persistently broken remote (wrong-but-2xx
+    // endpoint, DDL-less token on a stale schema) would toast success on
+    // every sync while nothing ever landed.
+    if failure.is_none() && !entries.is_empty() && pushed == 0 {
+        return Err(crate::Error::Api(format!(
+            "Turso push: all {} entries were rejected at the statement level; they remain queued for retry",
+            entries.len()
+        )));
     }
 
     match failure {
@@ -1181,7 +1272,7 @@ fn encode_pull_cursor(cursor: &PullCursor) -> String {
 /// still matches `last_pull_timestamp`. That self-check makes a torn write (the
 /// two settings rows are written back to back, not atomically) harmless in both
 /// orders: a mismatch degrades to `entry_id = ""`, which re-reads that one
-/// millisecond — idempotent, since applying a snapshot is `INSERT OR REPLACE`
+/// millisecond — idempotent, since applying a snapshot is a whole-row upsert
 /// and recording the entry is `INSERT OR IGNORE` — instead of skipping rows.
 fn decode_pull_cursor(last_pull: &str, stored: Option<&str>) -> PullCursor {
     let entry_id = stored
@@ -1521,16 +1612,11 @@ async fn apply_remote_change(
                 crate::Error::Other("Snapshot is not a JSON object".to_string())
             })?;
 
-            // Build an UPSERT: INSERT OR REPLACE
+            // Conflict-target upsert — NOT `INSERT OR REPLACE`, whose
+            // internal DELETE fires ON DELETE CASCADE and wiped child rows
+            // on the receiving device (see build_snapshot_upsert_sql).
             let columns: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
-            let placeholders: Vec<&str> = columns.iter().map(|_| "?").collect();
-
-            let sql = format!(
-                "INSERT OR REPLACE INTO {} ({}) VALUES ({})",
-                sanitize_table_name(table_name)?,
-                columns.join(", "),
-                placeholders.join(", ")
-            );
+            let sql = build_snapshot_upsert_sql(sanitize_table_name(table_name)?, &columns);
 
             let mut query = sqlx::query(&sql);
             for col in &columns {
@@ -2010,6 +2096,187 @@ mod push_batching_tests {
 }
 
 #[cfg(test)]
+mod snapshot_apply_tests {
+    use crate::test_util::test_pool;
+    use crate::types::CreateTaskInput;
+
+    /// THE cascade regression: applying a project snapshot must never delete
+    /// the project's tasks. `INSERT OR REPLACE` did exactly that — REPLACE
+    /// deletes the row first, and with foreign_keys ON (sqlx's default) the
+    /// DELETE fires local_tasks.project_id ON DELETE CASCADE, wiping every
+    /// task in the project on the receiving device.
+    #[tokio::test]
+    async fn applying_a_project_snapshot_does_not_cascade_delete_its_tasks() {
+        let pool = test_pool().await;
+        let project = crate::db::projects::create_project(&pool, "Errands", "blue", None)
+            .await
+            .unwrap();
+        for i in 0..3 {
+            crate::db::tasks::create_local_task(
+                &pool,
+                CreateTaskInput {
+                    content: format!("task {i}"),
+                    project_id: Some(project.id.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        // A remote rename of the same project arrives as a full snapshot.
+        let mut renamed = project.clone();
+        renamed.name = "Chores".to_string();
+        let snapshot = serde_json::to_string(&renamed).unwrap();
+        super::apply_remote_change(&pool, "projects", &project.id, "UPDATE", Some(&snapshot))
+            .await
+            .unwrap();
+
+        let task_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM local_tasks WHERE project_id = ?")
+                .bind(&project.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(task_count, 3, "applying a project snapshot must not cascade-delete its tasks");
+        let name: String = sqlx::query_scalar("SELECT name FROM projects WHERE id = ?")
+            .bind(&project.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(name, "Chores", "the snapshot's own change must still apply");
+    }
+
+    /// Same cascade, one level down: applying a parent task's snapshot must
+    /// not delete its subtasks via local_tasks.parent_id ON DELETE CASCADE.
+    #[tokio::test]
+    async fn applying_a_parent_task_snapshot_does_not_cascade_delete_its_subtasks() {
+        let pool = test_pool().await;
+        let parent = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput { content: "parent".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "child".to_string(),
+                parent_id: Some(parent.id.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let mut completed = parent.clone();
+        completed.status = "complete".to_string();
+        completed.completed = true;
+        let snapshot = super::task_sync_snapshot(&completed);
+        super::apply_remote_change(&pool, "local_tasks", &parent.id, "UPDATE", Some(&snapshot))
+            .await
+            .unwrap();
+
+        let child_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM local_tasks WHERE parent_id = ?")
+                .bind(&parent.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(child_count, 1, "applying a parent snapshot must not cascade-delete subtasks");
+    }
+
+    /// A snapshot for a brand-new row must still insert it (the ON CONFLICT
+    /// upsert's INSERT arm).
+    #[tokio::test]
+    async fn applying_a_snapshot_for_an_unknown_row_inserts_it() {
+        let pool = test_pool().await;
+        let snapshot = serde_json::json!({
+            "id": "remote-p1",
+            "name": "From another device",
+            "color": "#8b8b8b",
+            "position": 42,
+        })
+        .to_string();
+        super::apply_remote_change(&pool, "projects", "remote-p1", "INSERT", Some(&snapshot))
+            .await
+            .unwrap();
+        let name: String = sqlx::query_scalar("SELECT name FROM projects WHERE id = ?")
+            .bind("remote-p1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(name, "From another device");
+    }
+
+    #[test]
+    fn upsert_sql_uses_the_right_conflict_target_per_table() {
+        let sql = super::build_snapshot_upsert_sql("task_labels", &["task_id", "label_id", "created_at"]);
+        assert!(sql.contains("ON CONFLICT(task_id, label_id) DO UPDATE SET created_at = excluded.created_at"), "got {sql}");
+        let sql = super::build_snapshot_upsert_sql("daily_state", &["date", "energy_level"]);
+        assert!(sql.contains("ON CONFLICT(date) DO UPDATE SET energy_level = excluded.energy_level"), "got {sql}");
+        // Only PK columns in the snapshot → DO NOTHING, not a syntax error.
+        let sql = super::build_snapshot_upsert_sql("task_labels", &["task_id", "label_id"]);
+        assert!(sql.contains("ON CONFLICT(task_id, label_id) DO NOTHING"), "got {sql}");
+    }
+}
+
+#[cfg(test)]
+mod pipeline_error_tests {
+    use super::check_pipeline_statement_errors;
+    use serde_json::json;
+
+    #[test]
+    fn a_clean_pipeline_passes() {
+        let body = json!({ "results": [
+            { "type": "ok" }, { "type": "ok" }
+        ]});
+        assert!(check_pipeline_statement_errors(&body, "test", false).is_ok());
+    }
+
+    #[test]
+    fn a_statement_error_inside_a_2xx_response_fails() {
+        // The whole bug family this guards against: HTTP 200 carrying
+        // `results[i].type == "error"`, historically parsed as success five
+        // separate times (pull, push_batch, v17/v19 gates, remote init).
+        let body = json!({ "results": [
+            { "type": "ok" },
+            { "type": "error", "error": { "message": "table projects has no column named external_id" } }
+        ]});
+        let err = check_pipeline_statement_errors(&body, "test", false).unwrap_err();
+        assert!(err.to_string().contains("no column named external_id"));
+        assert!(err.to_string().contains("statement 1"));
+    }
+
+    #[test]
+    fn duplicate_column_is_ignored_only_when_asked() {
+        let body = json!({ "results": [
+            { "type": "error", "error": { "message": "SQLite error: duplicate column name: context" } }
+        ]});
+        assert!(check_pipeline_statement_errors(&body, "test", true).is_ok());
+        assert!(check_pipeline_statement_errors(&body, "test", false).is_err());
+    }
+
+    #[test]
+    fn duplicate_column_tolerance_does_not_swallow_other_errors_in_the_same_pipeline() {
+        let body = json!({ "results": [
+            { "type": "error", "error": { "message": "duplicate column name: due_time" } },
+            { "type": "error", "error": { "message": "no such table: local_tasks" } }
+        ]});
+        let err = check_pipeline_statement_errors(&body, "test", true).unwrap_err();
+        assert!(err.to_string().contains("no such table"));
+    }
+
+    #[test]
+    fn a_missing_or_malformed_results_array_is_an_error_not_a_silent_pass() {
+        // A 2xx JSON response without a results array (wrong endpoint, a
+        // proxy answering for Turso) must not pass and latch a caller's gate.
+        assert!(check_pipeline_statement_errors(&json!({}), "test", false).is_err());
+        assert!(check_pipeline_statement_errors(&json!({ "results": "?" }), "test", false).is_err());
+    }
+}
+
+#[cfg(test)]
 mod pull_cursor_tests {
     use super::{decode_pull_cursor, encode_pull_cursor, PullCursor};
 
@@ -2127,7 +2394,8 @@ mod vault_sync_tests {
         );
         assert_eq!(reqs.len(), 1);
         let sql = reqs[0].pointer("/stmt/sql").and_then(|v| v.as_str()).unwrap_or_default();
-        assert!(sql.starts_with("INSERT OR REPLACE INTO vault_notes"), "got {sql}");
+        assert!(sql.starts_with("INSERT INTO vault_notes"), "got {sql}");
+        assert!(sql.contains("ON CONFLICT(id) DO UPDATE SET"), "got {sql}");
     }
 
     #[tokio::test]

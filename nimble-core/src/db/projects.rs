@@ -18,13 +18,57 @@ impl FromRow<'_, SqliteRow> for Project {
             external_source: row.try_get("external_source")?,
             remote_updated_at: row.try_get("remote_updated_at")?,
             synced_snapshot: row.try_get("synced_snapshot")?,
+            goal_id: row.try_get("goal_id")?,
+            milestone_id: row.try_get("milestone_id")?,
         })
+    }
+}
+
+/// The one `projects` column list — every single-row/list SELECT that maps to
+/// `Project` uses this, mirroring `db::tasks::SELECT_COLS`. A literal copied
+/// per call site is how a new column gets missed at one of them and silently
+/// left stale on other devices (upserts only update snapshot columns).
+pub(crate) const SELECT_COLS: &str = "id, name, color, position, parent_id, external_id, external_source, remote_updated_at, synced_snapshot, goal_id, milestone_id";
+
+/// Re-read a project row and append a full-snapshot sync_log entry for it.
+/// The single definition of "project snapshot" for the Todoist import/pull
+/// paths, which mutate projects with raw SQL outside this module's CRUD fns
+/// (deliberately — the CRUD fns fire the Todoist observer, which would echo
+/// imported rows straight back to Todoist). Hand-rolling the
+/// SELECT-serialize-append block at each site is how a future projects
+/// column gets missed at one copy and silently blanked on every other device
+/// (a column absent from every snapshot never replicates). Fire-and-forget like
+/// every sync_log append, but warns on failure: sync_log IS the retry
+/// mechanism, so a swallowed failure here can leave the row permanently
+/// absent from Turso with nothing to count as "unsynced".
+pub(crate) async fn log_project_sync(pool: &SqlitePool, project_id: &str, operation: &str) {
+    let row: Result<Option<Project>, _> = sqlx::query_as::<_, Project>(
+        &format!("SELECT {SELECT_COLS} FROM projects WHERE id = ?"),
+    )
+    .bind(project_id)
+    .fetch_optional(pool)
+    .await;
+    match row {
+        Ok(Some(project)) => {
+            let snapshot = serde_json::to_string(&project).unwrap_or_default();
+            if let Err(e) =
+                sync::append_sync_log(pool, "projects", project_id, operation, None, Some(&snapshot)).await
+            {
+                log::warn!("log_project_sync: sync_log append failed for project {project_id}: {e}");
+            }
+        }
+        Ok(None) => {
+            log::warn!("log_project_sync: project {project_id} not found for {operation}");
+        }
+        Err(e) => {
+            log::warn!("log_project_sync: snapshot read failed for project {project_id}: {e}");
+        }
     }
 }
 
 pub async fn get_projects(pool: &SqlitePool) -> crate::Result<Vec<Project>> {
     let rows: Vec<Project> = sqlx::query_as::<_, Project>(
-        "SELECT id, name, color, position, parent_id, external_id, external_source, remote_updated_at, synced_snapshot FROM projects ORDER BY position, created_at",
+        &format!("SELECT {SELECT_COLS} FROM projects ORDER BY position, created_at"),
     )
     .fetch_all(pool)
     .await?;
@@ -121,6 +165,8 @@ pub async fn create_project(
         external_source: None,
         remote_updated_at: None,
         synced_snapshot: None,
+        goal_id: None,
+        milestone_id: None,
     };
 
     // Sync log: INSERT
@@ -207,7 +253,7 @@ pub async fn update_project(
     // Sync log: UPDATE
     if !fields_changed.is_empty() {
         let row: Option<Project> = sqlx::query_as::<_, Project>(
-            "SELECT id, name, color, position, parent_id, external_id, external_source, remote_updated_at, synced_snapshot FROM projects WHERE id = ?"
+            &format!("SELECT {SELECT_COLS} FROM projects WHERE id = ?")
         ).bind(id).fetch_optional(pool).await.ok().flatten();
         if let Some(project) = row {
             let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
@@ -236,7 +282,7 @@ pub async fn delete_project(pool: &SqlitePool, id: &str) -> crate::Result<()> {
     // Fetch the full project before deleting, so the observer can enqueue a
     // delete op (and read external_id) after the row is gone.
     let pre_delete_project: Option<Project> = sqlx::query_as::<_, Project>(
-        "SELECT id, name, color, position, parent_id, external_id, external_source, remote_updated_at, synced_snapshot FROM projects WHERE id = ?"
+        &format!("SELECT {SELECT_COLS} FROM projects WHERE id = ?")
     ).bind(id).fetch_optional(pool).await.ok().flatten();
 
     // Move tasks to Inbox before deleting
