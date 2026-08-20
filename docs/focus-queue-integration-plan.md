@@ -72,15 +72,21 @@ Rust commands in `apps/desktop/src-tauri/src/commands/focus_queue.rs`, db in `ni
 
 ## UI & window architecture
 
-**Two surfaces, one store, one component.**
+**Ground truth (checked 2026-08-20):** Focus in Nimble is not a `Page`. It's an overlay state — `focusStore.isActive` — rendered by `Dashboard.tsx`, entered from `BulkActionBar` (multi-select → Focus) or `FocusPlayMenu` (per-task ▶). `startFocus(first, config, queue)` already accepts a queue, but it's in-memory, selection-ordered, not reorderable, and lost on relaunch. The `'session'` page is unrelated.
 
-1. **In-app: extend the existing Focus page.** `FocusView.tsx` already is the "big timer on one task" screen. Add the queue below it (a `SortableTaskList` variant bound to `focus_queue` order) and the timebox control. `FocusBanner` stays as the in-window compact mode. No new `Page` variant needed if Focus already has one; otherwise add `'focus'` to `appStore.Page` + a `Dashboard.tsx` case + `NavSidebar` entry.
+**UX decision: the queue is ambient, not a mode.** Nimble's current model is *pick tasks → start session → session ends → queue evaporates.* Focus Queue's model — the one that worked in daily use — is *there is always a sequence; the top is what I'm doing; the timer is just whether it's running.* Adopt the second:
 
-2. **Companion window: a second Tauri window, `focus`.** Follow the `capture` window precedent in `tauri.conf.json` (`alwaysOnTop`, `decorations: false`, `transparent`, `skipTaskbar`), 340 px wide, same React bundle, branched on `getCurrentWindow().label === 'focus'` at the root. It renders the *same* `FocusView` + queue components, so there's one implementation of the card. Detach/reattach is a button in the in-app view ("Pop out ↗") — this is the moment the feature feels native rather than bolted on.
+1. **Queue tray** — a collapsible right-edge panel in `Dashboard` showing the persisted, ordered queue with the top item as a mini focus card. Visible with or without a running timer. No new nav page.
+2. **Add from anywhere** — hover action / `⌘⇧Q` "Add to queue"; drag onto the tray; `BulkActionBar` "Focus" splits into **Queue selected** (default) and **Focus now** (queue + start). Per-task ▶ keeps meaning "focus now" and also places the task at the top of the queue.
+3. **Session = property of the top task.** Start/pause/complete never dissolves the queue; complete advances to `queue[1]`. `FocusView` is the zoomed-in state of the tray's top card; `FocusBanner` is the compact in-app state.
+4. **Pop-out ↗** on both banner and tray header → the always-on-top window, which is the tray rendered alone at 340 px. **Banner and window coexist** (decided): banner when Nimble is frontmost, window when it isn't. One component, three zoom levels: tray card → banner → floating window.
+5. **Today ≠ queue.** "Queue today" is a deliberate one-time seed; overdue never auto-enters.
 
-   **Known risk — cross-window state.** `emitTasksChanged()` is an in-process JS event bus; a second webview won't hear it. Fix: have the Rust layer `app.emit("tasks-changed")` after every mutation and have each window's `useLocalTasks` subscribe via `listen()`. Zustand stores are per-webview too — the focus window must treat SQLite as truth and re-read on events, not share `focusStore` memory. Decide this in the spike (Phase 0), before building on sand. The `CaptureStrip` window already solves a subset of this; read it first.
+**Companion window mechanics.** Second Tauri window `focus`, following the `capture` precedent in `tauri.conf.json` (`alwaysOnTop`, `decorations: false`, `transparent`, `skipTaskbar`), same React bundle, branched on `getCurrentWindow().label === 'focus'` at the root.
 
-3. **Focus-view scaling** (corner-drag → `transform: scale()`) ports straight into the companion window via `logic/focusView.ts` + `window/focusViewController.ts`. Keep `chromeHeight()` — it's the same 28 px title-bar problem.
+**Known risk — cross-window state.** `emitTasksChanged()` is an in-process JS event bus; a second webview won't hear it, and `focusStore` memory is per-webview. Fix: Rust `app.emit("tasks-changed")` after every mutation, each window subscribes via `listen()`; the focus window treats SQLite as truth. Decide this in Phase 0. `CaptureStrip` already solves a subset — read it first.
+
+**Focus-view scaling** (corner-drag → `transform: scale()`) ports into the companion window via `logic/focusView.ts` + `window/focusViewController.ts`. Keep `chromeHeight()` — same 28 px title-bar problem.
 
 ---
 
@@ -123,8 +129,8 @@ Use the `motion` library for card transitions instead of the old hand-rolled one
 
 spec → Rust types + migration → DataProvider contract → pure logic + tests → commands → UI → review → `CLAUDE.md` gotcha entries. Specs go in `nimble/docs/` next to this file.
 
-## Open questions for Marco
+## Decisions & open items
 
-1. Does Nimble's Focus already have a `Page` entry, or is it reached only from a task? (Determines whether Phase 1 adds nav.)
-2. Should the companion window replace `FocusBanner`, or coexist? Recommendation: coexist — banner in-app, window when Nimble is hidden.
-3. Pomodoro rounds (Nimble) vs. timeboxes (Focus Queue) — same control or two? Recommendation: one control, "timebox" with an optional repeat.
+- **Nav:** no new page; queue tray + overlay (see UI section). *Decided 2026-08-20.*
+- **Banner vs. window:** coexist. *Decided 2026-08-20.*
+- **Pomodoro rounds vs. timeboxes:** open. Options: (a) per-session config toggle between the two, (b) unify as "timebox, optional repeat ×N" with rounds = repeats. Lean (b); decide when Phase 2 starts.
