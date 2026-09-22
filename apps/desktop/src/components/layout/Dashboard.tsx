@@ -11,6 +11,8 @@ import { NavSidebar } from './NavSidebar'
 import { RightSidebar } from './RightSidebar'
 import { CommandBar } from '@/components/shared/CommandBar'
 import { HelpPanel } from '@/components/shared/HelpPanel'
+import { useHelpPanelStore } from '@/stores/helpPanelStore'
+import { G_PREFIX_PAGES, G_PREFIX_TIMEOUT_MS } from '@/lib/shortcuts'
 import { BulkActionBar } from '@/components/shared/BulkActionBar'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { QuickCreateDialog } from '@/components/tasks/QuickCreateDialog'
@@ -126,6 +128,13 @@ export function Dashboard() {
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
 
+      // ? — toggle the keyboard-shortcuts panel (shell P1-1, §1.5)
+      if (e.key === '?' && !isInput && !meta && !e.altKey) {
+        e.preventDefault()
+        useHelpPanelStore.getState().toggle()
+        return
+      }
+
       // Cmd+, — open settings
       if (meta && e.key === ',') {
         e.preventDefault()
@@ -195,6 +204,43 @@ export function Dashboard() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [setCurrentPage, detailTarget, closeDetail, focusActive])
+
+  // G-prefix navigation (§1.5, shell P1-5): `g` then t/k/i/d/g/s/, within
+  // 600ms. Registered in the capture phase so the second key never reaches
+  // the page-level handlers (`k` = previous task, `s` = snooze, `t` =
+  // calendar today). Number keys and ⌘1–6 are untouched — this is additive.
+  const pendingGRef = useRef<number | null>(null)
+  useEffect(() => {
+    function handleChord(e: KeyboardEvent) {
+      const target = e.target as HTMLElement
+      const isInput =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      if (isInput || e.metaKey || e.ctrlKey || e.altKey) return
+
+      const pending = pendingGRef.current
+      if (pending !== null) {
+        pendingGRef.current = null
+        if (Date.now() - pending <= G_PREFIX_TIMEOUT_MS) {
+          const page = G_PREFIX_PAGES[e.key]
+          if (page) {
+            e.preventDefault()
+            e.stopPropagation()
+            setCurrentPage(page)
+            return
+          }
+        }
+      }
+      if (e.key === 'g') {
+        e.preventDefault()
+        e.stopPropagation()
+        pendingGRef.current = Date.now()
+      }
+    }
+    window.addEventListener('keydown', handleChord, true)
+    return () => window.removeEventListener('keydown', handleChord, true)
+  }, [setCurrentPage])
 
   const hideSidebar = currentPage === 'settings' || currentPage === 'session'
   const contentMaxW = hideSidebar ? 'max-w-3xl' : 'max-w-2xl'

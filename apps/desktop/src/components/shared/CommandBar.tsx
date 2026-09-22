@@ -246,10 +246,19 @@ export function CommandBar() {
       if (e.key === 'ArrowUp') { e.preventDefault(); setSelectedIndex((prev) => (prev - 1 + totalItems) % totalItems); return }
 
       // Action shortcuts (Option + key)
+      // e.code as well as e.key: on macOS ⌥C / ⌥B / ⌥M produce ç / ∫ / µ as
+      // e.key, which is why the letter checks alone never fired in the webview.
       if (selectedIndex < filteredTasks.length && e.altKey) {
         const task = filteredTasks[selectedIndex]
-        if (e.key === 'c') { e.preventDefault(); handleComplete(task.id); return }
-        if (e.key === 'b') { e.preventDefault(); handleBreakDown(task); return }
+        if (e.key === 'c' || e.code === 'KeyC') { e.preventDefault(); handleComplete(task.id); return }
+        if (e.key === 'b' || e.code === 'KeyB') { e.preventDefault(); handleBreakDown(task); return }
+        if (e.key === 'm' || e.code === 'KeyM') {
+          // Open the selected row's move menu — the trigger only renders on
+          // the selected row, so there is exactly one in the DOM.
+          e.preventDefault()
+          document.querySelector<HTMLElement>('[data-move-trigger]')?.click()
+          return
+        }
       }
 
       if (e.key === 'Enter') {
