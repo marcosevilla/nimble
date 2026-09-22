@@ -5,15 +5,15 @@ Updated 2026-09-21 after installed Google OAuth repair and verified first live s
 ## Session wrap — 2026-09-21
 
 - Context refresh saved locally: outer AGENTS.md/CLAUDE.md, repository CLAUDE.md, verification records, agent-access guide, locked-decisions status, implementation plans and historical-roadmap pointers. The 11 shared documents match between main and the OAuth repair worktree; the repair plan is updated in that worktree only.
-- Pending commit proposal: `docs: refresh Nimble context and remaining acceptance gates`. Commit on `codex/google-desktop-oauth-fix` after Marco approves; main contains matching documentation edits, so preserve/reconcile them during later integration. Outer context files are outside Git.
-- Remote main verified at `3e4a061`; OAuth repair has four local commits through `a29bea2`, with no remote branch. Installed app runtime remains `af39e29`. Do not rebuild from the older main source before integration.
+- [x] Marco authorized commit/push. Context refresh committed (`600d3b3`, `c56f57a`), OAuth repair merged into main (`b3211dd`) and pushed to GitHub on 2026-09-21. Remote main and repair branch verified after push. Main's merge tree exactly matches the freshly tested repair tree: 330 Rust tests, eight frontend tests, desktop/web builds passed.
+- Outer AGENTS.md/CLAUDE.md snapshots are versioned under `docs/context/`; the active outer files remain outside Git. Installed runtime remains `af39e29`; source is now integrated into main. Worktrees are retained for continuity.
 - Vercel production rechecked Ready: `dpl_9aNWreqb49Ho9KocRGypNDu8BLnE`, deployed from `49254e9`. Main's later `3e4a061` contains documentation only; repair remains desktop-local. No deployment performed during wrap.
 - Todoist pointer lookup failed twice with HTTP401. Could not verify/update the single Nimble open-loops pointer; after reconnect, search before creating and prepend the dated status while preserving description/labels. This local file is the fallback handoff. No live task changes made.
 - Separate security follow-up: an unrelated Figma credential appeared in a process diagnostic earlier in this session; Marco was informed. Rotation/revocation remains unverified. Never reproduce the credential or repeat broad process-command diagnostics.
 
 ## Start here
 
-- [x] **Google Calendar connected and first live sync verified (2026-09-21).** Marco completed secret setup/consent. Installed Nimble reports Connected to Nimble and secret saved in Keychain. Sync now succeeded; read-only SQLite confirms a dedicated calendar, America/Los_Angeles timezone, initialized sync cursor, last sync 2026-09-22T05:31:58Z, no error/retry state. No tasks are published yet. Next acceptance: publish one chosen test reminder and confirm the physical phone notification, then verify two-way edits. Repair branch remains local, not merged/pushed.
+- [x] **Google Calendar connected and first live sync verified (2026-09-21).** Marco completed secret setup/consent. Installed Nimble reports Connected to Nimble and secret saved in Keychain. Sync now succeeded; read-only SQLite confirms a dedicated calendar, America/Los_Angeles timezone, initialized sync cursor, last sync 2026-09-22T05:31:58Z, no error/retry state. No tasks are published yet. Next acceptance: publish one chosen test reminder and confirm the physical phone notification, then verify two-way edits. Repair source was subsequently merged and pushed in `b3211dd`; see wrap record above.
 - [x] Install approved Google repair, preserving all 1,125 tasks, 63 projects, 25 labels and 150 captures with full-row hashes and schema20 integrity verified after relaunch. Rollback app/data: `~/Library/Application Support/Nimble Rollbacks/20260921-222607-google-oauth`. CLI unchanged.
 - Google setup preserved: project **Nimble** (`nimble-509404`); approved terms accepted; Calendar API enabled; External/testing with Marco as sole test user; only `calendar.app.created` declared; approved Desktop client **Nimble Mac** created and public ID saved in Nimble. The initial token exchange failed; the installed repair resolved it, and connection/calendar creation plus first sync are verified. No billing enabled. Reuse this project/client; testing-mode token lifetime and physical-phone acceptance remain open.
 - [x] Fix Google setup and reminder timezone Save buttons with explicit submit types; all three actual-render regression tests pass.
@@ -22,11 +22,11 @@ Updated 2026-09-21 after installed Google OAuth repair and verified first live s
 
 - [x] Push merged main (`49254e9`) to GitHub and deploy web production on 2026-09-21. Vercel deployment `dpl_9aNWreqb49Ho9KocRGypNDu8BLnE` is Ready at https://nimble-web-marco-sevilla-projects.vercel.app. Login form and anonymous API protection verified; signed-in web acceptance remains open because production password exports were empty and the browser was logged out. See [deployment verification](docs/c2-c3-verification.md#production-web-deployment--2026-09-21).
 
-- [x] Merge C2/C3 into `main`: only `NEXT.md` conflicted; preserved the complete implementation and installation record. This merge established the C2/C3 baseline; the installed app now additionally includes the local OAuth repair below. Merged verification: 320 Rust tests, five interface tests, desktop and web builds passed. Naming: **Nimble Agent Tools** (`dt`); workflow activation remains below.
+- [x] Merge C2/C3 into `main`: only `NEXT.md` conflicted; preserved the complete implementation and installation record. This merge established the C2/C3 baseline; the installed app now additionally includes the OAuth repair below. Merged verification: 320 Rust tests, five interface tests, desktop and web builds passed. Naming: **Nimble Agent Tools** (`dt`); workflow activation remains below.
 
 - [x] Installed signed C2/C3 update into `/Applications/Nimble.app` and `dt` into `~/.local/bin/dt` on 2026-09-21. App reopened, schema20 integrity passed, and all preexisting task/project/label/section/capture fields are unchanged. New local and private online backup succeeded; isolated restore verification passed. Rollback: `~/Library/Application Support/Nimble Rollbacks/20260921-210436-c23`. Google was disconnected at this installation checkpoint and is now connected after the repair; workflow routing remains unactivated. The C2/C3 baseline is integrated into `main`.
 
-- C2/C3 implementation from `codex/c2-c3-reminders-agents` is integrated into `main`; native synthetic CLI refresh, reminder submission, restart catch-up and backup/restore checks passed. All 320 Rust tests, desktop/web builds and final review passed. Production app is updated; Google connection and initial sync subsequently passed with the local OAuth repair (330 Rust tests and eight frontend tests). See [combined verification](docs/c2-c3-verification.md).
+- C2/C3 implementation from `codex/c2-c3-reminders-agents` is integrated into `main`; native synthetic CLI refresh, reminder submission, restart catch-up and backup/restore checks passed. All 320 Rust tests, desktop/web builds and final review passed. Production app is updated; Google connection and initial sync subsequently passed with the OAuth repair (330 Rust tests and eight frontend tests). See [combined verification](docs/c2-c3-verification.md).
 
 - [x] Review the [coordinated C2/C3 implementation plan](docs/superpowers/plans/2026-09-21-c2-c3-coordination.md): reminders and local assistant access will develop concurrently with separate subagents and one owner for shared database, backup, and app integration. Plan approved and implementation built 2026-09-21 in `codex/c2-c3-reminders-agents`; remaining live activation is listed below.
 
@@ -42,10 +42,9 @@ Updated 2026-09-21 after installed Google OAuth repair and verified first live s
 ## Next execution order
 
 1. Finish C2 live acceptance: publish one disposable timed task, confirm the physical phone alert, and verify edits in both directions. Check restart/reconnect behavior and testing-mode token longevity; keep real deadline reminders on the existing fallback until acceptance passes.
-2. Integrate and push the already-installed OAuth repair from `codex/google-desktop-oauth-fix` when authorized. Main remains at `3e4a061`; installed runtime is `af39e29`. No new web deployment occurred for this repair.
-3. Finish C3 activation: review/approve assistant routing, test a parent task with three subtasks, labels and due date in the app, and confirm signed-in web propagation. Preserve Instinct ownership and avoid duplicate fallback writes.
-4. Build C4: grouped labels (ENERGY / TIME / TYPE / CREATIVE) and indexed task-title/description search, including completed tasks.
-5. Proceed to C5 import and a 2–4 week trial only after the remaining acceptance gates pass; keep Todoist operational meanwhile.
+2. Finish C3 activation: review/approve assistant routing, test a parent task with three subtasks, labels and due date in the app, and confirm signed-in web propagation. Preserve Instinct ownership and avoid duplicate fallback writes.
+3. Build C4: grouped labels (ENERGY / TIME / TYPE / CREATIVE) and indexed task-title/description search, including completed tasks.
+4. Proceed to C5 import and a 2–4 week trial only after the remaining acceptance gates pass; keep Todoist operational meanwhile.
 
 ## Code track — agreed order
 

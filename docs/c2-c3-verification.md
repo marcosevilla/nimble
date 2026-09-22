@@ -1,6 +1,6 @@
 # C2/C3 implementation verification
 
-Status as of 2026-09-21: implementation, review and production installation complete. Live Mac banner, Google connection and first sync passed. Physical phone delivery/two-way edits, restart/reconnect/token-longevity checks, assistant routing and live web propagation remain open. OAuth repair is installed from af39e29 but remains local and unmerged. Earlier dated sections are historical checkpoints; the final Google live connection section supersedes their disconnected state.
+Status as of 2026-09-21: implementation, review and production installation complete. Live Mac banner, Google connection and first sync passed. Physical phone delivery/two-way edits, restart/reconnect/token-longevity checks, assistant routing and live web propagation remain open. OAuth repair is installed from af39e29 and was merged/pushed in b3211dd on 2026-09-21. Earlier dated sections are historical checkpoints; the final Google live connection section supersedes their disconnected state.
 
 ## Isolation
 
@@ -45,7 +45,7 @@ Production Mac test, 2026-09-21: Marco authorized one reminder test. Installed `
 - [x] Native OS banner presentation confirmed by Marco in the installed production app on 2026-09-21.
 - [x] Configure Google Desktop OAuth client, consent mode and real account connection; dedicated calendar and first live sync verified.
 - [ ] Verify restart/reconnect persistence and testing-mode token longevity.
-- [ ] Integrate/push installed OAuth repair when authorized.
+- [x] Integrate/push installed OAuth repair: merged in b3211dd and verified on GitHub on 2026-09-21.
 - [ ] Physical phone alarm and two-way event-edit acceptance.
 - [x] Install CLI on PATH and verify its connection to the production app using backup RPC.
 - [ ] Agent workflow routing activation and live web propagation acceptance.
@@ -113,3 +113,7 @@ Historical credential handoff (subsequently completed): Google Cloud client deta
 ## Google live connection verified — 2026-09-21
 
 Marco completed the credential/consent handoff. Native Settings reports Connected to Nimble and the credential saved in Keychain. Invoked Google Sync now; status remained connected with no error. Read-only SQLite confirms calendar configured, timezone America/Los_Angeles, sync cursor initialized, last_synced_at 2026-09-22T05:31:58.782931+00:00, null error_code and retry_after. Calendar links are empty, so this verifies account/calendar connection and initial sync, not phone notifications or two-way task edits. No secret/token values were read or logged.
+
+## Source integration and push — 2026-09-21
+
+Marco requested commit and push of all session work. Saved context in `600d3b3` and `c56f57a`, including outer workspace AGENTS.md/CLAUDE.md snapshots under docs/context. Merged the repair into main in `b3211dd`; the merge tree exactly equals the freshly tested repair tree. Full Rust suite: 330 passed; frontend suite: eight passed; desktop/web builds passed. Logs: `/private/tmp/nimble-wrap-rust-tests.log`, `/private/tmp/nimble-wrap-frontend-tests.log`, `/private/tmp/nimble-wrap-desktop-build.log`, `/private/tmp/nimble-wrap-web-build.log`. GitHub acknowledged main at b3211dd and repair branch at c56f57a, independently checked with ls-remote. This operation does not establish phone/two-way or agent workflow acceptance. Installed app was not rebuilt or replaced; no manual web deployment was performed.

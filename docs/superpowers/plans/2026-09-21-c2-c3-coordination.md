@@ -1,6 +1,6 @@
 # Reminders and Agent Access Implementation Plan
 
-Execution status (2026-09-21): C2/C3 implementation is merged and installed. This approved plan is retained as an implementation checklist, not the current open-loops list; unchecked original steps do not by themselves mean work is unimplemented. See [NEXT.md](../../../NEXT.md) and [verification](../../c2-c3-verification.md) for completed evidence and remaining acceptance. Mac banner and Google connection/first sync passed; phone/two-way acceptance and assistant routing/web propagation remain open. The installed OAuth repair is still on its local unmerged branch.
+Execution status (2026-09-21): C2/C3 implementation is merged and installed. This approved plan is retained as an implementation checklist, not the current open-loops list; unchecked original steps do not by themselves mean work is unimplemented. See [NEXT.md](../../../NEXT.md) and [verification](../../c2-c3-verification.md) for completed evidence and remaining acceptance. Mac banner and Google connection/first sync passed; phone/two-way acceptance and assistant routing/web propagation remain open. The installed OAuth repair was merged into main and pushed in b3211dd on 2026-09-21.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

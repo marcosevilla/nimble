@@ -11,7 +11,7 @@
 - Preserve existing tasks, Google project/client, refresh-token Keychain service, calendar ownership checks, and opt-in publishing.
 - No client secrets in SQLite, Turso, portable backups, logs, status responses, or source files.
 - Development/synthetic/demo modes cannot write production credentials or access Google.
-- No migration or new dependency required. No push/deployment authorized in this repair request.
+- No migration or new dependency required. The original repair request excluded publishing; Marco subsequently authorized commit/push on 2026-09-21. No manual web deployment was requested.
 
 ## Task 1: Token exchange and callback (worker owns google_oauth.rs)
 - [x] Add local HTTP regressions for exchange/refresh fields and sanitized error responses; run failing tests.
@@ -38,4 +38,4 @@ Files: google_credentials.rs, commands/google_calendar.rs, google_calendar_runne
 - [x] Quit installed app, save private rollback app/data, install verified app, reopen, check task data/schema unchanged and setup fields visible.
 - [x] Marco completed secret entry and consent; native Connected to Nimble status, Keychain-configured indicator, dedicated calendar and first live sync verified on 2026-09-21. No secret/token values were read or logged.
 
-Remaining product acceptance: physical phone notification, two-way event edits, restart/reconnect and testing-mode token longevity. Source integration/push remains pending authorization. See `NEXT.md` and `docs/c2-c3-verification.md`.
+Remaining product acceptance: physical phone notification, two-way event edits, restart/reconnect and testing-mode token longevity. Source integration/push completed with merge b3211dd on 2026-09-21. See `NEXT.md` and `docs/c2-c3-verification.md`.
