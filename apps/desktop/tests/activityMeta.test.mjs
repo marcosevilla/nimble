@@ -17,7 +17,8 @@ test('every action has a sentence-case label, an icon and one of the four colors
     assert.equal(typeof meta.label, 'string', key)
     assert.ok(meta.label.trim().length > 0, key)
     assert.equal(meta.label[0], meta.label[0].toUpperCase(), `${key}: label starts lowercase`)
-    assert.equal(typeof meta.icon, 'function', `${key}: icon should be a lucide component`)
+    // lucide icons are React.forwardRef exotic objects, not plain functions
+    assert.ok(meta.icon && (typeof meta.icon === 'function' || typeof meta.icon.render === 'function'), `: icon should be a lucide component`)
     assert.ok(ALLOWED.has(meta.color), `${key}: ${meta.color} is not a semantic color`)
     if (meta.shortLabel != null) assert.ok(meta.shortLabel.trim().length > 0, key)
   }
