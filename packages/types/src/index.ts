@@ -481,3 +481,28 @@ export interface TodoistSyncStatus {
   error_ops: number
   errors: [string, string, string][]
 }
+
+// Desktop backup status. Null counts mean unavailable, never zero.
+export interface BackupStatus {
+  running: boolean
+  disabled_reason: string | null
+  last_local_success_at: string | null
+  last_push_at: string | null
+  export_commit: string | null
+  backup_directory: string
+  retained_count: number | null
+  remote_configured: boolean
+  remote_name: string | null
+  turso_pending: number | null
+  todoist_pending: number | null
+  todoist_failed: number | null
+  error: { stage: string; code: string; at: string } | null
+}
+export interface BackupCapability {
+  supported: boolean
+  status(): Promise<BackupStatus>
+  runNow(): Promise<BackupStatus>
+  verifyLatest(): Promise<{ verified: boolean }>
+  openFolder(): Promise<void>
+  configureRemote(ownerRepo: string): Promise<BackupStatus>
+}

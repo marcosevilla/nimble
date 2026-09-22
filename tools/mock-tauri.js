@@ -832,7 +832,26 @@
     return TASKS.find(function (t) { return t.id === id }) || null
   }
 
+  var backupScenario = new URLSearchParams(window.location.search).get('backup') || 'local'
+  var backupMock = {
+    running: backupScenario === 'working', disabled_reason: null,
+    last_local_success_at: backupScenario === 'empty' ? null : '2026-09-21T09:00:00Z',
+    last_push_at: backupScenario === 'uploaded' ? '2026-09-21T09:01:00Z' : null,
+    export_commit: backupScenario === 'uploaded' ? '0123456789abcdef' : null,
+    backup_directory: '/synthetic/Nimble/backups', retained_count: backupScenario === 'empty' ? 0 : 5,
+    remote_configured: ['uploaded', 'pending', 'error'].indexOf(backupScenario) >= 0,
+    remote_name: 'example/private-backups',
+    turso_pending: backupScenario === 'unavailable' ? null : 0,
+    todoist_pending: backupScenario === 'unavailable' ? null : 0,
+    todoist_failed: backupScenario === 'unavailable' ? null : 0,
+    error: backupScenario === 'error' ? { stage: 'publish', code: 'offline', at: '2026-09-21T09:00:00Z' } : null,
+  }
   var commands = {
+    backup_get_status: function () { return Object.assign({}, backupMock) },
+    backup_run_now: function () { backupMock.last_local_success_at = new Date().toISOString(); return Object.assign({}, backupMock) },
+    backup_verify_latest: function () { return { verified: true } },
+    backup_open_folder: function () { return null },
+    backup_configure_remote: function (args) { backupMock.remote_configured = true; backupMock.remote_name = args.ownerRepo; return Object.assign({}, backupMock) },
     // Settings
     check_setup_complete: function () { return true },
     get_setting: function (args) {

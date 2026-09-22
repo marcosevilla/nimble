@@ -72,6 +72,14 @@ function ni(method: string): () => Promise<never> {
 
 export function createTursoProvider(): DataProvider {
   return {
+    backup: {
+      supported: false,
+      status: ni('backup.status'),
+      runNow: ni('backup.runNow'),
+      verifyLatest: ni('backup.verifyLatest'),
+      openFolder: ni('backup.openFolder'),
+      configureRemote: ni('backup.configureRemote'),
+    },
     settings: {
       // See note 2 in the file header — deliberately resolves.
       checkSetupComplete: () => Promise.resolve(true),

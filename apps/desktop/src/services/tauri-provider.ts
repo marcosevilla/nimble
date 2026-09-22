@@ -10,6 +10,14 @@ import * as tauri from './tauri'
 
 export function createTauriProvider(): DataProvider {
   return {
+    backup: {
+      supported: true,
+      status: tauri.backupGetStatus,
+      runNow: tauri.backupRunNow,
+      verifyLatest: tauri.backupVerifyLatest,
+      openFolder: tauri.backupOpenFolder,
+      configureRemote: tauri.backupConfigureRemote,
+    },
     settings: {
       checkSetupComplete: tauri.checkSetupComplete,
       get: tauri.getSetting,

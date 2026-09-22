@@ -66,6 +66,7 @@ import type {
 } from './index'
 
 export interface DataProvider {
+  backup: import('./index').BackupCapability
   settings: {
     checkSetupComplete(): Promise<boolean>
     get(key: string): Promise<string | null>

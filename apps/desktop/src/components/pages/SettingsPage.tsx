@@ -41,6 +41,7 @@ import type { ProductFont } from '@/lib/fonts'
 import { IconButton } from '@/components/shared/IconButton'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Label as SectionLabel, Meta, SectionTitle } from '@/components/shared/typography'
+import { BackupSection } from '@/components/settings/BackupSection'
 import { TodoistSyncSection } from '@/components/settings/TodoistSyncSection'
 import { TodoistMigrationSection } from '@/components/settings/TodoistMigrationSection'
 import { DocsMigrationSection } from '@/components/settings/DocsMigrationSection'
@@ -1614,6 +1615,7 @@ export function SettingsPage() {
 
       {/* Sync */}
       <SyncSection />
+      <BackupSection />
 
       <Separator />
 

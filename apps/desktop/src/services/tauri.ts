@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import type { BackupStatus } from '@nimble/types'
 
 // Re-export all types from the shared package so existing imports continue to work
 export type {
@@ -901,3 +902,11 @@ export async function getDemoStatus(): Promise<boolean> {
 export async function toggleDemoMode(on: boolean): Promise<void> {
   return invoke<void>('demo_toggle', { on })
 }
+
+// Backups: desktop-only, fixed backend paths.
+export const backupGetStatus = () => invoke<BackupStatus>('backup_get_status')
+export const backupRunNow = () => invoke<BackupStatus>('backup_run_now')
+export const backupVerifyLatest = () => invoke<{ verified: boolean }>('backup_verify_latest')
+export const backupOpenFolder = () => invoke<void>('backup_open_folder')
+export const backupConfigureRemote = (ownerRepo: string) =>
+  invoke<BackupStatus>('backup_configure_remote', { ownerRepo })

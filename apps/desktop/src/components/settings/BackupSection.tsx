@@ -1,0 +1,114 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { BackupStatus } from '@nimble/types'
+import { useDataProvider } from '@/services/provider-context'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Meta, SectionTitle } from '@/components/shared/typography'
+
+function when(value: string | null) {
+  if (!value) return 'Not saved yet'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 'Unavailable' : date.toLocaleString()
+}
+
+export function BackupSection() {
+  const dp = useDataProvider()
+  return dp.backup.supported ? <DesktopBackupSection /> : null
+}
+
+function DesktopBackupSection() {
+  const dp = useDataProvider()
+  const [status, setStatus] = useState<BackupStatus | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [verified, setVerified] = useState(false)
+  const [repo, setRepo] = useState('')
+  const mounted = useRef(false)
+  const request = useRef(0)
+  const invalidate = useCallback(() => { ++request.current }, [])
+  const refresh = useCallback(async () => {
+    const id = ++request.current
+    try {
+      const next = await dp.backup.status()
+      if (mounted.current && id === request.current) {
+        setStatus(next)
+        setLoadError(null)
+      }
+    } catch {
+      if (mounted.current && id === request.current) setLoadError('Backup status is unavailable. Try again.')
+    }
+  }, [dp])
+  useEffect(() => {
+    mounted.current = true
+    void refresh()
+    const timer = setInterval(() => { void refresh() }, 15_000)
+    return () => { mounted.current = false; invalidate(); clearInterval(timer) }
+  }, [refresh, invalidate])
+
+  const act = async (operation: () => Promise<unknown>, verification = false) => {
+    setBusy(true)
+    setVerified(false)
+    setError(null)
+    ++request.current
+    try {
+      await operation()
+      if (mounted.current) {
+        setVerified(verification)
+        await refresh()
+      }
+    } catch {
+      if (mounted.current) setError('This action could not finish. Check backup status and try again.')
+    } finally {
+      if (mounted.current) setBusy(false)
+    }
+  }
+  const disabled = busy || !!status?.running || !!status?.disabled_reason
+  return (
+    <section id="backups" className="space-y-4 border-t border-border pt-6" aria-label="Backups">
+      <div className="space-y-1">
+        <SectionTitle>Backups</SectionTitle>
+        <Meta as="p">Automatic daily copies on this Mac, with a separate private online archive.</Meta>
+      </div>
+      {(error || loadError) && <p className="text-body text-destructive" role="alert">{error || loadError}</p>}
+      {!status && !loadError && <Skeleton className="h-24 w-full" />}
+      {!status && loadError && <Button variant="outline" size="sm" onClick={() => void refresh()}>Try again</Button>}
+      {status && <>
+        {status.disabled_reason && <Meta as="p">{status.disabled_reason}</Meta>}
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-body">
+          <dt className="text-muted-foreground">On this Mac</dt><dd>{when(status.last_local_success_at)}</dd>
+          <dt className="text-muted-foreground">Private online copy</dt><dd>{status.remote_configured ? when(status.last_push_at) : 'Not connected'}</dd>
+          <dt className="text-muted-foreground">Saved copies</dt><dd>{status.retained_count ?? 'Unavailable'}</dd>
+          <dt className="text-muted-foreground">Device sync waiting</dt><dd>{status.turso_pending ?? 'Unavailable'}</dd>
+          <dt className="text-muted-foreground">Todoist waiting / failed</dt><dd>{status.todoist_pending ?? 'Unavailable'} / {status.todoist_failed ?? 'Unavailable'}</dd>
+        </dl>
+        <Meta as="p" className="break-all">{status.backup_directory}</Meta>
+        {status.export_commit && <Meta as="p">Archive version {status.export_commit.slice(0, 8)}</Meta>}
+        {status.error && <p className="text-body text-destructive" role="alert">
+          {status.error.stage === 'publish' ? 'The online copy could not be saved. Your local backup is separate.' : 'The last backup step could not finish.'}
+          {' '}Try again; previous verified copies are kept.
+        </p>}
+        {(busy || status.running) && <Meta as="p" role="status">Working on your backup…</Meta>}
+        {verified && <Meta as="p" role="status">Latest backup restored and verified in a separate test copy.</Meta>}
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(() => dp.backup.runNow())}>Back up now</Button>
+          <Button size="sm" variant="outline" disabled={disabled} onClick={() => void act(() => dp.backup.openFolder())}>Open backup folder</Button>
+          <Button size="sm" variant="outline" disabled={disabled || !status.last_local_success_at} onClick={() => void act(async () => {
+            const result = await dp.backup.verifyLatest()
+            if (!result.verified) throw new Error('verification_failed')
+          }, true)}>Verify latest backup</Button>
+        </div>
+        {status.remote_configured ? <Meta as="p">Private repository: {status.remote_name}</Meta> :
+          <form className="space-y-2" onSubmit={event => { event.preventDefault(); void act(() => dp.backup.configureRemote(repo.trim())) }}>
+            <label htmlFor="backup-repo" className="text-body">Existing private GitHub repository</label>
+            <div className="flex gap-2">
+              <Input id="backup-repo" value={repo} onChange={event => setRepo(event.target.value)} placeholder="owner/repository" disabled={disabled} autoComplete="off" />
+              <Button type="submit" variant="outline" size="sm" disabled={disabled || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo.trim())}>Connect private repository</Button>
+            </div>
+            <Meta as="p">Local backups work without this. GitHub sign-in through the GitHub CLI is required for the online copy.</Meta>
+          </form>}
+      </>}
+    </section>
+  )
+}
