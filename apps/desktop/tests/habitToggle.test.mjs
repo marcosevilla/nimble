@@ -65,3 +65,34 @@ test('rollback restores only the failed habit, keeping a concurrent flip of anot
   await assert.rejects(first, /db down/)
   assert.deepEqual(state.map((h) => h.today_completed), [false, false], 'a rolled back, b stays flipped')
 })
+
+// ── Reload ordering (review minor 1) ──
+import { createHabitLoadGate } from '../src/lib/habitToggle.ts'
+
+test('a reload that started before a newer toggle is dropped', () => {
+  const gate = createHabitLoadGate()
+  const load = gate.beginLoad()
+  const done = gate.beginToggle()
+  done()
+  assert.equal(gate.canApply(load), false)
+})
+
+test('no reload applies while any toggle is still in flight', () => {
+  const gate = createHabitLoadGate()
+  const doneA = gate.beginToggle()
+  const doneB = gate.beginToggle()
+  doneB()
+  const reloadAfterB = gate.beginLoad()
+  assert.equal(gate.canApply(reloadAfterB), false, 'A still pending — B\'s reload would erase A\'s optimistic flip')
+  doneA()
+  const reloadAfterA = gate.beginLoad()
+  assert.equal(gate.canApply(reloadAfterA), true)
+})
+
+test('only the latest reload applies', () => {
+  const gate = createHabitLoadGate()
+  const first = gate.beginLoad()
+  const second = gate.beginLoad()
+  assert.equal(gate.canApply(first), false)
+  assert.equal(gate.canApply(second), true)
+})

@@ -348,7 +348,7 @@ function HabitHeatmap({ data }: { data: HabitHeatmapEntry[] }) {
               key={i}
               title={cellLabel(cell)}
               data-focused={gridFocused && i === cursor ? 'true' : undefined}
-              className={cn('absolute rounded-[2px]', gridFocused && i === cursor && 'outline-2 outline-ring outline-offset-1')}
+              className={cn('absolute rounded-xs', gridFocused && i === cursor && 'outline-2 outline-ring outline-offset-1')}
               style={{
                 width: CELL_SIZE,
                 height: CELL_SIZE,

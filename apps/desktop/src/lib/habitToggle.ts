@@ -38,3 +38,34 @@ export async function toggleHabitOptimistically<H extends ToggleableHabit>(opts:
     throw e
   }
 }
+
+/* Orders habit reloads against optimistic toggles (goals review minor 1).
+   A reload result is applied only if it is the latest reload, no toggle
+   started after it began, and no toggle is still in flight — otherwise it
+   could carry pre-toggle server state over a newer optimistic flip. The
+   last toggle to settle triggers the reload that does apply. */
+export interface HabitLoadTicket {
+  load: number
+  mutation: number
+}
+
+export function createHabitLoadGate() {
+  let loadSeq = 0
+  let mutationSeq = 0
+  let inFlight = 0
+  return {
+    beginToggle(): () => void {
+      mutationSeq++
+      inFlight++
+      let settled = false
+      return () => { if (!settled) { settled = true; inFlight-- } }
+    },
+    beginLoad(): HabitLoadTicket {
+      return { load: ++loadSeq, mutation: mutationSeq }
+    },
+    canApply(t: HabitLoadTicket): boolean {
+      return t.load === loadSeq && t.mutation === mutationSeq && inFlight === 0
+    },
+    get pending(): number { return inFlight },
+  }
+}

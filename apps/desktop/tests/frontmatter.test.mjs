@@ -35,3 +35,15 @@ test('multi-line yaml lists collapse into one comma-joined chip', () => {
     { key: 'status', value: 'open' },
   ])
 })
+
+test('an empty block is stripped, not rendered as two rules', () => {
+  const { fields, body } = splitFrontmatter('---\n---\n# Title\n')
+  assert.deepEqual(fields, [])
+  assert.equal(body, '# Title\n')
+})
+
+test('a leading BOM does not defeat the fence', () => {
+  const { fields, body } = splitFrontmatter('﻿---\ntype: capture\n---\nbody')
+  assert.deepEqual(fields, [{ key: 'type', value: 'capture' }])
+  assert.equal(body, 'body')
+})

@@ -2,6 +2,7 @@ import { useEffect, useCallback } from 'react'
 import { useFocusStore } from '@/stores/focusStore'
 import { playCompletionSound } from '@/lib/sound'
 import { shouldIgnoreKey } from '@/lib/keyGuard'
+import { toast } from 'sonner'
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
@@ -36,19 +37,27 @@ export function FocusCelebration() {
   const nextTask = useFocusStore((s) => s.nextTask)
   const dismissCelebration = useFocusStore((s) => s.dismissCelebration)
   const endCelebration = useFocusStore((s) => s.endCelebration)
-  const parkCelebration = useFocusStore((s) => s.parkCelebration)
 
   // Play sound on mount
   useEffect(() => {
     playCompletionSound()
   }, [])
 
-  // Auto-dismiss after 2.5 seconds: the next task lands in the banner,
-  // paused — surfaced, never started unattended (session P1-2, §2.4).
+  // Auto-dismiss after 2.5 seconds writes nothing: the session ends and the
+  // next task is only surfaced in a toast whose Start action is the first
+  // thing that touches the backend (session P1-2, §2.4; review I-1).
   useEffect(() => {
-    const timeout = setTimeout(parkCelebration, 2500)
+    const timeout = setTimeout(() => {
+      const { nextTask: next, config, queue } = useFocusStore.getState()
+      endCelebration()
+      if (next) {
+        toast(`Up next: ${next.content}`, {
+          action: { label: 'Start', onClick: () => useFocusStore.getState().startFocus(next, config, queue) },
+        })
+      }
+    }, 2500)
     return () => clearTimeout(timeout)
-  }, [parkCelebration])
+  }, [endCelebration])
 
   // Escape and a stray click end the session; only Enter commits to the
   // next task. The overlay owns these keys while it is up (capture phase,
@@ -79,7 +88,7 @@ export function FocusCelebration() {
       role="status"
       aria-live="polite"
       aria-label="Session complete"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-in fade-in duration-(--transition-fast)"
       onClick={handleEnd}
     >
       <div className="relative text-center space-y-4">
@@ -117,29 +126,29 @@ export function FocusCelebration() {
         </div>
 
         {/* Task name */}
-        <p className="text-title line-through text-muted-foreground animate-in fade-in duration-500">
+        <p className="text-title line-through text-muted-foreground animate-in fade-in duration-(--transition-base)">
           {task?.content}
         </p>
 
         {/* Duration */}
         {completedDuration != null && (
-          <p className="text-body text-muted-foreground animate-in fade-in slide-in-from-bottom-2 duration-500">
+          <p className="text-body text-muted-foreground animate-in fade-in slide-in-from-bottom-2 duration-(--transition-base)">
             Focused for {formatDuration(completedDuration)}
           </p>
         )}
 
         {/* Next task preview — shown, not started */}
         {nextTask ? (
-          <p className="text-meta text-muted-foreground animate-in fade-in duration-700">
+          <p className="text-meta text-muted-foreground animate-in fade-in duration-(--transition-slow)">
             Next: <span className="text-foreground">{nextTask.content}</span>
             {' — '}
-            <kbd className="rounded bg-muted/60 px-1 font-mono text-label">Enter</kbd> to start,{' '}
-            <kbd className="rounded bg-muted/60 px-1 font-mono text-label">Esc</kbd> to stop here
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Enter</kbd> to start,{' '}
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Esc</kbd> to stop here
           </p>
         ) : (
-          <p className="text-meta text-muted-foreground animate-in fade-in duration-700">
-            <kbd className="rounded bg-muted/60 px-1 font-mono text-label">Enter</kbd> or{' '}
-            <kbd className="rounded bg-muted/60 px-1 font-mono text-label">Esc</kbd> to close
+          <p className="text-meta text-muted-foreground animate-in fade-in duration-(--transition-slow)">
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Enter</kbd> or{' '}
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Esc</kbd> to close
           </p>
         )}
       </div>

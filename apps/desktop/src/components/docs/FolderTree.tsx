@@ -223,7 +223,10 @@ export function FolderTree() {
     vaultExpanded,
     expandedVaultFolders,
   })
-  const tabStop = pickRovingKey(visibleKeys, focusKey, selectionKey)
+  // A row swapped for its inline delete confirm isn't rendered as a row.
+  const confirmKey = confirmDelete ? `${confirmDelete.kind}:${confirmDelete.id}` : null
+  const rowKeys = confirmKey ? visibleKeys.filter((k) => k !== confirmKey) : visibleKeys
+  const tabStop = pickRovingKey(rowKeys, focusKey, selectionKey)
   const tabIndexFor = (key: string) => (key === tabStop ? 0 : -1)
 
   // Escape / "Keep it" returns focus to the row the confirm replaced.

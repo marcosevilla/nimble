@@ -1,6 +1,10 @@
 import { create } from 'zustand'
 import { getDataProvider } from '@/services/provider-context'
-import { toggleHabitOptimistically } from '@/lib/habitToggle'
+import { toggleHabitOptimistically, createHabitLoadGate } from '@/lib/habitToggle'
+
+// Orders reloads against optimistic toggles so a stale list never lands
+// over a newer flip (goals review minor 1).
+const habitGate = createHabitLoadGate()
 import type { GoalWithProgress, LifeArea, HabitWithStats } from '@nimble/types'
 
 interface GoalsStore {
@@ -48,27 +52,34 @@ export const useGoalsStore = create<GoalsStore>((set, get) => ({
     // Skeleton only on the very first load — a reload behind a check-off
     // must not unmount the circles (goals P1-3, §1.6).
     if (get().habits.length === 0) set({ habitsLoading: true })
+    const ticket = habitGate.beginLoad()
     try {
       const dp = getDataProvider()
       const habits = await dp.habits.list()
-      set({ habits, habitsLoading: false })
+      if (habitGate.canApply(ticket)) set({ habits, habitsLoading: false })
     } catch {
-      set({ habitsLoading: false })
+      if (habitGate.canApply(ticket)) set({ habitsLoading: false })
     }
   },
 
   toggleHabit: async (id) => {
     const dp = getDataProvider()
-    await toggleHabitOptimistically({
-      habits: get().habits,
-      id,
-      write: (habits) => set({ habits }),
-      read: () => get().habits,
-      log: (habitId) => dp.habits.log(habitId),
-      unlog: (habitId) => dp.habits.unlog(habitId),
-    })
-    // Momentum and today_intensity come from the backend; pull them quietly.
-    await get().loadHabits()
+    const settle = habitGate.beginToggle()
+    try {
+      await toggleHabitOptimistically({
+        habits: get().habits,
+        id,
+        write: (habits) => set({ habits }),
+        read: () => get().habits,
+        log: (habitId) => dp.habits.log(habitId),
+        unlog: (habitId) => dp.habits.unlog(habitId),
+      })
+    } finally {
+      settle()
+      // Momentum and today_intensity come from the backend; the last toggle
+      // to settle pulls them quietly (earlier reloads would be dropped anyway).
+      if (habitGate.pending === 0) void get().loadHabits()
+    }
   },
 
   refresh: async () => {

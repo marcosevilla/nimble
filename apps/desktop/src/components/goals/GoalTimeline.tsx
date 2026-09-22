@@ -63,7 +63,7 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // Space on a goal row is that button's click; keep it from the
     // Dashboard's window-level Space (pause a focus session).
-    if (e.key === ' ') { e.stopPropagation(); return }
+    if (e.key === ' ' && e.target !== e.currentTarget) { e.stopPropagation(); return }
     if (e.key === 'ArrowLeft' && scrollRef.current) {
       e.preventDefault()
       scrollRef.current.scrollLeft -= 100
@@ -217,7 +217,7 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
                   <div className="absolute inset-0 rounded-xl bg-foreground/8 group-hover/bar:bg-foreground/12 transition-colors" />
                   {/* Progress fill */}
                   <div
-                    className="absolute inset-y-0 left-0 rounded-xl bg-foreground/20 transition-all duration-300"
+                    className="absolute inset-y-0 left-0 rounded-xl bg-foreground/20 transition-[width] duration-(--transition-base) ease-(--ease-entrance)"
                     style={{ width: progressWidth }}
                   />
                   {/* Bar label (show if wide enough) */}

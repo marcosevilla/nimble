@@ -69,7 +69,7 @@ function GoalCard({
         if (!e.repeat) onClick()
       }}
       className={cn(
-        'cursor-pointer transition-all duration-150 hover:ring-foreground/20 hover:shadow-sm',
+        'cursor-pointer transition-[box-shadow,opacity] duration-(--transition-fast) hover:ring-foreground/20 hover:shadow-sm',
         goal.status === 'achieved' && 'opacity-75',
       )}
       onClick={onClick}
@@ -111,10 +111,7 @@ function GoalCard({
             <div
               /* Neutral fill (goals P2-1): the area color is on the chip dot above;
                  the bar encodes progress, not category. */
-              className={cn(
-                'h-full rounded-full bg-foreground/70 transition-all duration-500',
-                goal.progress >= 100 && 'animate-pulse',
-              )}
+              className="h-full rounded-full bg-foreground/70 transition-[width] duration-(--transition-base) ease-(--ease-entrance)"
               style={{ width: `${Math.min(goal.progress, 100)}%` }}
             />
           </div>

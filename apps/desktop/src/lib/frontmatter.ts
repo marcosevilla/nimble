@@ -18,14 +18,14 @@ export interface SplitNote {
   body: string
 }
 
-const FENCE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/
+const FENCE = /^\uFEFF?---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/
 
 export function splitFrontmatter(content: string): SplitNote {
   const match = FENCE.exec(content)
   if (!match) return { fields: [], body: content }
 
   const fields: FrontmatterField[] = []
-  for (const rawLine of match[1].split(/\r?\n/)) {
+  for (const rawLine of (match[1] ?? '').split(/\r?\n/)) {
     const line = rawLine.replace(/\s+$/, '')
     if (!line.trim()) continue
 

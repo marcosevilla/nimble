@@ -95,7 +95,9 @@ export function FocusView() {
   // (pause) stays in the Dashboard handler.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
+      // defaultPrevented: the Dashboard's g-chord (same window, capture) already
+      // claimed this key — `g s` navigates to Session, it must not stop the session.
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
       if (shouldIgnoreKey(e.target as HTMLElement)) return
       const store = useFocusStore.getState()
       if (!store.isActive || store.isCompact || store.showCelebration) return
@@ -104,15 +106,18 @@ export function FocusView() {
         if (store.isOnBreak) store.endBreak()
         else handleComplete()
       } else if (e.key === 'Escape') {
+        // Capture phase + stopPropagation: minimizing must not also close a
+        // detail view or clear a selection under the expanded session.
         e.preventDefault()
+        e.stopPropagation()
         store.setCompact(true)
       } else if (e.key === 's') {
         e.preventDefault()
         store.abandonFocus()
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [handleComplete])
 
   if (!task) return null
@@ -235,7 +240,7 @@ export function FocusView() {
           <Button variant="ghost" size="sm" onClick={abandonFocus} className="gap-1.5 text-muted-foreground">
             <X className="size-3" />
             Stop
-            <Kbd>S</Kbd>
+            <Kbd>s</Kbd>
           </Button>
         </div>
       </div>
