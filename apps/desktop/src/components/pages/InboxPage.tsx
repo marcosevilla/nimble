@@ -15,13 +15,13 @@ import { useDataProvider } from '@/services/provider-context'
 import type { CaptureRoute } from '@nimble/types'
 import { parseRoutePrefix } from '@/lib/captureRoutes'
 import { cn } from '@/lib/utils'
-import { StatusDropdown } from '@/components/tasks/StatusDropdown'
-import { SubtaskBadge, SubtaskSummary } from '@/components/tasks/TaskItem'
+import { LocalTaskRow } from '@/components/tasks/LocalTaskRow'
+import { useRowNavigation } from '@/hooks/useTaskNavigation'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { taskToast } from '@/lib/taskToast'
-import { PenLine, ArrowRight, FileText, Download, Search, Lightbulb, Quote, CheckSquare } from 'lucide-react'
+import { PenLine, ArrowRight, FileText, Download, Search, Lightbulb, Quote, CheckSquare, X } from 'lucide-react'
 import { PageHeader } from '@/components/shared/PageHeader'
 import type { LocalTask, Capture, DocFolder, Document } from '@nimble/types'
 
@@ -51,20 +51,36 @@ type InboxItem =
     }
   | { kind: 'note'; data: Capture; sortDate: string }
 
+// Row ids for keyboard navigation — unique across the two kinds.
+const rowId = (item: InboxItem) => `${item.kind}:${item.data.id}`
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  if (!el) return false
+  return (
+    el.tagName === 'INPUT' ||
+    el.tagName === 'TEXTAREA' ||
+    el.isContentEditable ||
+    !!el.closest?.('[role="dialog"]')
+  )
+}
+
+const noop = () => {}
+
 // ── Main page ──
 
 export function InboxPage() {
   const dp = useDataProvider()
+  const currentPage = useAppStore((s) => s.currentPage)
   const captureRequested = useAppStore((s) => s.captureRequested)
   const setCaptureRequested = useAppStore((s) => s.setCaptureRequested)
 
   const { tasks, loading: tasksLoading } = useLocalTasks({ projectId: 'inbox' })
-  const [moveToDocCapture, setMoveToDocCapture] = useState<Capture | null>(null)
+  const [pickerFor, setPickerFor] = useState<string | null>(null)
 
   const [captures, setCaptures] = useState<Capture[]>([])
   const [capturesLoading, setCapturesLoading] = useState(true)
   const [inputValue, setInputValue] = useState('')
-  const [submitting, setSubmitting] = useState(false)
   const [importing, setImporting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const [routes, setRoutes] = useState<CaptureRoute[]>([])
@@ -108,7 +124,7 @@ export function InboxPage() {
     return () => { unlisten.then((fn) => fn()) }
   }, [refreshCaptures])
 
-  // Auto-focus
+  // Auto-focus from the tray / command bar handoff
   useEffect(() => {
     if (captureRequested) {
       requestAnimationFrame(() => inputRef.current?.focus())
@@ -116,6 +132,20 @@ export function InboxPage() {
       return () => clearTimeout(timer)
     }
   }, [captureRequested, setCaptureRequested])
+
+  // `c` focuses the capture field from anywhere on the page (inbox audit
+  // P1-3); Escape inside the field blurs back to the list (see the input).
+  useEffect(() => {
+    if (currentPage !== 'inbox') return
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'c' || e.metaKey || e.ctrlKey || e.altKey) return
+      if (isEditableTarget(e.target)) return
+      e.preventDefault()
+      inputRef.current?.focus()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [currentPage])
 
   // Merge + sort chronologically. Parent tasks appear sorted by creation
   // date; their subtasks follow them as adjacent rows regardless of their
@@ -144,8 +174,10 @@ export function InboxPage() {
         }
       })
 
+    // A routed capture is already processed (it lives in its doc / became
+    // a task) — it is history, not triage work (inbox audit P2-2).
     const noteItems: InboxItem[] = captures
-      .filter((c) => !c.converted_to_task_id)
+      .filter((c) => !c.converted_to_task_id && c.source !== 'route')
       .map((c) => ({ kind: 'note', data: c, sortDate: c.created_at }))
 
     // Merge parents + notes, sort chronologically
@@ -167,47 +199,100 @@ export function InboxPage() {
     return result
   }, [tasks, captures])
 
-  // Handlers
+  const captureById = useCallback(
+    (id: string) => captures.find((c) => c.id === id),
+    [captures],
+  )
+
+  // ── Handlers (all optimistic — inbox audit P1-4, P2-3) ──
+
   const handleSubmit = useCallback(async () => {
     const text = inputValue.trim()
-    if (!text || submitting) return
-    setSubmitting(true)
-    try {
-      const { route, content } = parseRoutePrefix(text, routes)
-      if (route && content) {
-        // Route to target (doc or task)
+    if (!text) return
+    const { route, content } = parseRoutePrefix(text, routes)
+    setInputValue('')
+
+    if (route && content) {
+      // Routed captures never show in the triage list, so there is no row
+      // to add optimistically — just keep the field free for the next one.
+      try {
         const result = await dp.captureRoutes.route(route.prefix, content)
-        if (result.target_type === 'task') {
-          emitTasksChanged()
-        }
-        setInputValue('')
+        if (result.target_type === 'task') emitTasksChanged()
         toast.success(`Saved to ${result.label}`)
         refreshCaptures()
-      } else {
-        // Default: create a plain capture
-        const capture = await dp.captures.create(text, 'inbox')
-        setCaptures((prev) => [capture, ...prev])
-        setInputValue('')
-        toast.success('Note saved')
+      } catch (e) {
+        setInputValue(text)
+        toast.error(`Failed: ${e}`)
       }
-    } catch (e) {
-      toast.error(`Failed: ${e}`)
-    } finally {
-      setSubmitting(false)
-      inputRef.current?.focus()
+      return
     }
-  }, [inputValue, submitting, routes, refreshCaptures, dp])
+
+    // Plain capture: the row appears now, reconciles when the save lands.
+    const tempId = `temp-${Date.now()}`
+    const temp: Capture = {
+      id: tempId,
+      content: text,
+      source: 'inbox',
+      converted_to_task_id: null,
+      routed_to: null,
+      context: null,
+      created_at: new Date().toISOString(),
+    }
+    setCaptures((prev) => [temp, ...prev])
+    try {
+      const created = await dp.captures.create(text, 'inbox')
+      setCaptures((prev) => prev.map((c) => (c.id === tempId ? created : c)))
+    } catch (e) {
+      setCaptures((prev) => prev.filter((c) => c.id !== tempId))
+      setInputValue(text)
+      toast.error(`Failed: ${e}`)
+    }
+  }, [inputValue, routes, refreshCaptures, dp])
 
   const handleConvert = useCallback(async (capture: Capture) => {
+    if (capture.id.startsWith('temp-')) return
+    setCaptures((prev) => prev.filter((c) => c.id !== capture.id))
     try {
       const task = await dp.captures.convertToTask(capture.id)
       taskToast(`Converted to task: "${capture.content}"`, task.id)
       emitTasksChanged()
-      refreshCaptures()
     } catch (e) {
+      setCaptures((prev) => [capture, ...prev])
       toast.error(`Failed to convert: ${e}`)
     }
-  }, [refreshCaptures, dp])
+  }, [dp])
+
+  // Row-level dismiss with Undo. Undo re-creates the capture, so it comes
+  // back with a new id (a true soft-delete needs Rust — queued for Marco).
+  const handleDismiss = useCallback(async (capture: Capture) => {
+    if (capture.id.startsWith('temp-')) return
+    setCaptures((prev) => prev.filter((c) => c.id !== capture.id))
+    try {
+      await dp.captures.delete(capture.id)
+    } catch (e) {
+      setCaptures((prev) => [capture, ...prev])
+      toast.error(`Failed to dismiss: ${e}`)
+      return
+    }
+    toast('Note dismissed', {
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          try {
+            const restored = await dp.captures.create(capture.content, capture.source, capture.context ?? undefined)
+            setCaptures((prev) => [restored, ...prev])
+          } catch (e) {
+            toast.error(`Failed to restore: ${e}`)
+          }
+        },
+      },
+    })
+  }, [dp])
+
+  const handleMovedToDoc = useCallback((capture: Capture) => {
+    setCaptures((prev) => prev.filter((c) => c.id !== capture.id))
+    setPickerFor(null)
+  }, [])
 
   const handleImport = useCallback(async () => {
     setImporting(true)
@@ -226,6 +311,32 @@ export function InboxPage() {
     }
   }, [refreshCaptures, dp])
 
+  // ── Keyboard rows (inbox audit P1-2): j/k/Enter over every row, t/m/d on
+  // the focused note. Registered in lib/shortcuts.ts under Inbox. ──
+  const rowIds = useMemo(() => items.map(rowId), [items])
+
+  const openRow = useCallback((id: string) => {
+    const [kind, itemId] = id.split(':', 2)
+    if (kind === 'task') useDetailStore.getState().openTask(itemId)
+    else useDetailStore.getState().openCapture(itemId)
+  }, [])
+
+  const noteFromRow = useCallback(
+    (id: string) => (id.startsWith('note:') ? captureById(id.slice(5)) : undefined),
+    [captureById],
+  )
+
+  const rowKeys = useMemo(
+    () => ({
+      t: (id: string) => { const c = noteFromRow(id); if (c) void handleConvert(c) },
+      m: (id: string) => { const c = noteFromRow(id); if (c) setPickerFor(c.id) },
+      d: (id: string) => { const c = noteFromRow(id); if (c) void handleDismiss(c) },
+    }),
+    [noteFromRow, handleConvert, handleDismiss],
+  )
+
+  const { focusedId, focusRow } = useRowNavigation(rowIds, openRow, { pages: ['inbox'], keys: rowKeys })
+
   return (
     <>
       <PageHeader
@@ -243,17 +354,24 @@ export function InboxPage() {
           </button>
         }
       />
-      <div className="px-5 py-6 space-y-4 w-full">
-      {/* Note input — command bar style */}
-      <div className="flex h-10 items-center gap-2 rounded-xl border border-border/30 bg-muted/30 px-3">
+      {/* pl-6 leaves room for the row's hover cluster (checkbox), which
+          hangs outside the column to the left like the Tasks list. The
+          capture field's ml-4 lines its edge up with the rows' content. */}
+      <div className="px-5 py-6 pl-11 space-y-4 w-full min-w-0">
+      {/* Note input — command bar style. Never disabled: rapid capture is
+          the point (inbox audit P1-4); the ring is the focus state (P2-7). */}
+      <div className="ml-4 flex h-10 items-center gap-2 rounded-xl border border-border/30 bg-muted/30 px-3 transition-colors focus-within:border-ring">
         <Search className="size-3.5 shrink-0 text-muted-foreground" />
         <input
           ref={inputRef}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit() } }}
-          placeholder="Write a note... (/i idea, /q quote, /t task)"
-          disabled={submitting}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit() }
+            if (e.key === 'Escape') { e.preventDefault(); e.currentTarget.blur() }
+          }}
+          placeholder="Write a note… (/i idea, /q quote, /t task)"
+          aria-label="Capture a note"
           className="flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
         />
         {/* LabelChipPill recipe (inbox P2-8): the user's route color is a dot,
@@ -265,190 +383,193 @@ export function InboxPage() {
             {parsedRoute.route.label}
           </span>
         )}
-        {inputValue.trim() && (
+        {inputValue.trim() ? (
           <button
+            type="button"
             onClick={handleSubmit}
-            className="text-meta text-muted-foreground hover:text-foreground transition-colors"
+            className="relative rounded px-1 text-meta text-muted-foreground hover:text-foreground transition-colors after:absolute after:-inset-2 after:content-['']"
           >
-            {submitting ? '...' : 'Save'}
+            Save
           </button>
+        ) : (
+          <kbd className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-label text-muted-foreground">C</kbd>
         )}
       </div>
 
       {/* Loading */}
       {loading ? (
-        <div className="space-y-2">
+        <div className="space-y-2 ml-4">
           {[...Array(5)].map((_, i) => (
             <Skeleton key={i} className="h-9 rounded-md" />
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="space-y-3 py-4">
-          <p className="text-body text-muted-foreground text-center">
-            Inbox is empty — nothing to process.
-          </p>
-          <div className="flex justify-center">
-            <Button variant="ghost" size="sm" onClick={handleImport} disabled={importing} className="gap-1.5 text-meta">
-              <Download className="size-3" />
-              {importing ? 'Importing...' : 'Import from Obsidian'}
-            </Button>
-          </div>
-        </div>
+        // Inbox zero is the good state (§1.1, inbox audit P2-5): one calm
+        // line, no button — Import stays in the header.
+        <p className="text-body text-muted-foreground text-center py-8">
+          Inbox zero. New thoughts land here — ⌘K or the capture strip.
+        </p>
       ) : (
-        <div className="divide-y divide-border/20">
+        <div>
           {items.map((item) => {
-            return (
-              <div
-                key={item.kind === 'task' ? `task-${item.data.id}` : `note-${item.data.id}`}
-              >
-                {item.kind === 'task' ? (
-                  <InboxTaskRow
-                    task={item.data as LocalTask}
-                    isSubtask={item.isSubtask}
-                    subtaskStats={item.subtaskStats}
-                  />
-                ) : (
-                  <InboxNoteRow
-                    capture={item.data as Capture}
-                    onConvert={() => handleConvert(item.data as Capture)}
-                    onMoveToDoc={(c) => setMoveToDocCapture(c)}
-                  />
-                )}
-              </div>
+            const id = rowId(item)
+            return item.kind === 'task' ? (
+              <LocalTaskRow
+                key={id}
+                task={item.data}
+                isSubtask={item.isSubtask}
+                subtaskStats={item.subtaskStats}
+                onDelete={noop}
+                showGrip={false}
+                focused={focusedId === id}
+                onFocusRow={() => focusRow(id)}
+              />
+            ) : (
+              <InboxNoteRow
+                key={id}
+                capture={item.data}
+                focused={focusedId === id}
+                onFocusRow={() => focusRow(id)}
+                onConvert={() => handleConvert(item.data)}
+                onDismiss={() => handleDismiss(item.data)}
+                pickerOpen={pickerFor === item.data.id}
+                onPickerOpenChange={(open) => setPickerFor(open ? item.data.id : null)}
+                onMoved={() => handleMovedToDoc(item.data)}
+              />
             )
           })}
-
         </div>
-      )}
-
-      {/* Move to doc picker */}
-      {moveToDocCapture && (
-        <MoveToDocPicker
-          capture={moveToDocCapture}
-          onClose={() => setMoveToDocCapture(null)}
-          onDone={refreshCaptures}
-        />
       )}
       </div>
     </>
   )
 }
 
-// ── Task row ──
-
-function InboxTaskRow({
-  task,
-  isSubtask,
-  subtaskStats,
-}: {
-  task: LocalTask
-  isSubtask?: boolean
-  subtaskStats?: { done: number; total: number }
-}) {
-  const isSelected = useSelectionStore((s) => s.selectedIds.has(task.id))
-
-  return (
-    <div className={cn(
-      'group flex items-center gap-2 h-9 min-w-0 px-2 rounded-md transition-all duration-150 hover:bg-hover',
-      isSelected && 'bg-accent-blue/10',
-    )}>
-      <SelectionCheckbox id={task.id} type="task" />
-
-      <StatusDropdown taskId={task.id} status={task.status ?? 'todo'} />
-
-      {isSubtask && <SubtaskBadge />}
-
-      <button
-        onClick={() => useDetailStore.getState().openTask(task.id)}
-        className="flex-1 min-w-0 truncate text-body text-left bg-transparent border-none cursor-pointer hover:text-foreground"
-      >
-        {task.content}
-      </button>
-
-      {subtaskStats && subtaskStats.total > 0 && (
-        <SubtaskSummary done={subtaskStats.done} total={subtaskStats.total} />
-      )}
-    </div>
-  )
-}
-
 // ── Note row ──
+//
+// Same chrome as TaskItem (tasks list) so the two lists read as one object
+// (inbox audit P2-6): 40px row, hover cluster hanging outside the column,
+// content offset by margin so the hairline starts at the icon.
 
 function InboxNoteRow({
   capture,
+  focused,
+  onFocusRow,
   onConvert,
-  onMoveToDoc,
+  onDismiss,
+  pickerOpen,
+  onPickerOpenChange,
+  onMoved,
 }: {
   capture: Capture
+  focused: boolean
+  onFocusRow: () => void
   onConvert: () => void
-  onMoveToDoc: (capture: Capture) => void
+  onDismiss: () => void
+  pickerOpen: boolean
+  onPickerOpenChange: (open: boolean) => void
+  onMoved: () => void
 }) {
   const isSelected = useSelectionStore((s) => s.selectedIds.has(capture.id))
+  const rowRef = useRef<HTMLDivElement>(null)
+  const open = () => useDetailStore.getState().openCapture(capture.id)
+
+  useEffect(() => {
+    if (!focused || !rowRef.current) return
+    if (document.activeElement !== rowRef.current && !pickerOpen) rowRef.current.focus()
+    rowRef.current.scrollIntoView({ block: 'nearest' })
+  }, [focused, pickerOpen])
 
   return (
-    <div className={cn(
-      'group flex items-center gap-2 h-9 min-w-0 px-2 rounded-md transition-all duration-150 hover:bg-hover',
-      isSelected && 'bg-accent-blue/10',
-    )}>
-      <SelectionCheckbox id={capture.id} type="capture" />
-
-      {/* Note icon */}
-      <PenLine className="size-4 shrink-0 text-muted-foreground" />
-
-      {/* Content */}
-      <button
-        onClick={() => useDetailStore.getState().openCapture(capture.id)}
-        className="flex-1 min-w-0 truncate text-body text-left bg-transparent border-none cursor-pointer hover:text-foreground"
-      >
-        {capture.content}
-      </button>
-
-      {/* Source app (selection captures) */}
-      {capture.context && (
-        <span className="shrink-0 text-meta text-muted-foreground">
-          from {capture.context}
-        </span>
+    <div
+      ref={rowRef}
+      role="button"
+      tabIndex={0}
+      onClick={open}
+      onFocus={(e) => { if (e.target === e.currentTarget) onFocusRow() }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); open() }
+      }}
+      className={cn(
+        'group relative flex h-10 items-center min-w-0 transition-colors hover:bg-hover cursor-default',
+        'focus-visible:-outline-offset-2',
+        focused && 'bg-accent/10',
+        isSelected && 'bg-accent-blue/10',
       )}
+    >
+      <div className="absolute right-full top-0 flex h-10 items-center gap-1 pr-2">
+        <SelectionCheckbox id={capture.id} type="capture" />
+      </div>
 
-      {/* Routed badge */}
-      {capture.routed_to && (
-        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-label text-muted-foreground">
-          {capture.routed_to}
-        </span>
-      )}
+      <div className="flex flex-1 h-10 items-center gap-3 min-w-0 ml-4 border-b border-secondary">
+        <PenLine className="size-4 shrink-0 text-muted-foreground" />
 
-      {/* Actions */}
-      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-        <button
-          onClick={() => onMoveToDoc(capture)}
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-label text-muted-foreground hover:text-foreground hover:bg-hover"
+        <span className="flex-1 min-w-0 truncate text-body">{capture.content}</span>
+
+        {/* Source app (selection captures) */}
+        {capture.context && (
+          <span className="shrink-0 text-meta text-muted-foreground">
+            from {capture.context}
+          </span>
+        )}
+
+        {/* Actions — revealed on hover AND on keyboard focus anywhere in the
+            row (P1-2); each carries its single-key hint. */}
+        <div
+          className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          onClick={(e) => e.stopPropagation()}
         >
-          <FileText className="size-3" />
-          Move to doc
-        </button>
-        <button
-          onClick={onConvert}
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-label text-muted-foreground hover:text-foreground hover:bg-hover"
-        >
-          <ArrowRight className="size-3" />
-          Convert to task
-        </button>
+          <Popover open={pickerOpen} onOpenChange={onPickerOpenChange}>
+            <PopoverTrigger className={ROW_ACTION}>
+              <FileText className="size-3" />
+              Move to doc
+              <RowKbd>M</RowKbd>
+            </PopoverTrigger>
+            <PopoverContent
+              side="bottom"
+              align="end"
+              sideOffset={4}
+              className="w-72 gap-0 p-2"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                // Keep j/k/t/m/d typed inside the picker from reaching the
+                // row list; Escape and Tab stay with the popover.
+                if (e.key !== 'Escape' && e.key !== 'Tab') e.stopPropagation()
+              }}
+            >
+              {pickerOpen && <MoveToDocPicker capture={capture} onMoved={onMoved} />}
+            </PopoverContent>
+          </Popover>
+          <button type="button" onClick={onConvert} className={ROW_ACTION}>
+            <ArrowRight className="size-3" />
+            Convert to task
+            <RowKbd>T</RowKbd>
+          </button>
+          <button type="button" onClick={onDismiss} className={ROW_ACTION} aria-label="Dismiss note">
+            <X className="size-3" />
+            Dismiss
+            <RowKbd>D</RowKbd>
+          </button>
+        </div>
       </div>
     </div>
   )
 }
 
-// ── Move to Doc Picker ──
+// 18px-tall text buttons get a 32px+ target via ::after (inbox audit P3-2).
+const ROW_ACTION =
+  "relative flex items-center gap-1 rounded-md px-1.5 py-0.5 text-label text-muted-foreground transition-colors hover:text-foreground hover:bg-hover after:absolute after:-inset-2 after:content-['']"
 
-function MoveToDocPicker({
-  capture,
-  onClose,
-  onDone,
-}: {
-  capture: Capture
-  onClose: () => void
-  onDone: () => void
-}) {
+function RowKbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-muted-foreground">{children}</kbd>
+  )
+}
+
+// ── Move to doc picker (inside the row's Popover — Escape, focus and
+// dismissal come from the primitive; inbox audit P1-1) ──
+
+function MoveToDocPicker({ capture, onMoved }: { capture: Capture; onMoved: () => void }) {
   const dp = useDataProvider()
   const [folders, setFolders] = useState<DocFolder[]>([])
   const [docs, setDocs] = useState<Document[]>([])
@@ -465,69 +586,75 @@ function MoveToDocPicker({
     : docs
 
   const handleSelect = async (docId: string) => {
+    const doc = docs.find((d) => d.id === docId)
+    onMoved()
     try {
       await dp.docs.createNote(docId, capture.content)
       await dp.captures.delete(capture.id)
-      const doc = docs.find((d) => d.id === docId)
       toast.success(`Moved to "${doc?.title || 'doc'}"`)
-      onDone()
-      onClose()
     } catch (e) {
       toast.error(`Failed to move: ${e}`)
     }
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-background/60 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
-      <div className="w-72 rounded-xl border border-border/30 bg-popover p-3 shadow-xl animate-in fade-in slide-in-from-bottom-3 duration-200" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-meta text-muted-foreground">Move to doc</span>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-meta">Esc</button>
-        </div>
+    <div>
+      <div className="mb-2 flex items-center justify-between px-1">
+        <span className="text-meta text-muted-foreground">Move to doc</span>
+        <kbd className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-label text-muted-foreground">Esc</kbd>
+      </div>
 
-        {/* Folder filter */}
-        <div className="flex items-center gap-1 mb-2 flex-wrap">
+      {/* Folder filter */}
+      <div className="mb-2 flex flex-wrap items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setSelectedFolderId(null)}
+          className={cn('rounded-md px-2 py-0.5 text-label transition-colors', !selectedFolderId ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-hover')}
+        >
+          All
+        </button>
+        {folders.map((f) => (
           <button
-            onClick={() => setSelectedFolderId(null)}
-            className={cn('rounded-md px-2 py-0.5 text-label transition-colors', !selectedFolderId ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-hover')}
+            key={f.id}
+            type="button"
+            onClick={() => setSelectedFolderId(f.id)}
+            className={cn('rounded-md px-2 py-0.5 text-label transition-colors', selectedFolderId === f.id ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-hover')}
           >
-            All
+            {f.name}
           </button>
-          {folders.map((f) => (
+        ))}
+      </div>
+
+      {/* Doc list — skeleton rows while loading (P1-5), never a spinner or
+          "Loading..." string. */}
+      <div className="max-h-48 space-y-0.5 overflow-y-auto [scrollbar-gutter:stable]">
+        {loading ? (
+          <>
+            <Skeleton className="h-8 rounded-md" />
+            <Skeleton className="h-8 rounded-md" />
+            <Skeleton className="h-8 rounded-md" />
+          </>
+        ) : filteredDocs.length === 0 ? (
+          <p className="py-2 text-center text-meta text-muted-foreground">No docs yet</p>
+        ) : (
+          filteredDocs.map((doc, i) => (
             <button
-              key={f.id}
-              onClick={() => setSelectedFolderId(f.id)}
-              className={cn('rounded-md px-2 py-0.5 text-label transition-colors', selectedFolderId === f.id ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-hover')}
+              key={doc.id}
+              type="button"
+              autoFocus={i === 0}
+              onClick={() => handleSelect(doc.id)}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors hover:bg-hover"
             >
-              {f.name}
+              <FileText className="size-3 shrink-0 text-muted-foreground" />
+              <span className="truncate">{doc.title || 'Untitled'}</span>
             </button>
-          ))}
-        </div>
+          ))
+        )}
+      </div>
 
-        {/* Doc list */}
-        <div className="max-h-48 overflow-y-auto space-y-0.5 [scrollbar-gutter:stable]">
-          {loading ? (
-            <p className="text-meta text-muted-foreground py-2 text-center">Loading...</p>
-          ) : filteredDocs.length === 0 ? (
-            <p className="text-meta text-muted-foreground py-2 text-center">No docs yet</p>
-          ) : (
-            filteredDocs.map((doc) => (
-              <button
-                key={doc.id}
-                onClick={() => handleSelect(doc.id)}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-hover transition-colors"
-              >
-                <FileText className="size-3 shrink-0 text-muted-foreground" />
-                <span className="truncate">{doc.title || 'Untitled'}</span>
-              </button>
-            ))
-          )}
-        </div>
-
-        {/* Note preview */}
-        <div className="mt-2 pt-2 border-t border-border/20">
-          <p className="text-label text-muted-foreground truncate">"{capture.content}"</p>
-        </div>
+      {/* Note preview */}
+      <div className="mt-2 border-t border-border/20 pt-2">
+        <p className="truncate text-label text-muted-foreground">"{capture.content}"</p>
       </div>
     </div>
   )
