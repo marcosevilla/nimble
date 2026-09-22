@@ -65,7 +65,7 @@ export function InlineDescription({ value, onSave }: InlineDescriptionProps) {
       {/* leading-relaxed: deliberate prose override — rendered description is read like body copy */}
       <p
         onClick={startEditing}
-        className="text-body leading-relaxed cursor-text hover:bg-accent/10 rounded-md -mx-1 px-1 transition-colors min-h-[24px]"
+        className="text-body leading-relaxed cursor-text hover:bg-muted rounded-md -mx-1 px-1 transition-colors min-h-[24px]"
       >
         {value ? (
           <span className="text-muted-foreground">{value}</span>

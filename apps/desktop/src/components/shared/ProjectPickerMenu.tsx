@@ -18,7 +18,7 @@ export function ProjectPickerMenu({ projects, excludeProjectId, onSelect }: Proj
       {filtered.map((p) => (
         <button
           key={p.id}
-          className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-body hover:bg-accent/20 transition-colors"
+          className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-body hover:bg-muted transition-colors"
           onClick={() => onSelect(p.id)}
         >
           <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: p.color }} />

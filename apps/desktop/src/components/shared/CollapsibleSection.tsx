@@ -37,7 +37,7 @@ export function CollapsibleSection({
             '[&>svg:first-child]:data-[panel-open]:rotate-90',
             variant === 'primary'
               ? 'pt-5 pb-1 text-body-strong text-foreground'
-              : 'rounded-md px-2 py-1.5 hover:bg-accent/20',
+              : 'rounded-md px-2 py-1.5 hover:bg-muted',
           )}
         >
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-150" />

@@ -123,7 +123,7 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete }: Stat
     <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setShowBlockedInput(false); setBlockedReason('') } }}>
       <PopoverTrigger
         className={cn(
-          'shrink-0 rounded-md transition-colors hover:bg-accent/20',
+          'shrink-0 rounded-md transition-colors hover:bg-muted',
           size === 'md' ? 'p-0.5' : 'p-0',
         )}
         onClick={(e) => e.stopPropagation()}
@@ -166,7 +166,7 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete }: Stat
             <div className="flex justify-end gap-1">
               <button
                 onClick={() => setShowBlockedInput(false)}
-                className="rounded-md px-2 py-1 text-meta text-muted-foreground hover:bg-accent/20"
+                className="rounded-md px-2 py-1 text-meta text-muted-foreground hover:bg-muted"
               >
                 Cancel
               </button>
@@ -187,7 +187,7 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete }: Stat
                 key={s.value}
                 className={cn(
                   'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-body transition-colors',
-                  s.value === status ? 'bg-accent/40' : 'hover:bg-accent/20',
+                  s.value === status ? 'bg-accent/40' : 'hover:bg-muted',
                 )}
                 onClick={() => handleSelect(s.value)}
               >

@@ -137,7 +137,7 @@ function HabitCircle({
             'relative size-10 rounded-full flex items-center justify-center text-title transition-all duration-200 cursor-pointer select-none border border-border bg-card',
             completed
               ? 'scale-105'
-              : 'opacity-50 hover:opacity-80 hover:bg-accent/50',
+              : 'opacity-50 hover:opacity-80 hover:bg-muted',
             holding && 'scale-95',
           )}
           onMouseDown={startHold}
@@ -538,7 +538,7 @@ function ManageHabitsPopover({ habits, onChanged }: { habits: HabitWithStats[]; 
     <>
       <Popover>
         <PopoverTrigger
-          className="flex size-5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/20 transition-colors"
+          className="flex size-5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           aria-label="Manage habits"
         >
           <Settings2 className="size-3" />
@@ -593,7 +593,7 @@ function ManageHabitRow({
   }
 
   return (
-    <div className="group flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent/10 transition-colors">
+    <div className="group flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-muted transition-colors">
       <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: habit.color }} />
       <input
         value={draft}

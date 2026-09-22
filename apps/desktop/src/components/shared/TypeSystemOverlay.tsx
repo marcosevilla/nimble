@@ -190,7 +190,7 @@ export function TypeSystemOverlay({ onClose }: { onClose: () => void }) {
                 'flex items-center gap-1 rounded px-1.5 py-0.5 text-label transition-colors',
                 inspecting
                   ? 'bg-accent-blue/15 text-accent-blue'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent/30',
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted',
               )}
               aria-pressed={inspecting}
               aria-label={inspecting ? 'Exit inspect mode' : 'Enter inspect mode'}
@@ -201,7 +201,7 @@ export function TypeSystemOverlay({ onClose }: { onClose: () => void }) {
             <button
               onClick={onClose}
               onMouseDown={(e) => e.stopPropagation()}
-              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors"
+              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               aria-label="Close type system overlay"
             >
               <X className="size-3.5" />
