@@ -163,8 +163,6 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
 
           {/* Goal bars */}
           {timelineGoals.map((goal, i) => {
-            const area = goal.life_area_id ? areaMap[goal.life_area_id] : null
-
             // Calculate positions
             const startDate = goal.start_date
               ? new Date(goal.start_date)
