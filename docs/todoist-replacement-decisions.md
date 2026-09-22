@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-25
 **Supersedes the phase plan in:** `docs/todoist-replacement-analysis.md` §5 (the analysis itself still stands)
-**Status:** decisions locked, spec not yet written
+**Status:** decisions remain locked. The August assessment below is historical. As of 2026-09-21, C1 is complete; C2/C3 are implemented and installed with live activation gates remaining. Google connection/first sync and Mac banner passed; phone/two-way and agent-routing/web acceptance remain open. C4 and C5 are next. Current priorities: [NEXT.md](../NEXT.md); evidence: [combined verification](c2-c3-verification.md).
 
 The 2026-08-09 analysis is still correct about the *gaps*. Its R1–R5 phase plan is stale
 because R1 shipped, R2 half-shipped, and the mobile premise changed. This document records

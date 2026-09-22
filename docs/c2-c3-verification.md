@@ -1,6 +1,6 @@
 # C2/C3 implementation verification
 
-Status: implementation, final code review and production installation complete. Google/phone acceptance and agent workflow activation remain open.
+Status as of 2026-09-21: implementation, review and production installation complete. Live Mac banner, Google connection and first sync passed. Physical phone delivery/two-way edits, restart/reconnect/token-longevity checks, assistant routing and live web propagation remain open. OAuth repair is installed from af39e29 but remains local and unmerged. Earlier dated sections are historical checkpoints; the final Google live connection section supersedes their disconnected state.
 
 ## Isolation
 
@@ -31,7 +31,7 @@ Foundation review identified cancellation-unsafe transactions and a concurrent r
 
 Combined review identified Calendar URL assembly, expired-token reconnect, calendar reuse, unfired A→B→A reminder restoration, stale ETag deletion and remote timezone conversion. The coordinated fix wave `b36f574` addresses all six findings and passes scoped re-review, with no additional blocking regression found.
 
-## Remaining acceptance
+## Acceptance checklist and historical setup evidence
 
 Google live failure diagnosis, 2026-09-21: Marco confirmed completing consent and seeing the callback's "Google connected" message. Installed Nimble instead reports that the step could not finish; production `google_calendar_state` has no row. Source review shows callback success HTML is returned before token exchange and omits `client_secret` from both exchange and refresh. A diagnostic token-endpoint request with the configured public client ID, a deliberately invalid code, and random PKCE verifier returned HTTP400 `invalid_request` / `client_secret is missing.` No actual authorization code, access token, refresh token, or client secret was used in that diagnostic. This proves the current request is rejected for the missing desktop-client credential; the original request's detailed response was discarded by the app. Proposed repair and remaining acceptance are tracked in NEXT.md. Marco subsequently approved the repair; implementation and installation evidence follow below.
 
@@ -43,7 +43,9 @@ Production Mac test, 2026-09-21: Marco authorized one reminder test. Installed `
 - [x] Scoped re-review of fixes; frontend desktop/web builds pass. Final native bundle build is recorded below.
 - [x] Reopen test app after a missed reminder and confirm persistent catch-up UI; dismissal removed the item.
 - [x] Native OS banner presentation confirmed by Marco in the installed production app on 2026-09-21.
-- [ ] Configure Google Desktop OAuth client, consent mode and real account connection.
+- [x] Configure Google Desktop OAuth client, consent mode and real account connection; dedicated calendar and first live sync verified.
+- [ ] Verify restart/reconnect persistence and testing-mode token longevity.
+- [ ] Integrate/push installed OAuth repair when authorized.
 - [ ] Physical phone alarm and two-way event-edit acceptance.
 - [x] Install CLI on PATH and verify its connection to the production app using backup RPC.
 - [ ] Agent workflow routing activation and live web propagation acceptance.
@@ -104,9 +106,9 @@ Approved repair in `codex/google-desktop-oauth-fix`. The Desktop OAuth client se
 
 Regression evidence: transport, client/profile storage isolation, public-ID-only persistence, bound-client replacement guard, blank-secret rejection, actual-render masked field and form submission tests demonstrated failing before the repair and passing afterward. Desktop/web production builds, eight frontend tests and targeted lint pass. Final Rust suite passed all 330 tests, including the credential-status regression after review. Logs: `/private/tmp/nimble-google-tests-final.log`, `/private/tmp/nimble-google-ui-tests.log`, `/private/tmp/nimble-google-build.log`, `/private/tmp/nimble-google-lint.log`. Independent final review found no remaining blockers. Signed release from `af39e29` built with `Marco Task App Dev`, passed strict signature verification, and installed at `/Applications/Nimble.app`. Native Settings shows the new masked secret field, disabled Save until input, and Not connected / Not configured truthfully. Full-row hashes for all 1,125 tasks, 63 projects, 25 labels, 0 sections and 150 captures match before/after relaunch; schema20 integrity is OK. Rollback app/data: `~/Library/Application Support/Nimble Rollbacks/20260921-222607-google-oauth`. Installed binary hash matches the verified build. CLI and web deployment unchanged. Source remains on the local repair branch. Build log: `/private/tmp/nimble-google-release.log`.
 
-Live acceptance still requires entering the existing Desktop client's secret into the installed app, reconnecting Google, verifying the dedicated Nimble calendar and testing a phone alert. The existing Google project/client must be reused. Never paste the secret into chat or documentation.
+At this installation checkpoint, credential entry/reconnection and calendar verification were pending. Those steps subsequently passed in the live connection section below; the phone alert remains unverified. The existing Google project/client must be reused. Never paste the secret into chat or documentation.
 
-Handoff: Google Cloud client details > Information and summary shows that viewing/downloading existing secrets is no longer available. The existing Nimble Mac client remains intact. Its Add client secret control and Nimble’s new masked field are open for Marco; user must create/copy the secret because credential changes require browser handoff. No new secret was created or copied.
+Historical credential handoff (subsequently completed): Google Cloud client details > Information and summary shows that viewing/downloading existing secrets is no longer available. The existing Nimble Mac client remains intact. Its Add client secret control and Nimble’s new masked field are open for Marco; user must create/copy the secret because credential changes require browser handoff. No new secret was created or copied.
 
 ## Google live connection verified — 2026-09-21
 

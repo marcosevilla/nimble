@@ -36,4 +36,6 @@ Files: google_credentials.rs, commands/google_calendar.rs, google_calendar_runne
 - [x] Update setup docs and NEXT.md to describe actual client-secret requirements and remaining live acceptance.
 - [x] Build signed release using existing development signing identity; verify signature.
 - [x] Quit installed app, save private rollback app/data, install verified app, reopen, check task data/schema unchanged and setup fields visible.
-- [ ] Let Marco enter the client secret from his existing Google Desktop client into the new write-only field; retry consent and verify actual connected status/calendar. Do not claim live success before that acceptance.
+- [x] Marco completed secret entry and consent; native Connected to Nimble status, Keychain-configured indicator, dedicated calendar and first live sync verified on 2026-09-21. No secret/token values were read or logged.
+
+Remaining product acceptance: physical phone notification, two-way event edits, restart/reconnect and testing-mode token longevity. Source integration/push remains pending authorization. See `NEXT.md` and `docs/c2-c3-verification.md`.

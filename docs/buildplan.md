@@ -1,5 +1,7 @@
 # Nimble — Build Plan
 
+Historical March 2026 snapshot; retained for background, not current execution. The C1–C5 order in [locked decisions](todoist-replacement-decisions.md) supersedes this plan. Read [NEXT.md](../NEXT.md) for current status and next work.
+
 ## Current State (as of 2026-03-29)
 
 ### What's been built
