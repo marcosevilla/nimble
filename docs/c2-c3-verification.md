@@ -74,4 +74,20 @@ User approved local integration of `codex/c2-c3-reminders-agents` at `cbcd21e` i
 
 Fresh verification on merged main: `cargo test --workspace --offline` passed320 tests with0 failures, both desktop/web production builds passed, and five interface tests passed. Rust ran outside the sandbox for macOS file events and localhost sockets. Logs: `/private/tmp/nimble-c23-main-rust.log`, `/private/tmp/nimble-c23-main-desktop.log`, `/private/tmp/nimble-c23-main-web.log`, `/private/tmp/nimble-c23-main-ui-tests.log`. Existing compiler/bundle-size warnings remain non-blocking. No installed-app rebuild or data change was required.
 
-This is a local merge; no push, web deployment or workflow activation was performed. Feature worktree retained with development evidence and artifacts.
+At this integration checkpoint the merge was local; the subsequent push and web deployment are recorded below. No workflow activation was performed. Feature worktree retained with development evidence and artifacts.
+
+## Production web deployment — 2026-09-21
+
+User approved push and deploy. Fetched GitHub and confirmed main was19 commits ahead with no remote divergence, then pushed `49254e9` to `marcosevilla/nimble` main. Published the clean checkout with `vercel deploy --prod --yes` to the existing `nimble-web` project.
+
+- Deployment: `dpl_9aNWreqb49Ho9KocRGypNDu8BLnE`, status **Ready**, target production.
+- Production alias: https://nimble-web-marco-sevilla-projects.vercel.app
+- Immutable deployment: https://nimble-f77wzmy7q-marco-sevilla-projects.vercel.app
+- Previous production (rollback reference): `dpl_CYgrZGFPsGEgmheA9oN9xw48CD9e`, https://nimble-1p22mtlrg-marco-sevilla-projects.vercel.app
+- Vercel inspection confirms `api/login`, `api/turso` and middleware are present. Cloud web build passed.
+
+Live checks: HTML GET `/` returns200 with the password form; GET `/` without HTML Accept returns401; unauthenticated POST `/api/turso` returns401 with Nimble's `Unauthorized` response; wrong-password POST `/api/login` returns401 without timeout. Browser independently renders the Nimble Unlock page at the production alias. The installed desktop reports both v19 and v20 Turso schema upgrades completed.
+
+Signed-in app and authenticated database checks were not completed: both Vercel environment-run and explicit production environment export returned an empty `WEB_PASSWORD` value. The browser has no signed-in session. The private temporary environment copy was removed, no credentials were changed, and no task data was written. These deployment checks do not establish live end-to-end reminder/agent web propagation.
+
+Build log: `/private/tmp/nimble-c23-production-deploy.log`. Credential-limited verification log: `/private/tmp/nimble-c23-live-check.log`. Google connection, physical phone acceptance and agent routing remain separate activation work.
