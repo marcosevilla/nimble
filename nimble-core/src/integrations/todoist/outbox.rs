@@ -101,6 +101,44 @@ pub async fn pending_batch(pool: &SqlitePool, limit: i64) -> crate::Result<Vec<O
         .collect())
 }
 
+/// Re-read candidate rows while holding SQLite's writer lock, then claim only
+/// rows still pending and export eligible. A stale in-memory batch cannot send
+/// a task whose local-only policy cancelled its intent meanwhile.
+pub async fn claim_pending_batch(pool: &SqlitePool, ids: &[String]) -> crate::Result<Vec<OutboxRow>> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut claimed = Vec::new();
+    for id in ids {
+        let row: Option<(String, String, String, String, String, String, Option<String>)> =
+            sqlx::query_as("SELECT id, local_id, object_type, op, payload_json, command_uuid, temp_id FROM todoist_outbox WHERE id=? AND status='pending'")
+                .bind(id).fetch_optional(&mut *tx).await?;
+        let Some((id, local_id, object_type, op, payload_json, command_uuid, temp_id)) = row else { continue };
+        if object_type == "task" {
+            let policy: Option<String> = sqlx::query_scalar("SELECT sync_policy FROM local_tasks WHERE id=?")
+                .bind(&local_id).fetch_optional(&mut *tx).await?;
+            if policy.as_deref() == Some("local_only") || (policy.is_none() && op != "delete") {
+                sqlx::query("DELETE FROM todoist_outbox WHERE id=? AND status='pending'")
+                    .bind(&id).execute(&mut *tx).await?;
+                continue;
+            }
+        }
+        let updated = sqlx::query("UPDATE todoist_outbox SET status='sending', updated_at=datetime('now','localtime') WHERE id=? AND status='pending'")
+            .bind(&id).execute(&mut *tx).await?;
+        if updated.rows_affected() == 1 {
+            claimed.push(OutboxRow { id, local_id, object_type, op,
+                payload: serde_json::from_str(&payload_json).unwrap_or_else(|_| serde_json::json!({})),
+                command_uuid, temp_id });
+        }
+    }
+    tx.commit().await?;
+    Ok(claimed)
+}
+
+pub async fn cancel_unsent_task(pool: &SqlitePool, task_id: &str) -> crate::Result<()> {
+    sqlx::query("DELETE FROM todoist_outbox WHERE local_id=? AND object_type='task' AND status='pending'")
+        .bind(task_id).execute(pool).await?;
+    Ok(())
+}
+
 pub async fn pending_create_temp_id(pool: &SqlitePool, local_id: &str) -> crate::Result<Option<String>> {
     let row: Option<(Option<String>,)> = sqlx::query_as(
         "SELECT temp_id FROM todoist_outbox WHERE local_id = ? AND status = 'pending' AND op = 'create'",

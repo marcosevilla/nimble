@@ -4,23 +4,9 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{FromRow, Row, SqlitePool};
 
 use crate::db::activity;
-use crate::db::labels;
 use crate::db::sync;
 use crate::parsers::html_to_md::{html_to_markdown, scan_unknown_tags};
 use crate::types::{CreateTaskInput, LocalTask, UpdateTaskInput};
-
-fn validate_reminder(offset: Option<i64>, google_enabled: bool, due_date: Option<&str>, due_time: Option<&str>) -> crate::Result<()> {
-    if offset.is_some_and(|value| !(0..=40320).contains(&value)) {
-        return Err(crate::Error::Other("reminder offset must be 0–40320 minutes".into()));
-    }
-    if (offset.is_some() || google_enabled) && (due_date.is_none() || due_time.is_none()) {
-        return Err(crate::Error::Other("a reminder requires a due date and time".into()));
-    }
-    if google_enabled && offset.is_none() {
-        return Err(crate::Error::Other("a phone alert requires a reminder offset".into()));
-    }
-    Ok(())
-}
 
 impl FromRow<'_, SqliteRow> for LocalTask {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
@@ -200,10 +186,38 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
 
 pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInput) -> crate::Result<LocalTask> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let old: LocalTask = sqlx::query_as(&format!("SELECT {SELECT_COLS} FROM local_tasks WHERE id=?"))
+        .bind(id).fetch_one(&mut *tx).await?;
+    let fields_changed = activity_fields(&input, &old);
     let task = crate::db::task_tx::update_task_tx(&mut tx, id, input, crate::db::task_tx::MutationPolicy::User).await?;
     tx.commit().await?;
-    activity::log_activity(pool, "task_updated", Some(id), None).await;
+    if !fields_changed.is_empty() {
+        let action = if fields_changed == ["project_id"] { "task_moved" } else { "task_updated" };
+        activity::log_activity(pool, action, Some(id),
+            Some(serde_json::json!({"fields_changed":fields_changed}))).await;
+    }
     Ok(task)
+}
+
+fn activity_fields(input: &UpdateTaskInput, old: &LocalTask) -> Vec<&'static str> {
+    let mut fields = Vec::new();
+    if input.sync_policy.is_some() { fields.push("sync_policy"); }
+    if input.content.is_some() { fields.push("content"); }
+    if input.description.is_some() { fields.push("description"); }
+    if input.project_id.is_some() { fields.push("project_id"); }
+    if input.priority.is_some() { fields.push("priority"); }
+    if input.linked_doc_id.is_some() { fields.push("linked_doc_id"); }
+    if input.due_date.is_some() || input.clear_due_date { fields.push("due_date"); }
+    if input.due_time.is_some() || input.clear_due_time { fields.push("due_time"); }
+    if input.duration_minutes.is_some() || input.clear_due_time || input.clear_duration { fields.push("duration_minutes"); }
+    if input.recurrence_rule.is_some() || input.clear_recurrence { fields.push("recurrence_rule"); }
+    let implicit_section_clear = input.project_id.as_deref().is_some_and(|target| target != old.project_id)
+        && input.section_id.is_none() && old.section_id.is_some();
+    if input.section_id.is_some() || input.clear_section || implicit_section_clear { fields.push("section_id"); }
+    if input.reminder_offset_minutes.is_some() || input.clear_reminder || input.clear_due_date || input.clear_due_time { fields.push("reminder_offset_minutes"); }
+    if input.google_calendar_enabled.is_some() || input.clear_reminder || input.clear_due_date || input.clear_due_time { fields.push("google_calendar_enabled"); }
+    if input.label_ids.is_some() { fields.push("labels"); }
+    fields
 }
 
 /// Apply a Google-originated edit only if the complete persisted task row still
@@ -242,69 +256,14 @@ pub async fn update_local_task_if_unchanged(
     if sync::task_sync_snapshot(&current) != sync::task_sync_snapshot(expected) {
         return Ok(None);
     }
-    let due_date = if input.clear_due_date {
-        None
-    } else {
-        input.due_date.as_deref().or(current.due_date.as_deref())
-    };
-    let due_time = if input.clear_due_time {
-        None
-    } else {
-        input.due_time.as_deref().or(current.due_time.as_deref())
-    };
-    let duration = if input.clear_duration || input.clear_due_time {
-        None
-    } else {
-        input.duration_minutes.or(current.duration_minutes)
-    };
-    let offset = if input.clear_reminder || input.clear_due_date || input.clear_due_time {
-        None
-    } else {
-        input
-            .reminder_offset_minutes
-            .or(current.reminder_offset_minutes)
-    };
-    let calendar = !(input.clear_reminder || input.clear_due_date || input.clear_due_time)
-        && input
-            .google_calendar_enabled
-            .unwrap_or(current.google_calendar_enabled);
-    validate_reminder(offset, calendar, due_date, due_time)?;
-    sqlx::query("UPDATE local_tasks SET content=?,description=?,due_date=?,due_time=?,duration_minutes=?,reminder_offset_minutes=?,google_calendar_enabled=?,updated_at=datetime('now') WHERE id=?")
-            .bind(input.content.as_deref().unwrap_or(&current.content))
-            .bind(input.description.as_deref().or(current.description.as_deref()))
-            .bind(due_date).bind(due_time).bind(duration).bind(offset).bind(calendar).bind(id)
-            .execute(&mut *tx).await?;
-    let mut updated: LocalTask = sqlx::query_as(&format!(
-        "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
-    ))
-    .bind(id)
-    .fetch_one(&mut *tx)
-    .await?;
+    let updated = crate::db::task_tx::update_task_tx(&mut tx, id, input,
+        crate::db::task_tx::MutationPolicy::User).await?;
     tx.commit().await?;
-    updated.labels = labels::labels_for_task(pool, id).await.unwrap_or_default();
     activity::log_activity(
         pool,
         "task_updated",
         Some(id),
         Some(serde_json::json!({"source":"google_calendar"})),
-    )
-    .await;
-    let snapshot = sync::task_sync_snapshot(&updated);
-    sync::append_sync_log(pool, "local_tasks", id, "UPDATE", None, Some(&snapshot))
-        .await
-        .ok();
-    crate::integrations::todoist::observer::on_task_mutation(
-        pool,
-        crate::integrations::todoist::observer::TaskMutation::Updated {
-            task: &updated,
-            fields_changed: &[
-                "content".into(),
-                "description".into(),
-                "due_date".into(),
-                "due_time".into(),
-                "duration_minutes".into(),
-            ],
-        },
     )
     .await;
     Ok(Some(updated))

@@ -1,6 +1,6 @@
 use crate::integrations::todoist::{client, mappers, merge, outbox};
 use sqlx::SqlitePool;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 /// Push-side context: resolves local ids referenced by outbox rows to the
@@ -19,6 +19,7 @@ pub struct PushCtx {
     /// local task id → current remote project_external_id from synced_snapshot
     /// (used to detect a `move` op that would be a no-op on Todoist's side)
     current_project: HashMap<String, String>,
+    local_only_tasks: HashSet<String>,
 }
 
 impl PushCtx {
@@ -33,6 +34,7 @@ impl PushCtx {
             base_due: HashMap::new(),
             temp_ids: HashMap::new(),
             current_project: HashMap::new(),
+            local_only_tasks: HashSet::new(),
         }
     }
     #[cfg(test)]
@@ -87,6 +89,7 @@ pub async fn load_push_ctx(pool: &SqlitePool, rows: &[outbox::OutboxRow]) -> cra
         base_due: HashMap::new(),
         temp_ids: HashMap::new(),
         current_project: HashMap::new(),
+        local_only_tasks: HashSet::new(),
     };
     for row in rows {
         if let Some(t) = &row.temp_id {
@@ -95,13 +98,14 @@ pub async fn load_push_ctx(pool: &SqlitePool, rows: &[outbox::OutboxRow]) -> cra
     }
     // load referenced tasks (their external_id + snapshot due + snapshot project)
     for row in rows.iter().filter(|r| r.object_type == "task") {
-        let rec: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT external_id, synced_snapshot FROM local_tasks WHERE id = ?",
+        let rec: Option<(Option<String>, Option<String>, String)> = sqlx::query_as(
+            "SELECT external_id, synced_snapshot, sync_policy FROM local_tasks WHERE id = ?",
         )
         .bind(&row.local_id)
         .fetch_optional(pool)
         .await?;
-        if let Some((ext, snap)) = rec {
+        if let Some((ext, snap, policy)) = rec {
+            if policy == "local_only" { ctx.local_only_tasks.insert(row.local_id.clone()); }
             let parsed_snapshot = snap.and_then(|s| serde_json::from_str::<mappers::TaskSnapshot>(&s).ok());
             if let Some(due) = parsed_snapshot.as_ref().and_then(|s| s.due.clone()) {
                 ctx.base_due.insert(row.local_id.clone(), due);
@@ -166,6 +170,10 @@ pub fn build_commands(
     let mut cmds = Vec::new();
     let mut unbuildable = Vec::new();
     for row in rows {
+        if row.object_type == "task" && ctx.local_only_tasks.contains(&row.local_id) {
+            unbuildable.push((row.id.clone(), "local-only task".into()));
+            continue;
+        }
         let cmd = match (row.object_type.as_str(), row.op.as_str()) {
             ("task", "create") => {
                 let mut args = serde_json::Map::new();
@@ -354,18 +362,28 @@ pub async fn push_outbox(pool: &SqlitePool, token: &str) -> crate::Result<usize>
 
     let mut confirmed = 0usize;
     loop {
-        let rows = outbox::pending_batch(pool, 100).await?;
-        if rows.is_empty() {
+        let candidates = outbox::pending_batch(pool, 100).await?;
+        if candidates.is_empty() {
             break;
         }
-        let ctx = load_push_ctx(pool, &rows).await?;
+        let candidate_ids: Vec<String> = candidates.iter().map(|r| r.id.clone()).collect();
+        let rows = outbox::claim_pending_batch(pool, &candidate_ids).await?;
+        if rows.is_empty() { continue; }
+        let ctx = match load_push_ctx(pool, &rows).await {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+                outbox::mark_pending(pool, &ids).await?;
+                return Err(e);
+            }
+        };
         let (cmds, unbuildable) = build_commands(&rows, &ctx);
         let unbuildable_ids: std::collections::HashSet<&str> =
             unbuildable.iter().map(|(id, _)| id.as_str()).collect();
         for (row_id, reason) in &unbuildable {
             // Never-synced deletes and no-op moves are successes (nothing to do
             // remotely), not errors — drop them rather than erroring forever.
-            if reason.contains("never-synced") || reason.contains("no-op") {
+            if reason.contains("never-synced") || reason.contains("no-op") || reason.contains("local-only") {
                 outbox::mark_done(pool, &[row_id.clone()]).await?;
             } else {
                 outbox::mark_error(pool, row_id, reason).await?;
@@ -375,18 +393,13 @@ pub async fn push_outbox(pool: &SqlitePool, token: &str) -> crate::Result<usize>
             continue;
         }
 
-        // Mark the rows about to be sent as 'sending' *before* the HTTP call
-        // (I1): a local edit that arrives while this batch is in flight can no
-        // longer coalesce into it (enqueue's coalescer only targets 'pending'
-        // rows) — it creates a fresh pending op instead, so it can never be
-        // silently discarded when this batch's response retires the sent row.
+        // Claimed rows were marked sending before commands were built, so
+        // later local edits cannot coalesce into this batch.
         let sending_ids: Vec<String> = rows
             .iter()
             .filter(|r| !unbuildable_ids.contains(r.id.as_str()))
             .map(|r| r.id.clone())
             .collect();
-        outbox::mark_sending(pool, &sending_ids).await?;
-
         let resp = match client::sync(token, &serde_json::json!({"commands": cmds})).await {
             Ok(resp) => resp,
             Err(e) => {

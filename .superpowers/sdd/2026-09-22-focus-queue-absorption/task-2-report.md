@@ -18,3 +18,12 @@ Recurring native completion advances the due date and yields one due-update inte
 - GREEN: `cargo check --workspace --offline` — passed. Commands used the shared `CARGO_TARGET_DIR` from the task brief.
 
 The full `nimble-core --lib` run had 236 passes and the pre-existing schema-20 backup assertion failure `db::sync::backup_lock_regression::replaced_job_lock_prevents_any_pruning` (`backup_export_unsupported_schema`), reserved for Task 4. No test was weakened.
+
+## Scoped review fixes (round 1)
+
+The reviewer found three gaps. First, a Turso-applied `local_only` policy now cancels older pending task intents; push claims candidate IDs under a SQLite writer lock, re-reads current row and policy, and builds commands only from claimed rows. `load_push_ctx` also reads `sync_policy` and blocks a newly private task. A failed context load releases claimed rows for retry. This closes the stale candidate and policy-transition cases without holding a database transaction across HTTP; a policy change after an HTTP request starts cannot revoke that request.
+
+Second, Calendar's locked compare now calls `update_task_tx` on the same connection, so a synthetic enqueue failure rolls back its content edit. Third, public task updates again log `fields_changed`, use `task_moved` for a project-only edit, and skip activity for an empty update. Activity remains post-commit best-effort.
+
+- RED: focused suite had three failures: Calendar edit committed after injected outbox failure; project no-op wrote activity; Turso-applied `local_only` left a pending create. The new stale-batch claim test initially could not compile because the claim API was absent.
+- GREEN: `focus_task_tx` 12 passed, including recurrence payload due date `2026-09-23`; `db::tasks` 24 passed; Todoist 74 passed; `cargo check --workspace --offline` passed. `git diff --check` passed. The known Task 4 backup failure was not rerun.

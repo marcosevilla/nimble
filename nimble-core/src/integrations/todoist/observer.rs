@@ -204,6 +204,16 @@ pub async fn on_turso_row_applied(
     pre_delete_sync_policy: Option<String>,
     deleted: bool,
 ) {
+    if table == "local_tasks" && !deleted {
+        let policy: Option<String> = sqlx::query_scalar("SELECT sync_policy FROM local_tasks WHERE id=?")
+            .bind(row_id).fetch_optional(pool).await.ok().flatten();
+        if policy.as_deref() == Some("local_only") {
+            if let Err(e) = outbox::cancel_unsent_task(pool, row_id).await {
+                log::warn!("todoist observer: failed to cancel local-only intents: {e}");
+            }
+            return;
+        }
+    }
     if !active(pool).await {
         return;
     }

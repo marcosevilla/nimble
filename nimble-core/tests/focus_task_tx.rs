@@ -282,6 +282,70 @@ async fn switching_back_to_default_restores_create_intent() {
 }
 
 #[tokio::test]
+async fn calendar_edit_rolls_back_when_delivery_intent_fails() {
+    let pool = nimble_core::test_util::test_pool().await;
+    nimble_core::integrations::ensure_state(&pool, "todoist").await.unwrap();
+    nimble_core::db::settings::set_setting(&pool, "todoist_api_token", "synthetic").await.unwrap();
+    let task = nimble_core::db::tasks::create_local_task(&pool, CreateTaskInput {
+        content: "Before".into(), ..Default::default()
+    }).await.unwrap();
+    sqlx::query("CREATE TRIGGER reject_calendar_intent BEFORE UPDATE ON todoist_outbox BEGIN SELECT RAISE(ABORT, 'synthetic calendar intent failure'); END")
+        .execute(&pool).await.unwrap();
+    let result = nimble_core::db::tasks::update_local_task_if_unchanged(
+        &pool, &task.id, &task, nimble_core::types::UpdateTaskInput { content: Some("After".into()), ..Default::default() }
+    ).await;
+    assert!(result.is_err());
+    let content: String = sqlx::query_scalar("SELECT content FROM local_tasks WHERE id=?")
+        .bind(&task.id).fetch_one(&pool).await.unwrap();
+    assert_eq!(content, "Before");
+}
+
+#[tokio::test]
+async fn project_only_edit_logs_move_and_no_op_logs_nothing() {
+    let pool = nimble_core::test_util::test_pool().await;
+    let project = nimble_core::db::projects::create_project(&pool, "Second", "#fff", None).await.unwrap();
+    let task = nimble_core::db::tasks::create_local_task(&pool, CreateTaskInput { content: "Move".into(), ..Default::default() }).await.unwrap();
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM activity_log WHERE target_id=?")
+        .bind(&task.id).fetch_one(&pool).await.unwrap();
+    nimble_core::db::tasks::update_local_task(&pool, &task.id, nimble_core::types::UpdateTaskInput::default()).await.unwrap();
+    let after_no_op: i64 = sqlx::query_scalar("SELECT count(*) FROM activity_log WHERE target_id=?")
+        .bind(&task.id).fetch_one(&pool).await.unwrap();
+    assert_eq!(after_no_op, before);
+    nimble_core::db::tasks::update_local_task(&pool, &task.id, nimble_core::types::UpdateTaskInput { project_id: Some(project.id), ..Default::default() }).await.unwrap();
+    let row: (String, Option<String>) = sqlx::query_as("SELECT action_type, metadata FROM activity_log WHERE target_id=? ORDER BY rowid DESC LIMIT 1")
+        .bind(&task.id).fetch_one(&pool).await.unwrap();
+    assert_eq!(row.0, "task_moved");
+    let meta: serde_json::Value = serde_json::from_str(&row.1.unwrap()).unwrap();
+    assert_eq!(meta["fields_changed"], serde_json::json!(["project_id"]));
+}
+
+#[tokio::test]
+async fn turso_local_only_pull_cancels_older_pending_create() {
+    let pool = nimble_core::test_util::test_pool().await;
+    nimble_core::integrations::ensure_state(&pool, "todoist").await.unwrap();
+    nimble_core::db::settings::set_setting(&pool, "todoist_api_token", "synthetic").await.unwrap();
+    let task = nimble_core::db::tasks::create_local_task(&pool, CreateTaskInput { content: "Before".into(), ..Default::default() }).await.unwrap();
+    sqlx::query("UPDATE local_tasks SET sync_policy='local_only' WHERE id=?").bind(&task.id).execute(&pool).await.unwrap();
+    nimble_core::integrations::todoist::observer::on_turso_row_applied(&pool,"local_tasks",&task.id,None,None,false).await;
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM todoist_outbox WHERE local_id=? AND status='pending'")
+        .bind(&task.id).fetch_one(&pool).await.unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn loaded_batch_cannot_claim_cancelled_local_only_task() {
+    let pool = nimble_core::test_util::test_pool().await;
+    nimble_core::integrations::ensure_state(&pool, "todoist").await.unwrap();
+    nimble_core::db::settings::set_setting(&pool, "todoist_api_token", "synthetic").await.unwrap();
+    let task = nimble_core::db::tasks::create_local_task(&pool, CreateTaskInput { content: "Claim race".into(), ..Default::default() }).await.unwrap();
+    let loaded = nimble_core::integrations::todoist::outbox::pending_batch(&pool, 100).await.unwrap();
+    let ids: Vec<String> = loaded.iter().map(|r| r.id.clone()).collect();
+    sqlx::query("UPDATE local_tasks SET sync_policy='local_only' WHERE id=?").bind(&task.id).execute(&pool).await.unwrap();
+    let claimed = nimble_core::integrations::todoist::outbox::claim_pending_batch(&pool, &ids).await.unwrap();
+    assert!(claimed.is_empty());
+}
+
+#[tokio::test]
 async fn recurring_completion_emits_due_update_without_close() {
     let pool = nimble_core::test_util::test_pool().await;
     nimble_core::integrations::ensure_state(&pool, "todoist")
@@ -315,5 +379,10 @@ async fn recurring_completion_emits_due_update_without_close() {
             .await
             .unwrap();
     assert_eq!(ops.iter().filter(|(op,)| op == "close").count(), 0);
+    let payloads: Vec<(String,)> = sqlx::query_as("SELECT payload_json FROM todoist_outbox WHERE local_id=? AND op='create'")
+        .bind(&task.id).fetch_all(&mut *tx).await.unwrap();
+    assert_eq!(payloads.len(), 1);
+    let payload: serde_json::Value = serde_json::from_str(&payloads[0].0).unwrap();
+    assert_eq!(payload["due_date"], "2026-09-23");
     tx.rollback().await.unwrap();
 }
