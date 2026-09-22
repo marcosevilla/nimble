@@ -3,6 +3,7 @@ import { CalendarPanel } from '@/components/calendar/CalendarPanel'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { IconButton } from '@/components/shared/IconButton'
 import { PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { Icon } from '@/components/shared/Icon'
 import { cn } from '@/lib/utils'
 
 const MIN_WIDTH = 200
@@ -62,7 +63,7 @@ export function RightSidebar() {
             size="lg"
             title="Expand sidebar"
           >
-            <PanelRightOpen className="size-4" />
+            <Icon icon={PanelRightOpen} size="nav" />
           </IconButton>
         </div>
       )}
@@ -86,7 +87,7 @@ export function RightSidebar() {
               tone="subtle"
               title="Collapse sidebar"
             >
-              <PanelRightClose className="size-3.5" />
+              <Icon icon={PanelRightClose} size="nav" />
             </IconButton>
           </div>
         </>

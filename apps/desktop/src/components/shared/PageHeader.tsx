@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils'
 import { ArrowLeft } from 'lucide-react'
+import { Icon } from '@/components/shared/Icon'
 
 interface PageHeaderProps {
   title: React.ReactNode
@@ -33,9 +34,9 @@ export function PageHeader({
         {backAction && (
           <button
             onClick={backAction.onClick}
-            className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 -ml-1 text-meta text-muted-foreground transition-colors hover:bg-accent/20 hover:text-muted-foreground"
+            className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 -ml-1 text-meta text-muted-foreground transition-colors duration-(--transition-fast) hover:bg-muted hover:text-foreground"
           >
-            <ArrowLeft className="size-3" />
+            <Icon icon={ArrowLeft} />
             {backAction.label}
           </button>
         )}

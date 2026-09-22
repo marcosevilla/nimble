@@ -6,6 +6,7 @@ import { useDataProvider } from '@/services/provider-context'
 import { cn } from '@/lib/utils'
 import { Sun, CheckSquare, Inbox, FileText, Target, BookOpen, Settings, Command } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { Icon } from '@/components/shared/Icon'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import {
   DndContext,
@@ -47,9 +48,26 @@ const NAV_LABELS: Record<string, string> = {
   session: 'Activity',
 }
 
+/* One class recipe for every rail item (shell P2-10, P3-4, P2-9):
+   - a real <button> in both modes so Enter and Space activate natively;
+   - hover is full-alpha `bg-muted` (the old accent/20 measured 1.02:1);
+   - the 36px box gets a 40px hit target through `after:` — the rail's
+     gap-1 keeps neighbouring targets touching, never overlapping;
+   - active adds a 2px foreground bar as a second cue beside icon colour. */
+function navItemClasses(expanded: boolean, isActive: boolean) {
+  return cn(
+    'relative flex h-9 items-center rounded-lg transition-[color,background-color] duration-(--transition-fast) cursor-pointer',
+    'after:absolute after:-inset-0.5 after:rounded-lg',
+    expanded ? 'w-full gap-2.5 px-2.5' : 'w-9 justify-center',
+    isActive
+      ? 'bg-muted text-foreground before:absolute before:left-0 before:top-1/2 before:h-4 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-foreground'
+      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+  )
+}
+
 function NavButton({
   label,
-  icon: Icon,
+  icon,
   isActive,
   expanded,
   onClick,
@@ -60,36 +78,33 @@ function NavButton({
   expanded: boolean
   onClick: () => void
 }) {
-  const buttonClasses = cn(
-    'flex h-9 items-center rounded-lg transition-all duration-150 cursor-pointer',
-    expanded ? 'w-full gap-2.5 px-2.5' : 'w-9 justify-center',
-    isActive
-      ? 'bg-accent/60 text-foreground'
-      : 'text-muted-foreground hover:text-foreground hover:bg-accent/20',
-  )
-
   const content = (
     <>
-      <Icon className="size-4 shrink-0" strokeWidth={1.75} />
+      <Icon icon={icon} size="nav" />
       {expanded && (
         <span className="text-body-strong truncate">{label}</span>
       )}
     </>
   )
 
+  const shared = {
+    'aria-label': label,
+    'aria-current': isActive ? ('page' as const) : undefined,
+    onClick,
+    className: navItemClasses(expanded, isActive),
+  }
+
   if (expanded) {
     return (
-      <div role="button" tabIndex={0} onClick={onClick} onKeyDown={(e) => e.key === 'Enter' && onClick()} className={buttonClasses}>
+      <button type="button" {...shared}>
         {content}
-      </div>
+      </button>
     )
   }
 
   return (
     <Tooltip>
-      <TooltipTrigger onClick={onClick} className={buttonClasses}>
-        {content}
-      </TooltipTrigger>
+      <TooltipTrigger {...shared}>{content}</TooltipTrigger>
       <TooltipContent side="right">{label}</TooltipContent>
     </Tooltip>
   )
@@ -124,56 +139,51 @@ function SortableNavItem({
   const label = NAV_LABELS[id]
   if (!icon || !label) return null
 
-  const buttonClasses = cn(
-    'flex h-9 items-center rounded-lg transition-all duration-150 cursor-pointer touch-none',
-    expanded ? 'w-full gap-2.5 px-2.5' : 'w-9 justify-center',
-    isActive
-      ? 'bg-accent/60 text-foreground'
-      : 'text-muted-foreground hover:text-foreground hover:bg-accent/20',
-    isDragging && 'opacity-60 shadow-md z-10',
-  )
-
-  const Icon = icon
+  // dnd-kit's keyboard sensor claims Enter/Space to start a drag and
+  // preventDefaults them, which silently killed keyboard navigation on the
+  // rail (measured in the harness: Enter on a focused item never changed
+  // the page). Reordering now starts on ⌥Enter / ⌥Space; plain Enter and
+  // Space reach the button and navigate.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.altKey) listeners?.onKeyDown?.(e)
+  }
 
   const content = (
     <>
-      <Icon className="size-4 shrink-0" strokeWidth={1.75} />
+      <Icon icon={icon} size="nav" />
       {expanded && (
         <span className="text-body-strong truncate">{label}</span>
       )}
     </>
   )
 
+  const shared = {
+    ref: setNodeRef,
+    style,
+    ...attributes,
+    ...listeners,
+    onKeyDown,
+    'aria-label': label,
+    'aria-current': isActive ? ('page' as const) : undefined,
+    onClick,
+    className: cn(
+      navItemClasses(expanded, isActive),
+      'touch-none',
+      isDragging && 'opacity-60 shadow-md z-10',
+    ),
+  }
+
   if (expanded) {
     return (
-      <div
-        ref={setNodeRef}
-        style={style}
-        {...attributes}
-        {...listeners}
-        role="button"
-        tabIndex={0}
-        onClick={onClick}
-        onKeyDown={(e) => e.key === 'Enter' && onClick()}
-        className={buttonClasses}
-      >
+      <button type="button" {...shared}>
         {content}
-      </div>
+      </button>
     )
   }
 
   return (
     <Tooltip>
-      <TooltipTrigger
-        ref={setNodeRef}
-        style={style}
-        {...attributes}
-        {...listeners}
-        onClick={onClick}
-        className={buttonClasses}
-      >
-        {content}
-      </TooltipTrigger>
+      <TooltipTrigger {...shared}>{content}</TooltipTrigger>
       <TooltipContent side="right">{label}</TooltipContent>
     </Tooltip>
   )
@@ -299,7 +309,17 @@ export function NavSidebar() {
       )}
 
       {/* Sortable nav items */}
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+        accessibility={{
+          screenReaderInstructions: {
+            draggable:
+              'To reorder a page, press Option and Enter, move it with the arrow keys, then press Enter to drop or Escape to cancel.',
+          },
+        }}
+      >
         <SortableContext items={navOrder} strategy={verticalListSortingStrategy}>
           <div className={cn('flex flex-1 flex-col gap-1', expanded ? 'px-2' : 'items-center')}>
             {navOrder.map((id) => (
