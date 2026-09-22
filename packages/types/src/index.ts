@@ -9,6 +9,7 @@
 // The one cross-client data-access contract. Lives in its own module so the
 // domain types below stay importable without pulling in the interface.
 export type { DataProvider } from './data-provider'
+export type * from './focus'
 
 // ── Settings ──
 
@@ -96,6 +97,7 @@ export interface Project {
 export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'blocked' | 'complete'
 
 export interface LocalTask {
+  sync_policy: 'default' | 'local_only'
   reminder_offset_minutes: number | null
   google_calendar_enabled: boolean
   id: string

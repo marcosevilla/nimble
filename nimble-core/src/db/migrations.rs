@@ -529,9 +529,111 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             )
         ",
     },
+    Migration {
+        version: 21,
+        description: "Focus queue, timing ledger, import provenance and local task sync policy",
+        sql: r#"
+            ALTER TABLE local_tasks ADD COLUMN sync_policy TEXT NOT NULL DEFAULT 'default' CHECK(sync_policy IN ('default', 'local_only'));
+            CREATE TABLE focus_queue_state (
+                id INTEGER PRIMARY KEY CHECK(id = 1), queue_id TEXT NOT NULL,
+                writer_device_id TEXT NOT NULL, owner_epoch TEXT NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+                entries_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(entries_json) AND json_type(entries_json) = 'array'),
+                selected_occurrence_id TEXT, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE focus_occurrences (
+                id TEXT PRIMARY KEY, task_id TEXT REFERENCES local_tasks(id) ON DELETE SET NULL,
+                original_task_id TEXT NOT NULL, title_snapshot TEXT NOT NULL,
+                project_snapshot TEXT, scheduling_identity TEXT,
+                generation INTEGER NOT NULL CHECK(generation >= 1),
+                state TEXT NOT NULL CHECK(state IN ('open','completed','removed')),
+                created_at TEXT NOT NULL, completed_at TEXT, completion_reason TEXT,
+                archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1))
+            );
+            CREATE UNIQUE INDEX focus_one_occurrence_generation ON focus_occurrences(original_task_id, generation);
+            CREATE INDEX focus_occurrences_task ON focus_occurrences(task_id);
+            CREATE TABLE focus_sessions (
+                id TEXT PRIMARY KEY, occurrence_id TEXT NOT NULL REFERENCES focus_occurrences(id),
+                owner_device_id TEXT NOT NULL, owner_epoch TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('paused','running','ended')),
+                mode TEXT NOT NULL CHECK(mode IN ('count_up','timebox','pomodoro')),
+                config_json TEXT NOT NULL CHECK(json_valid(config_json)),
+                work_ms INTEGER NOT NULL DEFAULT 0 CHECK(work_ms >= 0),
+                break_ms INTEGER NOT NULL DEFAULT 0 CHECK(break_ms >= 0),
+                round_work_ms INTEGER NOT NULL DEFAULT 0 CHECK(round_work_ms >= 0),
+                round INTEGER NOT NULL DEFAULT 1 CHECK(round >= 1),
+                started_at TEXT, checkpoint_at TEXT, ended_at TEXT,
+                session_revision INTEGER NOT NULL DEFAULT 0 CHECK(session_revision >= 0),
+                end_reason TEXT
+            );
+            CREATE INDEX focus_sessions_occurrence ON focus_sessions(occurrence_id);
+            CREATE TABLE focus_segments (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES focus_sessions(id),
+                kind TEXT NOT NULL CHECK(kind IN ('work','break')),
+                started_at TEXT NOT NULL, checkpoint_at TEXT NOT NULL,
+                duration_ms INTEGER NOT NULL DEFAULT 0 CHECK(duration_ms >= 0),
+                closed_at TEXT, close_reason TEXT
+            );
+            CREATE UNIQUE INDEX focus_one_open_segment ON focus_segments((1)) WHERE closed_at IS NULL;
+            CREATE TABLE focus_runtime (
+                id INTEGER PRIMARY KEY CHECK(id = 1), live_session_id TEXT REFERENCES focus_sessions(id),
+                owner_epoch TEXT NOT NULL, process_generation INTEGER NOT NULL DEFAULT 0 CHECK(process_generation >= 0),
+                engine_revision INTEGER NOT NULL DEFAULT 0 CHECK(engine_revision >= 0),
+                heartbeat_sequence INTEGER NOT NULL DEFAULT 0 CHECK(heartbeat_sequence >= 0),
+                checkpoint_at TEXT, sound_token TEXT, boundary_token TEXT,
+                recovery_reason TEXT
+            );
+            CREATE TABLE focus_import_batches (
+                id TEXT PRIMARY KEY, source_namespace TEXT NOT NULL, schema_version TEXT,
+                file_hashes_json TEXT NOT NULL CHECK(json_valid(file_hashes_json)),
+                preview_hash TEXT NOT NULL, mappings_json TEXT NOT NULL CHECK(json_valid(mappings_json)),
+                created_at TEXT NOT NULL, committed_at TEXT,
+                UNIQUE(source_namespace, preview_hash)
+            );
+            CREATE TABLE focus_import_records (
+                id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES focus_import_batches(id),
+                source_namespace TEXT NOT NULL, record_key TEXT NOT NULL,
+                fingerprint TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('included','excluded','unresolved','quarantined')),
+                mapping_json TEXT, decision_json TEXT, raw_evidence_json TEXT
+            );
+            CREATE UNIQUE INDEX focus_import_record_key ON focus_import_records(source_namespace, record_key);
+            CREATE TABLE focus_import_totals (
+                id TEXT PRIMARY KEY, source_namespace TEXT NOT NULL, record_key TEXT NOT NULL,
+                occurrence_id TEXT REFERENCES focus_occurrences(id), unresolved_task_id TEXT,
+                duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0), completed_at TEXT,
+                source_kind TEXT NOT NULL, batch_id TEXT NOT NULL REFERENCES focus_import_batches(id),
+                inclusion TEXT NOT NULL CHECK(inclusion IN ('included','excluded','unresolved')),
+                UNIQUE(source_namespace, record_key)
+            );
+            CREATE TABLE focus_command_receipts (
+                command_id TEXT PRIMARY KEY, request_hash TEXT NOT NULL,
+                result_json TEXT NOT NULL CHECK(json_valid(result_json)),
+                committed_revision INTEGER NOT NULL CHECK(committed_revision >= 0),
+                affected_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(affected_ids_json)),
+                committed_at TEXT NOT NULL
+            );
+            CREATE TABLE focus_delivery (
+                id TEXT PRIMARY KEY, occurrence_id TEXT NOT NULL REFERENCES focus_occurrences(id),
+                purpose TEXT NOT NULL, native_task_id TEXT, external_id TEXT,
+                payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), idempotency_key TEXT,
+                state TEXT NOT NULL CHECK(state IN ('pending','retry','sent','error','cancelled')),
+                attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0), next_attempt_at TEXT,
+                last_error TEXT, remote_receipt TEXT, created_at TEXT NOT NULL,
+                UNIQUE(occurrence_id, purpose)
+            );
+            CREATE TABLE focus_undo (
+                token TEXT PRIMARY KEY, original_task_id TEXT NOT NULL,
+                task_snapshot_json TEXT NOT NULL CHECK(json_valid(task_snapshot_json)),
+                queue_entry_json TEXT, previous_entry_id TEXT, next_entry_id TEXT,
+                occurrence_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(occurrence_ids_json)),
+                issued_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+                consumed INTEGER NOT NULL DEFAULT 0 CHECK(consumed IN (0,1))
+            )
+        "#,
+    },
 ];
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 20;
+pub const CURRENT_SCHEMA_VERSION: i64 = 21;
 
 pub async fn current_schema_version(pool: &SqlitePool) -> crate::Result<i64> {
     let version = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM schema_version")

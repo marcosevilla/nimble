@@ -1,5 +1,7 @@
 use sqlx::SqlitePool;
 
+pub mod schema;
+
 use crate::db::activity;
 use crate::db::sync;
 use crate::types::FocusState;

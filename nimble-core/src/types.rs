@@ -34,6 +34,8 @@ pub struct Project {
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct LocalTask {
+    #[serde(default = "default_sync_policy")]
+    pub sync_policy: String,
     pub id: String,
     pub parent_id: Option<String>,
     pub content: String,
@@ -68,6 +70,7 @@ pub struct LocalTask {
 /// fields without touching every caller.
 #[derive(Debug, Default, Deserialize)]
 pub struct CreateTaskInput {
+    pub sync_policy: Option<String>,
     pub content: String,
     pub project_id: Option<String>,
     pub parent_id: Option<String>,
@@ -87,6 +90,7 @@ pub struct CreateTaskInput {
 /// fields without touching every caller.
 #[derive(Debug, Default, Deserialize)]
 pub struct UpdateTaskInput {
+    pub sync_policy: Option<String>,
     pub content: Option<String>,
     pub description: Option<String>,
     pub project_id: Option<String>,
@@ -107,6 +111,8 @@ pub struct UpdateTaskInput {
     pub google_calendar_enabled: Option<bool>,
     pub clear_reminder: bool,
 }
+
+pub fn default_sync_policy() -> String { "default".into() }
 
 // ── Labels ──
 

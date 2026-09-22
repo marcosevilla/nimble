@@ -80,6 +80,8 @@ function buildTaskQuery(opts: ListTasksOptions): { sql: string; args: TursoArg[]
 /** Decode one `local_tasks` row. `labels` is filled in by the caller. */
 function toTask(row: Row, labels: string[]): LocalTask {
   return {
+    // Task 4 adds the remote v21 column/upgrade before focus replicas are enabled.
+    sync_policy: 'default',
     reminder_offset_minutes: numOrNull(row, 'reminder_offset_minutes'),
     google_calendar_enabled: bool(row, 'google_calendar_enabled'),
     id: str(row, 'id'),
@@ -212,6 +214,7 @@ export async function createTask(opts: CreateTaskOptions): Promise<LocalTask> {
 
   const now = rowTimestampUtc()
   const task: LocalTask = {
+    sync_policy: 'default',
     reminder_offset_minutes: null,
     google_calendar_enabled: false,
     id: newId(),

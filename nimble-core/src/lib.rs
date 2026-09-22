@@ -1,4 +1,5 @@
 pub mod agent_protocol;
+pub mod focus_types;
 pub mod reminders;
 pub mod api;
 pub mod db;

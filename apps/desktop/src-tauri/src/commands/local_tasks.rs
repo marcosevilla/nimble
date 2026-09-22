@@ -52,6 +52,7 @@ pub async fn create_local_task(
     nimble_core::db::tasks::create_local_task(
         pool.inner(),
         nimble_core::types::CreateTaskInput {
+            sync_policy: None,
             content,
             project_id,
             parent_id,
@@ -101,6 +102,7 @@ pub async fn update_local_task(
         pool.inner(),
         &id,
         nimble_core::types::UpdateTaskInput {
+            sync_policy: None,
             content,
             description,
             project_id,

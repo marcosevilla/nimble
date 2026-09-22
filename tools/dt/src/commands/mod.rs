@@ -181,6 +181,7 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
                     db::tasks::create_local_task(
                         pool,
                         CreateTaskInput {
+                            sync_policy: None,
                             content,
                             parent_id: parent,
                             project_id: f.project,

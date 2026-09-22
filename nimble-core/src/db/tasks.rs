@@ -45,6 +45,7 @@ fn validate_reminder(offset: Option<i64>, google_enabled: bool, due_date: Option
 impl FromRow<'_, SqliteRow> for LocalTask {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
         Ok(LocalTask {
+            sync_policy: row.try_get("sync_policy")?,
             id: row.try_get("id")?,
             parent_id: row.try_get("parent_id")?,
             content: row.try_get("content")?,
@@ -74,7 +75,7 @@ impl FromRow<'_, SqliteRow> for LocalTask {
     }
 }
 
-pub(crate) const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, reminder_offset_minutes, google_calendar_enabled, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot";
+pub(crate) const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, reminder_offset_minutes, google_calendar_enabled, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot, sync_policy";
 
 /// Snapshot a task row and append its sync_log entry, warning on failure —
 /// sync_log IS the retry mechanism, so a silently swallowed append can leave
@@ -210,6 +211,7 @@ pub async fn get_local_tasks(
 
 pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> crate::Result<LocalTask> {
     let CreateTaskInput {
+        sync_policy,
         content,
         project_id,
         parent_id,
@@ -237,6 +239,10 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
     let id = Uuid::new_v4().to_string();
     let project_id = project_id.unwrap_or("inbox");
     let priority = priority.unwrap_or(1);
+    let sync_policy = sync_policy.as_deref().unwrap_or("default");
+    if !matches!(sync_policy, "default" | "local_only") {
+        return Err(crate::Error::Other("invalid task sync policy".into()));
+    }
 
     // No FK on local_tasks.section_id — validate app-side that the section
     // actually belongs to this task's project before writing it.
@@ -264,8 +270,8 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
     };
 
     sqlx::query(
-        "INSERT INTO local_tasks (id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, reminder_offset_minutes, google_calendar_enabled, position)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO local_tasks (id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, reminder_offset_minutes, google_calendar_enabled, position, sync_policy)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(parent_id)
@@ -281,6 +287,7 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
     .bind(reminder_offset_minutes)
     .bind(google_calendar_enabled.unwrap_or(false))
     .bind(max_pos + 1)
+    .bind(sync_policy)
     .execute(pool)
     .await?;
 
@@ -331,6 +338,7 @@ pub async fn update_local_task(
     input: UpdateTaskInput,
 ) -> crate::Result<LocalTask> {
     let UpdateTaskInput {
+        sync_policy,
         content,
         description,
         project_id,
@@ -375,6 +383,12 @@ pub async fn update_local_task(
         && next.section_id.is_some();
     if let Some(value) = content {
         next.content = value.to_owned();
+    }
+    if let Some(value) = sync_policy.as_deref() {
+        if !matches!(value, "default" | "local_only") {
+            return Err(crate::Error::Other("invalid task sync policy".into()));
+        }
+        next.sync_policy = value.to_owned();
     }
     if let Some(value) = description {
         next.description = Some(value.to_owned());
@@ -453,11 +467,11 @@ pub async fn update_local_task(
         next.due_date.as_deref(),
         next.due_time.as_deref(),
     )?;
-    sqlx::query("UPDATE local_tasks SET content=?,description=?,project_id=?,priority=?,due_date=?,due_time=?,duration_minutes=?,recurrence_rule=?,section_id=?,linked_doc_id=?,reminder_offset_minutes=?,google_calendar_enabled=?,updated_at=datetime('now') WHERE id=?")
+    sqlx::query("UPDATE local_tasks SET content=?,description=?,project_id=?,priority=?,due_date=?,due_time=?,duration_minutes=?,recurrence_rule=?,section_id=?,linked_doc_id=?,reminder_offset_minutes=?,google_calendar_enabled=?,sync_policy=?,updated_at=datetime('now') WHERE id=?")
         .bind(&next.content).bind(&next.description).bind(&next.project_id).bind(next.priority)
         .bind(&next.due_date).bind(&next.due_time).bind(next.duration_minutes)
         .bind(&next.recurrence_rule).bind(&next.section_id).bind(&next.linked_doc_id)
-        .bind(next.reminder_offset_minutes).bind(next.google_calendar_enabled).bind(id)
+        .bind(next.reminder_offset_minutes).bind(next.google_calendar_enabled).bind(&next.sync_policy).bind(id)
         .execute(&mut *tx).await?;
     let mut task: LocalTask = sqlx::query_as(&format!(
         "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
@@ -469,6 +483,9 @@ pub async fn update_local_task(
 
     // Log activity with changed fields
     let mut fields_changed = Vec::new();
+    if sync_policy.is_some() {
+        fields_changed.push("sync_policy");
+    }
     if content.is_some() {
         fields_changed.push("content");
     }
