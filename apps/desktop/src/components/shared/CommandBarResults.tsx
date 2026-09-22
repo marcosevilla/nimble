@@ -205,7 +205,7 @@ export function CommandBarResults({
                   key={doc.id}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                    selectedIndex === idx ? 'bg-hover' : 'hover:bg-hover',
+                    selectedIndex === idx && 'bg-hover',
                   )}
                   onMouseEnter={() => onSelect(idx)}
                   onClick={() => onOpenDoc(doc.id)}
@@ -234,7 +234,7 @@ export function CommandBarResults({
                   key={capture.id}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                    selectedIndex === idx ? 'bg-hover' : 'hover:bg-hover',
+                    selectedIndex === idx && 'bg-hover',
                   )}
                   onMouseEnter={() => onSelect(idx)}
                   onClick={() => onOpenCapture(capture.id)}
@@ -258,7 +258,7 @@ export function CommandBarResults({
             <button
               className={cn(
                 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                selectedIndex === createIndex ? 'bg-hover' : 'hover:bg-hover',
+                selectedIndex === createIndex && 'bg-hover',
               )}
               onMouseEnter={() => onSelect(createIndex)}
               onClick={onCreateTask}
@@ -275,7 +275,7 @@ export function CommandBarResults({
             <button
               className={cn(
                 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                selectedIndex === captureIndex ? 'bg-hover' : 'hover:bg-hover',
+                selectedIndex === captureIndex && 'bg-hover',
               )}
               onMouseEnter={() => onSelect(captureIndex)}
               onClick={onCapture}
@@ -316,7 +316,7 @@ function TaskResultRow({
     <div
       className={cn(
         'group/result relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors',
-        isSelected ? 'bg-hover' : 'hover:bg-hover',
+        isSelected && 'bg-hover',
       )}
       onMouseEnter={onSelect}
     >
