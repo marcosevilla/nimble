@@ -4,11 +4,11 @@ Updated 2026-09-21 from the current checkout and committed planning documents.
 
 ## Start here
 
-- Release packaging complete: optimized app and `dt` compiled, Marco approved signing, and `codesign --verify --deep --strict` passed with identity `Marco Task App Dev`. The signed update is ready for installation; production installation has not occurred.
+- [x] Installed signed C2/C3 update into `/Applications/Nimble.app` and `dt` into `~/.local/bin/dt` on 2026-09-21. App reopened, schema20 integrity passed, and all preexisting task/project/label/section/capture fields are unchanged. New local and private online backup succeeded; isolated restore verification passed. Rollback: `~/Library/Application Support/Nimble Rollbacks/20260921-210436-c23`. Google connection and workflow routing remain unactivated; code remains on the feature branch pending integration.
 
-- C2/C3 implementation is built in `codex/c2-c3-reminders-agents`; native synthetic CLI refresh, reminder submission, restart catch-up and backup/restore checks passed. All 320 Rust tests, desktop/web builds and final review passed. Production app and real Google connection remain unchanged. See [combined verification](docs/c2-c3-verification.md).
+- C2/C3 implementation is built in `codex/c2-c3-reminders-agents`; native synthetic CLI refresh, reminder submission, restart catch-up and backup/restore checks passed. All 320 Rust tests, desktop/web builds and final review passed. Production app is updated; real Google connection remains unconfigured. See [combined verification](docs/c2-c3-verification.md).
 
-- [x] Review the [coordinated C2/C3 implementation plan](docs/superpowers/plans/2026-09-21-c2-c3-coordination.md): reminders and local assistant access will develop concurrently with separate subagents and one owner for shared database, backup, and app integration. Plan approved and implementation built 2026-09-21 in `codex/c2-c3-reminders-agents`; integration/installation and live activation remain below.
+- [x] Review the [coordinated C2/C3 implementation plan](docs/superpowers/plans/2026-09-21-c2-c3-coordination.md): reminders and local assistant access will develop concurrently with separate subagents and one owner for shared database, backup, and app integration. Plan approved and implementation built 2026-09-21 in `codex/c2-c3-reminders-agents`; branch integration and remaining live activation are listed below.
 
 - [x] Install signed release from `codex/c1-backup-restore` (`e196d1c`) into `/Applications/Nimble.app`; reopened successfully, existing task/project counts preserved, first local backup succeeded.
 - [x] Fast-forward the tested feature branch into main; reran the full Rust suite: 279 passed.
@@ -22,8 +22,8 @@ Updated 2026-09-21 from the current checkout and committed planning documents.
 ## Code track — agreed order
 
 - [x] **C1: Safety net activation.** Implemented, tested, installed, merged into main, and first private online backup acknowledged.
-- [ ] **C2: Reminders activation.** Code implemented: desktop reminders, persistent catch-up, dedicated-calendar OAuth and two-way reconciliation, schema20 label-group storage. Tests/review pass. Remaining: production installation, Google client setup/consent and physical-phone alert/two-way test; independently observe a Mac banner.
-- [ ] **C3: Agent access activation.** CLI, JSON commands, private app socket and workflow proposals implemented; native open-task refresh verified. Remaining: install `dt`, approve/activate actual assistant routing, and verify live web propagation. Todoist remains the fallback, without duplicate writes after uncertain results.
+- [ ] **C2: Reminders activation.** Code implemented: desktop reminders, persistent catch-up, dedicated-calendar OAuth and two-way reconciliation, schema20 label-group storage. Tests/review pass. Installed and verified. Remaining: Google client setup/consent and physical-phone alert/two-way test; independently observe a Mac banner.
+- [ ] **C3: Agent access activation.** CLI, JSON commands, private app socket and workflow proposals implemented; native open-task refresh verified. `dt` is installed on PATH and backup RPC is verified. Remaining: approve/activate actual assistant routing, and verify live web propagation. Todoist remains the fallback, without duplicate writes after uncertain results.
 - [ ] **C4: Labels and search.** Restore ENERGY / TIME / TYPE / CREATIVE grouping; indexed task-title and description search including completed tasks.
 - [ ] **C5: Import and cutover.** Preserve first-class task fields; import active tasks plus the last 12 months completed; archive full history; use Nimble for 2–4 weeks before deciding on cutover. Downgrade Todoist to free only when ready.
 

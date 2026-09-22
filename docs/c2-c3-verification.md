@@ -39,8 +39,10 @@ Combined review identified Calendar URL assembly, expired-token reconnect, calen
 - [ ] Independently observe native OS banner presentation.
 - [ ] Configure Google Desktop OAuth client, consent mode and real account connection.
 - [ ] Physical phone alarm and two-way event-edit acceptance.
-- [ ] Installed CLI / agent workflow routing activation and live web propagation acceptance.
-- [ ] Production app update and code integration, following review.
+- [x] Install CLI on PATH and verify its connection to the production app using backup RPC.
+- [ ] Agent workflow routing activation and live web propagation acceptance.
+- [x] Production app update, following review and user approval.
+- [ ] Integrate feature branch into main.
 
 Mocked transport success does not establish phone delivery. Mac reminders need Nimble running; missed occurrences appear on reopen. Already-published Google events can alert while the Mac app is closed, but new changes/current recurrence advancement need Nimble to sync.
 
@@ -55,3 +57,13 @@ Implementation choices: workers shared one isolated feature worktree with exclus
 Optimized app compilation passed and `dt` release binary built successfully. The release bundle has production identifier `com.marcosevilla.daily-triage` and no test `LSEnvironment`. Marco approved the macOS signing prompt, and packaging completed with identity `Marco Task App Dev` (signed 2026-09-21 20:53:39 PDT). `codesign --verify --deep --strict --verbose=2` passed outside the sandbox: valid on disk and satisfies its Designated Requirement. The sandbox-only verification initially reported `CSSMERR_TP_NOT_TRUSTED`; verification using macOS trust services outside the sandbox succeeded. This is the existing local developer identity; the bundle was not notarized.
 
 Completed build log: `/private/tmp/nimble-c23-release-build.log`. Signed app: `/Users/marcosevilla/Developer/marco-task-app/.worktrees/nimble-c1/target/release/bundle/macos/Nimble.app`. CLI artifact: `/Users/marcosevilla/Developer/marco-task-app/.worktrees/nimble-c1/target/release/dt`; release `--json --help` succeeds. No production install, code merge, live account setup or agent routing change occurred.
+
+## Production installation — 2026-09-21
+
+User approved installation. Saved the previous app, app data and WebKit cache under `~/Library/Application Support/Nimble Rollbacks/20260921-210436-c23` with private data permissions. Installed the verified signed bundle into `/Applications/Nimble.app` and the matching release CLI into `~/.local/bin/dt` (resolves on PATH).
+
+Reopened the app through native UI. Schema migrated from19 to20, `PRAGMA integrity_check` returned `ok`, and the installed executable hash matches the verified release. Counts and hashes over every preexisting column match before/after: 1,124 tasks,63 projects,25 labels,0 sections,150 captures. Settings visibly shows Reminders and Phone alerts; Mac notifications Enabled, timezone `America/Los_Angeles`, Google Not connected. No real task was created or edited for verification.
+
+Installed `dt --json backup now` succeeded through the production app socket: local backup at2026-09-22T04:05:15Z, private online backup acknowledged at04:05:23Z, export commit `674b4a0a4e85a2518393645bfe9e519709a86196`. `dt --json backup verify` returned `verified:true` using isolated recovery. One pending Turso entry was reported at backup time; live web propagation is not claimed.
+
+Phone-alert account setup, physical phone acceptance, independent Mac-banner observation, workflow routing activation and feature-branch integration remain open.
