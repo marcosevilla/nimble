@@ -217,7 +217,9 @@ async fn create_inner(
         local_date: at.date_naive().to_string(),
         local_iso_week: format!("{:04}-W{:02}", week.year(), week.week()),
         app_version: version.to_owned(),
-        schema_version: 19,
+        schema_version: serde_json::from_slice::<serde_json::Value>(&portable.format)
+            .map_err(|_| invalid("format"))?["schema_version"].as_i64()
+            .ok_or_else(|| invalid("format_version"))?,
         export_version: 1,
         snapshot_hash: storage::hash(&snapshot)?,
         data_hash: storage::hash(&staging.join("export/data.json"))?,
@@ -293,7 +295,7 @@ fn checked_manifest(directory: &Path) -> crate::Result<BackupManifest> {
     }
     let week = date.iso_week();
     if manifest.local_iso_week != format!("{:04}-W{:02}", week.year(), week.week())
-        || manifest.schema_version != 19
+        || !matches!(manifest.schema_version, 19 | 20)
         || manifest.export_version != 1
     {
         return Err(invalid("manifest_version"));

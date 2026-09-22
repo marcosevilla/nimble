@@ -358,6 +358,8 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             duration_minutes INTEGER,
             recurrence_rule TEXT,
             section_id TEXT,
+            reminder_offset_minutes INTEGER,
+            google_calendar_enabled INTEGER NOT NULL DEFAULT 0,
             completed INTEGER NOT NULL DEFAULT 0,
             completed_at TEXT,
             status TEXT NOT NULL DEFAULT 'todo',
@@ -725,6 +727,23 @@ async fn ensure_remote_v19_schema(
     Ok(())
 }
 
+async fn ensure_remote_v20_schema(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'turso_schema_v20_upgraded'")
+        .fetch_optional(pool).await?;
+    if done.is_some() { return Ok(()); }
+    let requests = [
+        "ALTER TABLE local_tasks ADD COLUMN reminder_offset_minutes INTEGER",
+        "ALTER TABLE local_tasks ADD COLUMN google_calendar_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE labels ADD COLUMN \"group\" TEXT",
+    ].iter().map(|sql| turso_execute(sql, vec![]))
+        .chain(std::iter::once(serde_json::json!({"type":"close"}))).collect();
+    let body = turso_pipeline(turso_url, turso_token, requests).await?;
+    check_pipeline_statement_errors(&body, "Turso v20 schema upgrade", true)?;
+    sqlx::query("INSERT INTO settings (key,value,updated_at) VALUES ('turso_schema_v20_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')")
+        .execute(pool).await?;
+    Ok(())
+}
+
 // ── Push ──
 
 /// Conflict target (primary-key columns) per synced table, for building the
@@ -754,7 +773,7 @@ fn build_snapshot_upsert_sql(table_name: &str, columns: &[&str]) -> String {
     let set_clauses: Vec<String> = columns
         .iter()
         .filter(|c| !pk_cols.contains(c))
-        .map(|c| format!("{c} = excluded.{c}"))
+        .map(|c| { let name = if *c == "group" { "\"group\"" } else { c }; format!("{name} = excluded.{name}") })
         .collect();
     let action = if set_clauses.is_empty() {
         "DO NOTHING".to_string()
@@ -764,7 +783,7 @@ fn build_snapshot_upsert_sql(table_name: &str, columns: &[&str]) -> String {
     format!(
         "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT({}) {}",
         table_name,
-        columns.join(", "),
+        columns.iter().map(|c| if *c == "group" { "\"group\"" } else { c }).collect::<Vec<_>>().join(", "),
         placeholders.join(", "),
         target,
         action
@@ -1135,6 +1154,9 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     // may not exist on a remote initialized earlier.
     if let Err(e) = ensure_remote_v19_schema(pool, turso_url, turso_token).await {
         log::warn!("Turso v19 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
+    if let Err(e) = ensure_remote_v20_schema(pool, turso_url, turso_token).await {
+        log::warn!("Turso v20 schema gate failed, pushing anyway (gate retries next push): {e}");
     }
 
     // Fetch all unsynced entries
@@ -2208,6 +2230,22 @@ mod snapshot_apply_tests {
         // Only PK columns in the snapshot → DO NOTHING, not a syntax error.
         let sql = super::build_snapshot_upsert_sql("task_labels", &["task_id", "label_id"]);
         assert!(sql.contains("ON CONFLICT(task_id, label_id) DO NOTHING"), "got {sql}");
+    }
+
+    #[tokio::test]
+    async fn v19_snapshot_does_not_clear_v20_intent() {
+        let pool = crate::test_util::test_pool().await;
+        let task = crate::db::tasks::create_local_task(&pool, crate::types::CreateTaskInput {
+            content: "Reminder".into(), due_date: Some("2026-09-22".into()),
+            due_time: Some("09:00".into()), reminder_offset_minutes: Some(15),
+            google_calendar_enabled: Some(true), ..Default::default()
+        }).await.unwrap();
+        let old_snapshot = serde_json::json!({"id":task.id,"content":"Old peer edit","project_id":"inbox"}).to_string();
+        super::apply_remote_change(&pool, "local_tasks", &task.id, "UPDATE", Some(&old_snapshot)).await.unwrap();
+        let updated: crate::types::LocalTask = sqlx::query_as(&format!("SELECT {} FROM local_tasks WHERE id=?", crate::db::tasks::SELECT_COLS))
+            .bind(&task.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(updated.reminder_offset_minutes, Some(15));
+        assert!(updated.google_calendar_enabled);
     }
 }
 

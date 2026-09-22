@@ -1,0 +1,11 @@
+# C2/C3 shared foundation report
+
+Schema 20 is the single reviewed migration. It adds task reminder offset and Google publishing intent, nullable label group, and four device-local delivery/calendar tables. The dormant mobile migration mirror has the same SQL. New intent fields ride in task/label snapshots and portable exports; delivery/calendar state is explicitly excluded from portable data and Turso sync. Full private snapshots retain the local tables.
+
+Interfaces: `migrations::CURRENT_SCHEMA_VERSION = 20`, `current_schema_version(pool) -> Result<i64>`, `run_migrations_to_version(pool, target) -> Result<()>` (only 19 or 20). `CreateTaskInput` and `UpdateTaskInput` add `reminder_offset_minutes: Option<i64>` and `google_calendar_enabled: Option<bool>`; updates also add `clear_reminder: bool`. `LocalTask` adds offset and bool. `labels::set_label_group(pool,id,group)` returns Label. `tasks::update_local_task_if_unchanged(pool,id,expected:&LocalTask,input)` returns `Option<LocalTask>`; `None` signals stale/missing row, and the comparison plus mutation run under SQLite's IMMEDIATE write lock. This helper accepts calendar-editable fields only and preserves sync/outbox observations.
+
+A synthetic v19 SQL fixture was copied before migration edits (SHA-256 bd942a89c96131fa727a255b1b9c742c72485dff073d9b6f9997fcd319c8e068). Historical v19 snapshot and portable routes restore into isolated v19 DBs without upgrading or altering source archives. v20 export policy remains fail-closed for unknown schema, table, or column.
+
+Verification: `cargo test -p nimble-core --offline --target-dir ../nimble-c1/target --test backup_export --test backup_snapshot --test backup_recovery` passed 6+12+5 tests; `--test schema20_compatibility` passed 4 tests; `v19_snapshot_does_not_clear_v20_intent` passed. `cargo test -p app --lib ... backup_runner` passed 7 tests, and full app lib passed 26. One full core suite run had only the known sandbox-sensitive vault watcher failure; the initial sync SQL assertion was repaired and focused rerun passed. Untouched main desktop backup runner had intermittent `backup_snapshot_failed` under the concurrently shared build target; this worktree's full desktop lib now passes. Use a distinct build target per worktree if that failure recurs.
+
+No production database or live integration was accessed.

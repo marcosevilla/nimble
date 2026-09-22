@@ -1,5 +1,6 @@
 //! Reviewed SQLite v19 portable-export policy. Changing the schema requires a policy review.
 
+#[derive(Clone, Copy)]
 pub(crate) struct TablePolicy {
     pub name: &'static str,
     pub columns: &'static [&'static str],
@@ -48,6 +49,29 @@ pub(crate) const TABLES: &[TablePolicy] = &[
     table!("vault_notes"; ["id","path","title","content","frontmatter_json","mtime","size","hash","updated_at","deleted_at"]; ["id","path","title","content","frontmatter_json","mtime","size","hash","updated_at","deleted_at"]),
     table!("vault_tags"; ["id","note_id","tag","created_at"]; ["id","note_id","tag","created_at"]),
 ];
+
+/// V19 remains byte-for-byte compatible. V20 adds only reviewed user intent
+/// to portable data; device-local calendar and delivery state is excluded.
+pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
+    if version == 19 { return Some(TABLES.to_vec()); }
+    if version != 20 { return None; }
+    let mut tables = TABLES.to_vec();
+    for policy in &mut tables {
+        match policy.name {
+            "labels" => *policy = table!("labels"; ["id","name","color","position","created_at","group"]; ["id","name","color","position","created_at","group"]),
+            "local_tasks" => *policy = table!("local_tasks"; ["id","parent_id","content","description","project_id","priority","due_date","completed","completed_at","position","created_at","updated_at","status","linked_doc_id","external_id","external_source","remote_updated_at","synced_snapshot","due_time","duration_minutes","recurrence_rule","section_id","reminder_offset_minutes","google_calendar_enabled"]; ["id","parent_id","content","description","project_id","priority","due_date","completed","completed_at","position","created_at","updated_at","status","linked_doc_id","external_id","external_source","due_time","duration_minutes","recurrence_rule","section_id","reminder_offset_minutes","google_calendar_enabled"]),
+            _ => {},
+        }
+    }
+    tables.extend([
+        table!("reminder_deliveries"; ["occurrence_key","task_id","scheduled_at","state","last_fired_at","acknowledged_at","error_code"]; []; ["occurrence_key"]),
+        table!("google_calendar_state"; ["id","calendar_id","timezone","sync_token","last_synced_at","retry_after","error_code"]; []; ["id"]),
+        table!("google_calendar_links"; ["task_id","event_id","etag","base_json","operation_id","desired_json","state","retry_after"]; []; ["task_id"]),
+        table!("google_calendar_conflicts"; ["task_id","reason","local_json","remote_json","created_at"]; []; ["task_id"]),
+    ]);
+    tables.sort_by_key(|policy| policy.name);
+    Some(tables)
+}
 
 pub(crate) const FTS_TABLES: &[(&str, &[&str])] = &[
     ("vault_fts", &["note_id", "title", "content"]),
