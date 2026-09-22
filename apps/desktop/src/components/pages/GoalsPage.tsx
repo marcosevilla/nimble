@@ -57,8 +57,19 @@ function GoalCard({
   return (
     <Card
       size="sm"
+      role="button"
+      tabIndex={0}
+      aria-label={`Open goal ${goal.name}`}
+      onKeyDown={(e) => {
+        // Only the card itself — never a key bubbling up from a control inside it.
+        // stopPropagation keeps Space away from the Dashboard's focus-pause key.
+        if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+        e.preventDefault()
+        e.stopPropagation()
+        if (!e.repeat) onClick()
+      }}
       className={cn(
-        'cursor-pointer transition-all duration-150 hover:ring-foreground/20 hover:shadow-sm',
+        'cursor-pointer transition-[box-shadow,opacity] duration-(--transition-fast) hover:ring-foreground/20 hover:shadow-sm',
         goal.status === 'achieved' && 'opacity-75',
       )}
       onClick={onClick}
@@ -100,10 +111,7 @@ function GoalCard({
             <div
               /* Neutral fill (goals P2-1): the area color is on the chip dot above;
                  the bar encodes progress, not category. */
-              className={cn(
-                'h-full rounded-full bg-foreground/70 transition-all duration-500',
-                goal.progress >= 100 && 'animate-pulse',
-              )}
+              className="h-full rounded-full bg-foreground/70 transition-[width] duration-(--transition-base) ease-(--ease-entrance)"
               style={{ width: `${Math.min(goal.progress, 100)}%` }}
             />
           </div>

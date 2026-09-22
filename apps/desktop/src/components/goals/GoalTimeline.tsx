@@ -1,5 +1,6 @@
 import { useRef, useEffect, useMemo, useCallback } from 'react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
 import type { GoalWithProgress, LifeArea } from '@nimble/types'
 
 const DAY_WIDTH = 3
@@ -46,28 +47,42 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
     return map
   }, [lifeAreas])
 
-  // Auto-scroll to today on mount
-  useEffect(() => {
+  const scrollToToday = useCallback(() => {
     if (!scrollRef.current) return
     const todayOffset = getDayOfYear(new Date()) * DAY_WIDTH
     const containerWidth = scrollRef.current.clientWidth
     scrollRef.current.scrollLeft = Math.max(0, todayOffset - containerWidth / 2)
   }, [])
 
+  // Auto-scroll to today on mount
+  useEffect(() => { scrollToToday() }, [scrollToToday])
+
   const todayX = getDayOfYear(new Date()) * DAY_WIDTH
 
-  // Keyboard navigation
+  // ← → pan; T snaps back to today while the region has focus (goals P2-5).
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // Arrow navigation could be added here
+    // Space on a goal row is that button's click; keep it from the
+    // Dashboard's window-level Space (pause a focus session).
+    if (e.key === ' ' && e.target !== e.currentTarget) { e.stopPropagation(); return }
     if (e.key === 'ArrowLeft' && scrollRef.current) {
+      e.preventDefault()
       scrollRef.current.scrollLeft -= 100
     }
     if (e.key === 'ArrowRight' && scrollRef.current) {
+      e.preventDefault()
       scrollRef.current.scrollLeft += 100
     }
-  }, [])
+    if ((e.key === 't' || e.key === 'T') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault()
+      scrollToToday()
+    }
+  }, [scrollToToday])
 
-  if (goals.length === 0) {
+  // Filter to goals that have at least a start or target date
+  const timelineGoals = goals.filter((g) => g.start_date || g.target_date)
+
+  // Guard on the rows we actually draw, not the unfiltered list (goals P2-10).
+  if (timelineGoals.length === 0) {
     return (
       <div className="flex items-center justify-center py-16">
         <p className="text-body text-muted-foreground">
@@ -77,33 +92,35 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
     )
   }
 
-  // Filter to goals that have at least a start or target date
-  const timelineGoals = goals.filter((g) => g.start_date || g.target_date)
-
   return (
     <div
       className="flex rounded-lg border border-border/20 overflow-hidden bg-card"
       onKeyDown={handleKeyDown}
       tabIndex={0}
       role="region"
-      aria-label="Goals timeline"
+      aria-label="Goals timeline. Arrow keys pan, T jumps to today."
     >
       {/* Fixed left panel — goal names */}
       <div
         className="shrink-0 border-r border-border/20 bg-muted/20"
         style={{ width: LEFT_PANEL_WIDTH }}
       >
-        <div className="h-[52px] border-b border-border/20 px-3 flex items-end pb-2">
-          <span className="text-label text-muted-foreground">Goals</span>
+        <div className="h-[52px] border-b border-border/20 px-3 flex items-end justify-between pb-1.5">
+          <span className="text-label text-muted-foreground pb-1">Goals</span>
+          <Button variant="ghost" size="xs" onClick={scrollToToday} className="gap-1 text-muted-foreground">
+            Today
+            <kbd aria-hidden="true" className="rounded bg-muted/60 px-1 font-mono text-label text-muted-foreground">T</kbd>
+          </Button>
         </div>
         {timelineGoals.map((goal) => {
           const area = goal.life_area_id ? areaMap[goal.life_area_id] : null
           /* Identity dot: goal color, falling back to the life area's. */
           const dotColor = goal.color || area?.color
           return (
-            <div
+            <button
               key={goal.id}
-              className="flex items-center gap-2 px-3 border-b border-border/10 cursor-pointer hover:bg-hover transition-colors"
+              type="button"
+              className="flex w-full items-center gap-2 px-3 border-b border-border/10 text-left hover:bg-hover transition-colors duration-(--transition-fast)"
               style={{ height: ROW_HEIGHT }}
               onClick={() => onGoalClick(goal.id)}
             >
@@ -113,8 +130,8 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
                   style={{ backgroundColor: dotColor }}
                 />
               )}
-              <span className="text-meta truncate">{goal.name}</span>
-            </div>
+              <span className="min-w-0 truncate text-meta">{goal.name}</span>
+            </button>
           )
         })}
       </div>
@@ -188,9 +205,10 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
             return (
               <Tooltip key={goal.id}>
                 <TooltipTrigger
-                  className="absolute cursor-pointer group/bar"
+                  className="absolute flex cursor-pointer items-center group/bar"
                   style={{ left: x, top: y, width, height: BAR_HEIGHT }}
                   onClick={() => onGoalClick(goal.id)}
+                  aria-label={`Open goal ${goal.name}`}
                 >
                   {/* Neutral track + fill (goals P2-1): the area color lives on the
                       row's dot only. Fill stays at /20 rather than the card bars'
@@ -199,12 +217,13 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
                   <div className="absolute inset-0 rounded-xl bg-foreground/8 group-hover/bar:bg-foreground/12 transition-colors" />
                   {/* Progress fill */}
                   <div
-                    className="absolute inset-y-0 left-0 rounded-xl bg-foreground/20 transition-all duration-300"
+                    className="absolute inset-y-0 left-0 rounded-xl bg-foreground/20 transition-[width] duration-(--transition-base) ease-(--ease-entrance)"
                     style={{ width: progressWidth }}
                   />
                   {/* Bar label (show if wide enough) */}
+                  {/* Sticky so the label stays readable after the auto-scroll to today (P2-5) */}
                   {width > 60 && (
-                    <span className="absolute inset-0 flex items-center px-2 text-label text-foreground truncate">
+                    <span className="sticky left-2 z-10 max-w-full truncate px-2 text-label text-foreground">
                       {goal.name}
                     </span>
                   )}

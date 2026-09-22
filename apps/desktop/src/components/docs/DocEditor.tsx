@@ -6,6 +6,7 @@ import { DocNoteEntry } from './DocNoteEntry'
 import { VaultNoteEditor } from './VaultNoteEditor'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
 import type { DocNote } from '@nimble/types'
 
 let cachedFormat: 'html' | 'markdown' | null = null
@@ -27,6 +28,7 @@ export function DocEditor() {
   const currentVaultNote = useDocsStore((s) => s.currentVaultNote)
   const folders = useDocsStore((s) => s.folders)
   const refresh = useDocsStore((s) => s.refresh)
+  const createDocument = useDocsStore((s) => s.createDocument)
 
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState<DocNote[]>([])
@@ -101,10 +103,28 @@ export function DocEditor() {
     return <VaultNoteEditor />
   }
 
+  // Positive, actionable empty state (docs audit P2-6): the verb is
+  // "open", not "edit" — vault notes in the tree are read-only.
   if (!currentDoc) {
     return (
-      <div className="flex flex-1 items-center justify-center text-muted-foreground">
-        <p className="text-body">Select a document to start editing</p>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
+        <div className="space-y-1">
+          <p className="text-body-strong">Nothing open</p>
+          <p className="text-meta text-muted-foreground">Pick something from the tree, or start a new document.</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => {
+            createDocument(useDocsStore.getState().selectedFolderId ?? undefined)
+              .catch((e) => toast.error(`Couldn't create the document — ${e}`))
+          }}
+        >
+          <Plus className="size-3.5" />
+          New document
+          <kbd aria-hidden="true" className="rounded bg-muted/60 px-1 font-mono text-label text-muted-foreground">N</kbd>
+        </Button>
       </div>
     )
   }
@@ -183,12 +203,13 @@ export function DocEditor() {
           )}
 
           {!noteInputVisible && notes.length === 0 && (
-            <p
+            <button
+              type="button"
               onClick={() => setNoteInputVisible(true)}
-              className="text-body text-muted-foreground cursor-text hover:text-muted-foreground transition-colors"
+              className="block w-full rounded-md text-left text-body text-muted-foreground hover:text-foreground transition-colors duration-(--transition-fast)"
             >
-              Add a note...
-            </p>
+              Add a note…
+            </button>
           )}
         </div>
 

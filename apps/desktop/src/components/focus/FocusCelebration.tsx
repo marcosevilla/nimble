@@ -1,6 +1,8 @@
 import { useEffect, useCallback } from 'react'
 import { useFocusStore } from '@/stores/focusStore'
 import { playCompletionSound } from '@/lib/sound'
+import { shouldIgnoreKey } from '@/lib/keyGuard'
+import { toast } from 'sonner'
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
@@ -34,38 +36,60 @@ export function FocusCelebration() {
   const task = useFocusStore((s) => s.task)
   const nextTask = useFocusStore((s) => s.nextTask)
   const dismissCelebration = useFocusStore((s) => s.dismissCelebration)
+  const endCelebration = useFocusStore((s) => s.endCelebration)
 
   // Play sound on mount
   useEffect(() => {
     playCompletionSound()
   }, [])
 
-  // Auto-dismiss after 2.5 seconds
+  // Auto-dismiss after 2.5 seconds writes nothing: the session ends and the
+  // next task is only surfaced in a toast whose Start action is the first
+  // thing that touches the backend (session P1-2, §2.4; review I-1).
   useEffect(() => {
-    const timeout = setTimeout(dismissCelebration, 2500)
+    const timeout = setTimeout(() => {
+      const { nextTask: next, config, queue } = useFocusStore.getState()
+      endCelebration()
+      if (next) {
+        toast(`Up next: ${next.content}`, {
+          action: { label: 'Start', onClick: () => useFocusStore.getState().startFocus(next, config, queue) },
+        })
+      }
+    }, 2500)
     return () => clearTimeout(timeout)
-  }, [dismissCelebration])
+  }, [endCelebration])
 
-  // Click or keypress to dismiss early
-  const handleDismiss = useCallback(() => {
-    dismissCelebration()
-  }, [dismissCelebration])
+  // Escape and a stray click end the session; only Enter commits to the
+  // next task. The overlay owns these keys while it is up (capture phase,
+  // so the focused Complete button underneath can't fire twice), except in
+  // text entry or an open dialog. Space is swallowed, not mapped: it means
+  // "pause" everywhere else, so it must never start a 25-minute session.
+  // Held-key repeats are ignored — the Enter that completed the task must
+  // not auto-repeat into starting the next one.
+  const handleEnd = useCallback(() => { endCelebration() }, [endCelebration])
+  const handleNext = useCallback(() => { dismissCelebration() }, [dismissCelebration])
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
-        e.preventDefault()
-        handleDismiss()
-      }
+      if (e.key !== 'Escape' && e.key !== 'Enter' && e.key !== ' ') return
+      if (shouldIgnoreKey(e.target as HTMLElement, { allowInteractive: true })) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.repeat) return
+      if (e.key === 'Escape') handleEnd()
+      else if (e.key === 'Enter') handleNext()
     }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [handleDismiss])
+    window.addEventListener('keydown', handleKey, true)
+    return () => window.removeEventListener('keydown', handleKey, true)
+  }, [handleEnd, handleNext])
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-in fade-in duration-200"
-      onClick={handleDismiss}
+      role="status"
+      aria-live="polite"
+      aria-label="Session complete"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-in fade-in duration-(--transition-fast)"
+      onClick={handleEnd}
     >
       <div className="relative text-center space-y-4">
         {/* Confetti particles */}
@@ -102,21 +126,29 @@ export function FocusCelebration() {
         </div>
 
         {/* Task name */}
-        <p className="text-title line-through text-muted-foreground animate-in fade-in duration-500">
+        <p className="text-title line-through text-muted-foreground animate-in fade-in duration-(--transition-base)">
           {task?.content}
         </p>
 
         {/* Duration */}
         {completedDuration != null && (
-          <p className="text-body text-muted-foreground animate-in fade-in slide-in-from-bottom-2 duration-500">
+          <p className="text-body text-muted-foreground animate-in fade-in slide-in-from-bottom-2 duration-(--transition-base)">
             Focused for {formatDuration(completedDuration)}
           </p>
         )}
 
-        {/* Next task preview */}
-        {nextTask && (
-          <p className="text-meta text-muted-foreground animate-in fade-in duration-700">
-            Next: {nextTask.content}
+        {/* Next task preview — shown, not started */}
+        {nextTask ? (
+          <p className="text-meta text-muted-foreground animate-in fade-in duration-(--transition-slow)">
+            Next: <span className="text-foreground">{nextTask.content}</span>
+            {' — '}
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Enter</kbd> to start,{' '}
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Esc</kbd> to stop here
+          </p>
+        ) : (
+          <p className="text-meta text-muted-foreground animate-in fade-in duration-(--transition-slow)">
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Enter</kbd> or{' '}
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Esc</kbd> to close
           </p>
         )}
       </div>

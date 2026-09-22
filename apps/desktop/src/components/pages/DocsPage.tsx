@@ -4,9 +4,12 @@ import { useEffect } from 'react'
 // portable. Not part of the DataProvider seam.
 // eslint-disable-next-line no-restricted-imports
 import { listen } from '@tauri-apps/api/event'
+import { toast } from 'sonner'
 import { useDocsStore } from '@/stores/docsStore'
+import { shouldIgnoreKey } from '@/lib/keyGuard'
 import { FolderTree } from '@/components/docs/FolderTree'
 import { DocEditor } from '@/components/docs/DocEditor'
+import { DOCS_SEARCH_INPUT_ID } from '@/components/docs/DocsSearch'
 import { IconButton } from '@/components/shared/IconButton'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { PanelLeftOpen } from 'lucide-react'
@@ -15,6 +18,7 @@ export function DocsPage() {
   const folderTreeCollapsed = useDocsStore((s) => s.folderTreeCollapsed)
   const setFolderTreeCollapsed = useDocsStore((s) => s.setFolderTreeCollapsed)
   const refresh = useDocsStore((s) => s.refresh)
+  const createDocument = useDocsStore((s) => s.createDocument)
   const currentDoc = useDocsStore((s) => s.currentDoc)
   const currentVaultNote = useDocsStore((s) => s.currentVaultNote)
 
@@ -29,6 +33,40 @@ export function DocsPage() {
     return () => { unlisten.then((fn) => fn()) }
   }, [refresh])
 
+  // Page-scoped keys (registry: Docs). `n` → new document in the selected
+  // folder, `/` → the sidebar search. Both are additive and skip text entry,
+  // open popovers/dialogs, nested controls other than a tree row, key
+  // repeat and every modifier chord (docs P1-1, P2-10; lib/keyGuard).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
+      if (shouldIgnoreKey(e.target as HTMLElement, { rowSelector: '[data-tree-row]' })) return
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault()
+        createDocument(useDocsStore.getState().selectedFolderId ?? undefined)
+          .catch((err) => toast.error(`Couldn't create the document — ${err}`))
+        return
+      }
+      if (e.key === '/') {
+        e.preventDefault()
+        const focusSearch = () => {
+          const input = document.getElementById(DOCS_SEARCH_INPUT_ID) as HTMLInputElement | null
+          input?.focus()
+          input?.select()
+        }
+        // A collapsed tree unmounts the search box: open it, then focus next frame.
+        if (useDocsStore.getState().folderTreeCollapsed) {
+          setFolderTreeCollapsed(false)
+          requestAnimationFrame(focusSearch)
+        } else {
+          focusSearch()
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [createDocument, setFolderTreeCollapsed])
+
   return (
     <div className="flex flex-1 h-full overflow-hidden flex-row">
       {/* Folder tree */}
@@ -38,6 +76,7 @@ export function DocsPage() {
             onClick={() => setFolderTreeCollapsed(false)}
             size="lg"
             title="Expand folder tree"
+            aria-label="Expand the folder tree"
           >
             <PanelLeftOpen className="size-4" />
           </IconButton>

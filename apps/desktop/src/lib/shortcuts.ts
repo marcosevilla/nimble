@@ -21,6 +21,9 @@ export type ShortcutSection =
   | 'Selection'
   | 'General'
   | 'Inbox'
+  | 'Docs'
+  | 'Goals'
+  | 'Session'
 
 export interface Shortcut {
   section: ShortcutSection
@@ -110,6 +113,24 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Inbox', keys: 'm', label: 'Move focused note to a doc' },
   { section: 'Inbox', keys: 'd', label: 'Dismiss focused note' },
   { section: 'Inbox', keys: 'Escape', label: 'Leave the capture field / clear row focus' },
+  // ── Docs (FolderTree.tsx roving tree; DocsSearch.tsx; DocsPage.tsx `N` and `/`) ──
+  { section: 'Docs', keys: '↑ / ↓', label: 'Move through the tree' },
+  { section: 'Docs', keys: '← / →', label: 'Collapse / expand a folder' },
+  { section: 'Docs', keys: 'Enter', label: 'Open the focused document or note' },
+  { section: 'Docs', keys: '⌫', label: 'Delete the focused document or folder (asks first)' },
+  { section: 'Docs', keys: 'N', label: 'New document' },
+  { section: 'Docs', keys: '/', label: 'Search docs and vault (⌘K /doc searches native docs only)' },
+
+  // ── Goals (HabitsSection.tsx habit circles; GoalTimeline.tsx) ──
+  { section: 'Goals', keys: 'Enter / Space', label: 'Check off the focused habit' },
+  { section: 'Goals', keys: 'T', label: 'Timeline: jump to today' },
+
+  // ── Session (FocusView.tsx while expanded; FocusCelebration.tsx) ──
+  { section: 'Session', keys: 'Enter', label: 'Complete the focused task' },
+  { section: 'Session', keys: 'Escape', label: 'Minimize to the banner' },
+  { section: 'Session', keys: 's', label: 'Stop the session' },
+  { section: 'Session', keys: 'Enter (celebration)', label: 'Start the next task' },
+  { section: 'Session', keys: 'Escape (celebration)', label: 'End the session' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [
@@ -121,6 +142,9 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
   'Selection',
   'General',
   'Inbox',
+  'Docs',
+  'Goals',
+  'Session',
 ]
 
 export function shortcutsBySection(): { title: ShortcutSection; rows: Shortcut[] }[] {

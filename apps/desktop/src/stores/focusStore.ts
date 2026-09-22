@@ -53,7 +53,10 @@ interface FocusStore {
   tick: () => void
   startBreak: () => void
   endBreak: () => void
+  /** Enter: start the next queued task now (or end if there is none). */
   dismissCelebration: () => void
+  /** Escape / click: end the session; never starts anything (session P1-2). */
+  endCelebration: () => void
   reset: () => void
 }
 
@@ -208,6 +211,10 @@ export const useFocusStore = create<FocusStore>((set, get) => ({
     } else {
       get().reset()
     }
+  },
+
+  endCelebration: () => {
+    get().reset()
   },
 
   reset: () => {

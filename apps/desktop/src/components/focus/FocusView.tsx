@@ -1,9 +1,18 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useFocusStore } from '@/stores/focusStore'
 import { useFocusQueue } from '@/hooks/useFocusQueue'
 import { cn } from '@/lib/utils'
+import { shouldIgnoreKey } from '@/lib/keyGuard'
 import { Pause, Play, Check, SkipForward, Minimize2, X, Coffee } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd aria-hidden="true" className="rounded bg-muted/60 px-1 font-mono text-label text-muted-foreground">
+      {children}
+    </kbd>
+  )
+}
 
 function formatTime(seconds: number): string {
   const m = Math.floor(Math.abs(seconds) / 60)
@@ -26,7 +35,7 @@ function ProgressRing({ progress, size = 200, stroke = 4 }: { progress: number; 
         fill="none"
         stroke="currentColor"
         strokeWidth={stroke}
-        className="text-muted/30"
+        className="text-border"
       />
       {/* Progress ring */}
       <circle
@@ -78,6 +87,39 @@ export function FocusView() {
     completeFocus(nextTask)
   }, [completeFocus, nextTask])
 
+  // Expanded-view keys (registry: Session). Enter completes (or ends the
+  // break), Escape minimizes to the banner, `s` stops. Skips text entry,
+  // open popovers/dialogs, a focused button (so Enter activates that button
+  // instead of also completing), key repeat and modifier chords; the
+  // celebration overlay owns the keys once it is up (session P1-3). Space
+  // (pause) stays in the Dashboard handler.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      // defaultPrevented: the Dashboard's g-chord (same window, capture) already
+      // claimed this key — `g s` navigates to Session, it must not stop the session.
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
+      if (shouldIgnoreKey(e.target as HTMLElement)) return
+      const store = useFocusStore.getState()
+      if (!store.isActive || store.isCompact || store.showCelebration) return
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        if (store.isOnBreak) store.endBreak()
+        else handleComplete()
+      } else if (e.key === 'Escape') {
+        // Capture phase + stopPropagation: minimizing must not also close a
+        // detail view or clear a selection under the expanded session.
+        e.preventDefault()
+        e.stopPropagation()
+        store.setCompact(true)
+      } else if (e.key === 's') {
+        e.preventDefault()
+        store.abandonFocus()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [handleComplete])
+
   if (!task) return null
 
   // Break view
@@ -96,8 +138,9 @@ export function FocusView() {
           <div className="text-timer text-muted-foreground">
             {formatTime(breakRemaining)}
           </div>
-          <Button variant="ghost" size="sm" onClick={endBreak}>
+          <Button variant="ghost" size="sm" onClick={endBreak} className="gap-1.5">
             Skip break
+            <Kbd>Enter</Kbd>
           </Button>
         </div>
       </div>
@@ -131,7 +174,7 @@ export function FocusView() {
                     ? 'bg-success'
                     : i === currentPomodoro - 1
                       ? 'bg-accent-blue'
-                      : 'bg-muted/40',
+                      : 'bg-border',
                 )}
               />
             ))}
@@ -167,16 +210,19 @@ export function FocusView() {
             <Button size="sm" onClick={resumeFocus} className="gap-1.5">
               <Play className="size-3.5" />
               Resume
+              <Kbd>Space</Kbd>
             </Button>
           ) : (
             <Button size="sm" variant="outline" onClick={pauseFocus} className="gap-1.5">
               <Pause className="size-3.5" />
               Pause
+              <Kbd>Space</Kbd>
             </Button>
           )}
           <Button size="sm" variant="success" onClick={handleComplete} className="gap-1.5">
             <Check className="size-3.5" />
             Complete
+            <Kbd>Enter</Kbd>
           </Button>
           <Button size="sm" variant="ghost" onClick={skipFocus} className="gap-1.5 text-muted-foreground">
             <SkipForward className="size-3.5" />
@@ -184,22 +230,18 @@ export function FocusView() {
           </Button>
         </div>
 
-        {/* Utility buttons */}
-        <div className="flex items-center justify-center gap-3">
-          <button
-            onClick={() => setCompact(true)}
-            className="flex items-center gap-1 text-meta text-muted-foreground hover:text-foreground transition-colors"
-          >
+        {/* Utility buttons — real hit areas, keys shown (session P3-3, P1-3) */}
+        <div className="flex items-center justify-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setCompact(true)} className="gap-1.5 text-muted-foreground">
             <Minimize2 className="size-3" />
             Minimize
-          </button>
-          <button
-            onClick={abandonFocus}
-            className="flex items-center gap-1 text-meta text-muted-foreground hover:text-foreground transition-colors"
-          >
+            <Kbd>Esc</Kbd>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={abandonFocus} className="gap-1.5 text-muted-foreground">
             <X className="size-3" />
             Stop
-          </button>
+            <Kbd>s</Kbd>
+          </Button>
         </div>
       </div>
     </div>
