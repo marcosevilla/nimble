@@ -57,6 +57,10 @@ function GoalCard({
   return (
     <Card
       size="sm"
+      role="button"
+      tabIndex={0}
+      aria-label={`Open goal ${goal.name}`}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
       className={cn(
         'cursor-pointer transition-all duration-150 hover:ring-foreground/20 hover:shadow-sm',
         goal.status === 'achieved' && 'opacity-75',

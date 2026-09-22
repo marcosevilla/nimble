@@ -3,7 +3,6 @@ import { cn } from '@/lib/utils'
 import { useGoalsStore } from '@/stores/goalsStore'
 import { useDataProvider } from '@/services/provider-context'
 import type { HabitHeatmapEntry, HabitWithStats } from '@nimble/types'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -19,9 +18,32 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog'
-import { Plus, Settings2, Sparkles, Trash2 } from 'lucide-react'
+import {
+  Plus, Settings2, Trash2,
+  Dumbbell, PenLine, BookOpen, Footprints, Sun, Droplets, Brush, Camera, Hammer,
+  ClipboardList, Heart, Brain, Smartphone, Users, Sparkles, Moon, Leaf, Coffee,
+  Music, Bike, GlassWater, Bed, Languages, Code,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { GOAL_COLORS } from '@/lib/goalStatus'
+
+/* Stored `habit.icon` is a lucide name (kebab or Pascal). This curated map
+   covers the names the habit picker and the vault import produce; anything
+   else falls back to the keyword emoji (goals P2-6). A full dynamic import
+   would ship ~1,500 icon chunks — not worth it for a picker of ~24. */
+const HABIT_ICONS: Record<string, LucideIcon> = {
+  dumbbell: Dumbbell, 'pen-line': PenLine, 'book-open': BookOpen, footprints: Footprints,
+  sun: Sun, droplets: Droplets, brush: Brush, camera: Camera, hammer: Hammer,
+  'clipboard-list': ClipboardList, heart: Heart, brain: Brain, smartphone: Smartphone,
+  users: Users, sparkles: Sparkles, moon: Moon, leaf: Leaf, coffee: Coffee, music: Music,
+  bike: Bike, 'glass-water': GlassWater, bed: Bed, languages: Languages, code: Code,
+}
+
+function lucideFor(icon: string): LucideIcon | null {
+  const kebab = icon.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()
+  return HABIT_ICONS[kebab] ?? null
+}
 
 /* Same user-data swatch list as goals — was a byte-identical copy. */
 const HABIT_COLORS = GOAL_COLORS
@@ -67,6 +89,8 @@ function renderHabitIcon(icon: string, name: string, category: string | null): s
 
 // ── Habit Circle ──
 
+const HOLD_DURATION = 500 // ms; the hold ring is optional flourish — a click completes too (decided 2026-09-22)
+
 function HabitCircle({
   name,
   icon,
@@ -84,102 +108,96 @@ function HabitCircle({
   momentum: number
   onToggle: () => void
 }) {
-  const displayIcon = renderHabitIcon(icon, name, category)
+  const Icon = lucideFor(icon)
+  const emoji = Icon ? null : renderHabitIcon(icon, name, category)
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Set when the hold itself completed the habit, so the click that follows
+  // pointerup does not toggle it straight back.
+  const firedByHold = useRef(false)
   const [holding, setHolding] = useState(false)
   const [progress, setProgress] = useState(0)
-  const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const HOLD_DURATION = 500 // ms to hold for completion
-
-  const startHold = useCallback(() => {
-    if (completed) {
-      // If already completed, single click to uncomplete
-      onToggle()
-      return
-    }
-    setHolding(true)
-    setProgress(0)
-
-    // Animate the progress ring
-    const startTime = Date.now()
-    progressInterval.current = setInterval(() => {
-      const elapsed = Date.now() - startTime
-      setProgress(Math.min(elapsed / HOLD_DURATION, 1))
-    }, 16)
-
-    holdTimer.current = setTimeout(() => {
-      setHolding(false)
-      setProgress(0)
-      if (progressInterval.current) clearInterval(progressInterval.current)
-      onToggle()
-    }, HOLD_DURATION)
-  }, [completed, onToggle])
 
   const cancelHold = useCallback(() => {
-    if (holdTimer.current) {
-      clearTimeout(holdTimer.current)
-      holdTimer.current = null
-    }
-    if (progressInterval.current) {
-      clearInterval(progressInterval.current)
-      progressInterval.current = null
-    }
+    if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null }
+    if (progressInterval.current) { clearInterval(progressInterval.current); progressInterval.current = null }
     setHolding(false)
     setProgress(0)
   }, [])
 
+  const startHold = useCallback((e: React.PointerEvent) => {
+    if (completed || e.button !== 0) return
+    firedByHold.current = false
+    setHolding(true)
+    setProgress(0)
+    const startTime = Date.now()
+    progressInterval.current = setInterval(() => {
+      setProgress(Math.min((Date.now() - startTime) / HOLD_DURATION, 1))
+    }, 16)
+    holdTimer.current = setTimeout(() => {
+      cancelHold()
+      firedByHold.current = true
+      onToggle()
+    }, HOLD_DURATION)
+  }, [completed, onToggle, cancelHold])
+
+  // One handler for mouse click, Enter and Space — the button's native
+  // activation covers all three (goals P1-1, P1-4).
+  const handleClick = useCallback(() => {
+    if (firedByHold.current) { firedByHold.current = false; return }
+    cancelHold()
+    onToggle()
+  }, [onToggle, cancelHold])
+
+  useEffect(() => cancelHold, [cancelHold])
+
   return (
-    <div className="flex flex-col items-center gap-1.5">
-      <Tooltip>
-        <TooltipTrigger
-          className={cn(
-            'relative size-10 rounded-full flex items-center justify-center text-title transition-all duration-200 cursor-pointer select-none border border-border bg-card',
-            completed
-              ? 'scale-105'
-              : 'opacity-50 hover:opacity-80 hover:bg-hover',
-            holding && 'scale-95',
-          )}
-          onMouseDown={startHold}
-          onMouseUp={cancelHold}
-          onMouseLeave={cancelHold}
-          onTouchStart={startHold}
-          onTouchEnd={cancelHold}
-          aria-label={`${completed ? 'Click to unmark' : 'Hold to complete'} ${name}`}
-        >
-          {/* Hold progress ring */}
-          {holding && !completed && (
-            <svg className="absolute inset-0 size-10 -rotate-90 pointer-events-none" viewBox="0 0 40 40">
-              <circle
-                cx="20" cy="20" r="18"
-                fill="none"
-                stroke={color}
-                strokeWidth="2.5"
-                strokeDasharray={`${progress * 113} 113`}
-                strokeLinecap="round"
-                className="transition-none"
-              />
-            </svg>
-          )}
-          <span className="select-none">{displayIcon}</span>
-          {completed && (
-            <span className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full flex items-center justify-center text-label text-success-fg bg-success">
-              ✓
-            </span>
-          )}
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <div className="text-meta">
-            <div className="text-meta-strong">{name}</div>
-            <div className="opacity-70">{completed ? 'Done today' : 'Not done yet'}</div>
-          </div>
-        </TooltipContent>
-      </Tooltip>
+    <div className="flex w-14 flex-col items-center gap-1.5">
+      <button
+        type="button"
+        onClick={handleClick}
+        onPointerDown={startHold}
+        onPointerUp={cancelHold}
+        onPointerLeave={cancelHold}
+        onPointerCancel={cancelHold}
+        aria-pressed={completed}
+        aria-label={`${name}${completed ? ', done today' : ''}`}
+        title={completed ? `${name} — done today. Click to unmark.` : `${name} — click or hold to complete.`}
+        className={cn(
+          'relative flex size-10 select-none items-center justify-center rounded-full border text-title transition-[background-color,border-color,scale] duration-(--transition-fast) active:scale-[0.96] motion-reduce:active:scale-100',
+          completed
+            ? 'border-success/40 bg-success/10 text-foreground'
+            : 'border-border bg-card text-foreground hover:bg-hover',
+          holding && 'scale-[0.96]',
+        )}
+      >
+        {/* Hold progress ring */}
+        {holding && !completed && (
+          <svg className="absolute inset-0 size-10 -rotate-90 pointer-events-none" viewBox="0 0 40 40" aria-hidden="true">
+            <circle
+              cx="20" cy="20" r="18"
+              fill="none"
+              stroke={color}
+              strokeWidth="2.5"
+              strokeDasharray={`${progress * 113} 113`}
+              strokeLinecap="round"
+              className="transition-none"
+            />
+          </svg>
+        )}
+        {Icon ? <Icon className="size-4" aria-hidden="true" /> : <span aria-hidden="true">{emoji}</span>}
+        {completed && (
+          // font-bold kept for legibility of checkmark on colored bg overlay
+          <span aria-hidden="true" className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full flex items-center justify-center text-label font-bold text-success-fg bg-success">
+            ✓
+          </span>
+        )}
+      </button>
 
       {/* Momentum bar */}
-      <div className="w-8 h-1 rounded-full bg-muted overflow-hidden">
+      <div className="w-8 h-1 rounded-full bg-muted overflow-hidden" aria-hidden="true">
         <div
-          className="h-full rounded-full transition-all duration-500"
+          className="h-full rounded-full transition-[width,opacity] duration-(--transition-base) ease-(--ease-entrance)"
           style={{
             width: `${Math.min(momentum, 100)}%`,
             backgroundColor: color,
@@ -187,6 +205,9 @@ function HabitCircle({
           }}
         />
       </div>
+
+      {/* Name — the thing the emoji never said (P2-6) */}
+      <span className="w-full truncate text-center text-label text-muted-foreground" aria-hidden="true">{name}</span>
     </div>
   )
 }
@@ -209,6 +230,11 @@ function getHeatmapColor(intensity: number): string {
   if (intensity <= 0) return AMBER_LEVELS[0]
   if (intensity >= 4) return AMBER_LEVELS[4]
   return AMBER_LEVELS[intensity]
+}
+
+function formatCellDate(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 function HabitHeatmap({ data }: { data: HabitHeatmapEntry[] }) {
@@ -259,14 +285,29 @@ function HabitHeatmap({ data }: { data: HabitHeatmapEntry[] }) {
     return labels
   }, [grid])
 
+  // One tab stop for the whole year; arrows move a cursor cell (goals P2-8).
+  const [cursor, setCursor] = useState(grid.length - 1)
+  const [gridFocused, setGridFocused] = useState(false)
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const step: Record<string, number> = { ArrowRight: DAYS, ArrowLeft: -DAYS, ArrowDown: 1, ArrowUp: -1 }
+    if (e.key in step) {
+      e.preventDefault()
+      setCursor((c) => Math.max(0, Math.min(grid.length - 1, c + step[e.key])))
+    } else if (e.key === 'Home') { e.preventDefault(); setCursor(0) }
+    else if (e.key === 'End') { e.preventDefault(); setCursor(grid.length - 1) }
+  }
+  const focused = grid[cursor]
+  const cellLabel = (c: { date: string; intensity: number }) =>
+    `${formatCellDate(c.date)} · ${c.intensity === 0 ? 'no check-ins' : c.intensity === 1 ? '1 check-in' : `${c.intensity} check-ins`}`
+
   const gridWidth = WEEKS * (CELL_SIZE + CELL_GAP)
   const gridHeight = DAYS * (CELL_SIZE + CELL_GAP)
 
   return (
     <div className="overflow-x-auto">
       <div style={{ width: gridWidth, minWidth: gridWidth }}>
-        {/* Month labels */}
-        <div className="flex mb-1" style={{ height: 14 }}>
+        {/* Month labels — `relative` so the absolute spans anchor here, not the page (P2-4) */}
+        <div className="relative flex mb-1" style={{ height: 14 }}>
           {monthLabels.map((m, i) => (
             <span
               key={i}
@@ -279,29 +320,38 @@ function HabitHeatmap({ data }: { data: HabitHeatmapEntry[] }) {
         </div>
 
         {/* Grid */}
-        <div className="relative" style={{ width: gridWidth, height: gridHeight }}>
+        <div
+          role="group"
+          aria-label="Habit activity, last 52 weeks. Use the arrow keys to move between days."
+          tabIndex={0}
+          onKeyDown={handleKeyDown}
+          onFocus={() => setGridFocused(true)}
+          onBlur={() => setGridFocused(false)}
+          className="relative rounded-sm"
+          style={{ width: gridWidth, height: gridHeight }}
+        >
           {grid.map((cell, i) => (
-            <Tooltip key={i}>
-              <TooltipTrigger
-                className="absolute rounded-sm transition-colors"
-                style={{
-                  width: CELL_SIZE,
-                  height: CELL_SIZE,
-                  left: cell.col * (CELL_SIZE + CELL_GAP),
-                  top: cell.row * (CELL_SIZE + CELL_GAP),
-                  backgroundColor: getHeatmapColor(cell.intensity),
-                  border: cell.intensity === 0 ? '1px solid oklch(from var(--border) l c h / 0.15)' : 'none',
-                }}
-              />
-              <TooltipContent side="top">
-                <div className="text-label">
-                  <div>{cell.date}</div>
-                  {cell.intensity > 0 && <div className="opacity-70">{cell.intensity} activities</div>}
-                </div>
-              </TooltipContent>
-            </Tooltip>
+            <div
+              key={i}
+              title={cellLabel(cell)}
+              data-focused={gridFocused && i === cursor ? 'true' : undefined}
+              className={cn('absolute rounded-[2px]', gridFocused && i === cursor && 'outline-2 outline-ring outline-offset-1')}
+              style={{
+                width: CELL_SIZE,
+                height: CELL_SIZE,
+                left: cell.col * (CELL_SIZE + CELL_GAP),
+                top: cell.row * (CELL_SIZE + CELL_GAP),
+                backgroundColor: getHeatmapColor(cell.intensity),
+                border: cell.intensity === 0 ? '1px solid oklch(from var(--border) l c h / 0.15)' : 'none',
+              }}
+            />
           ))}
         </div>
+
+        {/* Static cue for the cursor cell — also what assistive tech hears */}
+        <p className="mt-1.5 text-label text-muted-foreground tabular-nums" aria-live="polite">
+          {focused ? cellLabel(focused) : ''}
+        </p>
       </div>
     </div>
   )
@@ -314,6 +364,7 @@ export function HabitsSection() {
   const habits = useGoalsStore((s) => s.habits)
   const habitsLoading = useGoalsStore((s) => s.habitsLoading)
   const loadHabits = useGoalsStore((s) => s.loadHabits)
+  const toggleHabit = useGoalsStore((s) => s.toggleHabit)
 
   const [heatmapData, setHeatmapData] = useState<HabitHeatmapEntry[]>([])
   const [heatmapLoading, setHeatmapLoading] = useState(true)
@@ -326,20 +377,16 @@ export function HabitsSection() {
       .finally(() => setHeatmapLoading(false))
   }, [loadHabits, dp])
 
-  const handleToggle = useCallback(async (habitId: string, currentlyCompleted: boolean) => {
+  // Optimistic: the store flips today_completed before the call and rolls
+  // back on failure; we only surface the error and refresh the heatmap.
+  const handleToggle = useCallback(async (habitId: string) => {
     try {
-      if (currentlyCompleted) {
-        await dp.habits.unlog(habitId)
-      } else {
-        await dp.habits.log(habitId)
-      }
-      await loadHabits()
-      // Refresh heatmap
+      await toggleHabit(habitId)
       dp.habits.getHeatmap(undefined, 365).then(setHeatmapData).catch(() => {})
     } catch (e) {
-      console.error('Habit toggle failed:', e)
+      toast.error(`Couldn't save that check-off — ${e}`)
     }
-  }, [loadHabits, dp])
+  }, [toggleHabit, dp])
 
   const activeHabits = habits.filter((h) => h.active)
   const completedCount = activeHabits.filter((h) => h.today_completed).length
@@ -347,7 +394,7 @@ export function HabitsSection() {
     ? Math.round(activeHabits.reduce((sum, h) => sum + h.current_momentum, 0) / activeHabits.length)
     : 0
 
-  if (habitsLoading) {
+  if (habitsLoading && habits.length === 0) {
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-2">
@@ -405,7 +452,7 @@ export function HabitsSection() {
       </div>
 
       {/* Habit circles */}
-      <div className="flex items-center gap-4 flex-wrap">
+      <div className="flex items-start gap-3 flex-wrap" role="group" aria-label="Today's habits">
         {activeHabits.map((habit) => (
           <HabitCircle
             key={habit.id}
@@ -415,7 +462,7 @@ export function HabitsSection() {
             category={habit.category}
             completed={habit.today_completed}
             momentum={habit.current_momentum}
-            onToggle={() => handleToggle(habit.id, habit.today_completed)}
+            onToggle={() => handleToggle(habit.id)}
           />
         ))}
         <AddHabitPopover
