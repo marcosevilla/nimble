@@ -406,7 +406,7 @@ function CalendarsSection() {
         </div>
       ) : (
         <Button variant="outline" size="sm" onClick={() => setShowForm(true)}>
-          + Add Calendar
+          + Add calendar
         </Button>
       )}
     </section>
@@ -842,7 +842,7 @@ function CaptureRoutesSection() {
         </div>
       ) : (
         <Button variant="outline" size="sm" onClick={() => setShowForm(true)}>
-          + Add Route
+          + Add route
         </Button>
       )}
     </section>

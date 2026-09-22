@@ -40,7 +40,7 @@ export function GoogleCalendarSection() {
     <SectionTitle>Phone alerts</SectionTitle>
     <Meta as="p">Connect a dedicated Nimble calendar. Turn on phone alerts only for the tasks you choose. Already-published alerts can fire while Nimble is closed; new changes sync while the Mac app is open.</Meta>
     {error && <p className="text-body text-destructive" role="alert">{error}</p>}
-    {status?.errorCode && <Meta as="p">Calendar sync is paused. Sync now or reconnect to resume.</Meta>}
+    {status?.errorCode && <Meta as="p">Last sync didn't finish. Sync now or reconnect.</Meta>}
     <Meta as="p">{status?.connected ? `Connected to ${status.calendarLabel ?? 'Nimble'}` : 'Not connected'}</Meta>
     <div className="flex gap-2">
       <Button variant="outline" size="sm" disabled={busy || !status?.clientSecretConfigured} onClick={() => void act(() => dp.googleCalendar.connect())}>{status?.connected ? 'Reconnect Google Calendar' : 'Connect Google Calendar'}</Button>

@@ -5,6 +5,7 @@ import { useDataProvider } from '@/services/provider-context'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataVersion } from '@/hooks/useDataVersion'
 import { formatReminderTime } from '@/lib/reminderTime'
+import { createUndoable } from '@/lib/undoable'
 import { Button } from '@/components/ui/button'
 import { Meta, SectionTitle } from '@/components/shared/typography'
 
@@ -14,7 +15,7 @@ const UNDO_WINDOW_MS = 5_000
  * Reminders that fired while the app was closed. Quiet row group below the
  * page header: the rows are the signal, nothing here performs urgency.
  * Dismiss is optimistic — the row leaves at once, the acknowledge fires
- * after a 5 s Undo window.
+ * when the Undo toast closes (5 s, paused while hovered).
  */
 export function ReminderCatchUp() {
   const dp = useDataProvider()
@@ -47,28 +48,37 @@ export function ReminderCatchUp() {
     for (const key of keys) hidden.current.add(key)
     setItems(prev => prev.filter(i => !keys.includes(i.occurrenceKey)))
 
-    const commit = async () => {
-      try {
-        for (const key of keys) await dp.reminders.acknowledge(key)
-      } catch {
-        setError('Some reminders could not be dismissed. Try again.')
-      } finally {
+    const pending = createUndoable({
+      onCommit: () => {
+        void (async () => {
+          try {
+            for (const key of keys) await dp.reminders.acknowledge(key)
+          } catch {
+            setError('Some reminders could not be dismissed. Try again.')
+          } finally {
+            for (const key of keys) hidden.current.delete(key)
+            void refresh()
+          }
+        })()
+      },
+      onUndo: () => {
         for (const key of keys) hidden.current.delete(key)
+        setItems(prev => [...removed, ...prev])
         void refresh()
-      }
-    }
-    const timer = setTimeout(() => void commit(), UNDO_WINDOW_MS)
+      },
+    })
 
+    // The toast owns the window: Sonner pauses its timer while hovered or
+    // while the window is hidden, so the commit follows the toast closing
+    // rather than a parallel wall-clock timer. The toast lives in the global
+    // Toaster, so leaving Today mid-window still commits once.
     toast(keys.length === 1 ? 'Reminder dismissed' : `${keys.length} reminders dismissed`, {
       duration: UNDO_WINDOW_MS,
+      onAutoClose: () => { pending.commit() },
+      onDismiss: () => { pending.commit() },
       action: {
         label: 'Undo',
-        onClick: () => {
-          clearTimeout(timer)
-          for (const key of keys) hidden.current.delete(key)
-          setItems(prev => [...removed, ...prev])
-          void refresh()
-        },
+        onClick: () => { pending.undo() },
       },
     })
   }
