@@ -2929,6 +2929,7 @@ dependencies = [
  "futures",
  "htmd",
  "ical",
+ "libc",
  "log",
  "nimble-core",
  "notify",
