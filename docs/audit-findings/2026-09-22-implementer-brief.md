@@ -40,20 +40,19 @@ npm run build:web
 node --test tests/*.test.mjs
 ```
 
-Screenshots: start your own dev server on your assigned port: `npm run dev -- --port <port>`. Use the Playwright MCP (ToolSearch `select:mcp__playwright__browser_run_code_unsafe,mcp__playwright__browser_console_messages`). **The Playwright browser is shared by six agents at once** — inside `browser_run_code_unsafe`, create your own context so nobody else's navigation lands on your page:
+Screenshots: start your own dev server on your assigned port: `npm run dev -- --port <port>`. Use the Playwright MCP (ToolSearch `select:mcp__playwright__browser_run_code_unsafe,mcp__playwright__browser_console_messages`). **The Playwright browser is shared by several agents at once, and Marco watches it.** Open a new TAB in the existing window, never a new context or window (`browser.newContext()` opens a new Chrome window). Inject the mock per page with `page.addInitScript`, never `context.addInitScript` (that would stack mocks onto every agent's tabs). Close your tab when done:
 
 ```js
 async (page) => {
-  const ctx = await page.context().browser().newContext({ viewport: { width: 1280, height: 800 } });
-  await ctx.addInitScript({ path: '<your worktree>/tools/mock-tauri.js' });
-  const p = await ctx.newPage();
+  const p = await page.context().newPage();            // new tab, same window
+  await p.setViewportSize({ width: 1280, height: 800 });
+  await p.addInitScript({ path: '<your worktree>/tools/mock-tauri.js' });  // this tab only
   await p.goto('http://localhost:<port>/?page=tasks');
   await p.waitForTimeout(800);
   await p.addStyleTag({ content: '[data-agentation-root]{display:none!important}' });
   // dark: await p.evaluate(() => document.documentElement.classList.add('dark'));
   await p.screenshot({ path: '<your worktree>/docs/audit-findings/screenshots/loop1-after/<surface>-<state>-light.png' });
-  const errors = []; // collect via p.on('console') / p.on('pageerror') before goto if you need them
-  await ctx.close();
+  await p.close();                                      // always close your tab
   return 'ok';
 }
 ```
