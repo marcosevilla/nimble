@@ -520,11 +520,12 @@ export interface ReminderCapability {
   acknowledge(occurrenceKey: string): Promise<void>
 }
 
-export interface GoogleConnectionStatus { connected: boolean; calendarLabel: string | null; timezone: string; errorCode: string | null }
+export interface GoogleConnectionStatus { connected: boolean; clientSecretConfigured: boolean; calendarLabel: string | null; timezone: string; errorCode: string | null }
 export interface GoogleCalendarConflict { taskId: string; reason: string; local: unknown; remote: unknown; createdAt: string }
 export interface GoogleCalendarCapability {
   supported: boolean
   getStatus(): Promise<GoogleConnectionStatus>
+  configure(clientId: string, clientSecret: string): Promise<GoogleConnectionStatus>
   connect(): Promise<GoogleConnectionStatus>
   disconnect(): Promise<GoogleConnectionStatus>
   syncNow(): Promise<{ changedTaskIds: string[]; errorCode: string | null }>

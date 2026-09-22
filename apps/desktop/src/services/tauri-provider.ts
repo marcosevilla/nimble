@@ -15,7 +15,7 @@ export function createTauriProvider(): DataProvider {
       listCatchUp: tauri.reminderListCatchUp, acknowledge: tauri.reminderAcknowledge,
     },
     googleCalendar: {
-      supported: true, getStatus: tauri.googleCalendarStatus, connect: tauri.googleCalendarConnect, disconnect: tauri.googleCalendarDisconnect, syncNow: tauri.googleCalendarSyncNow, listConflicts: tauri.googleCalendarListConflicts, resolveConflict: tauri.googleCalendarResolveConflict,
+      supported: true, getStatus: tauri.googleCalendarStatus, configure: tauri.googleCalendarConfigure, connect: tauri.googleCalendarConnect, disconnect: tauri.googleCalendarDisconnect, syncNow: tauri.googleCalendarSyncNow, listConflicts: tauri.googleCalendarListConflicts, resolveConflict: tauri.googleCalendarResolveConflict,
     },
     backup: {
       supported: true,

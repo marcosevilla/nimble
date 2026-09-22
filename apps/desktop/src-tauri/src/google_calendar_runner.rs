@@ -1,6 +1,6 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
-use crate::google_credentials::{GoogleCredentials, KeychainCredentials};
+use crate::google_credentials::{client_secret_account, GoogleCredentials, KeychainClientCredentials, KeychainCredentials};
 static GOOGLE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub async fn lock() -> tokio::sync::MutexGuard<'static,()> { GOOGLE_LOCK.lock().await }
@@ -20,7 +20,7 @@ pub fn network_allowed(app:&AppHandle)->bool {
 
 pub async fn client_id(pool:&SqlitePool)->Result<String,String> {
     if let Ok(value)=std::env::var("NIMBLE_GOOGLE_CLIENT_ID") {
-        if !value.trim().is_empty() { return Ok(value) }
+        if !value.trim().is_empty() { return Ok(value.trim().to_owned()) }
     }
     nimble_core::db::settings::get_setting(pool,"google_calendar_client_id")
         .await.map_err(|_|"google_settings_failed")?
@@ -41,15 +41,16 @@ pub async fn tick(app:&AppHandle)->Result<nimble_core::integrations::google_cale
     }
     let client_id=client_id(pool.inner()).await?;
     let profile=profile_identity(app)?;
+    let client_secret=KeychainClientCredentials.load(&client_secret_account(&profile,&client_id)).map_err(str::to_owned)?.ok_or("google_client_config_missing")?;
     let credentials=KeychainCredentials;
     let refresh_token=credentials.load(&profile).map_err(str::to_owned)?.ok_or("google_connection_needed")?;
     let client=reqwest::Client::builder().timeout(std::time::Duration::from_secs(20))
         .connect_timeout(std::time::Duration::from_secs(10)).build().map_err(|_|"google_transport_failed")?;
-    let token=match crate::google_oauth::refresh(&client_id,&refresh_token,&client).await {
+    let token=match crate::google_oauth::refresh(&client_id,&client_secret,&refresh_token,&client).await {
         Ok(v)=>v,
-        Err("google_reconnect_required")=> {
-            nimble_core::db::google_calendar::set_error(pool.inner(),Some("google_reconnect_required"),None).await.map_err(|_|"google_status_failed")?;
-            return Err("google_reconnect_required".into());
+        Err(code @ ("google_reconnect_required" | "google_client_config_rejected"))=> {
+            nimble_core::db::google_calendar::set_error(pool.inner(),Some(code),None).await.map_err(|_|"google_status_failed")?;
+            return Err(code.into());
         }
         Err(e)=>return Err(e.into()),
     };

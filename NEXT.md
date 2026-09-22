@@ -4,6 +4,12 @@ Updated 2026-09-21 from the current checkout and committed planning documents.
 
 ## Start here
 
+- [ ] **Install and reconnect the approved Google repair.** Marco approved the app update. Implementation in `codex/google-desktop-oauth-fix` now stores a write-only Desktop OAuth client secret in profile/client-bound macOS Keychain, includes it in exchange/refresh, uses truthful callback copy, and fixes Save setup/Save timezone submit buttons. Final validation and signed installation are underway; live connection is not yet verified.
+- Google setup preserved: project **Nimble** (`nimble-509404`); approved terms accepted; Calendar API enabled; External/testing with Marco as sole test user; only `calendar.app.created` declared; approved Desktop client **Nimble Mac** created and public ID saved in Nimble. User consent occurred, but token exchange/calendar creation failed. No billing enabled. Reuse this project/client; testing-mode token lifetime and physical-phone acceptance remain open.
+- [x] Fix Google setup and reminder timezone Save buttons with explicit submit types; all three actual-render regression tests pass.
+
+- [x] Live Mac banner test passed (2026-09-21): Marco confirmed "ok reminder showed up." Native submission for temporary task `76f54a61-2149-46d5-9c15-70b8c007fba8` succeeded at 21:43:41 PDT. A retry was scheduled for 21:46; after Marco's confirmation, the task was completed with app refresh acknowledged. Google publishing stayed off.
+
 - [x] Push merged main (`49254e9`) to GitHub and deploy web production on 2026-09-21. Vercel deployment `dpl_9aNWreqb49Ho9KocRGypNDu8BLnE` is Ready at https://nimble-web-marco-sevilla-projects.vercel.app. Login form and anonymous API protection verified; signed-in web acceptance remains open because production password exports were empty and the browser was logged out. See [deployment verification](docs/c2-c3-verification.md#production-web-deployment--2026-09-21).
 
 - [x] Merge C2/C3 into `main`: only `NEXT.md` conflicted; preserved the complete implementation and installation record. Runtime source matches the installed, reviewed feature branch. Merged verification: 320 Rust tests, five interface tests, desktop and web builds passed. Naming: **Nimble Agent Tools** (`dt`); workflow activation remains below.
@@ -26,7 +32,7 @@ Updated 2026-09-21 from the current checkout and committed planning documents.
 ## Code track — agreed order
 
 - [x] **C1: Safety net activation.** Implemented, tested, installed, merged into main, and first private online backup acknowledged.
-- [ ] **C2: Reminders activation.** Code implemented: desktop reminders, persistent catch-up, dedicated-calendar OAuth and two-way reconciliation, schema20 label-group storage. Tests/review pass. Installed and verified. Remaining: Google client setup/consent and physical-phone alert/two-way test; independently observe a Mac banner.
+- [ ] **C2: Reminders activation.** Code implemented: desktop reminders, persistent catch-up, dedicated-calendar OAuth and two-way reconciliation, schema20 label-group storage. Tests/review pass. Installed and verified; Marco confirmed the live Mac reminder banner on 2026-09-21. Remaining: Google client setup/consent and physical-phone alert/two-way test.
 - [ ] **C3: Agent access activation.** CLI, JSON commands, private app socket and workflow proposals implemented; native open-task refresh verified. `dt` is installed on PATH and backup RPC is verified. Remaining: approve/activate actual assistant routing, and verify live web propagation. Todoist remains the fallback, without duplicate writes after uncertain results.
 - [ ] **C4: Labels and search.** Restore ENERGY / TIME / TYPE / CREATIVE grouping; indexed task-title and description search including completed tasks.
 - [ ] **C5: Import and cutover.** Preserve first-class task fields; import active tasks plus the last 12 months completed; archive full history; use Nimble for 2–4 weeks before deciding on cutover. Downgrade Todoist to free only when ready.

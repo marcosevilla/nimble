@@ -77,7 +77,7 @@ export function createTursoProvider(): DataProvider {
       listCatchUp: ni('reminders.listCatchUp'), acknowledge: ni('reminders.acknowledge'),
     },
     googleCalendar: {
-      supported: false, getStatus: ni('googleCalendar.getStatus'), connect: ni('googleCalendar.connect'), disconnect: ni('googleCalendar.disconnect'), syncNow: ni('googleCalendar.syncNow'), listConflicts: ni('googleCalendar.listConflicts'), resolveConflict: ni('googleCalendar.resolveConflict'),
+      supported: false, getStatus: ni('googleCalendar.getStatus'), configure: ni('googleCalendar.configure'), connect: ni('googleCalendar.connect'), disconnect: ni('googleCalendar.disconnect'), syncNow: ni('googleCalendar.syncNow'), listConflicts: ni('googleCalendar.listConflicts'), resolveConflict: ni('googleCalendar.resolveConflict'),
     },
     backup: {
       supported: false,

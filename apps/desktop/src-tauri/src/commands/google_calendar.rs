@@ -1,12 +1,13 @@
 use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager};
-use crate::google_credentials::{GoogleCredentials, KeychainCredentials};
+use crate::google_credentials::{client_secret_account, GoogleCredentials, KeychainClientCredentials, KeychainCredentials};
 
 #[derive(Debug,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct GoogleConnectionStatus {
     pub connected:bool,
+    pub client_secret_configured:bool,
     pub calendar_label:Option<String>,
     pub timezone:String,
     pub error_code:Option<String>,
@@ -16,14 +17,18 @@ pub struct GoogleConnectionStatus {
 pub async fn google_calendar_status(app:AppHandle)->Result<GoogleConnectionStatus,String> {
     let pool=app.state::<SqlitePool>();
     let state=nimble_core::db::google_calendar::state(pool.inner()).await.map_err(|_|"google_status_failed")?;
-    let connected=if cfg!(debug_assertions) || app.try_state::<crate::backup_runner::BackupRuntime>().is_some_and(|r|r.is_test_profile()) {
-        false
+    let (connected, client_secret_configured)=if !crate::google_calendar_runner::network_allowed(&app) {
+        (false, false)
     } else {
         let profile=crate::google_calendar_runner::profile_identity(&app)?;
-        KeychainCredentials.load(&profile).map_err(str::to_owned)?.is_some() && state.calendar_id.is_some()
-            && !matches!(state.error_code.as_deref(),Some("google_reconnect_required"|"google_permission_denied"))
+        let configured=match crate::google_calendar_runner::client_id(pool.inner()).await {
+            Ok(id)=>KeychainClientCredentials.load(&client_secret_account(&profile,&id)).map_err(str::to_owned)?.is_some(),
+            Err(_)=>false,
+        };
+        let connected=configured && should_reuse_session(state.calendar_id.is_some(),KeychainCredentials.load(&profile).map_err(str::to_owned)?.is_some(),state.error_code.as_deref());
+        (connected,configured)
     };
-    Ok(GoogleConnectionStatus { connected, calendar_label:state.calendar_id.map(|_|"Nimble".into()), timezone:state.timezone, error_code:state.error_code })
+    Ok(GoogleConnectionStatus { connected, client_secret_configured, calendar_label:state.calendar_id.map(|_|"Nimble".into()), timezone:state.timezone, error_code:state.error_code })
 }
 
 #[tauri::command]
@@ -34,6 +39,7 @@ pub async fn google_calendar_connect(app:AppHandle)->Result<GoogleConnectionStat
     let client_id=crate::google_calendar_runner::client_id(pool.inner()).await?;
     let state=nimble_core::db::google_calendar::state(pool.inner()).await.map_err(|_|"google_status_failed")?;
     let profile=crate::google_calendar_runner::profile_identity(&app)?;
+    let client_secret=KeychainClientCredentials.load(&client_secret_account(&profile,&client_id)).map_err(str::to_owned)?.ok_or("google_client_config_missing")?;
     let credentials=KeychainCredentials;
     let has_credential=credentials.load(&profile).map_err(str::to_owned)?.is_some();
     if should_reuse_session(state.calendar_id.is_some(),has_credential,state.error_code.as_deref()) {
@@ -42,7 +48,7 @@ pub async fn google_calendar_connect(app:AppHandle)->Result<GoogleConnectionStat
     if state.calendar_id.is_none() && state.error_code.as_deref()==Some("google_calendar_create_pending") { return Err("google_calendar_setup_needs_review".into()) }
     let client=reqwest::Client::builder().timeout(std::time::Duration::from_secs(20))
         .connect_timeout(std::time::Duration::from_secs(10)).build().map_err(|_|"google_transport_failed")?;
-    let token=crate::google_oauth::authorize(&client_id,&client).await.map_err(str::to_owned)?;
+    let token=crate::google_oauth::authorize(&client_id,&client_secret,&client).await.map_err(str::to_owned)?;
     if let Some(refresh_token)=token.refresh_token.as_deref() {
         credentials.store(&profile,refresh_token).map_err(str::to_owned)?;
     } else if credentials.load(&profile).map_err(str::to_owned)?.is_none() {
@@ -73,7 +79,7 @@ pub async fn google_calendar_connect(app:AppHandle)->Result<GoogleConnectionStat
 }
 
 fn should_reuse_session(has_calendar:bool,has_credential:bool,error:Option<&str>)->bool {
-    has_calendar && has_credential && !matches!(error,Some("google_reconnect_required"|"google_permission_denied"|"google_calendar_create_pending"))
+    has_calendar && has_credential && !matches!(error,Some("google_reconnect_required"|"google_permission_denied"|"google_calendar_create_pending"|"google_client_config_rejected"))
 }
 
 #[cfg(test)]
@@ -82,6 +88,7 @@ mod tests {
     #[test]
     fn reconnect_pause_requires_new_authorization() {
         assert!(!should_reuse_session(true,true,Some("google_reconnect_required")));
+        assert!(!should_reuse_session(true,true,Some("google_client_config_rejected")));
         assert!(!should_reuse_session(true,false,None));
         assert!(should_reuse_session(true,true,None));
     }
@@ -140,4 +147,79 @@ pub async fn google_calendar_resolve_conflict(app:AppHandle,task_id:String,resol
     sqlx::query("DELETE FROM google_calendar_conflicts WHERE task_id=?").bind(&task_id).execute(pool.inner()).await.map_err(|_|"google_resolution_failed")?;
     let _=app.emit("nimble-data-changed",serde_json::json!({"version":1,"domains":["tasks"],"ids":[task_id]}));
     Ok(())
+}
+
+#[tauri::command]
+pub async fn google_calendar_configure(app:AppHandle,client_id:String,client_secret:String)->Result<GoogleConnectionStatus,String> {
+    let _guard=crate::google_calendar_runner::lock().await;
+    if !crate::google_calendar_runner::network_allowed(&app) { return Err("google_live_network_disabled".into()) }
+    let pool=app.state::<SqlitePool>();
+    let profile=crate::google_calendar_runner::profile_identity(&app)?;
+    let state=nimble_core::db::google_calendar::state(pool.inner()).await.map_err(|_|"google_status_failed")?;
+    let bound=state.calendar_id.is_some() || KeychainCredentials.load(&profile).map_err(str::to_owned)?.is_some();
+    save_client_configuration(pool.inner(),&profile,&client_id,&client_secret,bound,&KeychainClientCredentials).await?;
+    google_calendar_status(app).await
+}
+
+async fn save_client_configuration(
+    pool: &SqlitePool, profile: &str, client_id: &str, client_secret: &str,
+    bound: bool, store: &dyn GoogleCredentials,
+) -> Result<(), String> {
+    let id=client_id.trim();
+    let secret=client_secret.trim();
+    if id.is_empty() || secret.is_empty() { return Err("google_client_config_missing".into()) }
+    if id.len()>512 || !id.ends_with(".apps.googleusercontent.com") || id.chars().any(|c|c.is_whitespace() || c.is_control())
+        || secret.len()>4096 || secret.chars().any(char::is_control) {
+        return Err("google_client_config_rejected".into())
+    }
+    if std::env::var("NIMBLE_GOOGLE_CLIENT_ID").ok().filter(|v|!v.trim().is_empty()).is_some_and(|v|v.trim()!=id) {
+        return Err("google_client_change_blocked".into())
+    }
+    if bound && crate::google_calendar_runner::client_id(pool).await?.trim()!=id {
+        return Err("google_client_change_blocked".into())
+    }
+    store.store(&client_secret_account(profile,id),secret).map_err(str::to_owned)?;
+    nimble_core::db::settings::set_setting(pool,"google_calendar_client_id",id).await.map_err(|_|"google_settings_failed".into())
+}
+
+#[cfg(test)]
+mod setup_tests {
+    use super::*;
+    use crate::google_credentials::{client_secret_account, MemoryCredentials};
+    async fn pool() -> SqlitePool {
+        let pool=sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT)").execute(&pool).await.unwrap();
+        pool
+    }
+    #[tokio::test]
+    async fn setup_saves_only_public_id_in_database_and_secret_in_bound_store() {
+        let pool=pool().await;
+        let store=MemoryCredentials::default();
+        let id="123-alpha.apps.googleusercontent.com";
+        save_client_configuration(&pool,"profile-a",id,"fake-secret",false,&store).await.unwrap();
+        let rows: Vec<(String,String)>=sqlx::query_as("SELECT key,value FROM settings").fetch_all(&pool).await.unwrap();
+        assert_eq!(rows,vec![("google_calendar_client_id".into(),id.into())]);
+        assert_eq!(store.load(&client_secret_account("profile-a",id)).unwrap().as_deref(),Some("fake-secret"));
+        assert_eq!(store.load(&client_secret_account("profile-b",id)).unwrap(),None);
+    }
+    #[tokio::test]
+    async fn setup_rejects_switching_clients_for_a_bound_calendar() {
+        let pool=pool().await;
+        let store=MemoryCredentials::default();
+        let old="123-alpha.apps.googleusercontent.com";
+        let new="456-beta.apps.googleusercontent.com";
+        nimble_core::db::settings::set_setting(&pool,"google_calendar_client_id",old).await.unwrap();
+        assert_eq!(save_client_configuration(&pool,"profile-a",new,"fake-new",true,&store).await,Err("google_client_change_blocked".into()));
+        assert_eq!(nimble_core::db::settings::get_setting(&pool,"google_calendar_client_id").await.unwrap().as_deref(),Some(old));
+        assert_eq!(store.load(&client_secret_account("profile-a",new)).unwrap(),None);
+        save_client_configuration(&pool,"profile-a",old,"fake-replacement",true,&store).await.unwrap();
+        assert_eq!(store.load(&client_secret_account("profile-a",old)).unwrap().as_deref(),Some("fake-replacement"));
+    }
+    #[tokio::test]
+    async fn setup_rejects_empty_secret_without_persisting_public_id() {
+        let pool=pool().await;
+        let store=MemoryCredentials::default();
+        assert_eq!(save_client_configuration(&pool,"profile-a","123-alpha.apps.googleusercontent.com"," ",false,&store).await,Err("google_client_config_missing".into()));
+        assert_eq!(nimble_core::db::settings::get_setting(&pool,"google_calendar_client_id").await.unwrap(),None);
+    }
 }

@@ -923,6 +923,7 @@ export const reminderRequestPermission = () => invoke<import('@nimble/types').Re
 export const reminderListCatchUp = () => invoke<import('@nimble/types').ReminderCatchUpItem[]>('reminder_list_catch_up')
 export const reminderAcknowledge = (occurrenceKey: string) => invoke<void>('reminder_acknowledge', { occurrenceKey })
 export const googleCalendarStatus = () => invoke<import('@nimble/types').GoogleConnectionStatus>('google_calendar_status')
+export const googleCalendarConfigure = (clientId: string, clientSecret: string) => invoke<import('@nimble/types').GoogleConnectionStatus>('google_calendar_configure', { clientId, clientSecret })
 export const googleCalendarConnect = () => invoke<import('@nimble/types').GoogleConnectionStatus>('google_calendar_connect')
 export const googleCalendarDisconnect = () => invoke<import('@nimble/types').GoogleConnectionStatus>('google_calendar_disconnect')
 export const googleCalendarSyncNow = () => invoke<{ changedTaskIds: string[]; errorCode: string | null }>('google_calendar_sync_now')
