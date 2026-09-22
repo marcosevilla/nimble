@@ -4,6 +4,8 @@ Updated 2026-09-21 from the current checkout and committed planning documents.
 
 ## Start here
 
+- Release packaging: optimized app and `dt` compiled; existing developer-identity signing is still pending. Computer Use cannot inspect macOS SecurityAgent; awaiting whether a signing prompt is visible. Production installation has not occurred.
+
 - C2/C3 implementation is built in `codex/c2-c3-reminders-agents`; native synthetic CLI refresh, reminder submission, restart catch-up and backup/restore checks passed. All 320 Rust tests, desktop/web builds and final review passed. Production app and real Google connection remain unchanged. See [combined verification](docs/c2-c3-verification.md).
 
 - [x] Review the [coordinated C2/C3 implementation plan](docs/superpowers/plans/2026-09-21-c2-c3-coordination.md): reminders and local assistant access will develop concurrently with separate subagents and one owner for shared database, backup, and app integration. Plan approved and implementation built 2026-09-21 in `codex/c2-c3-reminders-agents`; integration/installation and live activation remain below.

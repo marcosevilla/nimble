@@ -49,3 +49,9 @@ Mocked transport success does not establish phone delivery. Mac reminders need N
 The final debug test bundle built successfully and was reopened after the review fixes. The previously dismissed reminder remained dismissed; Settings includes Reminders and Phone alerts navigation. The test app was quit after verification. Build log: `/private/tmp/nimble-c23-final-native-build.log`.
 
 Implementation choices: workers shared one isolated feature worktree with exclusive file ownership (requiring coordinated integration), and frontend dependencies were installed separately because symlinking another worktree would resolve stale shared types. Neither choice changes production data or external account state.
+
+## Release packaging
+
+Optimized app compilation passed and `dt` release binary built successfully. The release bundle has production identifier `com.marcosevilla.daily-triage` and no test `LSEnvironment`. Existing identity `Marco Task App Dev` signing is still pending: `codesign --force -s ... --options runtime` has not exited. Computer Use denies inspection of `com.apple.SecurityAgent`; no attempt was made to bypass it. Marco was asked whether a signing prompt is visible. Do not treat this release bundle as install-ready until signing exits successfully and `codesign --verify --deep --strict` passes.
+
+Pending build session: `20242`; log `/private/tmp/nimble-c23-release-build.log`. CLI artifact: `/Users/marcosevilla/Developer/marco-task-app/.worktrees/nimble-c1/target/release/dt`; release `--json --help` succeeds. No production install, code merge, live account setup or agent routing change occurred.
