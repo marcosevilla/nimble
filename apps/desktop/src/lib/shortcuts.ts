@@ -20,6 +20,7 @@ export type ShortcutSection =
   | 'Calendar'
   | 'Selection'
   | 'General'
+  | 'Inbox'
 
 export interface Shortcut {
   section: ShortcutSection
@@ -94,6 +95,21 @@ export const SHORTCUTS: Shortcut[] = [
 
   // ── Appended by Stage B4 (shell): later rows go below, never reorder above ──
   { section: 'Navigation', keys: '⌥Enter', label: 'Reorder sidebar page (then arrows, Enter)' },
+
+  // ── B3a: Tasks rows (hooks/useTaskNavigation.ts via useTaskRowActions) ──
+  // Appended, never reordered — the panel groups by section.
+  { section: 'Tasks', keys: 'f', label: 'Start focus on focused task' },
+  { section: 'Tasks', keys: 'Escape', label: 'Clear row focus' },
+
+  // ── Inbox (InboxPage.tsx) ──
+  { section: 'Inbox', keys: 'c', label: 'Capture a note' },
+  { section: 'Inbox', keys: 'j / ↓', label: 'Next item' },
+  { section: 'Inbox', keys: 'k / ↑', label: 'Previous item' },
+  { section: 'Inbox', keys: 'Enter', label: 'Open focused item' },
+  { section: 'Inbox', keys: 't', label: 'Convert focused note to task' },
+  { section: 'Inbox', keys: 'm', label: 'Move focused note to a doc' },
+  { section: 'Inbox', keys: 'd', label: 'Dismiss focused note' },
+  { section: 'Inbox', keys: 'Escape', label: 'Leave the capture field / clear row focus' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [
@@ -104,6 +120,7 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
   'Calendar',
   'Selection',
   'General',
+  'Inbox',
 ]
 
 export function shortcutsBySection(): { title: ShortcutSection; rows: Shortcut[] }[] {
