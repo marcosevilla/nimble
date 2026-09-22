@@ -68,7 +68,7 @@ pub struct LocalTask {
 
 /// Input for `db::tasks::create_local_task`. Struct form lets later tasks add
 /// fields without touching every caller.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CreateTaskInput {
     pub sync_policy: Option<String>,
     pub content: String,
@@ -88,7 +88,7 @@ pub struct CreateTaskInput {
 
 /// Input for `db::tasks::update_local_task`. Struct form lets later tasks add
 /// fields without touching every caller.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct UpdateTaskInput {
     pub sync_policy: Option<String>,
     pub content: Option<String>,

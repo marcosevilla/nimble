@@ -190,6 +190,9 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
         .bind(id).fetch_one(&mut *tx).await?;
     let fields_changed = activity_fields(&input, &old);
     let task = crate::db::task_tx::update_task_tx(&mut tx, id, input, crate::db::task_tx::MutationPolicy::User).await?;
+    crate::db::focus::engine::reconcile_task_effects_tx(&mut tx, &crate::db::task_tx::TaskEffects {
+        changed: vec![task.clone()], ..Default::default()
+    }).await?;
     tx.commit().await?;
     if !fields_changed.is_empty() {
         let action = if fields_changed == ["project_id"] { "task_moved" } else { "task_updated" };
@@ -258,6 +261,9 @@ pub async fn update_local_task_if_unchanged(
     }
     let updated = crate::db::task_tx::update_task_tx(&mut tx, id, input,
         crate::db::task_tx::MutationPolicy::User).await?;
+    crate::db::focus::engine::reconcile_task_effects_tx(&mut tx, &crate::db::task_tx::TaskEffects {
+        changed: vec![updated.clone()], ..Default::default()
+    }).await?;
     tx.commit().await?;
     activity::log_activity(
         pool,
@@ -293,6 +299,7 @@ pub async fn update_task_status_at(
 ) -> crate::Result<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let effects = crate::db::task_tx::set_status_tx(&mut tx, id, status, today, crate::db::task_tx::MutationPolicy::User).await?;
+    crate::db::focus::engine::reconcile_task_effects_tx(&mut tx, &effects).await?;
     tx.commit().await?;
     if let Some(recurrence) = effects.recurrence {
         activity::log_activity(pool, "task_recurred", Some(id),
@@ -308,7 +315,8 @@ pub async fn update_task_status_at(
 
 pub async fn delete_local_task(pool: &SqlitePool, id: &str) -> crate::Result<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    crate::db::task_tx::delete_task_tx(&mut tx, id, crate::db::task_tx::MutationPolicy::User).await?;
+    let effects = crate::db::task_tx::delete_task_tx(&mut tx, id, crate::db::task_tx::MutationPolicy::User).await?;
+    crate::db::focus::engine::reconcile_task_effects_tx(&mut tx, &effects).await?;
     tx.commit().await?;
     activity::log_activity(pool, "task_deleted", Some(id), None).await;
     Ok(())

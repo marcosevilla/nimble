@@ -1,6 +1,9 @@
 use sqlx::SqlitePool;
 
 pub mod schema;
+pub mod engine;
+pub mod clock;
+pub mod queue;
 
 use crate::db::activity;
 use crate::db::sync;

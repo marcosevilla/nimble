@@ -506,6 +506,14 @@ pub async fn delete_task_tx(
     .bind(id)
     .fetch_all(&mut *conn)
     .await?;
+    effects.deleted.extend(children);
+    if let Some(parent) = parent {
+        effects.deleted.push(parent);
+    }
+    for task in &mut effects.deleted {
+        task.labels = sqlx::query_scalar("SELECT label_id FROM task_labels WHERE task_id=?")
+            .bind(&task.id).fetch_all(&mut *conn).await?;
+    }
     sqlx::query("DELETE FROM local_tasks WHERE parent_id=?")
         .bind(id)
         .execute(&mut *conn)
@@ -514,10 +522,6 @@ pub async fn delete_task_tx(
         .bind(id)
         .execute(&mut *conn)
         .await?;
-    effects.deleted.extend(children);
-    if let Some(parent) = parent {
-        effects.deleted.push(parent);
-    }
     if policy != MutationPolicy::Remote {
         for task in &effects.deleted {
             sync::append_sync_log_tx(conn, "local_tasks", &task.id, "DELETE", None, None).await?;
@@ -529,4 +533,33 @@ pub async fn delete_task_tx(
         }
     }
     Ok(effects)
+}
+
+/// Restore an exact local deletion snapshot, preserving IDs and parent links.
+/// The caller owns the transaction and resolves focus history/queue separately.
+pub async fn restore_deleted_tasks_tx(conn: &mut SqliteConnection, tasks: &[LocalTask]) -> crate::Result<()> {
+    // Parent was captured after children by delete_task_tx.
+    for task in tasks.iter().rev() {
+        let exists: Option<String> = sqlx::query_scalar("SELECT id FROM local_tasks WHERE id=?")
+            .bind(&task.id).fetch_optional(&mut *conn).await?;
+        if exists.is_some() { return Err(crate::Error::Other("conflict: task ID already exists during undo".into())); }
+        sqlx::query("INSERT INTO local_tasks(id,parent_id,content,description,project_id,priority,due_date,due_time,duration_minutes,recurrence_rule,section_id,reminder_offset_minutes,google_calendar_enabled,completed,completed_at,status,linked_doc_id,position,created_at,updated_at,external_id,external_source,remote_updated_at,synced_snapshot,sync_policy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+            .bind(&task.id).bind(&task.parent_id).bind(&task.content).bind(&task.description)
+            .bind(&task.project_id).bind(task.priority).bind(&task.due_date).bind(&task.due_time)
+            .bind(task.duration_minutes).bind(&task.recurrence_rule).bind(&task.section_id)
+            .bind(task.reminder_offset_minutes).bind(task.google_calendar_enabled).bind(task.completed)
+            .bind(&task.completed_at).bind(&task.status).bind(&task.linked_doc_id).bind(task.position)
+            .bind(&task.created_at).bind(&task.updated_at).bind(&task.external_id).bind(&task.external_source)
+            .bind(&task.remote_updated_at).bind(&task.synced_snapshot).bind(&task.sync_policy)
+            .execute(&mut *conn).await?;
+        for label in &task.labels {
+            sqlx::query("INSERT OR IGNORE INTO task_labels(task_id,label_id) VALUES(?,?)")
+                .bind(&task.id).bind(label).execute(&mut *conn).await?;
+        }
+        sqlx::query("DELETE FROM todoist_outbox WHERE local_id=? AND object_type='task' AND op='delete' AND status='pending'")
+            .bind(&task.id).execute(&mut *conn).await?;
+        sync_task(conn, task, "INSERT", None).await?;
+        observer::on_task_mutation_tx(conn, TaskMutation::Created(task)).await?;
+    }
+    Ok(())
 }
