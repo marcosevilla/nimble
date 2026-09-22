@@ -7,14 +7,14 @@
  */
 
 import type { Label } from '@nimble/types'
-import { query, str, num, type Row } from './client'
+import { query, str, strOrNull, num, type Row } from './client'
 
 /**
  * The column list from `LABEL_COLS` in labels.rs, spelled out rather than
  * `SELECT *` — the row decoder below indexes by name, so an added column on
  * Turso must not silently change what arrives.
  */
-const LABEL_COLS = 'id, name, color, position, created_at'
+const LABEL_COLS = 'id, name, color, position, created_at, "group"'
 
 /**
  * `position` is an INTEGER that the HTTP API hands back as the string "3";
@@ -23,6 +23,7 @@ const LABEL_COLS = 'id, name, color, position, created_at'
  */
 function toLabel(row: Row): Label {
   return {
+    group: strOrNull(row, 'group'),
     id: str(row, 'id'),
     name: str(row, 'name'),
     color: str(row, 'color'),

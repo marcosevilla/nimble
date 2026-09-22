@@ -1,3 +1,5 @@
+import { GoogleCalendarSection } from '@/components/settings/GoogleCalendarSection'
+import { ReminderSection } from '@/components/settings/ReminderSection'
 import { useCallback, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -1616,6 +1618,8 @@ export function SettingsPage() {
       {/* Sync */}
       <SyncSection />
       <BackupSection />
+      <ReminderSection />
+      <GoogleCalendarSection />
 
       <Separator />
 

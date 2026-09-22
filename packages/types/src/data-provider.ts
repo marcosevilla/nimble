@@ -66,6 +66,8 @@ import type {
 } from './index'
 
 export interface DataProvider {
+  googleCalendar: import('./index').GoogleCalendarCapability
+  reminders: import('./index').ReminderCapability
   backup: import('./index').BackupCapability
   settings: {
     checkSetupComplete(): Promise<boolean>
@@ -166,6 +168,8 @@ export interface DataProvider {
       priority?: number
       dueDate?: string
       dueTime?: string
+  reminderOffsetMinutes?: number
+  googleCalendarEnabled?: boolean
       durationMinutes?: number
       recurrenceRule?: string
       sectionId?: string
@@ -181,11 +185,14 @@ export interface DataProvider {
       clearDueDate?: boolean
       linkedDocId?: string | null
       dueTime?: string
+  reminderOffsetMinutes?: number
+  googleCalendarEnabled?: boolean
       durationMinutes?: number
       recurrenceRule?: string
       sectionId?: string
       labelIds?: string[]
       clearDueTime?: boolean
+  clearReminder?: boolean
       clearRecurrence?: boolean
       clearSection?: boolean
       clearDuration?: boolean

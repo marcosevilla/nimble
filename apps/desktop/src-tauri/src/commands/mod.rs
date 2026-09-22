@@ -1,3 +1,5 @@
+pub mod reminders;
+pub mod google_calendar;
 pub mod activity;
 pub mod ai;
 pub mod calendar;

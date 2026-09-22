@@ -1,3 +1,4 @@
+import { dispatchDataChanges, type DataDomain } from '@/lib/dataChanges'
 import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { useAppStore } from '@/stores/appStore'
@@ -64,6 +65,11 @@ function App() {
   // Todoist one so the log and any future handler can tell the two apart.
   useEffect(() => {
     const unlisteners = [
+      listen<{ version: number; domains: DataDomain[] }>('nimble-data-changed', ({ payload }) => {
+        if (payload.version !== 1 || !Array.isArray(payload.domains)) return
+        dispatchDataChanges(payload.domains)
+        if (payload.domains.some(d => ['tasks', 'projects', 'labels', 'sections'].includes(d))) emitTasksChanged()
+      }),
       listen('todoist-sync-applied', () => emitTasksChanged()),
       listen('remote-sync-applied', () => emitTasksChanged()),
     ]

@@ -1,3 +1,4 @@
+import { subscribeDataChanges } from '@/lib/dataChanges'
 import { useCallback, useEffect, useState } from 'react'
 import { useDataProvider, getDataProvider } from '@/services/provider-context'
 import type { LocalTask, Project } from '@nimble/types'
@@ -160,6 +161,8 @@ export function useProjects() {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  useEffect(() => subscribeDataChanges('projects', () => { void refresh() }), [refresh])
 
   const addProject = useCallback(async (name: string, color: string) => {
     try {

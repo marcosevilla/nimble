@@ -37,7 +37,7 @@ import type { DataProvider } from '@nimble/types'
 // mirrors the ordering/filtering of the matching fn in nimble-core/src/db/,
 // so a web list comes back in the same order as the desktop one. They all
 // share the transport in `turso/client.ts` — do not add another fetch path.
-import { createTask, listTasks, setTaskStatus } from '@/services/turso/tasks'
+import { createTask, listTasks, setTaskStatus, updateReminderIntent } from '@/services/turso/tasks'
 import { listProjects } from '@/services/turso/projects'
 import { createCapture, listCaptures } from '@/services/turso/captures'
 import { listLabels } from '@/services/turso/labels'
@@ -72,6 +72,13 @@ function ni(method: string): () => Promise<never> {
 
 export function createTursoProvider(): DataProvider {
   return {
+    reminders: {
+      supported: false, getStatus: ni('reminders.getStatus'), requestPermission: ni('reminders.requestPermission'),
+      listCatchUp: ni('reminders.listCatchUp'), acknowledge: ni('reminders.acknowledge'),
+    },
+    googleCalendar: {
+      supported: false, getStatus: ni('googleCalendar.getStatus'), connect: ni('googleCalendar.connect'), disconnect: ni('googleCalendar.disconnect'), syncNow: ni('googleCalendar.syncNow'), listConflicts: ni('googleCalendar.listConflicts'), resolveConflict: ni('googleCalendar.resolveConflict'),
+    },
     backup: {
       supported: false,
       status: ni('backup.status'),
@@ -164,7 +171,7 @@ export function createTursoProvider(): DataProvider {
     tasks: {
       list: listTasks,
       create: createTask,
-      update: ni('tasks.update'),
+      update: updateReminderIntent,
       // `note` is accepted and ignored: it exists only to be written to
       // activity_log, which web does not write yet. Dropping it changes no task
       // state — the status transition itself is applied in full.

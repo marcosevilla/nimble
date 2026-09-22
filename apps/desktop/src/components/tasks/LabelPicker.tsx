@@ -1,3 +1,4 @@
+import { useDataVersion } from '@/hooks/useDataVersion'
 import { useEffect, useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { labelColor, DEFAULT_LABEL_COLOR } from '@/lib/labelColors'
@@ -64,6 +65,7 @@ interface LabelPickerProps {
 }
 
 export function LabelPicker({ value, onChange }: LabelPickerProps) {
+  const labelVersion = useDataVersion('labels')
   const dp = useDataProvider()
   const [open, setOpen] = useState(false)
   const [labels, setLabels] = useState<Label[]>([])
@@ -77,7 +79,7 @@ export function LabelPicker({ value, onChange }: LabelPickerProps) {
       .then(setLabels)
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [dp])
+  }, [dp, labelVersion])
 
   const selectedLabels = useMemo(
     () => value.map((id) => labels.find((l) => l.id === id)).filter((l): l is Label => !!l),

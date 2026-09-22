@@ -1,3 +1,4 @@
+import { ReminderCatchUp } from '@/components/today/ReminderCatchUp'
 import { useMemo, useState, useCallback, useEffect } from 'react'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
@@ -426,9 +427,9 @@ export function TodayPage() {
 
   // Review mode (first open of the day)
   if (!reviewComplete) {
-    return <ReviewMode onComplete={handleReviewComplete} />
+    return <><ReminderCatchUp /><ReviewMode onComplete={handleReviewComplete} /></>
   }
 
   // Dashboard mode (review done)
-  return <DashboardMode cachedPriorities={cachedPriorities} />
+  return <><ReminderCatchUp /><DashboardMode cachedPriorities={cachedPriorities} /></>
 }

@@ -1,3 +1,5 @@
+import { ReminderPicker } from '@/components/tasks/ReminderPicker'
+import { useDataVersion } from '@/hooks/useDataVersion'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useDetailStore } from '@/stores/detailStore'
 import { useTaskDetail } from '@/hooks/useTaskDetail'
@@ -37,6 +39,8 @@ import { toast } from 'sonner'
 import { format, parseISO } from 'date-fns'
 
 export function TaskDetailPage() {
+  const referenceVersion = useDataVersion('labels')
+  const sectionVersion = useDataVersion('sections')
   const dp = useDataProvider()
   const target = useDetailStore((s) => s.target)
   const mode = useDetailStore((s) => s.mode)
@@ -55,7 +59,7 @@ export function TaskDetailPage() {
 
   useEffect(() => {
     dp.labels.list().then(setLabels).catch(() => setLabels([]))
-  }, [dp])
+  }, [dp, referenceVersion])
 
   useEffect(() => {
     if (!task?.project_id) {
@@ -63,7 +67,7 @@ export function TaskDetailPage() {
       return
     }
     dp.sections.list(task.project_id).then(setSections).catch(() => setSections([]))
-  }, [dp, task?.project_id])
+  }, [dp, task?.project_id, sectionVersion])
 
   const labelsMap = useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels])
 
@@ -484,6 +488,7 @@ export function TaskDetailPage() {
         </div>
       </div>
 
+      <ReminderPicker task={task} />
       {/* Metadata chips */}
       <MetadataChips
         values={chipValues}

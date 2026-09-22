@@ -96,6 +96,8 @@ export interface Project {
 export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'blocked' | 'complete'
 
 export interface LocalTask {
+  reminder_offset_minutes: number | null
+  google_calendar_enabled: boolean
   id: string
   parent_id: string | null
   content: string
@@ -143,6 +145,7 @@ export interface TasksMdResult {
 // ── Labels ──
 
 export interface Label {
+  group: string | null
   id: string
   name: string
   color: string
@@ -505,4 +508,26 @@ export interface BackupCapability {
   verifyLatest(): Promise<{ verified: boolean }>
   openFolder(): Promise<void>
   configureRemote(ownerRepo: string): Promise<BackupStatus>
+}
+
+export interface ReminderStatus { permission: 'granted' | 'denied' | 'unknown'; timezone: string; errorCode: string | null }
+export interface ReminderCatchUpItem { errorCode?: string | null; occurrenceKey: string; taskId: string; title: string; scheduledAt: string }
+export interface ReminderCapability {
+  supported: boolean
+  getStatus(): Promise<ReminderStatus>
+  requestPermission(): Promise<ReminderStatus>
+  listCatchUp(): Promise<ReminderCatchUpItem[]>
+  acknowledge(occurrenceKey: string): Promise<void>
+}
+
+export interface GoogleConnectionStatus { connected: boolean; calendarLabel: string | null; timezone: string; errorCode: string | null }
+export interface GoogleCalendarConflict { taskId: string; reason: string; local: unknown; remote: unknown; createdAt: string }
+export interface GoogleCalendarCapability {
+  supported: boolean
+  getStatus(): Promise<GoogleConnectionStatus>
+  connect(): Promise<GoogleConnectionStatus>
+  disconnect(): Promise<GoogleConnectionStatus>
+  syncNow(): Promise<{ changedTaskIds: string[]; errorCode: string | null }>
+  listConflicts(): Promise<GoogleCalendarConflict[]>
+  resolveConflict(taskId: string, resolution: 'keep_nimble' | 'use_calendar'): Promise<void>
 }
