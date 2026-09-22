@@ -4,6 +4,8 @@ Updated 2026-09-21 from the current checkout and committed planning documents.
 
 ## Start here
 
+- [ ] Review the [coordinated C2/C3 implementation plan](docs/superpowers/plans/2026-09-21-c2-c3-coordination.md): reminders and local assistant access will develop concurrently with separate subagents and one owner for shared database, backup, and app integration. Planning authorized 2026-09-21; implementation awaits plan approval.
+
 - [x] Install signed release from `codex/c1-backup-restore` (`e196d1c`) into `/Applications/Nimble.app`; reopened successfully, existing task/project counts preserved, first local backup succeeded.
 - [x] Fast-forward the tested feature branch into main; reran the full Rust suite: 279 passed.
 - [x] Build and open standalone Nimble Backup Test; native Back up now, Verify latest backup, and Open backup folder all passed using an isolated empty test profile.
