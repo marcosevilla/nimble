@@ -12,33 +12,50 @@ pub async fn log_activity(
     target_id: Option<&str>,
     metadata: Option<serde_json::Value>,
 ) {
-    let id = Uuid::new_v4().to_string();
-    let metadata_str = metadata.map(|m| m.to_string());
-
-    if let Err(e) = sqlx::query(
-        "INSERT INTO activity_log (id, action_type, target_id, metadata, created_at) VALUES (?, ?, ?, ?, datetime('now', 'localtime'))",
-    )
-    .bind(&id)
-    .bind(action_type)
-    .bind(target_id)
-    .bind(&metadata_str)
-    .execute(pool)
-    .await
+    if record_activity(pool, action_type, target_id, metadata)
+        .await
+        .is_err()
     {
-        log::warn!("Failed to log activity '{}': {}", action_type, e);
-        return;
+        log::warn!("Failed to record activity");
     }
+}
 
-    // Sync log: INSERT for activity_log
-    let snapshot = serde_json::json!({
-        "id": &id,
-        "action_type": action_type,
-        "target_id": target_id,
-        "metadata": &metadata_str,
-        "created_at": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-    });
-    let snap_str = serde_json::to_string(&snapshot).unwrap_or_default();
-    sync::append_sync_log(pool, "activity_log", &id, "INSERT", None, Some(&snap_str)).await.ok();
+/// Fallible activity recording for callers (such as dt gap) that promise persistence.
+pub async fn record_activity(
+    pool: &SqlitePool,
+    action_type: &str,
+    target_id: Option<&str>,
+    metadata: Option<serde_json::Value>,
+) -> crate::Result<ActivityEntry> {
+    let id = Uuid::new_v4().to_string();
+    let created_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let metadata_str = metadata.as_ref().map(|m| m.to_string());
+    sqlx::query("INSERT INTO activity_log (id, action_type, target_id, metadata, created_at) VALUES (?, ?, ?, ?, ?)")
+        .bind(&id).bind(action_type).bind(target_id).bind(&metadata_str).bind(&created_at)
+        .execute(pool).await?;
+    let snapshot = serde_json::json!({"id": &id, "action_type": action_type,
+        "target_id": target_id, "metadata": &metadata_str, "created_at": &created_at});
+    // Preserve the existing observer contract: local persistence succeeds even if sync logging fails.
+    if sync::append_sync_log(
+        pool,
+        "activity_log",
+        &id,
+        "INSERT",
+        None,
+        Some(&snapshot.to_string()),
+    )
+    .await
+    .is_err()
+    {
+        log::warn!("Activity persisted, but sync logging failed");
+    }
+    Ok(ActivityEntry {
+        id,
+        action_type: action_type.to_owned(),
+        target_id: target_id.map(str::to_owned),
+        metadata,
+        created_at,
+    })
 }
 
 /// Get activity log entries for a date range with optional filters
@@ -52,19 +69,28 @@ pub async fn get_activity_log(
 ) -> crate::Result<Vec<ActivityEntry>> {
     // Build query dynamically based on filters
     let mut conditions = vec!["created_at >= ?", "created_at < date(?, '+1 day')"];
-    if action_type.is_some() { conditions.push("action_type = ?"); }
-    if target_id.is_some() { conditions.push("target_id = ?"); }
+    if action_type.is_some() {
+        conditions.push("action_type = ?");
+    }
+    if target_id.is_some() {
+        conditions.push("target_id = ?");
+    }
 
     let sql = format!(
         "SELECT id, action_type, target_id, metadata, created_at FROM activity_log WHERE {} ORDER BY created_at DESC LIMIT ?",
         conditions.join(" AND ")
     );
 
-    let mut query = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, String)>(&sql)
-        .bind(from_date)
-        .bind(to_date);
-    if let Some(action) = action_type { query = query.bind(action); }
-    if let Some(tid) = target_id { query = query.bind(tid); }
+    let mut query =
+        sqlx::query_as::<_, (String, String, Option<String>, Option<String>, String)>(&sql)
+            .bind(from_date)
+            .bind(to_date);
+    if let Some(action) = action_type {
+        query = query.bind(action);
+    }
+    if let Some(tid) = target_id {
+        query = query.bind(tid);
+    }
     query = query.bind(limit);
 
     let rows = query.fetch_all(pool).await?;
