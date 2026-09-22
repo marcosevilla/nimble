@@ -1,6 +1,6 @@
 # Focus Queue absorption — verification record
 
-Status: **Tasks 1–5 reviewed (foundation checkpoint)**; Tasks 6–12 in progress on `codex/focus-absorption`. Code through `0a6117e`. This is an evidence log, not release or live-acceptance approval.
+Status: **Tasks 1–5 reviewed (foundation checkpoint)**; paused at Marco’s request before Task 6 on `codex/focus-absorption`. Code through `0a6117e`. This is an evidence log, not release or live-acceptance approval.
 
 Spec: [approved architecture](superpowers/specs/2026-09-22-focus-queue-absorption-design.md). Plan: [12 staged tasks](superpowers/plans/2026-09-22-focus-queue-absorption.md).
 
