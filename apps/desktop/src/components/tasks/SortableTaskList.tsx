@@ -27,6 +27,8 @@ interface SortableTaskItemProps {
   subtaskStats?: { done: number; total: number }
   onDelete: (id: string) => void
   onAddSubtask: (parentId: string, content: string) => void
+  focused?: boolean
+  onFocusRow?: () => void
 }
 
 // Exported so SectionedTaskList (Task 14's section-lane view) can reuse the
@@ -38,6 +40,8 @@ export function SortableTaskItem({
   subtaskStats,
   onDelete,
   onAddSubtask,
+  focused,
+  onFocusRow,
 }: SortableTaskItemProps) {
   const {
     attributes,
@@ -75,6 +79,8 @@ export function SortableTaskItem({
         subtaskStats={subtaskStats}
         onDelete={onDelete}
         onAddSubtask={onAddSubtask}
+        focused={focused}
+        onFocusRow={onFocusRow}
         dragHandleProps={{ ...attributes, ...listeners }}
       />
     </div>

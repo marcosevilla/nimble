@@ -29,18 +29,29 @@ export function SelectionCheckbox({ id, type, allIds, autoHide = true }: Selecti
     }
   }
 
+  // Hidden at rest (autoHide, nothing selected): revealed on row hover OR
+  // when anything in the row has keyboard focus, and taken out of the tab
+  // order so Tab never lands on an invisible control (tasks audit P1-2,
+  // inbox P1-2). The 16px box keeps a 32px hit area via ::after (P3-3).
+  const hidden = autoHide && !hasSelection && !isSelected
+
   return (
     <button
+      type="button"
       onClick={handleClick}
+      tabIndex={hidden ? -1 : 0}
+      aria-label={isSelected ? 'Deselect' : 'Select'}
+      aria-pressed={isSelected}
       className={cn(
-        'flex size-4 shrink-0 items-center justify-center rounded border transition-all',
+        'relative flex size-4 shrink-0 items-center justify-center rounded border transition-[opacity,color,background-color,border-color]',
+        'after:absolute after:-inset-2 after:content-[""]',
         isSelected
           ? 'border-accent-blue bg-accent-blue text-white'
           : 'border-muted-foreground/30 hover:border-muted-foreground/50',
         autoHide &&
-          (hasSelection || isSelected
-            ? 'opacity-100'
-            : 'opacity-0 group-hover:opacity-100'),
+          (hidden
+            ? 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+            : 'opacity-100'),
       )}
     >
       {isSelected && <Check className="size-3" />}

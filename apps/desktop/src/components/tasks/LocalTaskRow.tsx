@@ -91,6 +91,8 @@ interface LocalTaskRowProps {
   onDelete: (id: string) => void
   onAddSubtask?: (parentId: string, content: string) => void
   focused?: boolean
+  /** See TaskItem `onFocusRow`. */
+  onFocusRow?: () => void
   isSubtask?: boolean
   subtaskStats?: { done: number; total: number }
   /** dnd-kit `{...attributes, ...listeners}` from the sortable wrapper —
@@ -108,6 +110,7 @@ export function LocalTaskRow({
   projectColor,
   onAddSubtask,
   focused,
+  onFocusRow,
   isSubtask,
   subtaskStats,
   dragHandleProps,
@@ -163,6 +166,7 @@ export function LocalTaskRow({
         }}
         onOpen={() => useDetailStore.getState().openTask(task.id)}
         focused={focused}
+        onFocusRow={onFocusRow}
         dragHandleProps={dragHandleProps}
         showGrip={showGrip}
       />
