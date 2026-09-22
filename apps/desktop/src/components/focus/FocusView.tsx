@@ -90,7 +90,7 @@ export function FocusView() {
           <div>
             <h2 className="text-title">Take a break</h2>
             <p className="text-body text-muted-foreground mt-1">
-              Round {currentPomodoro - 1} of {config.totalPomodoros} complete
+              Round {currentPomodoro} of {config.totalPomodoros} complete
             </p>
           </div>
           <div className="text-timer text-muted-foreground">
