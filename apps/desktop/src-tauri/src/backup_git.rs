@@ -3,6 +3,7 @@ use crate::backup_state::{atomic_private_write, error, plain_file, RemoteConfig}
 use nimble_core::Result;
 use serde::{Deserialize, Serialize};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::os::unix::process::CommandExt;
 use std::{
     collections::BTreeMap,
     fs,
@@ -37,10 +38,47 @@ impl Default for Tools {
         }
     }
 }
+#[derive(Debug)]
 struct Output {
     success: bool,
     bytes: Vec<u8>,
 }
+// The group owns Git/gh plus any credential/transport helpers they spawn. The
+// guard also terminates helpers when the enclosing backup future is cancelled.
+struct ProcessGroup(libc::pid_t);
+impl Drop for ProcessGroup {
+    fn drop(&mut self) {
+        // SAFETY: spawn created a new process group with this positive child PID;
+        // the negative PID targets only that group, never the app's own group.
+        unsafe {
+            libc::kill(-self.0, libc::SIGKILL);
+        }
+    }
+}
+fn scrub_transport_environment(
+    command: &mut Command,
+    names: impl Iterator<Item = std::ffi::OsString>,
+) {
+    for name in names {
+        let text = name.to_string_lossy();
+        if text.starts_with("GIT_")
+            || matches!(
+                text.as_ref(),
+                "SSH_ASKPASS"
+                    | "SSH_ASKPASS_REQUIRE"
+                    | "HTTP_PROXY"
+                    | "HTTPS_PROXY"
+                    | "ALL_PROXY"
+                    | "http_proxy"
+                    | "https_proxy"
+                    | "all_proxy"
+            )
+        {
+            command.env_remove(name);
+        }
+    }
+}
+
 async fn bounded_read(mut reader: impl AsyncRead + Unpin) -> std::io::Result<(Vec<u8>, bool)> {
     let mut result = Vec::new();
     let mut buffer = [0; 8192];
@@ -69,18 +107,24 @@ impl Tools {
             .env("GCM_INTERACTIVE", "never")
             .env("GH_HOST", "github.com");
         // Do not let an inherited Git environment select a different worktree/index/config.
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("GIT_") {
-                command.env_remove(name);
-            }
-        }
+        scrub_transport_environment(&mut command, std::env::vars_os().map(|(name, _)| name));
         command.env("GIT_TERMINAL_PROMPT", "0");
+        // Keep SSH on the validated github.com host; user Host/ProxyCommand/LocalCommand
+        // directives cannot redirect a push or launch arbitrary processes. Agent/default
+        // key authentication and known-host verification remain available.
+        command.env(
+            "GIT_SSH_COMMAND",
+            "/usr/bin/ssh -F /dev/null -oBatchMode=yes -oPermitLocalCommand=no",
+        );
+        command.as_std_mut().process_group(0);
         if let Some(path) = cwd {
             command.current_dir(path);
         }
         let mut child = command
             .spawn()
             .map_err(|_| error("backup_tool_unavailable"))?;
+        let group =
+            ProcessGroup(child.id().ok_or_else(|| error("backup_process_failed"))? as libc::pid_t);
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
         let result = tokio::time::timeout(self.timeout, async {
@@ -101,7 +145,8 @@ impl Tools {
         match result {
             Ok(value) => value,
             Err(_) => {
-                let _ = child.kill().await;
+                drop(group); // Terminate helpers even when the direct child already exited.
+                let _ = child.wait().await; // Reap the direct child; OS reaps orphaned helpers.
                 Err(error("backup_process_timeout"))
             }
         }
@@ -263,6 +308,51 @@ fn check_files(root: &Path) -> Result<()> {
     }
     Ok(())
 }
+async fn validate_transport_config(tools: &Tools, root: &Path) -> Result<()> {
+    let rewrites = tools
+        .git(
+            root,
+            &[
+                "config",
+                "--get-regexp",
+                r"^url\..*\.(insteadof|pushinsteadof)$",
+            ],
+        )
+        .await?;
+    if !rewrites.bytes.is_empty() {
+        return Err(error("git_url_rewrite_refused"));
+    }
+    for key in [
+        "remote.origin.vcs",
+        "remote.origin.receivepack",
+        "remote.origin.uploadpack",
+        "remote.origin.proxy",
+        "core.sshCommand",
+        "http.proxy",
+        "https.proxy",
+    ] {
+        if !tools
+            .git(root, &["config", "--includes", "--get-all", key])
+            .await?
+            .bytes
+            .is_empty()
+        {
+            return Err(error("unexpected_backup_transport"));
+        }
+    }
+    if !tools
+        .git(
+            root,
+            &["config", "--includes", "--get-regexp", r"^http\..*\.proxy$"],
+        )
+        .await?
+        .bytes
+        .is_empty()
+    {
+        return Err(error("unexpected_backup_transport"));
+    }
+    Ok(())
+}
 async fn inspect(tools: &Tools, root: &Path, name: &str, clean: bool) -> Result<()> {
     if !root.exists() {
         return Err(error("backup_repository_missing"));
@@ -289,34 +379,7 @@ async fn inspect(tools: &Tools, root: &Path, name: &str, clean: bool) -> Result<
     if tools.text(root, &["remote"]).await?.trim() != "origin" {
         return Err(error("unexpected_backup_remote"));
     }
-    let rewrites = tools
-        .git(
-            root,
-            &[
-                "config",
-                "--get-regexp",
-                r"^url\..*\.(insteadof|pushinsteadof)$",
-            ],
-        )
-        .await?;
-    if !rewrites.bytes.is_empty() {
-        return Err(error("git_url_rewrite_refused"));
-    }
-    for key in [
-        "remote.origin.vcs",
-        "remote.origin.receivepack",
-        "remote.origin.uploadpack",
-        "remote.origin.proxy",
-    ] {
-        if !tools
-            .git(root, &["config", "--get-all", key])
-            .await?
-            .bytes
-            .is_empty()
-        {
-            return Err(error("unexpected_backup_transport"));
-        }
-    }
+    validate_transport_config(tools, root).await?;
     let raw = tools
         .text(root, &["config", "--get-all", "remote.origin.url"])
         .await?;
@@ -379,6 +442,8 @@ async fn configure(tools: &Tools, owner_repo: &str, root: &Path) -> Result<Remot
     let id = tools.privacy(owner_repo, None).await?;
     let parent = root.parent().ok_or_else(|| error("invalid_backup_root"))?;
     private_directory(parent)?;
+    // Reject global/include rewrites and transport commands before clone can execute them.
+    validate_transport_config(tools, parent).await?;
     if !root.exists() {
         let staging = parent.join(format!(".nimble-clone-{}", uuid::Uuid::new_v4()));
         let result = async {
@@ -825,7 +890,7 @@ args = sys.argv[1:]
 root = Path({directory:?})
 bare = {bare:?}
 os.environ['GIT_CONFIG_NOSYSTEM'] = '1'
-os.environ['GIT_CONFIG_GLOBAL'] = '/dev/null'
+os.environ['GIT_CONFIG_GLOBAL'] = str(root / 'global-config') if (root / 'global-config').exists() else '/dev/null'
 with (root / 'args.log').open('a') as f: f.write(repr(args) + '\n')
 if 'push' in args or 'ls-remote' in args:
     if (root / 'offline').exists(): sys.exit(7)
@@ -1153,6 +1218,175 @@ os.execv('/usr/bin/git', ['/usr/bin/git'] + args)
             "user edit SENTINEL_SECRET"
         );
         assert!(journal_path(&fixture.root).unwrap().exists());
+    }
+    #[tokio::test]
+    async fn backup_git_effective_ssh_override_never_executes() {
+        let fixture = Fixture::new();
+        let remote = fixture.configure().await;
+        local_git(
+            &fixture.root,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "git@github.com:owner/archive.git",
+            ],
+        );
+        let malicious = fixture.directory.join("ssh-override");
+        let sentinel = fixture.directory.join("override-executed");
+        script(
+            &malicious,
+            &format!(
+                "#!/usr/bin/env python3\nfrom pathlib import Path\nPath({:?}).touch()\n",
+                sentinel
+            ),
+        );
+        // Local, included, and global config are all effective Git configuration.
+        local_git(
+            &fixture.root,
+            &["config", "core.sshCommand", malicious.to_str().unwrap()],
+        );
+        assert!(fixture
+            .publish(&remote)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("unexpected_backup_transport"));
+        local_git(&fixture.root, &["config", "--unset", "core.sshCommand"]);
+        let included = fixture.directory.join("included-config");
+        fs::write(
+            &included,
+            format!("[core]\nsshCommand = {}\n", malicious.display()),
+        )
+        .unwrap();
+        local_git(
+            &fixture.root,
+            &["config", "include.path", included.to_str().unwrap()],
+        );
+        assert!(fixture
+            .publish(&remote)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("unexpected_backup_transport"));
+        local_git(&fixture.root, &["config", "--unset", "include.path"]);
+        fs::write(
+            fixture.directory.join("global-config"),
+            format!("[include]\npath = {}\n", included.display()),
+        )
+        .unwrap();
+        assert!(fixture
+            .publish(&remote)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("unexpected_backup_transport"));
+        let other_root = fixture.directory.join("must-not-clone");
+        assert!(configure(&fixture.tools, "owner/archive", &other_root)
+            .await
+            .is_err());
+        assert!(!other_root.exists());
+        assert!(!sentinel.exists());
+        assert!(!fixture.root.join("export").exists());
+    }
+    #[test]
+    fn backup_git_inherited_transport_environment_is_removed() {
+        let names = [
+            "GIT_SSH",
+            "GIT_SSH_COMMAND",
+            "GIT_PROXY_COMMAND",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_CONFIG_COUNT",
+            "GIT_EXEC_PATH",
+            "SSH_ASKPASS",
+            "SSH_ASKPASS_REQUIRE",
+            "HTTPS_PROXY",
+            "all_proxy",
+        ];
+        let mut command = Command::new("git");
+        for name in names {
+            command.env(name, "must-never-execute");
+        }
+        scrub_transport_environment(&mut command, names.into_iter().map(Into::into));
+        let values: BTreeMap<_, _> = command.as_std().get_envs().collect();
+        for name in names {
+            assert_eq!(values.get(std::ffi::OsStr::new(name)), Some(&None));
+        }
+    }
+    #[tokio::test]
+    async fn backup_git_timeout_terminates_grandchild_after_parent_exit() {
+        let fixture = Fixture::new();
+        let mut tools = fixture.tools.clone();
+        tools.timeout = Duration::from_secs(10);
+        let script_path = fixture.directory.join("helper-parent");
+        let marker = fixture.directory.join("helper-ran-after-timeout");
+        let pid_file = fixture.directory.join("helper-pid");
+        // Parent exits immediately; grandchild retains stdout, keeping bounded reads pending.
+        script(
+            &script_path,
+            &format!(
+                "#!/bin/sh\n(sleep 60; /usr/bin/touch {:?}) &\nprintf '%s' \"$!\" > {:?}\nexit 0\n",
+                marker, pid_file
+            ),
+        );
+        assert!(tools
+            .run(&script_path, &[], None)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("timeout"));
+        assert!(
+            !marker.exists(),
+            "transport helper escaped process-group termination"
+        );
+        let pid: i32 = fs::read_to_string(pid_file).unwrap().parse().unwrap();
+        // launchd reaps the orphan on macOS. ESRCH confirms it no longer exists.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while unsafe { libc::kill(pid, 0) } == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("terminated helper was not reaped");
+    }
+    #[tokio::test]
+    async fn backup_git_cancellation_terminates_helpers() {
+        let fixture = Fixture::new();
+        let tools = fixture.tools.clone();
+        let script_path = fixture.directory.join("cancel-parent");
+        let marker = fixture.directory.join("cancel-helper-survived");
+        let pid_file = fixture.directory.join("cancel-helper-pid");
+        script(
+            &script_path,
+            &format!(
+                r#"#!/usr/bin/env python3
+import subprocess, sys, time
+from pathlib import Path
+child = subprocess.Popen([sys.executable, '-c', {helper:?}])
+Path({pid_file:?}).write_text(str(child.pid))
+time.sleep(10)
+"#,
+                helper = format!(
+                    "import time; from pathlib import Path; time.sleep(2); Path({:?}).touch()",
+                    marker
+                ),
+                pid_file = pid_file
+            ),
+        );
+        let task = tokio::spawn(async move { tools.run(&script_path, &[], None).await });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !pid_file.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(!marker.exists());
+        let pid: i32 = fs::read_to_string(pid_file).unwrap().parse().unwrap();
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
     }
     #[tokio::test]
     async fn backup_git_process_timeout_missing_tool_and_bounded_sanitized_output() {

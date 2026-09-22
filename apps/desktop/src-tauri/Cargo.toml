@@ -41,3 +41,5 @@ core-foundation = "0.10"
 foreign-types = "0.5"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder"] }
+
+libc = "0.2"
