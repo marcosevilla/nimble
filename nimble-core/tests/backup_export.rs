@@ -60,6 +60,12 @@ async fn schema_drift_fails_closed() {
         .execute(&pool).await.unwrap();
     assert!(export_portable(&pool).await.is_err());
     close(pool, path).await;
+
+    let (pool, path) = nimble_core::test_util::file_pool().await;
+    sqlx::raw_sql("DROP TABLE settings; CREATE TABLE settings (key TEXT, value TEXT PRIMARY KEY, updated_at TEXT)")
+        .execute(&pool).await.unwrap();
+    assert!(export_portable(&pool).await.is_err());
+    close(pool, path).await;
 }
 
 #[tokio::test]
@@ -147,5 +153,28 @@ async fn unreviewed_binary_cell_is_rejected() {
         .await
         .unwrap();
     assert!(export_portable(&pool).await.is_err());
+    close(pool, path).await;
+}
+
+#[tokio::test]
+async fn reverse_insertion_order_has_identical_export_bytes() {
+    let (pool, path) = nimble_core::test_util::file_pool().await;
+    sqlx::raw_sql(
+        "INSERT INTO labels(id,name,created_at) VALUES
+        ('z','Zulu','2026-09-21'),('a','Alpha','2026-09-21')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let first = export_portable(&pool).await.unwrap();
+    sqlx::raw_sql(
+        "DELETE FROM labels; INSERT INTO labels(id,name,created_at) VALUES
+        ('a','Alpha','2026-09-21'),('z','Zulu','2026-09-21')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let second = export_portable(&pool).await.unwrap();
+    assert_eq!(first.data, second.data);
     close(pool, path).await;
 }

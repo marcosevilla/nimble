@@ -64,17 +64,28 @@ async fn validate(tx: &mut Transaction<'_, Sqlite>) -> crate::Result<()> {
         return Err(invalid("table_drift"));
     }
     for policy in TABLES {
-        let found: BTreeSet<String> = columns(tx, policy.name)
-            .await?
-            .into_iter()
-            .map(|(name, _)| name)
-            .collect();
+        let discovered = columns(tx, policy.name).await?;
+        let found: BTreeSet<String> = discovered.iter().map(|(name, _)| name.clone()).collect();
         let reviewed: BTreeSet<String> = policy.columns.iter().map(|s| (*s).to_owned()).collect();
         if found != reviewed {
             return Err(invalid("column_drift"));
         }
         if !policy.included.iter().all(|name| reviewed.contains(*name)) {
             return Err(invalid("invalid_policy"));
+        }
+        let mut actual_pk: Vec<(i64, &str)> = discovered
+            .iter()
+            .filter_map(|(name, ordinal)| (*ordinal > 0).then_some((*ordinal, name.as_str())))
+            .collect();
+        actual_pk.sort_by_key(|(ordinal, _)| *ordinal);
+        let expected_pk: Vec<(i64, &str)> = policy
+            .primary_key
+            .iter()
+            .enumerate()
+            .map(|(index, name)| ((index + 1) as i64, *name))
+            .collect();
+        if actual_pk != expected_pk {
+            return Err(invalid("primary_key_drift"));
         }
     }
     // FTS is excluded, but its virtual and shadow schemas must still match v19.
@@ -142,23 +153,15 @@ async fn records(
     if selected.is_empty() {
         return Ok(Vec::new());
     }
-    let pk = columns(tx, policy.name).await?;
-    let mut pk: Vec<(i64, String)> = pk
-        .into_iter()
-        .filter_map(|(name, ordinal)| (ordinal > 0).then_some((ordinal, name)))
-        .collect();
-    if pk.is_empty() {
-        return Err(invalid("missing_primary_key"));
-    }
-    pk.sort_by_key(|(ordinal, _)| *ordinal);
     let select = selected
         .iter()
         .map(|name| quoted(name))
         .collect::<Vec<_>>()
         .join(",");
-    let order = pk
+    let order = policy
+        .primary_key
         .iter()
-        .map(|(_, name)| quoted(name))
+        .map(|name| quoted(name))
         .collect::<Vec<_>>()
         .join(",");
     let query = format!(
@@ -241,4 +244,26 @@ pub async fn compare_snapshot_tables(a: &SqlitePool, b: &SqlitePool) -> crate::R
         }
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn real_two_and_integer_two_remain_distinct() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let row = sqlx::query("SELECT CAST(2.0 AS REAL) AS real_value, 2 AS integer_value")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let real = cell(&row, 0, false).unwrap();
+        let integer = cell(&row, 1, false).unwrap();
+        assert_eq!(real.as_f64(), Some(2.0));
+        assert_eq!(integer.as_i64(), Some(2));
+        assert_ne!(real, integer);
+        assert_eq!(serde_json::to_string(&real).unwrap(), "2.0");
+        assert_eq!(serde_json::to_string(&integer).unwrap(), "2");
+        pool.close().await;
+    }
 }
