@@ -212,7 +212,17 @@ pub async fn run_once<T: crate::api::google_calendar::CalendarApi>(pool: &sqlx::
                         }
                         match transport.update(&calendar_id,&link.event_id,&p,event.etag.as_deref().unwrap_or(""),raw).await {
                             Ok(updated)=> { db::acknowledge_upsert(pool,&task_id,updated.etag.as_deref(),&p).await?; if p!=*local_p { changed.push(task_id.clone()); } }
-                            Err(CalendarApiError::Precondition)=> { db::set_error(pool,Some("google_event_changed"),None).await?; return Ok(ReconcileResult { changed_task_ids:changed, error_code:Some("google_event_changed".into()) }) }
+                            Err(CalendarApiError::Precondition)=> {
+                                let fresh=transport.get_raw(&calendar_id,&link.event_id).await.map_err(|e|crate::Error::Api(api_error_code(&e).into()))?;
+                                let fresh_event=parse_event(&fresh).map_err(|_|crate::Error::Parse("Invalid changed calendar event".into()))?;
+                                if let (Some(base),Some(fresh_p))=(link.base.as_ref(),fresh_event.projection.as_ref()) {
+                                    if matches!(merge(base,&p,fresh_p),MergeDecision::Conflict) {
+                                        db::conflict(pool,&task_id,"divergent_edit",&p,Some(fresh_p)).await?;
+                                    }
+                                } else { db::conflict(pool,&task_id,"remote_unsupported",&p,fresh_event.projection.as_ref()).await?; }
+                                db::set_error(pool,Some("google_event_changed"),None).await?;
+                                return Ok(ReconcileResult { changed_task_ids:changed, error_code:Some("google_event_changed".into()) });
+                            }
                             Err(e)=>return fail_cycle(pool,&e).await,
                         }
                     }
