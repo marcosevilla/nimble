@@ -1,6 +1,6 @@
 # Nimble — Open loops
 
-Updated 2026-09-22 (Focus Queue implementation Tasks 1–4 reviewed; PAUSED before Task 5 at Marco’s request; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
+Updated 2026-09-22 (Focus Queue implementation Tasks 1–5 reviewed; PAUSED before Task 6 at Marco’s request; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
 
 ## Focus Queue absorption — 2026-09-22 (PAUSED after Task 5)
 
