@@ -98,6 +98,8 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
         </div>
         {timelineGoals.map((goal) => {
           const area = goal.life_area_id ? areaMap[goal.life_area_id] : null
+          /* Identity dot: goal color, falling back to the life area's. */
+          const dotColor = goal.color || area?.color
           return (
             <div
               key={goal.id}
@@ -105,10 +107,10 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
               style={{ height: ROW_HEIGHT }}
               onClick={() => onGoalClick(goal.id)}
             >
-              {area && (
+              {dotColor && (
                 <span
                   className="size-2 rounded-full shrink-0"
-                  style={{ backgroundColor: area.color }}
+                  style={{ backgroundColor: dotColor }}
                 />
               )}
               <span className="text-meta truncate">{goal.name}</span>

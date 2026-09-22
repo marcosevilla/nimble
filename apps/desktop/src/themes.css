@@ -35,6 +35,9 @@
      4.69:1 on --secondary; --success-fg on it 4.90:1. */
   --success: oklch(0.52 0.14 145);
   --success-fg: oklch(0.98 0 0);
+  /* Success button hover darkens (success/90 lightened it to 4.06:1);
+     --success-fg on it 6.09:1. */
+  --success-hover: oklch(0.47 0.13 145);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -83,6 +86,8 @@
   --accent-blue: oklch(0.65 0.15 250);
   --success: oklch(0.70 0.16 150);
   --success-fg: oklch(0.16 0 0);
+  /* Dark: hover lightens, away from the dark label; --success-fg on it 9.58:1. */
+  --success-hover: oklch(0.76 0.15 150);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);

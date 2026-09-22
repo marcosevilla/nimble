@@ -50,6 +50,9 @@ function GoalCard({
   onClick: () => void
 }) {
   const progressLabel = goal.progress > 0 ? `${goal.progress}%` : 'Not started'
+  /* Identity dot: the goal's own color, falling back to its life area's.
+     The progress fill stays neutral (goals P2-1). */
+  const dotColor = goal.color || area?.color
 
   return (
     <Card
@@ -63,13 +66,15 @@ function GoalCard({
       <CardContent className="space-y-2.5">
         {/* Top row: life area chip + status */}
         <div className="flex items-center justify-between">
-          {area ? (
+          {area || dotColor ? (
             <span className="inline-flex items-center gap-1.5 text-meta-strong text-foreground">
-              <span
-                className="size-1.5 rounded-full shrink-0"
-                style={{ backgroundColor: area.color }}
-              />
-              {area.name}
+              {dotColor && (
+                <span
+                  className="size-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: dotColor }}
+                />
+              )}
+              {area?.name}
             </span>
           ) : (
             <span />

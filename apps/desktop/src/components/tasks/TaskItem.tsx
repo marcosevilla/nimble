@@ -65,17 +65,19 @@ export function SubtaskBadge() {
 
 export function SubtaskSummary({ done, total }: { done: number; total: number }) {
   const allDone = done === total && total > 0
-  /* Template literal keeps text-label surviving next to text-muted-foreground;
+  /* All done: count on text-foreground (success text on the /10 tint
+     measured 4.47:1 in light); the success check icon carries the meaning.
+     Template literal keeps text-label surviving next to text-muted-foreground;
      see DueDateBadge note above. */
   return (
     <span
       className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-label tabular-nums ${
-        allDone ? 'bg-success/10 text-success' : 'bg-muted/60 text-muted-foreground'
+        allDone ? 'bg-success/10 text-foreground' : 'bg-muted/60 text-muted-foreground'
       }`}
       aria-label={`${done} of ${total} subtasks complete`}
     >
       {allDone ? (
-        <CheckCircle2 className="size-2.5" />
+        <CheckCircle2 className="size-2.5 text-success" />
       ) : (
         <ListTree className="size-2.5" />
       )}

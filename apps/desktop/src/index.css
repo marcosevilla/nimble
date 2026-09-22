@@ -81,6 +81,7 @@
     --color-accent-blue: var(--accent-blue);
     --color-success: var(--success);
     --color-success-fg: var(--success-fg);
+    --color-success-hover: var(--success-hover);
     /* Semantic roles — defined per theme in themes.css (warm light + dark). */
     --color-warning: var(--warning);
     --color-ai: var(--ai);

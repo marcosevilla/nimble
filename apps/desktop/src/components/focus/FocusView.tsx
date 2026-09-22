@@ -149,7 +149,10 @@ export function FocusView() {
         {/* Timer done prompt */}
         {timerDone && currentPomodoro < config.totalPomodoros && (
           <div className="rounded-lg bg-success/10 p-3 animate-in fade-in duration-300">
-            <p className="text-body text-success">
+            {/* Text on foreground (success text on the /10 tint measured 4.47:1
+                in light); the success icon carries the meaning. */}
+            <p className="flex items-center gap-1.5 text-body text-foreground">
+              <Check className="size-4 shrink-0 text-success" aria-hidden />
               Round {currentPomodoro} complete!
             </p>
             <Button size="sm" className="mt-2" onClick={startBreak}>
