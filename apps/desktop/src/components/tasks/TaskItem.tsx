@@ -4,28 +4,31 @@ import { useSelectionStore } from '@/stores/selectionStore'
 import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import type { TaskStatus } from '@nimble/types'
-import { format, parseISO, isToday, isTomorrow, isPast } from 'date-fns'
+import { format, parseISO, isToday, isTomorrow } from 'date-fns'
 import { CornerDownRight, ListTree, CheckCircle2, GripVertical } from 'lucide-react'
 
 // ── Due Date Badge ──
 
+/* No-guilt: a past date is not an alarm. Every date renders muted; only
+   Today lifts to foreground. --destructive is reserved for destructive
+   actions (see lib/task-view.ts "Still open" bucket). */
 function DueDateBadge({ date }: { date: string }) {
   const parsed = parseISO(date)
-  const overdue = isPast(parsed) && !isToday(parsed)
+  const today = isToday(parsed)
 
   let label: string
-  if (isToday(parsed)) label = 'Today'
+  if (today) label = 'Today'
   else if (isTomorrow(parsed)) label = 'Tomorrow'
   else label = format(parsed, 'MMM d')
 
   /* Template literal (not cn) to dodge the tailwind-merge + custom-color
      gotcha that drops text-<size> when combined with text-foreground /
-     text-muted-foreground / text-destructive. Both classes apply here
-     because font-size and color target different CSS properties. */
+     text-muted-foreground. Both classes apply here because font-size and
+     color target different CSS properties. */
   return (
     <span
-      className={`shrink-0 text-body tabular-nums ${
-        overdue ? 'text-destructive' : 'text-muted-foreground'
+      className={`shrink-0 text-meta tabular-nums ${
+        today ? 'text-foreground' : 'text-muted-foreground'
       }`}
     >
       {label}
