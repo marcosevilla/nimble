@@ -117,6 +117,47 @@ async fn validate(pool: &SqlitePool) -> crate::Result<()> {
     super::export::validate_schema(pool).await
 }
 
+/// Activation safety is applied only to a verified, separate v21 output copy.
+/// Canonical source/copy and portable equality checks must happen first.
+pub async fn normalize_focus_restore(pool: &SqlitePool) -> crate::Result<()> {
+    let version: i64 = sqlx::query_scalar("SELECT MAX(version) FROM schema_version").fetch_one(pool).await?;
+    if version < 21 { return Ok(()); }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let work: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT occurrence_id,work_ms FROM focus_sessions").fetch_all(&mut *tx).await?;
+    let imported: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT occurrence_id,duration_ms FROM focus_import_totals WHERE inclusion='included' AND occurrence_id IS NOT NULL")
+        .fetch_all(&mut *tx).await?;
+    let mut totals = std::collections::HashMap::<String, u64>::new();
+    for (occurrence_id, duration) in work.into_iter().chain(imported) {
+        if duration < 0 { return Err(invalid("negative_focus_total")); }
+        let total = totals.entry(occurrence_id).or_default();
+        *total = total.checked_add(duration as u64).filter(|sum| *sum <= crate::focus_types::MAX_SAFE_INTEGER)
+            .ok_or_else(|| invalid("focus_total_overflow"))?;
+    }
+    sqlx::query("UPDATE focus_segments SET closed_at=checkpoint_at,close_reason='restored' WHERE closed_at IS NULL")
+        .execute(&mut *tx).await?;
+    sqlx::query("UPDATE focus_sessions SET status='paused' WHERE status='running'")
+        .execute(&mut *tx).await?;
+    sqlx::query("UPDATE focus_queue_state SET writer_device_id='' WHERE id=1")
+        .execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO focus_runtime(id,owner_epoch,process_generation,engine_revision,recovery_reason) VALUES(1,'',0,0,'restore requires explicit activation') ON CONFLICT(id) DO UPDATE SET live_session_id=NULL,owner_epoch='',process_generation=0,sound_token=NULL,boundary_token=NULL,recovery_reason='restore requires explicit activation'")
+        .execute(&mut *tx).await?;
+    sqlx::query("UPDATE focus_delivery SET state='cancelled',next_attempt_at=NULL,last_error='restored; delivery quarantined' WHERE state IN ('pending','retry')")
+        .execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM focus_undo").execute(&mut *tx).await?;
+    sqlx::query("UPDATE daily_state SET focus_task_id=NULL,focus_started_at=NULL,focus_paused_at=NULL")
+        .execute(&mut *tx).await?;
+    sqlx::query("UPDATE integration_sync_state SET enabled=0").execute(&mut *tx).await?;
+    sqlx::query("UPDATE todoist_outbox SET status='error',error='restored; needs review' WHERE status IN ('pending','sending')")
+        .execute(&mut *tx).await?;
+    sqlx::query("UPDATE sync_log SET synced=1 WHERE synced=0").execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM settings WHERE key IN ('turso_url','turso_token','todoist_api_token')")
+        .execute(&mut *tx).await?;
+    tx.commit().await?;
+    validate(pool).await
+}
+
 pub async fn restore_snapshot(source: &Path, dest: &Path) -> crate::Result<RecoveryReport> {
     let dest = destination(dest, None)?;
     let verified = backup::verify_generation(source).await?;
@@ -143,6 +184,12 @@ pub async fn restore_snapshot(source: &Path, dest: &Path) -> crate::Result<Recov
     original.close().await;
     restored.close().await;
     result?;
+    if verified.manifest().schema_version >= 21 {
+        let activation = open(&path, false).await?;
+        let normalization = normalize_focus_restore(&activation).await;
+        activation.close().await;
+        normalization?;
+    }
     stage.publish(&dest)
 }
 
@@ -218,6 +265,12 @@ pub async fn restore_export(source: &Path, dest: &Path) -> crate::Result<Recover
     }.await;
     pool.close().await;
     result?;
+    if version >= 21 {
+        let activation = open(&path, false).await?;
+        let normalization = normalize_focus_restore(&activation).await;
+        activation.close().await;
+        normalization?;
+    }
     stage.publish(&dest)
 }
 

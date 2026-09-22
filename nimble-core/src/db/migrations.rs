@@ -631,7 +631,21 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
                 occurrence_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(occurrence_ids_json)),
                 issued_at TEXT NOT NULL, expires_at TEXT NOT NULL,
                 consumed INTEGER NOT NULL DEFAULT 0 CHECK(consumed IN (0,1))
-            )
+            );
+            CREATE TABLE focus_replica (
+                id TEXT PRIMARY KEY CHECK(id = 'current'),
+                writer_device_id TEXT NOT NULL, owner_epoch TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision BETWEEN 0 AND 9007199254740991),
+                queue_revision INTEGER NOT NULL CHECK(queue_revision BETWEEN 0 AND 9007199254740991),
+                payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+                as_of TEXT NOT NULL
+            );
+            INSERT OR IGNORE INTO activity_log(id,action_type,target_id,metadata,created_at)
+                SELECT 'legacy-focus-recovery-' || date,'focus_legacy_recovery',focus_task_id,
+                    json_object('elapsed','unknown','started_at',focus_started_at,'paused_at',focus_paused_at),
+                    datetime('now')
+                FROM daily_state WHERE focus_task_id IS NOT NULL;
+            UPDATE daily_state SET focus_task_id=NULL,focus_started_at=NULL,focus_paused_at=NULL
         "#,
     },
 ];

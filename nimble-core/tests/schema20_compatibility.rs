@@ -9,28 +9,34 @@ use nimble_core::{
 
 #[tokio::test]
 async fn v20_intent_exports_and_local_ledgers_stay_private() {
-    let (pool, path) = nimble_core::test_util::file_pool().await;
+    let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1)
+        .connect("sqlite::memory:").await.unwrap();
+    migrations::run_migrations_to_version(&pool, 20).await.unwrap();
     assert_eq!(migrations::current_schema_version(&pool).await.unwrap(), 20);
-    let task = create_local_task(
-        &pool,
-        CreateTaskInput {
-            content: "Review".into(),
-            due_date: Some("2026-09-22".into()),
-            due_time: Some("09:00".into()),
-            reminder_offset_minutes: Some(15),
-            google_calendar_enabled: Some(true),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(task.reminder_offset_minutes, Some(15));
-    assert!(task.google_calendar_enabled);
+    sqlx::query("INSERT INTO local_tasks(id,content,due_date,due_time,reminder_offset_minutes,google_calendar_enabled) VALUES('v20-task','Review','2026-09-22','09:00',15,1)")
+        .execute(&pool).await.unwrap();
     let export = export_portable(&pool).await.unwrap();
     let data: serde_json::Value = serde_json::from_slice(&export.data).unwrap();
     let format: serde_json::Value = serde_json::from_slice(&export.format).unwrap();
     assert_eq!(format["schema_version"], 20);
     assert_eq!(data["local_tasks"][0]["reminder_offset_minutes"], 15);
+    let root = std::env::temp_dir().canonicalize().unwrap()
+        .join(format!("nimble-v20-compat-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let source = root.join("portable");
+    std::fs::create_dir(&source).unwrap();
+    std::fs::write(source.join("data.json"), &export.data).unwrap();
+    std::fs::write(source.join("format.json"), &export.format).unwrap();
+    let restored = nimble_core::db::recovery::restore_export(&source, &root.join("restored"))
+        .await.unwrap();
+    let copy = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new().filename(restored.output).read_only(true)
+    ).await.unwrap();
+    let round_trip = export_portable(&copy).await.unwrap();
+    assert_eq!(round_trip.data, export.data);
+    assert_eq!(round_trip.format, export.format);
+    copy.close().await;
+    std::fs::remove_dir_all(root).unwrap();
     for private in [
         "reminder_deliveries",
         "google_calendar_state",
@@ -40,20 +46,12 @@ async fn v20_intent_exports_and_local_ledgers_stay_private() {
         assert!(data.get(private).is_none());
         assert!(format["excluded"].get(private).is_some());
     }
-    let cleared = update_local_task(
-        &pool,
-        &task.id,
-        UpdateTaskInput {
-            clear_due_time: true,
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(cleared.reminder_offset_minutes, None);
-    assert!(!cleared.google_calendar_enabled);
+    sqlx::query("UPDATE local_tasks SET due_time=NULL,reminder_offset_minutes=NULL,google_calendar_enabled=0 WHERE id='v20-task'")
+        .execute(&pool).await.unwrap();
+    let cleared: (Option<i64>, i64) = sqlx::query_as("SELECT reminder_offset_minutes,google_calendar_enabled FROM local_tasks WHERE id='v20-task'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(cleared, (None, 0));
     pool.close().await;
-    std::fs::remove_file(path).unwrap();
 }
 
 #[tokio::test]

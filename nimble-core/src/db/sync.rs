@@ -332,6 +332,14 @@ const V19_TABLE_DDL: [&str; 3] = [
     )",
 ];
 
+const FOCUS_REPLICA_DDL: &str = "CREATE TABLE IF NOT EXISTS focus_replica (
+    id TEXT PRIMARY KEY CHECK(id = 'current'),
+    writer_device_id TEXT NOT NULL, owner_epoch TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision BETWEEN 0 AND 9007199254740991),
+    queue_revision INTEGER NOT NULL CHECK(queue_revision BETWEEN 0 AND 9007199254740991),
+    payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), as_of TEXT NOT NULL
+)";
+
 /// Create all synced tables on the remote Turso database.
 /// Only runs once — checks for `turso_initialized` setting.
 pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
@@ -360,7 +368,11 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
                     "Turso remote is missing tables behind a latched init gate — re-initializing: {e}"
                 );
             }
-            other => return other,
+            other => {
+                other?;
+                ensure_remote_v21_schema(pool, turso_url, turso_token).await?;
+                return Ok(());
+            },
         }
     }
 
@@ -387,6 +399,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             section_id TEXT,
             reminder_offset_minutes INTEGER,
             google_calendar_enabled INTEGER NOT NULL DEFAULT 0,
+            sync_policy TEXT NOT NULL DEFAULT 'default',
             completed INTEGER NOT NULL DEFAULT 0,
             completed_at TEXT,
             status TEXT NOT NULL DEFAULT 'todo',
@@ -562,6 +575,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
 
     create_statements.extend_from_slice(&VAULT_TABLE_DDL);
     create_statements.extend_from_slice(&V19_TABLE_DDL);
+    create_statements.push(FOCUS_REPLICA_DDL);
 
     // Build pipeline requests — one execute per statement
     let mut requests: Vec<serde_json::Value> = create_statements
@@ -584,6 +598,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     )
     .execute(pool)
     .await?;
+    ensure_remote_v21_schema(pool, turso_url, turso_token).await?;
 
     Ok(())
 }
@@ -771,6 +786,22 @@ async fn ensure_remote_v20_schema(pool: &SqlitePool, turso_url: &str, turso_toke
     Ok(())
 }
 
+async fn ensure_remote_v21_schema(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='turso_schema_v21_upgraded'")
+        .fetch_optional(pool).await?;
+    if done.is_some() { return Ok(()); }
+    let requests = [
+        turso_execute("ALTER TABLE local_tasks ADD COLUMN sync_policy TEXT NOT NULL DEFAULT 'default'", vec![]),
+        turso_execute(FOCUS_REPLICA_DDL, vec![]),
+        serde_json::json!({"type":"close"}),
+    ];
+    let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
+    check_pipeline_statement_errors(&body, "Turso v21 schema upgrade", true)?;
+    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v21_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
+        .execute(pool).await?;
+    Ok(())
+}
+
 // ── Push ──
 
 /// Conflict target (primary-key columns) per synced table, for building the
@@ -828,6 +859,7 @@ fn build_data_mutation_requests(
 ) -> Vec<serde_json::Value> {
     match operation {
         "DELETE" => {
+            if table_name == "focus_replica" { return vec![]; }
             // Validate table name
             if sanitize_table_name(table_name).is_err() {
                 return vec![];
@@ -869,7 +901,12 @@ fn build_data_mutation_requests(
 
             let columns: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
 
-            let sql = build_snapshot_upsert_sql(table_name, &columns);
+            let mut sql = build_snapshot_upsert_sql(table_name, &columns);
+            if table_name == "focus_replica" {
+                // A delayed retry must not regress the remote aggregate.
+                // Epoch changes require a separate stopped-owner takeover.
+                sql.push_str(" WHERE focus_replica.writer_device_id=excluded.writer_device_id AND focus_replica.owner_epoch=excluded.owner_epoch AND excluded.revision>focus_replica.revision");
+            }
 
             let args: Vec<serde_json::Value> = columns
                 .iter()
@@ -1184,6 +1221,9 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     }
     if let Err(e) = ensure_remote_v20_schema(pool, turso_url, turso_token).await {
         log::warn!("Turso v20 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
+    if let Err(e) = ensure_remote_v21_schema(pool, turso_url, turso_token).await {
+        log::warn!("Turso v21 schema gate failed, pushing anyway (gate retries next push): {e}");
     }
 
     // Fetch all unsynced entries
@@ -1505,7 +1545,7 @@ pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
             let remote_device_id = match get_text(6) { Some(v) => v, None => continue };
 
             // LWW check: skip if local has a newer sync_log entry for the same (table_name, row_id)
-            if has_newer_local_change(pool, &table_name, &row_id, &timestamp).await.unwrap_or(false) {
+            if table_name != "focus_replica" && has_newer_local_change(pool, &table_name, &row_id, &timestamp).await.unwrap_or(false) {
                 log::info!("Skipping remote change {} — local has newer entry for {}/{}", entry_id, table_name, row_id);
                 // Still record the entry so we don't pull it again
                 let _ = sqlx::query(
@@ -1626,6 +1666,19 @@ async fn apply_remote_change(
     operation: &str,
     snapshot: Option<&str>,
 ) -> crate::Result<()> {
+    if table_name == "focus_replica" {
+        if operation == "DELETE" { return Ok(()); }
+        if row_id != "current" { return Err(crate::Error::Other("invalid focus replica id".into())); }
+        let row: serde_json::Value = serde_json::from_str(snapshot.ok_or_else(|| crate::Error::Other("missing focus replica".into()))?)
+            .map_err(|_| crate::Error::Other("invalid focus replica row".into()))?;
+        let payload: crate::db::focus::replica::FocusReplica = serde_json::from_str(
+            row["payload_json"].as_str().ok_or_else(|| crate::Error::Other("missing focus payload".into()))?)
+            .map_err(|_| crate::Error::Other("invalid focus payload".into()))?;
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+        crate::db::focus::replica::apply_focus_replica_tx(&mut tx, payload).await?;
+        tx.commit().await?;
+        return Ok(());
+    }
     match operation {
         "DELETE" => {
             let table = sanitize_table_name(table_name)?;
@@ -1714,6 +1767,7 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
         "labels",
         "task_labels",
         "sections",
+        "focus_replica",
     ];
 
     if ALLOWED.contains(&name) {
@@ -1792,6 +1846,24 @@ pub async fn seed_existing_data(pool: &SqlitePool) -> crate::Result<u64> {
     ];
 
     let mut count: u64 = 0;
+    let focus_exists: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='focus_queue_state'")
+        .fetch_optional(pool).await?;
+    let initialized_focus: Option<String> = if focus_exists.is_some() {
+        sqlx::query_scalar("SELECT writer_device_id FROM focus_queue_state WHERE id=1")
+            .fetch_optional(pool).await?
+    } else { None };
+    if initialized_focus.as_deref().is_some_and(|writer| !writer.is_empty()) {
+        let already: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM sync_log WHERE table_name='focus_replica' AND row_id='current' LIMIT 1")
+            .fetch_optional(pool).await?;
+        if already.is_none() {
+            let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+            crate::db::focus::replica::publish_focus_replica_tx(&mut tx).await?;
+            tx.commit().await?;
+            count += 1;
+        }
+    }
 
     for table in &tables_with_id {
         // Get all rows that don't have a sync_log entry yet
@@ -1941,6 +2013,118 @@ pub async fn seed_existing_data(pool: &SqlitePool) -> crate::Result<u64> {
     }
 
     Ok(count)
+}
+
+#[cfg(test)]
+mod focus_replica_route_tests {
+    use super::*;
+    use crate::db::focus::{engine::FocusService, replica::FocusReplica};
+    use std::collections::BTreeMap;
+
+    fn row(replica: &FocusReplica) -> String {
+        serde_json::json!({
+            "id": "current",
+            "writer_device_id": replica.writer_device_id,
+            "owner_epoch": replica.owner_epoch,
+            "revision": replica.revision,
+            "queue_revision": replica.queue_revision,
+            "payload_json": serde_json::to_string(replica).unwrap(),
+            "as_of": replica.as_of,
+        }).to_string()
+    }
+
+    #[tokio::test]
+    async fn remote_write_accepts_only_newer_same_writer_epoch() {
+        let mut replica = FocusReplica {
+            version: 1, writer_device_id: "mac-a".into(), owner_epoch: "epoch-1".into(),
+            revision: 10, queue_revision: 3, queue: vec![], selected_occurrence_id: None,
+            occurrences: vec![], sessions: vec![], import_totals: vec![], totals: BTreeMap::new(),
+            as_of: "2026-09-22T00:00:00Z".into(),
+        };
+        let requests = build_data_mutation_requests(
+            "focus_replica", "current", "UPDATE", &Some(row(&replica)));
+        assert_eq!(requests.len(), 1);
+        let sql = requests[0]["stmt"]["sql"].as_str().unwrap();
+        assert!(sql.contains("excluded.revision>focus_replica.revision"));
+        assert!(sql.contains("focus_replica.owner_epoch=excluded.owner_epoch"));
+        assert!(build_data_mutation_requests(
+            "focus_replica", "current", "DELETE", &None).is_empty());
+        let pool = crate::test_util::test_pool().await;
+        async fn apply_sql(pool: &SqlitePool, replica: &FocusReplica) {
+            let requests = build_data_mutation_requests(
+                "focus_replica", "current", "UPDATE", &Some(row(replica)));
+            let statement = &requests[0]["stmt"];
+            let mut query = sqlx::query(statement["sql"].as_str().unwrap());
+            for arg in statement["args"].as_array().unwrap() {
+                let value = arg["value"].as_str().unwrap();
+                query = match arg["type"].as_str().unwrap() {
+                    "integer" => query.bind(value.parse::<i64>().unwrap()),
+                    "text" => query.bind(value.to_owned()),
+                    other => panic!("unexpected argument type {other}"),
+                };
+            }
+            query.execute(pool).await.unwrap();
+        }
+        apply_sql(&pool, &replica).await;
+        replica.revision = 8;
+        apply_sql(&pool, &replica).await;
+        replica.revision = 12;
+        replica.owner_epoch = "foreign-epoch".into();
+        apply_sql(&pool, &replica).await;
+        let revision: i64 = sqlx::query_scalar("SELECT revision FROM focus_replica WHERE id='current'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(revision, 10);
+    }
+
+    #[tokio::test]
+    async fn actual_sync_apply_rejects_stale_foreign_and_local_authority() {
+        let pool = crate::test_util::test_pool().await;
+        let service = FocusService::new(pool.clone(), "receiver".into());
+        service.initialize().await.unwrap();
+        for (key, value) in [
+            ("focus_replica_writer_device_id", "mac-a"),
+            ("focus_replica_owner_epoch", "epoch-1"),
+        ] {
+            sqlx::query("INSERT INTO settings(key,value) VALUES(?,?)")
+                .bind(key).bind(value).execute(&pool).await.unwrap();
+        }
+        let entries: Vec<crate::focus_types::FocusEntry> = serde_json::from_value(serde_json::json!([
+            {"id":"entry-b","task_id":"task-b","occurrence_id":"occ-b","added_at":"2026-09-22T00:00:00Z","source":{"kind":"today"},"explicit_still_open":false,"config":{"mode":"count_up","budget_ms":null,"work_ms":1500000,"break_ms":300000,"rounds":1}},
+            {"id":"entry-a","task_id":"task-a","occurrence_id":"occ-a","added_at":"2026-09-22T00:00:01Z","source":{"kind":"today"},"explicit_still_open":false,"config":{"mode":"count_up","budget_ms":null,"work_ms":1500000,"break_ms":300000,"rounds":1}}
+        ])).unwrap();
+        let mut replica = FocusReplica {
+            version: 1, writer_device_id: "mac-a".into(), owner_epoch: "epoch-1".into(),
+            revision: 9, queue_revision: 3, queue: entries, selected_occurrence_id: Some("occ-b".into()),
+            occurrences: vec![], sessions: vec![], import_totals: vec![], totals: BTreeMap::new(),
+            as_of: "2026-09-22T00:00:00Z".into(),
+        };
+        apply_remote_change(&pool, "focus_replica", "current", "UPDATE", Some(&row(&replica)))
+            .await.unwrap();
+        replica.revision = 8;
+        apply_remote_change(&pool, "focus_replica", "current", "UPDATE", Some(&row(&replica)))
+            .await.unwrap();
+        replica.revision = 10;
+        replica.writer_device_id = "mac-b".into();
+        apply_remote_change(&pool, "focus_replica", "current", "UPDATE", Some(&row(&replica)))
+            .await.unwrap();
+        let revision: i64 = sqlx::query_scalar("SELECT revision FROM focus_replica WHERE id='current'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(revision, 9);
+        replica.writer_device_id = "mac-a".into();
+        apply_remote_change(&pool, "focus_replica", "current", "UPDATE", Some(&row(&replica)))
+            .await.unwrap();
+        let revision: i64 = sqlx::query_scalar("SELECT revision FROM focus_replica WHERE id='current'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(revision, 10);
+        let payload: String = sqlx::query_scalar("SELECT payload_json FROM focus_replica WHERE id='current'")
+            .fetch_one(&pool).await.unwrap();
+        let copied: FocusReplica = serde_json::from_str(&payload).unwrap();
+        assert_eq!(copied.queue.iter().map(|entry| entry.id.as_str()).collect::<Vec<_>>(),
+            ["entry-b", "entry-a"]);
+        let own = service.snapshot().await.unwrap();
+        assert_eq!(own.writer_device_id, "receiver");
+        assert!(own.queue.is_empty());
+    }
 }
 
 /// Get unsynced sync log entries (for diagnostics).

@@ -11,11 +11,11 @@ use uuid::Uuid;
 
 use super::{
     clock::{MonotonicClock, SystemClock},
-    queue, schema,
+    queue, replica, schema,
 };
 use crate::{
     db::{
-        activity, sync,
+        activity,
         task_tx::{self, MutationPolicy, TaskEffects},
     },
     focus_types::*,
@@ -159,6 +159,7 @@ impl FocusTaskWriteGuard<'_> {
             .as_mut()
             .expect("uncommitted focus task transaction");
         reconcile_task_effects_owned_tx(tx, effects).await?;
+        replica::publish_focus_replica_tx(tx).await?;
         let snapshot = snapshot_tx(tx).await?;
         self.tx
             .take()
@@ -202,7 +203,9 @@ impl FocusService {
             sqlx::query_scalar("SELECT owner_epoch FROM focus_runtime WHERE id=1")
                 .fetch_optional(&mut *tx)
                 .await?;
-        if existing.is_none() {
+        let first_initialize = existing.is_none();
+        let mut recovered = false;
+        if first_initialize {
             let epoch = id();
             sqlx::query("INSERT INTO focus_queue_state(id,queue_id,writer_device_id,owner_epoch,revision,entries_json,updated_at) VALUES(1,?,?,?,0,'[]',?)")
                 .bind(id()).bind(&self.device_id).bind(&epoch).bind(now()).execute(&mut *tx).await?;
@@ -222,6 +225,7 @@ impl FocusService {
                     .fetch_one(&mut *tx)
                     .await?;
             if let Some(sid) = live {
+                recovered = true;
                 sqlx::query("UPDATE focus_segments SET closed_at=checkpoint_at,close_reason='recovered' WHERE session_id=? AND closed_at IS NULL")
                     .bind(&sid).execute(&mut *tx).await?;
                 sqlx::query("UPDATE focus_sessions SET status='paused',session_revision=session_revision+1 WHERE id=?")
@@ -234,6 +238,9 @@ impl FocusService {
             )
             .execute(&mut *tx)
             .await?;
+        }
+        if first_initialize || recovered {
+            replica::publish_focus_replica_tx(&mut tx).await?;
         }
         tx.commit().await?;
         guard.sampled_ms = self.clock.elapsed_ms();
@@ -259,6 +266,7 @@ impl FocusService {
                     "storage failure; paused at last durable checkpoint",
                 )
                 .await?;
+                replica::publish_focus_replica_tx(&mut tx).await?;
                 tx.commit().await?;
                 Ok::<(), crate::Error>(())
             }
@@ -396,6 +404,7 @@ impl FocusService {
                 .as_ref()
                 .is_some_and(|s| s.status == FocusStatus::Running)
         {
+            replica::publish_focus_replica_tx(&mut tx).await?;
             tx.commit().await?;
             guard.sampled_ms = sampled;
             return Err(err(
@@ -430,6 +439,7 @@ impl FocusService {
         sqlx::query("UPDATE focus_runtime SET engine_revision=engine_revision+1 WHERE id=1")
             .execute(&mut *tx)
             .await?;
+        replica::publish_focus_replica_tx(&mut tx).await?;
         let snapshot = snapshot_tx(&mut tx).await?;
         let reply = FocusReply {
             committed_revision: snapshot.engine_revision,
@@ -481,9 +491,16 @@ impl FocusService {
         }
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         ensure_process_tx(&mut tx, guard.process_generation).await?;
+        let prior_revision: i64 = sqlx::query_scalar("SELECT engine_revision FROM focus_runtime WHERE id=1")
+            .fetch_one(&mut *tx).await?;
         if let Err(e) = settle_tx(&mut tx, elapsed_ms, &wall_time).await {
             guard.frozen = true;
             return Err(e);
+        }
+        let current_revision: i64 = sqlx::query_scalar("SELECT engine_revision FROM focus_runtime WHERE id=1")
+            .fetch_one(&mut *tx).await?;
+        if current_revision > prior_revision {
+            replica::publish_focus_replica_tx(&mut tx).await?;
         }
         let snap = snapshot_tx(&mut tx).await?;
         if let Err(e) = tx.commit().await {
@@ -522,6 +539,7 @@ impl FocusService {
         pause_live_tx(&mut tx, reason, &now()).await?;
         sqlx::query("UPDATE focus_runtime SET recovery_reason=?,engine_revision=engine_revision+1 WHERE id=1")
             .bind(reason).execute(&mut *tx).await?;
+        replica::publish_focus_replica_tx(&mut tx).await?;
         let snap = snapshot_tx(&mut tx).await?;
         tx.commit().await?;
         guard.sampled_ms = sampled;
@@ -683,6 +701,7 @@ impl FocusService {
             None
         };
         reconcile_task_effects_owned_tx(&mut tx, &effects).await?;
+        replica::publish_focus_replica_tx(&mut tx).await?;
         let snapshot = snapshot_tx(&mut tx).await?;
         let reply = NativeTaskReply {
             task,
@@ -867,18 +886,6 @@ async fn save_queue_tx(
     queue::validate(entries, selected)?;
     sqlx::query("UPDATE focus_queue_state SET entries_json=?,selected_occurrence_id=?,revision=revision+1,updated_at=? WHERE id=1")
         .bind(serde_json::to_string(entries).map_err(|e|err("invalid",&e.to_string()))?).bind(selected).bind(stamp).execute(&mut *conn).await?;
-    let row=sqlx::query("SELECT queue_id,writer_device_id,owner_epoch,revision,entries_json,selected_occurrence_id,updated_at FROM focus_queue_state WHERE id=1")
-        .fetch_one(&mut *conn).await?;
-    let snapshot = serde_json::json!({"id":1,"queue_id":row.get::<String,_>("queue_id"),"writer_device_id":row.get::<String,_>("writer_device_id"),"owner_epoch":row.get::<String,_>("owner_epoch"),"revision":row.get::<i64,_>("revision"),"entries_json":row.get::<String,_>("entries_json"),"selected_occurrence_id":row.get::<Option<String>,_>("selected_occurrence_id"),"updated_at":row.get::<String,_>("updated_at")});
-    sync::append_sync_log_tx(
-        conn,
-        "focus_queue_state",
-        "1",
-        "UPDATE",
-        None,
-        Some(&snapshot.to_string()),
-    )
-    .await?;
     Ok(())
 }
 
@@ -1482,7 +1489,8 @@ pub async fn reconcile_task_effects_tx(
     conn: &mut SqliteConnection,
     effects: &TaskEffects,
 ) -> crate::Result<()> {
-    reconcile_task_effects_inner_tx(conn, effects, true).await
+    reconcile_task_effects_inner_tx(conn, effects, true).await?;
+    replica::publish_focus_replica_tx(conn).await
 }
 async fn reconcile_task_effects_owned_tx(
     conn: &mut SqliteConnection,

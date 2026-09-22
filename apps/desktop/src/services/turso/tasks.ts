@@ -35,7 +35,7 @@ const SELECT_COLS =
   'id, parent_id, content, description, project_id, priority, due_date, due_time, ' +
   'duration_minutes, recurrence_rule, section_id, completed, completed_at, status, ' +
   'linked_doc_id, position, created_at, updated_at, external_id, external_source, ' +
-  'remote_updated_at, synced_snapshot, reminder_offset_minutes, google_calendar_enabled'
+  'remote_updated_at, synced_snapshot, reminder_offset_minutes, google_calendar_enabled, sync_policy'
 
 export interface ListTasksOptions {
   projectId?: string
@@ -80,8 +80,7 @@ function buildTaskQuery(opts: ListTasksOptions): { sql: string; args: TursoArg[]
 /** Decode one `local_tasks` row. `labels` is filled in by the caller. */
 function toTask(row: Row, labels: string[]): LocalTask {
   return {
-    // Task 4 adds the remote v21 column/upgrade before focus replicas are enabled.
-    sync_policy: 'default',
+    sync_policy: str(row, 'sync_policy') as LocalTask['sync_policy'],
     reminder_offset_minutes: numOrNull(row, 'reminder_offset_minutes'),
     google_calendar_enabled: bool(row, 'google_calendar_enabled'),
     id: str(row, 'id'),
