@@ -10,6 +10,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme}
       className="toaster group"
+      // Clear of the floating help button (size-9 at bottom-4/right-4 → 52px tall band).
+      offset={{ bottom: 64, right: 24 }}
       icons={{
         success: (
           <CircleCheckIcon className="size-4" />
@@ -33,12 +35,17 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
+          // Sonner's own stylesheet is unlayered and sets the font on the
+          // toaster, so a Tailwind `font-sans` class loses; inline wins.
+          fontFamily: "var(--font-sans)",
         } as React.CSSProperties
       }
       toastOptions={{
         classNames: {
           toast: "cn-toast",
         },
+        // Sonner hardcodes the toast box-shadow; inline maps it to the token.
+        style: { boxShadow: "var(--shadow-popover)" },
       }}
       {...props}
     />

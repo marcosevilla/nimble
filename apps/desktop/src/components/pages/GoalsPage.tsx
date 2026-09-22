@@ -191,7 +191,7 @@ function GoalCreateDialog({
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New Goal</DialogTitle>
+          <DialogTitle>New goal</DialogTitle>
           <DialogDescription>Define what you want to achieve.</DialogDescription>
         </DialogHeader>
 
@@ -223,7 +223,7 @@ function GoalCreateDialog({
           {/* Life Area */}
           {lifeAreas.length > 0 && (
             <div className="space-y-1.5">
-              <Label className="text-meta">Life Area</Label>
+              <Label className="text-meta">Life area</Label>
               <Select
                 value={lifeAreaId}
                 onValueChange={(v) => setLifeAreaId(v ?? '')}
@@ -312,7 +312,7 @@ function GoalCreateDialog({
             Cancel
           </Button>
           <Button onClick={handleCreate} disabled={!name.trim() || saving}>
-            {saving ? 'Creating...' : 'Create Goal'}
+            {saving ? 'Creating...' : 'Create goal'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -443,7 +443,7 @@ export function GoalsPage() {
       </Tooltip>
       <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
         <Plus className="size-3.5" />
-        New Goal
+        New goal
       </Button>
     </>
   )
@@ -516,7 +516,7 @@ export function GoalsPage() {
             </Button>
             <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
               <Plus className="size-3.5" />
-              Create Goal
+              Create goal
             </Button>
           </div>
         </div>

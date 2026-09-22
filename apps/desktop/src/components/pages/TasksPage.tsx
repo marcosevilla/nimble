@@ -224,7 +224,7 @@ export function TasksPage() {
           <IconButton
             onClick={() => handleSelectProject(null)}
             size="lg"
-            title="All Tasks"
+            title="All tasks"
             className={cn(selectedProjectId === null && 'bg-accent/30 text-foreground')}
           >
             <List className="size-4" />

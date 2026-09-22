@@ -242,7 +242,7 @@ export function ProjectSidebar({
               selectedProjectId === null ? 'text-meta-strong' : 'text-meta',
             )}
           >
-            All Tasks
+            All tasks
           </span>
           <span className="w-3 shrink-0 text-center text-meta text-muted-foreground">{totalActive}</span>
         </button>

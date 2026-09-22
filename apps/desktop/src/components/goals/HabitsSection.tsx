@@ -19,7 +19,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog'
-import { Flame, Plus, Settings2, Trash2 } from 'lucide-react'
+import { Plus, Settings2, Sparkles, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 const HABIT_COLORS = [
@@ -368,7 +368,7 @@ export function HabitsSection() {
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-2">
-          <Flame className="size-3.5 text-amber-500" />
+          <Sparkles className="size-3.5 text-amber-500" />
           <h3 className="text-body-strong">Habits</h3>
         </div>
         <div className="flex items-center gap-3">
@@ -392,7 +392,7 @@ export function HabitsSection() {
       {/* Header */}
       <div className="flex items-baseline justify-between">
         <div className="flex items-center gap-2">
-          <Flame className="size-3.5 text-amber-500" />
+          <Sparkles className="size-3.5 text-amber-500" />
           <h3 className="text-body-strong">Habits</h3>
           <span className="text-label text-muted-foreground tabular-nums">
             {completedCount}/{activeHabits.length}

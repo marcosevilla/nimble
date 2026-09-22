@@ -188,6 +188,7 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
       <PageHeader title="Today" />
       <div className="px-5 py-6 w-full flex justify-center">
         <div className="w-full max-w-[520px] space-y-4">
+          <ReminderCatchUp />
           {/* Greeting — demoted to first content block */}
           {(() => { const g = getGreeting(); return (
             <div className="py-4">
@@ -244,7 +245,7 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
 
 // ── Dashboard Mode ──
 
-function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | null }) {
+function DashboardMode({ cachedPriorities, cachedEnergy }: { cachedPriorities: Priority[] | null; cachedEnergy: string | null }) {
   const dp = useDataProvider()
   const { todayData } = useObsidian()
   const today = new Date().toISOString().slice(0, 10)
@@ -307,6 +308,7 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
     <>
       <PageHeader title="Today" />
       <div className="px-5 py-6 space-y-4 w-full">
+        <ReminderCatchUp />
         {/* Greeting — demoted to first content block */}
         {(() => { const g = getGreeting(); return (
           <div className="mb-2 space-y-1">
@@ -340,7 +342,7 @@ function DashboardMode({ cachedPriorities }: { cachedPriorities: Priority[] | nu
 
       {/* Cached priorities */}
       {cachedPriorities && cachedPriorities.length > 0 && (
-        <PrioritiesSection initialPriorities={cachedPriorities} />
+        <PrioritiesSection initialPriorities={cachedPriorities} initialEnergy={cachedEnergy} />
       )}
 
       {/* Habits */}
@@ -387,6 +389,7 @@ export function TodayPage() {
   const dp = useDataProvider()
   const [reviewComplete, setReviewComplete] = useState<boolean | null>(null) // null = loading
   const [cachedPriorities, setCachedPriorities] = useState<Priority[] | null>(null)
+  const [cachedEnergy, setCachedEnergy] = useState<string | null>(null)
 
   // Check if today's review has been done
   useEffect(() => {
@@ -399,6 +402,7 @@ export function TodayPage() {
       clearTimeout(timeout)
       setReviewComplete(state.review_complete)
       if (state.priorities) setCachedPriorities(state.priorities)
+      setCachedEnergy(state.energy_level)
     }).catch(() => {
       clearTimeout(timeout)
       setReviewComplete(false) // Assume not done on error
@@ -427,9 +431,9 @@ export function TodayPage() {
 
   // Review mode (first open of the day)
   if (!reviewComplete) {
-    return <><ReminderCatchUp /><ReviewMode onComplete={handleReviewComplete} /></>
+    return <ReviewMode onComplete={handleReviewComplete} />
   }
 
   // Dashboard mode (review done)
-  return <><ReminderCatchUp /><DashboardMode cachedPriorities={cachedPriorities} /></>
+  return <DashboardMode cachedPriorities={cachedPriorities} cachedEnergy={cachedEnergy} />
 }
