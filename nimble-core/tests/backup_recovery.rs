@@ -32,38 +32,62 @@ impl Fixture {
 }
 
 #[tokio::test]
-async fn historical_v19_generation_restores_both_routes_without_upgrading() {
-    let root = std::env::temp_dir().canonicalize().unwrap()
-        .join(format!("nimble-v19-recovery-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir(&root).unwrap();
-    let database = root.join("nimble.db");
-    let pool = SqlitePoolOptions::new().max_connections(1)
-        .connect_with(SqliteConnectOptions::new().filename(&database).create_if_missing(true))
-        .await.unwrap();
-    nimble_core::db::migrations::run_migrations_to_version(&pool, 19).await.unwrap();
-    sqlx::raw_sql(include_str!("fixtures/historical-v19/backup-v19.sql"))
-        .execute(&pool).await.unwrap();
-    pool.close().await;
-    let paths = BackupPaths { app_data: root.clone(), database, generations: root.join("backups") };
-    let guard = backup::try_lock(&paths).unwrap().unwrap();
-    let generation = backup::create_generation(&paths, at(), "historical-test", &guard).await.unwrap();
-    assert_eq!(generation.manifest().schema_version, 19);
+async fn frozen_c1_v19_archive_restores_both_routes_without_upgrading() {
+    // These bytes were emitted by the unmodified C1 exporter at commit 254bcf1.
+    // Never regenerate them from the current exporter inside this test.
+    const ID: &str = "22a15675-9a61-40f3-840e-47bb23f279e2";
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("nimble-v19-frozen-{}", uuid::Uuid::new_v4()));
+    let archive = root.join(ID);
+    std::fs::create_dir_all(archive.join("export")).unwrap();
+    for (name, bytes) in [
+        ("snapshot.db", include_bytes!("fixtures/historical-v19/archive/22a15675-9a61-40f3-840e-47bb23f279e2/snapshot.db").as_slice()),
+        ("manifest.json", include_bytes!("fixtures/historical-v19/archive/22a15675-9a61-40f3-840e-47bb23f279e2/manifest.json").as_slice()),
+        ("export/data.json", include_bytes!("fixtures/historical-v19/archive/22a15675-9a61-40f3-840e-47bb23f279e2/export/data.json").as_slice()),
+        ("export/format.json", include_bytes!("fixtures/historical-v19/archive/22a15675-9a61-40f3-840e-47bb23f279e2/export/format.json").as_slice()),
+    ] {
+        std::fs::write(archive.join(name), bytes).unwrap();
+    }
+    let verified = backup::verify_generation(&archive).await.unwrap();
+    assert_eq!(verified.manifest().schema_version, 19);
     for route in ["snapshot", "portable"] {
         let dest = root.join(route);
         let recovered = if route == "snapshot" {
-            nimble_core::db::recovery::restore_snapshot(generation.directory(), &dest).await
+            nimble_core::db::recovery::restore_snapshot(&archive, &dest).await
         } else {
-            nimble_core::db::recovery::restore_export(&generation.directory().join("export"), &dest).await
-        }.unwrap();
-        let restored = SqlitePoolOptions::new().max_connections(1)
-            .connect_with(SqliteConnectOptions::new().filename(&recovered.output).read_only(true))
-            .await.unwrap();
-        assert_eq!(nimble_core::db::migrations::current_schema_version(&restored).await.unwrap(), 19);
-        let portable = nimble_core::db::export::export_portable(&restored).await.unwrap();
-        assert_eq!(portable.data, std::fs::read(generation.directory().join("export/data.json")).unwrap());
+            nimble_core::db::recovery::restore_export(&archive.join("export"), &dest).await
+        }
+        .unwrap();
+        let restored = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&recovered.output)
+                    .read_only(true),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            nimble_core::db::migrations::current_schema_version(&restored)
+                .await
+                .unwrap(),
+            19
+        );
+        let portable = nimble_core::db::export::export_portable(&restored)
+            .await
+            .unwrap();
+        assert_eq!(
+            portable.data,
+            std::fs::read(archive.join("export/data.json")).unwrap()
+        );
+        assert_eq!(
+            portable.format,
+            std::fs::read(archive.join("export/format.json")).unwrap()
+        );
         restored.close().await;
     }
-    drop(guard);
     std::fs::remove_dir_all(root).unwrap();
 }
 impl Drop for Fixture {

@@ -1,0 +1,326 @@
+{
+  "export_version": 1,
+  "schema_version": 19,
+  "included": {
+    "activity_log": [
+      "action_type",
+      "created_at",
+      "id",
+      "metadata",
+      "target_id"
+    ],
+    "capture_routes": [
+      "color",
+      "created_at",
+      "doc_id",
+      "icon",
+      "id",
+      "label",
+      "position",
+      "prefix",
+      "target_type"
+    ],
+    "captures": [
+      "content",
+      "context",
+      "converted_to_task_id",
+      "created_at",
+      "id",
+      "routed_to",
+      "source"
+    ],
+    "daily_state": [
+      "date",
+      "energy_level",
+      "first_opened_at",
+      "focus_paused_at",
+      "focus_started_at",
+      "focus_task_id",
+      "last_saved_at",
+      "top_priorities"
+    ],
+    "doc_folders": [
+      "created_at",
+      "id",
+      "name",
+      "position"
+    ],
+    "doc_notes": [
+      "content",
+      "created_at",
+      "doc_id",
+      "id",
+      "position"
+    ],
+    "documents": [
+      "content",
+      "created_at",
+      "folder_id",
+      "id",
+      "position",
+      "title",
+      "updated_at"
+    ],
+    "goals": [
+      "color",
+      "created_at",
+      "description",
+      "id",
+      "life_area_id",
+      "name",
+      "position",
+      "start_date",
+      "status",
+      "target_date",
+      "updated_at"
+    ],
+    "habit_logs": [
+      "created_at",
+      "date",
+      "habit_id",
+      "id",
+      "intensity"
+    ],
+    "habits": [
+      "active",
+      "category",
+      "color",
+      "created_at",
+      "icon",
+      "id",
+      "name",
+      "position"
+    ],
+    "labels": [
+      "color",
+      "created_at",
+      "id",
+      "name",
+      "position"
+    ],
+    "life_areas": [
+      "color",
+      "created_at",
+      "icon",
+      "id",
+      "name",
+      "position"
+    ],
+    "local_tasks": [
+      "completed",
+      "completed_at",
+      "content",
+      "created_at",
+      "description",
+      "due_date",
+      "due_time",
+      "duration_minutes",
+      "external_id",
+      "external_source",
+      "id",
+      "linked_doc_id",
+      "parent_id",
+      "position",
+      "priority",
+      "project_id",
+      "recurrence_rule",
+      "section_id",
+      "status",
+      "updated_at"
+    ],
+    "milestones": [
+      "completed",
+      "completed_at",
+      "created_at",
+      "goal_id",
+      "id",
+      "name",
+      "position",
+      "target_date"
+    ],
+    "progress_snapshots": [
+      "created_at",
+      "energy_level",
+      "id",
+      "notes",
+      "priorities",
+      "tasks_completed",
+      "tasks_deferred",
+      "tasks_open"
+    ],
+    "projects": [
+      "color",
+      "created_at",
+      "external_id",
+      "external_source",
+      "goal_id",
+      "id",
+      "milestone_id",
+      "name",
+      "parent_id",
+      "position"
+    ],
+    "sections": [
+      "created_at",
+      "external_id",
+      "external_source",
+      "id",
+      "name",
+      "position",
+      "project_id"
+    ],
+    "task_labels": [
+      "created_at",
+      "label_id",
+      "task_id"
+    ],
+    "vault_links": [
+      "created_at",
+      "from_note_id",
+      "id",
+      "link_type",
+      "to_path"
+    ],
+    "vault_notes": [
+      "content",
+      "deleted_at",
+      "frontmatter_json",
+      "hash",
+      "id",
+      "mtime",
+      "path",
+      "size",
+      "title",
+      "updated_at"
+    ],
+    "vault_tags": [
+      "created_at",
+      "id",
+      "note_id",
+      "tag"
+    ]
+  },
+  "excluded": {
+    "action_log": [
+      "action_type",
+      "created_at",
+      "id",
+      "payload",
+      "synced",
+      "target_id"
+    ],
+    "calendar_events": [
+      "all_day",
+      "date",
+      "description",
+      "end_time",
+      "feed_color",
+      "feed_label",
+      "fetched_at",
+      "id",
+      "location",
+      "meeting_url",
+      "start_time",
+      "summary"
+    ],
+    "calendar_feeds": [
+      "color",
+      "created_at",
+      "enabled",
+      "id",
+      "label",
+      "url"
+    ],
+    "integration_sync_state": [
+      "enabled",
+      "last_error",
+      "last_full_sync_at",
+      "last_sync_at",
+      "provider",
+      "sync_token"
+    ],
+    "local_tasks": [
+      "remote_updated_at",
+      "synced_snapshot"
+    ],
+    "projects": [
+      "remote_updated_at",
+      "synced_snapshot"
+    ],
+    "schema_version": [
+      "applied_at",
+      "description",
+      "version"
+    ],
+    "settings": [
+      "key",
+      "updated_at",
+      "value"
+    ],
+    "sync_log": [
+      "changed_columns",
+      "device_id",
+      "id",
+      "operation",
+      "row_id",
+      "snapshot",
+      "synced",
+      "table_name",
+      "timestamp"
+    ],
+    "todoist_outbox": [
+      "command_uuid",
+      "created_at",
+      "error",
+      "id",
+      "local_id",
+      "object_type",
+      "op",
+      "payload_json",
+      "status",
+      "temp_id",
+      "updated_at"
+    ],
+    "todoist_tasks": [
+      "content",
+      "description",
+      "due_date",
+      "due_is_recurring",
+      "fetched_at",
+      "id",
+      "is_completed",
+      "priority",
+      "project_id",
+      "project_name",
+      "todoist_url"
+    ],
+    "vault_fts": [
+      "content",
+      "note_id",
+      "title"
+    ],
+    "vault_fts_config": [
+      "k",
+      "v"
+    ],
+    "vault_fts_content": [
+      "c0",
+      "c1",
+      "c2",
+      "id"
+    ],
+    "vault_fts_data": [
+      "block",
+      "id"
+    ],
+    "vault_fts_docsize": [
+      "id",
+      "sz"
+    ],
+    "vault_fts_idx": [
+      "pgno",
+      "segid",
+      "term"
+    ]
+  }
+}
