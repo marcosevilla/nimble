@@ -4,7 +4,7 @@ Updated 2026-09-21 from the current checkout and committed planning documents.
 
 ## Start here
 
-- Release packaging: optimized app and `dt` compiled; existing developer-identity signing is still pending. Computer Use cannot inspect macOS SecurityAgent; awaiting whether a signing prompt is visible. Production installation has not occurred.
+- Release packaging complete: optimized app and `dt` compiled, Marco approved signing, and `codesign --verify --deep --strict` passed with identity `Marco Task App Dev`. The signed update is ready for installation; production installation has not occurred.
 
 - C2/C3 implementation is built in `codex/c2-c3-reminders-agents`; native synthetic CLI refresh, reminder submission, restart catch-up and backup/restore checks passed. All 320 Rust tests, desktop/web builds and final review passed. Production app and real Google connection remain unchanged. See [combined verification](docs/c2-c3-verification.md).
 
