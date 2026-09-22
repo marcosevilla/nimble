@@ -21,11 +21,10 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Plus, Settings2, Sparkles, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { GOAL_COLORS } from '@/lib/goalStatus'
 
-const HABIT_COLORS = [
-  '#f59e0b', '#ef4444', '#22c55e', '#3b82f6', '#8b5cf6',
-  '#ec4899', '#14b8a6', '#f97316',
-]
+/* Same user-data swatch list as goals — was a byte-identical copy. */
+const HABIT_COLORS = GOAL_COLORS
 
 // Map icon string to Lucide component, fallback to emoji based on category/name
 function getHabitEmoji(name: string, category: string | null): string {
@@ -164,15 +163,14 @@ function HabitCircle({
           )}
           <span className="select-none">{displayIcon}</span>
           {completed && (
-            // font-bold kept for legibility of checkmark on colored bg overlay
-            <span className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full flex items-center justify-center text-label font-bold text-success-fg bg-success">
+            <span className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full flex items-center justify-center text-label text-success-fg bg-success">
               ✓
             </span>
           )}
         </TooltipTrigger>
         <TooltipContent side="bottom">
           <div className="text-meta">
-            <div className="font-medium">{name}</div>
+            <div className="text-meta-strong">{name}</div>
             <div className="opacity-70">{completed ? 'Done today' : 'Not done yet'}</div>
           </div>
         </TooltipContent>
@@ -368,7 +366,7 @@ export function HabitsSection() {
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-2">
-          <Sparkles className="size-3.5 text-amber-500" />
+          <Sparkles className="size-3.5 text-muted-foreground" />
           <h3 className="text-body-strong">Habits</h3>
         </div>
         <div className="flex items-center gap-3">
@@ -392,7 +390,7 @@ export function HabitsSection() {
       {/* Header */}
       <div className="flex items-baseline justify-between">
         <div className="flex items-center gap-2">
-          <Sparkles className="size-3.5 text-amber-500" />
+          <Sparkles className="size-3.5 text-muted-foreground" />
           <h3 className="text-body-strong">Habits</h3>
           <span className="text-label text-muted-foreground tabular-nums">
             {completedCount}/{activeHabits.length}

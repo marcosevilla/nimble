@@ -49,7 +49,6 @@ function GoalCard({
   area: LifeArea | null
   onClick: () => void
 }) {
-  const barColor = goal.color || area?.color || '#f59e0b'
   const progressLabel = goal.progress > 0 ? `${goal.progress}%` : 'Not started'
 
   return (
@@ -94,14 +93,13 @@ function GoalCard({
         <div className="flex items-center gap-2">
           <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
             <div
+              /* Neutral fill (goals P2-1): the area color is on the chip dot above;
+                 the bar encodes progress, not category. */
               className={cn(
-                'h-full rounded-full transition-all duration-500',
+                'h-full rounded-full bg-foreground/70 transition-all duration-500',
                 goal.progress >= 100 && 'animate-pulse',
               )}
-              style={{
-                width: `${Math.min(goal.progress, 100)}%`,
-                backgroundColor: barColor,
-              }}
+              style={{ width: `${Math.min(goal.progress, 100)}%` }}
             />
           </div>
           <span className="text-label text-muted-foreground tabular-nums shrink-0">

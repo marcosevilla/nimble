@@ -115,7 +115,6 @@ export function GoalDetailPage() {
   }
 
   const area = goal.life_area_id ? lifeAreas.find((a) => a.id === goal.life_area_id) ?? null : null
-  const barColor = goal.color || area?.color || '#f59e0b'
 
   return (
     <div className="space-y-6">
@@ -204,11 +203,9 @@ export function GoalDetailPage() {
         </div>
         <div className="h-1.5 rounded-full bg-muted overflow-hidden">
           <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{
-              width: `${Math.min(goal.progress, 100)}%`,
-              backgroundColor: barColor,
-            }}
+            /* Neutral fill (goals P2-1) — matches the GoalsPage card bar. */
+            className="h-full rounded-full bg-foreground/70 transition-all duration-500"
+            style={{ width: `${Math.min(goal.progress, 100)}%` }}
           />
         </div>
       </div>
