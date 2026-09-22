@@ -319,9 +319,9 @@ function TaskResultRow({
       {/* Action buttons (when selected) */}
       {isSelected && (
         <div className="flex shrink-0 items-center gap-0.5">
-          <ActionButton icon={Check} hint="⌥C" title="Complete" onClick={onComplete} className="text-green-500/70 hover:text-green-500" />
+          <ActionButton icon={Check} hint="⌥C" title="Complete" onClick={onComplete} className="text-success/70 hover:text-success" />
           <FocusPlayMenu task={task} />
-          <ActionButton icon={Sparkles} hint="⌥B" title="Break down" onClick={onBreakDown} className="text-purple-400/70 hover:text-purple-400" />
+          <ActionButton icon={Sparkles} hint="⌥B" title="Break down" onClick={onBreakDown} className="text-ai/70 hover:text-ai" />
           <DropdownMenu>
             <DropdownMenuTrigger data-move-trigger className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-accent/30 text-muted-foreground hover:text-foreground">
               <Tooltip>

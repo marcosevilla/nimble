@@ -70,7 +70,7 @@ export function SubtaskSummary({ done, total }: { done: number; total: number })
   return (
     <span
       className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-label tabular-nums ${
-        allDone ? 'bg-green-500/10 text-green-500' : 'bg-muted/60 text-muted-foreground'
+        allDone ? 'bg-success/10 text-success' : 'bg-muted/60 text-muted-foreground'
       }`}
       aria-label={`${done} of ${total} subtasks complete`}
     >
