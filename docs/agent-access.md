@@ -1,5 +1,7 @@
 # Nimble Agent Tools (`dt`)
 
+Rollout status (2026-09-21): matching `dt` is installed at `~/.local/bin/dt`; native app refresh and backup RPC are verified. Workflow files remain proposals. Assistant routing activation and signed-in web propagation still need acceptance; see [NEXT.md](../NEXT.md). The later OAuth repair updated the app only, leaving this CLI unchanged.
+
 `dt` is a Rust command-line interface to Nimble's existing local data layer. It preserves native task behavior, recurrence, labels, sync-log tracking and the Todoist outbox. It never opens a remote task-write API or creates/migrates a database.
 
 Build from the repository root:

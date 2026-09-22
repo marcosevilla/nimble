@@ -1,5 +1,7 @@
 # Nimble — Roadmap
 
+Historical March 2026 snapshot; retained for background, not current execution. The C1–C5 order in [locked decisions](todoist-replacement-decisions.md) supersedes this plan. Read [NEXT.md](../NEXT.md) for current status and next work.
+
 ## Current State (as of 2026-03-23)
 
 The app is a functional macOS daily triage tool with read + triage capabilities across Todoist, Google Calendar, and Obsidian. Solid keyboard-first UI with Linear-inspired design. Missing: task/capture creation, AI priorities UI, notifications.

@@ -1,6 +1,6 @@
 # C2/C3 implementation verification
 
-Status: implementation, final code review and production installation complete. Google/phone acceptance and agent workflow activation remain open.
+Status as of 2026-09-21: implementation, review and production installation complete. Live Mac banner, Google connection and first sync passed. Physical phone delivery/two-way edits, restart/reconnect/token-longevity checks, assistant routing and live web propagation remain open. OAuth repair is installed from af39e29 but remains local and unmerged. Earlier dated sections are historical checkpoints; the final Google live connection section supersedes their disconnected state.
 
 ## Isolation
 
@@ -31,13 +31,21 @@ Foundation review identified cancellation-unsafe transactions and a concurrent r
 
 Combined review identified Calendar URL assembly, expired-token reconnect, calendar reuse, unfired A→B→A reminder restoration, stale ETag deletion and remote timezone conversion. The coordinated fix wave `b36f574` addresses all six findings and passes scoped re-review, with no additional blocking regression found.
 
-## Remaining acceptance
+## Acceptance checklist and historical setup evidence
+
+Google live failure diagnosis, 2026-09-21: Marco confirmed completing consent and seeing the callback's "Google connected" message. Installed Nimble instead reports that the step could not finish; production `google_calendar_state` has no row. Source review shows callback success HTML is returned before token exchange and omits `client_secret` from both exchange and refresh. A diagnostic token-endpoint request with the configured public client ID, a deliberately invalid code, and random PKCE verifier returned HTTP400 `invalid_request` / `client_secret is missing.` No actual authorization code, access token, refresh token, or client secret was used in that diagnostic. This proves the current request is rejected for the missing desktop-client credential; the original request's detailed response was discarded by the app. Proposed repair and remaining acceptance are tracked in NEXT.md. Marco subsequently approved the repair; implementation and installation evidence follow below.
+
+Google setup, 2026-09-21: Marco approved creating project `nimble-509404`, accepting Google API/Calendar terms and User Data Policy, and creating Desktop OAuth client **Nimble Mac**. Calendar API is enabled, sole test user is Marco's personal Google account, and only `calendar.app.created` is declared. Public client ID was saved through Nimble's form using Enter (Save button did not submit; tracked in NEXT.md). Nimble opened a PKCE/loopback Google authorization flow in Dia and reached the unverified test-app warning. Marco subsequently confirmed consent; token exchange, dedicated-calendar creation, and live sync are not yet verified. No client secret was copied into Nimble or repository files; billing was not enabled.
+
+Production Mac test, 2026-09-21: Marco authorized one reminder test. Installed `dt` created `76f54a61-2149-46d5-9c15-70b8c007fba8` ("Nimble reminder test") due 21:43 America/Los_Angeles with offset 0 and Google publishing disabled; app refresh was acknowledged. Read-only inspection of the production delivery ledger confirmed `notified`, `last_fired_at=2026-09-22T04:43:41.571711+00:00`, and no error. Marco requested a retry; the same task was rescheduled for 21:46. Marco then explicitly confirmed "ok reminder showed up," establishing visible Mac banner acceptance (without attributing it to a particular attempt). The temporary task was completed at 21:46 PDT with app refresh acknowledged.
 
 - [x] Final complete Rust suite outside the macOS filesystem-event sandbox: 320 passed.
 - [x] Scoped re-review of fixes; frontend desktop/web builds pass. Final native bundle build is recorded below.
 - [x] Reopen test app after a missed reminder and confirm persistent catch-up UI; dismissal removed the item.
-- [ ] Independently observe native OS banner presentation.
-- [ ] Configure Google Desktop OAuth client, consent mode and real account connection.
+- [x] Native OS banner presentation confirmed by Marco in the installed production app on 2026-09-21.
+- [x] Configure Google Desktop OAuth client, consent mode and real account connection; dedicated calendar and first live sync verified.
+- [ ] Verify restart/reconnect persistence and testing-mode token longevity.
+- [ ] Integrate/push installed OAuth repair when authorized.
 - [ ] Physical phone alarm and two-way event-edit acceptance.
 - [x] Install CLI on PATH and verify its connection to the production app using backup RPC.
 - [ ] Agent workflow routing activation and live web propagation acceptance.
@@ -91,3 +99,17 @@ Live checks: HTML GET `/` returns200 with the password form; GET `/` without HTM
 Signed-in app and authenticated database checks were not completed: both Vercel environment-run and explicit production environment export returned an empty `WEB_PASSWORD` value. The browser has no signed-in session. The private temporary environment copy was removed, no credentials were changed, and no task data was written. These deployment checks do not establish live end-to-end reminder/agent web propagation.
 
 Build log: `/private/tmp/nimble-c23-production-deploy.log`. Credential-limited verification log: `/private/tmp/nimble-c23-live-check.log`. Google connection, physical phone acceptance and agent routing remain separate activation work.
+
+## Google OAuth repair — 2026-09-21
+
+Approved repair in `codex/google-desktop-oauth-fix`. The Desktop OAuth client secret is entered through Settings > Phone alerts > Google connection setup, stored only in macOS Keychain under a separate service, and bound to the device profile and public client ID. SQLite stores only the public ID. Both initial token exchange and refresh now include the secret. Callback copy reports approval received, with final connection status checked in Nimble. Save setup and Save timezone use explicit submit buttons. Rejected client credentials are persisted as a visible connection error; successful reconnect/sync clears the error.
+
+Regression evidence: transport, client/profile storage isolation, public-ID-only persistence, bound-client replacement guard, blank-secret rejection, actual-render masked field and form submission tests demonstrated failing before the repair and passing afterward. Desktop/web production builds, eight frontend tests and targeted lint pass. Final Rust suite passed all 330 tests, including the credential-status regression after review. Logs: `/private/tmp/nimble-google-tests-final.log`, `/private/tmp/nimble-google-ui-tests.log`, `/private/tmp/nimble-google-build.log`, `/private/tmp/nimble-google-lint.log`. Independent final review found no remaining blockers. Signed release from `af39e29` built with `Marco Task App Dev`, passed strict signature verification, and installed at `/Applications/Nimble.app`. Native Settings shows the new masked secret field, disabled Save until input, and Not connected / Not configured truthfully. Full-row hashes for all 1,125 tasks, 63 projects, 25 labels, 0 sections and 150 captures match before/after relaunch; schema20 integrity is OK. Rollback app/data: `~/Library/Application Support/Nimble Rollbacks/20260921-222607-google-oauth`. Installed binary hash matches the verified build. CLI and web deployment unchanged. Source remains on the local repair branch. Build log: `/private/tmp/nimble-google-release.log`.
+
+At this installation checkpoint, credential entry/reconnection and calendar verification were pending. Those steps subsequently passed in the live connection section below; the phone alert remains unverified. The existing Google project/client must be reused. Never paste the secret into chat or documentation.
+
+Historical credential handoff (subsequently completed): Google Cloud client details > Information and summary shows that viewing/downloading existing secrets is no longer available. The existing Nimble Mac client remains intact. Its Add client secret control and Nimble’s new masked field are open for Marco; user must create/copy the secret because credential changes require browser handoff. No new secret was created or copied.
+
+## Google live connection verified — 2026-09-21
+
+Marco completed the credential/consent handoff. Native Settings reports Connected to Nimble and the credential saved in Keychain. Invoked Google Sync now; status remained connected with no error. Read-only SQLite confirms calendar configured, timezone America/Los_Angeles, sync cursor initialized, last_synced_at 2026-09-22T05:31:58.782931+00:00, null error_code and retry_after. Calendar links are empty, so this verifies account/calendar connection and initial sync, not phone notifications or two-way task edits. No secret/token values were read or logged.

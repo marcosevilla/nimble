@@ -1,5 +1,7 @@
 # C2 Reminders and Phone Alerts Implementation Plan
 
+Execution status (2026-09-21): C2/C3 implementation is merged and installed. This approved plan is retained as an implementation checklist, not the current open-loops list; unchecked original steps do not by themselves mean work is unimplemented. See [NEXT.md](../../../NEXT.md) and [verification](../../c2-c3-verification.md) for completed evidence and remaining acceptance. Mac banner and Google connection/first sync passed; phone/two-way acceptance and assistant routing/web propagation remain open. The installed OAuth repair is still on its local unmerged branch.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give explicitly configured timed tasks persistent Mac reminders and opt-in Google Calendar phone alerts, without losing reminders when Nimble quits or the Mac sleeps.

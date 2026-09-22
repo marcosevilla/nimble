@@ -1,5 +1,7 @@
 # C2 reminder verification
 
+Current status (2026-09-21): C2 implementation is installed. Synthetic native reminder/restart checks and the live Mac banner passed. Google Calendar connection and initial sync passed after the installed OAuth repair. See [combined verification](c2-c3-verification.md) for evidence and [NEXT.md](../NEXT.md) for current gates. The implementation-stage observations below are historical.
+
 ## Implemented boundaries
 
 - A scheduled occurrence is derived from the task's wall date/time, configured IANA timezone, and reminder offset. DST ambiguity uses the earlier instant; nonexistent times surface an error. A title edit retains the occurrence key.
@@ -15,9 +17,9 @@ Final review regressions: eleven focused core tests pass across `reminders`, `go
 
 No real Google events or production task records were touched during implementation.
 
-## Pending live acceptance
+## Remaining live acceptance
 
-- Run a signed synthetic native Mac test: due in three minutes with a two-minute offset; quit/reopen after due; deny OS permission; complete before due; advance recurrence.
-- Configure a Desktop OAuth client, verify consent publishing mode and refresh-token longevity, then connect a disposable Google account/calendar.
+- Synthetic submission and restart catch-up are verified. Before closing the wider native checklist, reconcile evidence for OS-permission denial, completion before due and recurrence advancement; do not infer these from the banner test.
+- Existing Google Desktop client and dedicated Nimble calendar are connected; reuse them. Confirm testing-mode refresh-token longevity and restart/reconnect persistence.
 - Verify a popup on a physical phone and edit the disposable event both directions. Test disconnect/reconnect and restart token persistence.
 - Configure the real EDD task only after the disposable task passes. Historical biweekly recurrence-twice acceptance remains open until observed.

@@ -1,5 +1,7 @@
 # Reminders and Agent Access Implementation Plan
 
+Execution status (2026-09-21): C2/C3 implementation is merged and installed. This approved plan is retained as an implementation checklist, not the current open-loops list; unchecked original steps do not by themselves mean work is unimplemented. See [NEXT.md](../../../NEXT.md) and [verification](../../c2-c3-verification.md) for completed evidence and remaining acceptance. Mac banner and Google connection/first sync passed; phone/two-way acceptance and assistant routing/web propagation remain open. The installed OAuth repair is still on its local unmerged branch.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Develop C2 reminders and C3 local assistant access concurrently, preserving working backups and existing tasks.
@@ -10,7 +12,7 @@
 
 **Spec:** `docs/todoist-replacement-decisions.md`; companion plans `2026-09-21-c2-reminders.md` and `2026-09-21-c3-agent-access.md` in this directory.
 
-**Status:** Draft for Marco's review. Planning authorized; implementation has not started. Newly proposed defaults in companion plans require approval as part of this plan.
+**Status:** Approved and implemented. Current release evidence and remaining acceptance are linked above.
 
 ## Global Constraints
 
