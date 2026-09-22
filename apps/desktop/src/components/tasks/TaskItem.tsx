@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { StatusDropdown } from './StatusDropdown'
 import { useSelectionStore } from '@/stores/selectionStore'
+import { useFocusStore } from '@/stores/focusStore'
 import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import type { TaskStatus } from '@nimble/types'
@@ -111,10 +111,13 @@ interface TaskItemProps {
    * children (grip, checkbox, status) stop propagation so they don't trigger it. */
   onOpen?: () => void
   allIds?: string[]
-  /** Keyboard-focused row (j/k). When it flips true the row takes DOM focus
-   * and scrolls into view, so the focus ring and `document.activeElement`
-   * always agree (tasks audit P1-1). */
+  /** Keyboard-focused row (j/k) — the tint. DOM focus is moved by
+   * `useRowNavigation` (only on j/k), never by this prop, so a list change
+   * can't pull focus out of a field (review C1). */
   focused?: boolean
+  /** Id the list's `useRowNavigation` knows this row by (`data-nav-row`).
+   * Defaults to the task id. */
+  navId?: string
   /** Fired when the row itself receives DOM focus (Tab, click) so the
    * list's navigation index follows the user. */
   onFocusRow?: () => void
@@ -136,30 +139,26 @@ interface TaskItemProps {
   selectable?: boolean
 }
 
-export function TaskItem({ task, onOpen, allIds, focused, onFocusRow, className, dragHandleProps, showGrip = true, selectable = true }: TaskItemProps) {
+export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, className, dragHandleProps, showGrip = true, selectable = true }: TaskItemProps) {
   const isSelected = useSelectionStore((s) => s.selectedIds.has(task.id))
   const isCompleting = useSelectionStore((s) => s.completingTaskIds.has(task.id))
-  const rowRef = useRef<HTMLDivElement>(null)
 
   const completed = task.completed || task.status === 'complete'
   const visibleLabels = task.labels?.slice(0, 2) ?? []
   const overflowCount = (task.labels?.length ?? 0) - visibleLabels.length
 
-  useEffect(() => {
-    if (!focused || !rowRef.current) return
-    if (document.activeElement !== rowRef.current) rowRef.current.focus()
-    rowRef.current.scrollIntoView({ block: 'nearest' })
-  }, [focused])
-
   return (
     <div
-      ref={rowRef}
       role="button"
       tabIndex={0}
+      data-nav-row={navId ?? task.id}
       onClick={onOpen}
       onFocus={(e) => { if (e.target === e.currentTarget) onFocusRow?.() }}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' && e.target === e.currentTarget && onOpen) {
+        if (e.target !== e.currentTarget || !onOpen) return
+        // Enter and Space open, like any role="button" (review I2). Space
+        // stays with Dashboard's pause/resume while a focus session runs.
+        if (e.key === 'Enter' || (e.key === ' ' && !useFocusStore.getState().isActive)) {
           e.preventDefault()
           onOpen()
         }

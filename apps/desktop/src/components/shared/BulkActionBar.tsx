@@ -19,6 +19,7 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import { STATUSES } from '@/components/tasks/StatusDropdown'
+import { useDeleteTasks } from '@/components/tasks/useDeleteTasks'
 import { IconButton } from '@/components/shared/IconButton'
 import { playCompletionSound } from '@/lib/sound'
 import {
@@ -80,20 +81,30 @@ export function BulkActionBar() {
     }).catch(() => setSingleSelected(null))
   }, [selectionType, count, selectedIds, dp])
 
+  // Task deletes go through useDeleteTasks (review I1): leaves get Undo, a
+  // selection that takes subtasks with it confirms first.
+  const { requestDelete, dialog: deleteDialog } = useDeleteTasks()
   const handleDelete = useCallback(async () => {
     const ids = Array.from(selectedIds)
+    if (selectionType === 'task') {
+      const wanted = new Set(ids)
+      const all = await dp.tasks.list({ includeCompleted: true }).catch(() => [] as LocalTask[])
+      const snapshot = all.filter((t) => wanted.has(t.id))
+      if (snapshot.length === 0) { clear(); return }
+      await requestDelete(snapshot, clear)
+      return
+    }
     let deleted = 0
     for (const id of ids) {
       try {
-        if (selectionType === 'task') await dp.tasks.delete(id)
-        else await dp.captures.delete(id)
+        await dp.captures.delete(id)
         deleted++
       } catch { /* skip */ }
     }
     toast.success(`Deleted ${deleted} item${deleted !== 1 ? 's' : ''}`)
     emitTasksChanged()
     clear()
-  }, [selectedIds, selectionType, clear, dp])
+  }, [selectedIds, selectionType, clear, dp, requestDelete])
 
   const handleSetStatus = useCallback(async (status: TaskStatus) => {
     if (selectionType !== 'task') return
@@ -202,6 +213,8 @@ export function BulkActionBar() {
   const canAddSubtask = showSingleTaskActions && singleSelected && !singleSelected.parent_id
 
   return (
+    <>
+    {deleteDialog}
     <div className="fixed bottom-6 inset-x-0 z-30 flex justify-center bulk-action-bar-enter">
       <div className="flex items-center gap-1 rounded-xl border border-border/20 bg-popover px-2 py-1.5 shadow-lg shadow-black/5">
         <span className="px-2 text-body-strong tabular-nums">
@@ -342,6 +355,7 @@ export function BulkActionBar() {
         </IconButton>
       </div>
     </div>
+    </>
   )
 }
 

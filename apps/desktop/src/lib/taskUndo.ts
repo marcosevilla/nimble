@@ -3,9 +3,11 @@ import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { taskToast } from '@/lib/taskToast'
 import type { DataProvider, LocalTask } from '@nimble/types'
 
-/* Optimistic delete with Undo (tasks audit P1-6, §3.2). Replaces the
-   `window.confirm` gate: the task goes away immediately and the toast offers
-   the way back for as long as it is on screen.
+/* Task delete (tasks audit P1-6, §3.2; review I1). A leaf task goes away
+   immediately and the toast offers Undo; a task with subtasks is confirmed
+   in an AlertDialog and has no Undo, because `delete_local_task` cascades
+   and the frontend can't re-create that faithfully. Callers go through
+   `useDeleteTasks` (components/tasks/useDeleteTasks.tsx), which decides.
 
    Frontend-only restore: Undo re-creates the task from the snapshot via
    `dp.tasks.create`, so the restored task carries a NEW id (activity log,
@@ -33,8 +35,18 @@ export function snapshotToCreateInput(task: LocalTask): Parameters<DataProvider[
 
 const plural = (n: number) => (n === 1 ? 'task' : 'tasks')
 
-/** Delete every task in `tasks`; returns how many deletes succeeded. Shows
- * one toast whose Undo re-creates the ones that were deleted. */
+/** Re-create a deleted leaf task with everything it had: the create fields,
+ * then status and linked doc (not accepted by create). Throws when any step
+ * fails, so the caller never says "restored" for a half-restore. */
+export async function restoreTask(dp: DataProvider, task: LocalTask): Promise<LocalTask> {
+  const created = await dp.tasks.create(snapshotToCreateInput(task))
+  if (task.status !== created.status) await dp.tasks.updateStatus(created.id, task.status)
+  if (task.linked_doc_id) await dp.tasks.update({ id: created.id, linkedDocId: task.linked_doc_id })
+  return created
+}
+
+/** Delete leaf tasks (no subtasks — see lib/deletePlan; callers with
+ * subtasks confirm instead) and offer one Undo toast that restores them. */
 export async function deleteTasksWithUndo(dp: DataProvider, tasks: LocalTask[]): Promise<number> {
   const deleted: LocalTask[] = []
   for (const task of tasks) {
@@ -65,7 +77,7 @@ export async function deleteTasksWithUndo(dp: DataProvider, tasks: LocalTask[]):
         const restored: LocalTask[] = []
         for (const task of deleted) {
           try {
-            restored.push(await dp.tasks.create(snapshotToCreateInput(task)))
+            restored.push(await restoreTask(dp, task))
           } catch {
             /* reported below */
           }
@@ -76,10 +88,35 @@ export async function deleteTasksWithUndo(dp: DataProvider, tasks: LocalTask[]):
         } else if (restored.length === deleted.length) {
           toast.success(`Restored ${restored.length} ${plural(restored.length)}`)
         } else {
-          toast.error(`Restored ${restored.length} of ${deleted.length} ${plural(deleted.length)}`)
+          toast.error(`Restored ${restored.length} of ${deleted.length} ${plural(deleted.length)} — check the list`)
         }
       },
     },
   })
   return deleted.length
+}
+
+/** Delete tasks that take subtasks with them — confirmed first, no Undo
+ * (the cascade can't be re-created faithfully from the frontend). */
+export async function deleteTasksConfirmed(dp: DataProvider, roots: LocalTask[], subtaskCount: number): Promise<number> {
+  let deleted = 0
+  for (const task of roots) {
+    try {
+      await dp.tasks.delete(task.id)
+      deleted++
+    } catch {
+      /* reported below */
+    }
+  }
+  emitTasksChanged()
+  if (deleted === roots.length) {
+    toast.success(
+      roots.length === 1
+        ? `Deleted the task and its ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`
+        : `Deleted ${roots.length} tasks and their subtasks`,
+    )
+  } else {
+    toast.error(`Deleted ${deleted} of ${roots.length} ${plural(roots.length)}`)
+  }
+  return deleted
 }

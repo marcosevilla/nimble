@@ -47,7 +47,7 @@ const keysIn = (section) => SHORTCUTS.filter((s) => s.section === section).map((
 
 test('Tasks section lists the row keys, including f and Escape', () => {
   const keys = keysIn('Tasks')
-  for (const k of ['j / ↓', 'k / ↑', 'x / Space', 's', 'Enter', 'f', 'Escape']) {
+  for (const k of ['j / ↓', 'k / ↑', 'x', 's', 'Enter', 'f', 'Escape']) {
     assert.ok(keys.includes(k), `Tasks missing ${k}`)
   }
 })
@@ -61,4 +61,9 @@ test('Inbox section lists capture and row keys', () => {
 
 test('Inbox is appended as the last section, existing order untouched', () => {
   assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox'])
+})
+
+test('Space is not a Tasks row key — it stays Focus pause/resume (review I2)', () => {
+  assert.ok(!keysIn('Tasks').some((k) => k.includes('Space')))
+  assert.ok(keysIn('Focus').includes('Space'))
 })

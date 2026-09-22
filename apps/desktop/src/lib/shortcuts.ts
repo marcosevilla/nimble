@@ -60,7 +60,7 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Tasks', keys: 'q', label: 'Quick create task' },
   { section: 'Tasks', keys: 'j / ↓', label: 'Next task' },
   { section: 'Tasks', keys: 'k / ↑', label: 'Previous task' },
-  { section: 'Tasks', keys: 'x / Space', label: 'Complete focused task' },
+  { section: 'Tasks', keys: 'x', label: 'Complete focused task' },
   { section: 'Tasks', keys: 's', label: 'Snooze focused task' },
   { section: 'Tasks', keys: 'Enter', label: 'Open focused task' },
 

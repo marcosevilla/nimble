@@ -73,7 +73,7 @@ function AllTasksView({
   // j/k/x/s/f/Enter over the rows in display order (tasks audit P1-1).
   const visibleIds = useMemo(() => groups.flatMap((g) => g.tasks.map((t) => t.id)), [groups])
   const rowActions = useTaskRowActions(tasks)
-  const { focusedId, focusRow } = useTaskNavigation(visibleIds, rowActions)
+  const { focusedId, focusRow } = useTaskNavigation(visibleIds, rowActions, { memoryKey: 'tasks:all' })
 
   // All Tasks mixes projects — each row resolves its own badge (P2-1).
   const projectsById = useMemo(() => {

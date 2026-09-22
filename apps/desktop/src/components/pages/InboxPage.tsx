@@ -10,6 +10,7 @@ import { useLocalTasks } from '@/hooks/useLocalTasks'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { useDetailStore } from '@/stores/detailStore'
 import { useSelectionStore } from '@/stores/selectionStore'
+import { useFocusStore } from '@/stores/focusStore'
 import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { useDataProvider } from '@/services/provider-context'
 import type { CaptureRoute } from '@nimble/types'
@@ -294,6 +295,11 @@ export function InboxPage() {
     setPickerFor(null)
   }, [])
 
+  // The move failed before anything was written: put the row back.
+  const handleMoveFailed = useCallback((capture: Capture) => {
+    setCaptures((prev) => (prev.some((c) => c.id === capture.id) ? prev : [capture, ...prev]))
+  }, [])
+
   const handleImport = useCallback(async () => {
     setImporting(true)
     try {
@@ -335,7 +341,7 @@ export function InboxPage() {
     [noteFromRow, handleConvert, handleDismiss],
   )
 
-  const { focusedId, focusRow } = useRowNavigation(rowIds, openRow, { pages: ['inbox'], keys: rowKeys })
+  const { focusedId, focusRow } = useRowNavigation(rowIds, openRow, { pages: ['inbox'], keys: rowKeys, memoryKey: 'inbox' })
 
   return (
     <>
@@ -421,6 +427,7 @@ export function InboxPage() {
                 subtaskStats={item.subtaskStats}
                 onDelete={noop}
                 showGrip={false}
+                navId={id}
                 focused={focusedId === id}
                 onFocusRow={() => focusRow(id)}
               />
@@ -428,6 +435,7 @@ export function InboxPage() {
               <InboxNoteRow
                 key={id}
                 capture={item.data}
+                navId={id}
                 focused={focusedId === id}
                 onFocusRow={() => focusRow(id)}
                 onConvert={() => handleConvert(item.data)}
@@ -435,6 +443,7 @@ export function InboxPage() {
                 pickerOpen={pickerFor === item.data.id}
                 onPickerOpenChange={(open) => setPickerFor(open ? item.data.id : null)}
                 onMoved={() => handleMovedToDoc(item.data)}
+                onMoveFailed={() => handleMoveFailed(item.data)}
               />
             )
           })}
@@ -453,6 +462,7 @@ export function InboxPage() {
 
 function InboxNoteRow({
   capture,
+  navId,
   focused,
   onFocusRow,
   onConvert,
@@ -460,8 +470,10 @@ function InboxNoteRow({
   pickerOpen,
   onPickerOpenChange,
   onMoved,
+  onMoveFailed,
 }: {
   capture: Capture
+  navId: string
   focused: boolean
   onFocusRow: () => void
   onConvert: () => void
@@ -469,26 +481,32 @@ function InboxNoteRow({
   pickerOpen: boolean
   onPickerOpenChange: (open: boolean) => void
   onMoved: () => void
+  onMoveFailed: () => void
 }) {
   const isSelected = useSelectionStore((s) => s.selectedIds.has(capture.id))
   const rowRef = useRef<HTMLDivElement>(null)
   const open = () => useDetailStore.getState().openCapture(capture.id)
 
-  useEffect(() => {
-    if (!focused || !rowRef.current) return
-    if (document.activeElement !== rowRef.current && !pickerOpen) rowRef.current.focus()
-    rowRef.current.scrollIntoView({ block: 'nearest' })
-  }, [focused, pickerOpen])
+  // DOM focus moves via useRowNavigation on j/k only (review C1); `focused`
+  // is just the tint. Closing the picker hands focus back to the row (its
+  // `finalFocus`), not the trigger, so j/k keep working.
 
   return (
     <div
       ref={rowRef}
       role="button"
       tabIndex={0}
+      data-nav-row={navId}
       onClick={open}
       onFocus={(e) => { if (e.target === e.currentTarget) onFocusRow() }}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); open() }
+        if (e.target !== e.currentTarget) return
+        // Enter and Space open, like any role="button" (review I2); Space
+        // stays with Dashboard's pause/resume while a focus session runs.
+        if (e.key === 'Enter' || (e.key === ' ' && !useFocusStore.getState().isActive)) {
+          e.preventDefault()
+          open()
+        }
       }}
       className={cn(
         'group relative flex h-10 items-center min-w-0 transition-colors hover:bg-hover cursor-default',
@@ -530,6 +548,7 @@ function InboxNoteRow({
               align="end"
               sideOffset={4}
               className="w-72 gap-0 p-2"
+              finalFocus={rowRef}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
                 // Keep j/k/t/m/d typed inside the picker from reaching the
@@ -537,7 +556,7 @@ function InboxNoteRow({
                 if (e.key !== 'Escape' && e.key !== 'Tab') e.stopPropagation()
               }}
             >
-              {pickerOpen && <MoveToDocPicker capture={capture} onMoved={onMoved} />}
+              {pickerOpen && <MoveToDocPicker capture={capture} onMoved={onMoved} onFailed={onMoveFailed} />}
             </PopoverContent>
           </Popover>
           <button type="button" onClick={onConvert} className={ROW_ACTION}>
@@ -569,7 +588,7 @@ function RowKbd({ children }: { children: React.ReactNode }) {
 // ── Move to doc picker (inside the row's Popover — Escape, focus and
 // dismissal come from the primitive; inbox audit P1-1) ──
 
-function MoveToDocPicker({ capture, onMoved }: { capture: Capture; onMoved: () => void }) {
+function MoveToDocPicker({ capture, onMoved, onFailed }: { capture: Capture; onMoved: () => void; onFailed: () => void }) {
   const dp = useDataProvider()
   const [folders, setFolders] = useState<DocFolder[]>([])
   const [docs, setDocs] = useState<Document[]>([])
@@ -590,10 +609,19 @@ function MoveToDocPicker({ capture, onMoved }: { capture: Capture; onMoved: () =
     onMoved()
     try {
       await dp.docs.createNote(docId, capture.content)
+    } catch (e) {
+      onFailed()
+      toast.error(`Failed to move: ${e}`)
+      return
+    }
+    try {
       await dp.captures.delete(capture.id)
       toast.success(`Moved to "${doc?.title || 'doc'}"`)
-    } catch (e) {
-      toast.error(`Failed to move: ${e}`)
+    } catch {
+      // The note is in the doc; only the inbox copy stayed. Say so rather
+      // than restoring a row that would read as "not moved".
+      toast.error(`Saved to "${doc?.title || 'doc'}", but the note is still in your inbox`)
+      emitTasksChanged()
     }
   }
 

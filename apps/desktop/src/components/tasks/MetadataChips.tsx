@@ -289,7 +289,7 @@ function EntityChip<T extends { id: string; name: string }>({
   return (
     <div className={cn(CHIP_FILLED, 'group/chip')}>
       <DropdownMenu open={open} onOpenChange={onOpenChange}>
-        <DropdownMenuTrigger className="">{entity.name}</DropdownMenuTrigger>
+        <DropdownMenuTrigger>{entity.name}</DropdownMenuTrigger>
         {menu}
       </DropdownMenu>
       <ClearButton onClear={onClear} label={clearLabel} />

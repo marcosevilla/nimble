@@ -14,7 +14,7 @@ import { StatusDropdown } from '@/components/tasks/StatusDropdown'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Sparkles, Plus, Settings, ChevronLeft } from 'lucide-react'
 import { taskToast } from '@/lib/taskToast'
-import { deleteTasksWithUndo } from '@/lib/taskUndo'
+import { useDeleteTasks } from '@/components/tasks/useDeleteTasks'
 import { predictReschedule } from '@/lib/recurrence'
 import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { InlineTitle } from './InlineTitle'
@@ -354,13 +354,13 @@ export function TaskDetailPage() {
     toast.success('Task ID copied')
   }, [task])
 
-  // Optimistic: leave the page first, then delete; the toast's Undo brings
-  // the task back (tasks audit P1-6 — see lib/taskUndo for the new-id caveat).
+  // A leaf leaves the page and deletes with Undo; a task with subtasks
+  // confirms first (tasks audit P1-6, review I1 — see useDeleteTasks).
+  const { requestDelete, dialog: deleteDialog } = useDeleteTasks()
   const handleDeleteTask = useCallback(() => {
     if (!task) return
-    close()
-    void deleteTasksWithUndo(dp, [task])
-  }, [task, dp, close])
+    void requestDelete([task], close)
+  }, [task, requestDelete, close])
 
   // Recurring tasks reschedule instead of completing (Task 8) — the row's
   // due date just advances, no guilt copy, just a quiet confirmation of
@@ -411,6 +411,8 @@ export function TaskDetailPage() {
   }))
 
   return (
+    <>
+    {deleteDialog}
     <div className="mx-auto w-full max-w-[600px] pt-[30px] flex flex-col gap-6">
       {/* Top row: breadcrumb (left) + gear trigger (right) — no paperclip
           (Decision 13), no other actions in the right cluster. */}
@@ -622,5 +624,6 @@ export function TaskDetailPage() {
         </DialogContent>
       </Dialog>
     </div>
+    </>
   )
 }

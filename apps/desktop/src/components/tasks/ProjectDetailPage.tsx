@@ -95,7 +95,7 @@ export function ProjectDetailPage({
   // j/k/x/s/f/Enter over the rows in display order (tasks audit P1-1).
   const visibleIds = useMemo(() => groups.flatMap((g) => g.tasks.map((t) => t.id)), [groups])
   const rowActions = useTaskRowActions(projectTasks)
-  const { focusedId, focusRow } = useTaskNavigation(visibleIds, rowActions)
+  const { focusedId, focusRow } = useTaskNavigation(visibleIds, rowActions, { memoryKey: `tasks:project:${project.id}` })
 
   // Only surface labels that are actually applied to something in this
   // project — an empty label taxonomy in the filter menu is just noise.
