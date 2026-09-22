@@ -56,32 +56,50 @@ export function resolveRowFocus(prev: RowFocus, ids: readonly string[]): RowFocu
 /** Rows carry `data-nav-row="<id>"`. */
 export const NAV_ROW_SELECTOR = '[data-nav-row]'
 
-/** Controls that own their keys (Enter/Space activate them). */
+/** Controls that own Enter/Space (their native activation). Other list
+ * keys typed on them act on the row that contains them (fix round 2, N1). */
 export const INTERACTIVE_SELECTOR =
-  'button, a, input, textarea, select, [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"], [role="checkbox"], [role="switch"], [role="tab"], [contenteditable]:not([contenteditable="false"])'
+  'button, a, [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"], [role="checkbox"], [role="switch"], [role="tab"]'
+
+/** Text entry — every key belongs to the field. */
+export const FIELD_SELECTOR = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])'
 
 /** Anything open on top of the list — keys typed there are not row keys. */
 export const OVERLAY_SELECTOR =
   '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-slot="popover-content"]'
 
-export type RowKeyTarget = 'row' | 'free' | 'yield'
+export interface RowKeyDecision {
+  /** False: leave the event alone (no preventDefault, no row action). */
+  handle: boolean
+  /** The row the key came from (the row itself or a control inside it);
+   * the list acts on this row rather than its remembered focus. */
+  rowId: string | null
+}
 
 interface ElementLike {
   isContentEditable?: boolean
   matches?: (selector: string) => boolean
   closest?: (selector: string) => ElementLike | null
+  getAttribute?: (name: string) => string | null
 }
 
-/** Classify a keydown target for the window-level row handler:
- * `row` — a list row itself; `free` — the page (body) or a non-interactive
- * element; `yield` — a nested control, a field or an open overlay, which
- * the row handler must leave alone (no preventDefault, no row action). */
-export function classifyRowKeyTarget(target: unknown): RowKeyTarget {
+const SKIP: RowKeyDecision = { handle: false, rowId: null }
+
+/** Decide whether the window-level row handler takes `key` from `target`:
+ * - open overlay (popover, menu, dialog) or a field → skip every key;
+ * - a nested control (status button, "Convert to task") → skip Enter and
+ *   Space so the control activates; other keys act on its row;
+ * - a row, the page, or plain content → handle. */
+export function decideRowKey(target: unknown, key: string): RowKeyDecision {
   const el = target as ElementLike | null
-  if (!el || typeof el.closest !== 'function' || typeof el.matches !== 'function') return 'free'
-  if (el.closest(OVERLAY_SELECTOR)) return 'yield'
-  if (el.isContentEditable) return 'yield'
-  if (el.matches(NAV_ROW_SELECTOR)) return 'row'
-  if (el.closest(INTERACTIVE_SELECTOR)) return 'yield'
-  return 'free'
+  if (!el || typeof el.closest !== 'function' || typeof el.matches !== 'function') {
+    return { handle: true, rowId: null }
+  }
+  if (el.closest(OVERLAY_SELECTOR)) return SKIP
+  if (el.isContentEditable || el.matches(FIELD_SELECTOR)) return SKIP
+  const row = el.closest(NAV_ROW_SELECTOR)
+  const rowId = row?.getAttribute?.('data-nav-row') ?? null
+  if (el.matches(NAV_ROW_SELECTOR)) return { handle: true, rowId }
+  if (el.closest(INTERACTIVE_SELECTOR) && (key === 'Enter' || key === ' ')) return SKIP
+  return { handle: true, rowId }
 }

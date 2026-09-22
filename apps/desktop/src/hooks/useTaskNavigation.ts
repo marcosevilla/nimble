@@ -3,7 +3,7 @@ import { useAppStore, type Page } from '@/stores/appStore'
 import {
   stepIndex,
   resolveRowFocus,
-  classifyRowKeyTarget,
+  decideRowKey,
   NO_ROW_FOCUS,
   type RowFocus,
 } from '@/lib/rowNav'
@@ -19,9 +19,9 @@ import {
    was remembered (review I3) while nothing else holds focus. A list
    mutation never pulls focus out of the capture field.
 
-   Keys are only handled when the event came from a row itself or from the
-   page (review C2): nested controls, fields and open menus/popovers keep
-   their own Enter/Space. Space is not a list key at all (review I2): a row
+   Key targets (review C2, fix round 2 N1 — `decideRowKey`): fields and
+   open menus/popovers keep every key; a control nested in a row keeps
+   Enter/Space and passes the other list keys to its row. Space is not a list key at all (review I2): a row
    opens on Space like any `role="button"` (TaskItem / InboxNoteRow), and
    Dashboard's Space-pauses-focus wins while a session runs. Rows carry
    `data-nav-row="<id>"` so the hook can find them. */
@@ -82,11 +82,14 @@ export function useRowNavigation(ids: string[], onOpen: RowKeyHandler, options: 
 
     function handleKeyDown(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      const target = classifyRowKeyTarget(e.target)
-      if (target === 'yield') return
+      const decision = decideRowKey(e.target, e.key)
+      if (!decision.handle) return
 
       const list = idsRef.current
-      const { id: focusedId, index } = focusRef.current
+      // A key from a row (or a control inside it) acts on that row.
+      const fromRow = decision.rowId ? list.indexOf(decision.rowId) : -1
+      const focusedId = fromRow >= 0 ? list[fromRow] : focusRef.current.id
+      const index = fromRow >= 0 ? fromRow : focusRef.current.index
 
       switch (e.key) {
         case 'j':
