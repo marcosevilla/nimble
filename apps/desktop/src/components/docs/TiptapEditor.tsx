@@ -78,8 +78,9 @@ const MentionList = forwardRef<MentionListRef, SuggestionProps<MentionItem>>((pr
           key={`${item.kind}-${item.id}`}
           onClick={() => props.command(item)}
           className={cn(
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors',
-            i === selectedIndex ? 'bg-accent/40' : 'hover:bg-hover',
+            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors duration-(--transition-fast)',
+            // Same selected/hover pair as the tree and search (docs P1-3): accent/40 measured 1.04:1.
+            i === selectedIndex ? 'bg-muted' : 'hover:bg-hover',
           )}
         >
           {item.kind === 'task' ? (

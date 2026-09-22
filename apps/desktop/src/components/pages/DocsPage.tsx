@@ -6,6 +6,7 @@ import { useEffect } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { useDocsStore } from '@/stores/docsStore'
+import { shouldIgnoreKey } from '@/lib/keyGuard'
 import { FolderTree } from '@/components/docs/FolderTree'
 import { DocEditor } from '@/components/docs/DocEditor'
 import { DOCS_SEARCH_INPUT_ID } from '@/components/docs/DocsSearch'
@@ -33,13 +34,13 @@ export function DocsPage() {
   }, [refresh])
 
   // Page-scoped keys (registry: Docs). `n` → new document in the selected
-  // folder, `/` → the sidebar search. Both are additive and skip inputs,
-  // the editor's contenteditable, and every modifier chord (docs P1-1, P2-10).
+  // folder, `/` → the sidebar search. Both are additive and skip text entry,
+  // open popovers/dialogs, nested controls other than a tree row, key
+  // repeat and every modifier chord (docs P1-1, P2-10; lib/keyGuard).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const t = e.target as HTMLElement
-      const isInput = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
-      if (isInput || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
+      if (shouldIgnoreKey(e.target as HTMLElement, { rowSelector: '[data-tree-row]' })) return
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault()
         createDocument(useDocsStore.getState().selectedFolderId ?? undefined)
@@ -47,12 +48,19 @@ export function DocsPage() {
         return
       }
       if (e.key === '/') {
-        const input = document.getElementById(DOCS_SEARCH_INPUT_ID) as HTMLInputElement | null
-        if (!input) return
         e.preventDefault()
-        if (useDocsStore.getState().folderTreeCollapsed) setFolderTreeCollapsed(false)
-        input.focus()
-        input.select()
+        const focusSearch = () => {
+          const input = document.getElementById(DOCS_SEARCH_INPUT_ID) as HTMLInputElement | null
+          input?.focus()
+          input?.select()
+        }
+        // A collapsed tree unmounts the search box: open it, then focus next frame.
+        if (useDocsStore.getState().folderTreeCollapsed) {
+          setFolderTreeCollapsed(false)
+          requestAnimationFrame(focusSearch)
+        } else {
+          focusSearch()
+        }
       }
     }
     window.addEventListener('keydown', onKey)

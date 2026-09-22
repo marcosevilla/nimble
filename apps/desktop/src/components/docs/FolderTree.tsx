@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { IconButton } from '@/components/shared/IconButton'
 import { Button } from '@/components/ui/button'
 import { DocsSearch } from './DocsSearch'
+import { visibleTreeKeys, pickRovingKey } from '@/lib/docsTree'
 import type { Document, VaultNoteSummary } from '@nimble/types'
 
 /* Tree rows are real <button>s carrying data-tree-row / data-kind /
@@ -33,6 +34,9 @@ export function handleTreeKeyDown(e: React.KeyboardEvent<HTMLElement>, expand: (
   const focusAt = (i: number) => { rows[Math.max(0, Math.min(rows.length - 1, i))]?.focus() }
 
   switch (e.key) {
+    // Space is the row's native click. Stop it here so the Dashboard's
+    // window-level Space (pause a focus session) never swallows it.
+    case ' ': e.stopPropagation(); break
     case 'ArrowDown': e.preventDefault(); focusAt(idx + 1); break
     case 'ArrowUp': e.preventDefault(); focusAt(idx - 1); break
     case 'Home': e.preventDefault(); focusAt(0); break
@@ -98,6 +102,8 @@ export function FolderTree() {
   const [newFolderInput, setNewFolderInput] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<ConfirmTarget | null>(null)
+  // Last row that held focus — the roving tab stop follows the arrow keys.
+  const [focusKey, setFocusKey] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const startX = useRef(0)
   const startWidth = useRef(220)
@@ -200,20 +206,36 @@ export function FolderTree() {
     else if (key.startsWith('folder:')) setConfirmDelete({ kind: 'folder', id: key.slice(7), name })
   }, [])
 
-  // Roving tabindex: exactly one row is reachable by Tab — the selected
-  // one, else the first. Arrow keys move focus from there (§1.5).
-  const activeKey = selectedDocId
+  // Roving tabindex: exactly one *rendered* row is reachable by Tab — the
+  // last-focused one, else the selection, else the first. A selection inside
+  // a collapsed folder is skipped so the tree never loses its tab stop (§1.5).
+  const selectionKey = selectedDocId
     ? `doc:${selectedDocId}`
     : selectedVaultPath
       ? `note:${selectedVaultPath}`
       : null
-  const firstKeyRef = useRef<string | null>(null)
-  firstKeyRef.current = null
-  const tabIndexFor = (key: string) => {
-    if (activeKey) return activeKey === key ? 0 : -1
-    if (firstKeyRef.current === null) { firstKeyRef.current = key; return 0 }
-    return -1
-  }
+  const visibleKeys = visibleTreeKeys({
+    folders,
+    docsByFolder,
+    unfiled,
+    expandedFolders,
+    vaultRoot: vaultNotes.length > 0 ? vaultTree : null,
+    vaultExpanded,
+    expandedVaultFolders,
+  })
+  const tabStop = pickRovingKey(visibleKeys, focusKey, selectionKey)
+  const tabIndexFor = (key: string) => (key === tabStop ? 0 : -1)
+
+  // Escape / "Keep it" returns focus to the row the confirm replaced.
+  const cancelConfirm = useCallback(() => {
+    const target = confirmDelete
+    setConfirmDelete(null)
+    if (!target) return
+    const key = target.kind === 'doc' ? `doc:${target.id}` : `folder:${target.id}`
+    requestAnimationFrame(() => {
+      listRef.current?.querySelector<HTMLElement>(`[data-tree-row][data-key="${CSS.escape(key)}"]`)?.focus()
+    })
+  }, [confirmDelete])
 
   // Resize
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -247,12 +269,17 @@ export function FolderTree() {
   }, [dragging, setFolderTreeWidth])
 
   const renderConfirm = (target: ConfirmTarget, indent?: boolean) => (
-    <div className={cn('flex h-8 items-center gap-1 px-1.5', indent && 'ml-4')} role="alertdialog" aria-label={`Delete ${target.name}?`}>
+    <div
+      className={cn('flex h-8 items-center gap-1 px-1.5', indent && 'ml-4')}
+      role="alertdialog"
+      aria-label={`Delete ${target.name}?`}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelConfirm() } }}
+    >
       <span className="flex-1 truncate text-label text-destructive">Delete {target.name}?</span>
       <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={runConfirmedDelete} aria-label={`Confirm delete ${target.name}`} autoFocus>
         <Check className="size-3" />
       </Button>
-      <Button variant="ghost" size="icon-xs" onClick={() => setConfirmDelete(null)} aria-label="Keep it">
+      <Button variant="ghost" size="icon-xs" onClick={cancelConfirm} aria-label="Keep it">
         <X className="size-3" />
       </Button>
     </div>
@@ -268,6 +295,7 @@ export function FolderTree() {
         <button
           type="button"
           onClick={() => selectDoc(doc.id)}
+          role="treeitem"
           data-tree-row
           data-kind="leaf"
           data-key={key}
@@ -275,7 +303,7 @@ export function FolderTree() {
           data-deletable="true"
           data-parent={parentKey ?? undefined}
           tabIndex={tabIndexFor(key)}
-          aria-current={selected ? 'true' : undefined}
+          aria-selected={selected}
           className={cn(ROW, selected ? 'text-meta-strong' : 'text-meta')}
         >
           <FileText className="size-3.5 shrink-0 text-muted-foreground" />
@@ -331,6 +359,10 @@ export function FolderTree() {
         aria-label="Docs and vault"
         className="flex-1 overflow-y-auto p-1.5 space-y-0.5"
         onKeyDown={(e) => handleTreeKeyDown(e, expandKey, collapseKey, requestDelete)}
+        onFocus={(e) => {
+          const row = e.target as HTMLElement
+          if (row.hasAttribute('data-tree-row') && row.dataset.key) setFocusKey(row.dataset.key)
+        }}
       >
         {folders.map((folder) => {
           const key = `folder:${folder.id}`
@@ -342,6 +374,7 @@ export function FolderTree() {
                   <button
                     type="button"
                     onClick={() => toggleFolder(folder.id)}
+                    role="treeitem"
                     data-tree-row
                     data-kind="folder"
                     data-key={key}
@@ -407,6 +440,7 @@ export function FolderTree() {
               <button
                 type="button"
                 onClick={() => setVaultExpanded(!vaultExpanded)}
+                role="treeitem"
                 data-tree-row
                 data-kind="folder"
                 data-key="vault"
@@ -522,6 +556,7 @@ function VaultBranch({
                 type="button"
                 onClick={() => onToggle(child.path)}
                 title={child.path}
+                role="treeitem"
                 data-tree-row
                 data-kind="folder"
                 data-key={key}
@@ -561,12 +596,13 @@ function VaultBranch({
               type="button"
               onClick={() => onSelect(note.path)}
               title={note.path}
+              role="treeitem"
               data-tree-row
               data-kind="leaf"
               data-key={key}
               data-parent={parentKey}
               tabIndex={tabIndexFor(key)}
-              aria-current={selected ? 'true' : undefined}
+              aria-selected={selected}
               className={cn(ROW, selected ? 'text-meta-strong' : 'text-meta')}
             >
               <FileText className="size-3.5 shrink-0 text-muted-foreground" />
