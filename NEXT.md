@@ -21,7 +21,7 @@ Plan `docs/audit-findings/2026-09-22-loop1-plan.md` · audit brief `docs/audit-f
 - [x] Stage B merged, all six themes reviewed by fresh Opus reviewers and merged into main at `cc0263a` (97/97 frontend tests, desktop + web builds green): B2 no-guilt copy, B1 color semantics (palette literals 86→1 comment), B5 settings IA (5,559→4,663px, scroll-spy nav), B4 shell (no nested buttons, `--hover` token, hit areas), B3a Tasks/Inbox keyboard rows, B3b Docs/Goals/Session keyboard + states.
 - [ ] **Next: Marco says go on Stage C** (one PageFrame/SectionTitle/EmptyState on six pages — not Tasks/detail — plus motion tokens for ~45 literal durations, `Dashboard.tsx` scroller `flex-col` so sticky headers stick). Or re-score first.
 - [ ] Re-score step (loop N.5) not run: after-columns in the scorecard are empty; take a combined screenshot set of main.
-- [ ] Not pushed: main is 64 commits ahead of origin. Not installed to /Applications.
+- [x] Pushed 2026-09-22 (`5f290d0`, facelift A+B included; Vercel is not Git-linked, so no deploy). Still not installed to /Applications.
 - [ ] Prune worktrees when done: `.worktrees/facelift-{a,b1-color,b2-no-guilt,b3a-rows-tasks-inbox,b3b-docs-goals-session,b4-shell,b5-settings-ia}` (all merged).
 - [ ] Update `docs/audit-loop-playbook.md` with this run's lessons at final wrap (tabs not windows; pin subagent model; integrator agent per rebase; key-guard lesson).
 
