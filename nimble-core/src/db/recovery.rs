@@ -22,30 +22,45 @@ fn invalid(code: &str) -> crate::Error {
     fs::invalid(&format!("recovery_{code}"))
 }
 
+fn protected(path: &Path, extra_forbidden: Option<&Path>) -> bool {
+    // Conservative ASCII case folding protects case-insensitive macOS volumes,
+    // including legacy names anywhere under Application Support.
+    let parts = path
+        .components()
+        .map(|p| p.as_os_str().to_string_lossy().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    parts.iter().any(|p| p == "com.marcosevilla.daily-triage")
+        || parts
+            .windows(2)
+            .any(|p| p[0] == "library" && p[1] == "application support")
+        || extra_forbidden.is_some_and(|root| path.starts_with(root))
+}
+
 fn destination(path: &Path, extra_forbidden: Option<&Path>) -> crate::Result<PathBuf> {
     let path = fs::checked_path(path)?;
-    // Reject every user's macOS app-data tree, including legacy bundle locations.
-    if path
-        .components()
-        .any(|p| p.as_os_str() == "com.marcosevilla.daily-triage")
-        || path
-            .components()
-            .map(|p| p.as_os_str())
-            .collect::<Vec<_>>()
-            .windows(2)
-            .any(|p| p[0] == "Library" && p[1] == "Application Support")
-        || extra_forbidden.is_some_and(|root| path.starts_with(root))
-    {
+    if protected(&path, extra_forbidden) {
         return Err(invalid("production_destination"));
     }
     if path.exists() {
         return Err(invalid("destination_exists"));
     }
-    if !path.parent().is_some_and(Path::is_dir) {
-        return Err(invalid("parent_missing"));
+    let parent = path
+        .parent()
+        .filter(|p| p.is_dir())
+        .ok_or_else(|| invalid("parent_missing"))?;
+    // Resolve existing directory spelling before deriving the new output. Never
+    // canonicalize before checked_path: that would silently accept symlinks.
+    let canonical_parent = parent.canonicalize()?;
+    fs::checked_path(&canonical_parent)?;
+    let resolved = canonical_parent.join(path.file_name().ok_or_else(|| invalid("destination"))?);
+    let canonical_forbidden = extra_forbidden.and_then(|root| root.canonicalize().ok());
+    if protected(&resolved, extra_forbidden) || protected(&resolved, canonical_forbidden.as_deref())
+    {
+        return Err(invalid("production_destination"));
     }
-    Ok(path)
+    Ok(resolved)
 }
+
 struct Stage(PathBuf);
 impl Stage {
     fn new(dest: &Path) -> crate::Result<Self> {
@@ -222,6 +237,24 @@ mod tests {
         assert!(stage.publish(&dest).is_err());
         assert!(!stage_path.exists());
         assert_eq!(fs::read(&dest.join("sentinel")).unwrap(), b"preserved");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn differently_cased_existing_production_parents_are_refused() {
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("recovery-case-test-{}", uuid::Uuid::new_v4()));
+        for parent in [
+            "library/application support/legacy-app",
+            "COM.MARCOSEVILLA.DAILY-TRIAGE",
+        ] {
+            let parent = root.join(parent);
+            std::fs::create_dir_all(&parent).unwrap();
+            let dest = parent.join("new");
+            assert!(destination(&dest, None).is_err());
+            assert!(!dest.exists());
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
