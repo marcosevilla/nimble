@@ -3,7 +3,6 @@ import { useAppStore } from '@/stores/appStore'
 import { useDataProvider } from '@/services/provider-context'
 import type { CalendarEvent } from '@nimble/types'
 import { friendlyError } from '@/lib/errors'
-import { toast } from 'sonner'
 
 function todayString(): string {
   const d = new Date()
@@ -54,9 +53,9 @@ export function useCalendar() {
         setCalendarEvents(data)
       }
     } catch (e) {
-      const msg = friendlyError(e)
-      setError(msg)
-      toast.error(msg)
+      // Inline "Calendar offline. / Retry" in the panel is the one channel;
+      // a toast here fired on every day change (shell P2-6, §3.2).
+      setError(friendlyError(e))
     } finally {
       setLoading(false)
     }
