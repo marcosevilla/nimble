@@ -1,6 +1,6 @@
 # Focus Queue absorption — verification record
 
-Status: **paused at Marco’s request after reviewed Tasks 1–4**, before Task 5, on `codex/focus-absorption`. Code through `0a6117e`. This is an evidence log, not release or live-acceptance approval.
+Status: **Tasks 1–5 reviewed (foundation checkpoint)**; Tasks 6–12 in progress on `codex/focus-absorption`. Code through `0a6117e`. This is an evidence log, not release or live-acceptance approval.
 
 Spec: [approved architecture](superpowers/specs/2026-09-22-focus-queue-absorption-design.md). Plan: [12 staged tasks](superpowers/plans/2026-09-22-focus-queue-absorption.md).
 
@@ -18,6 +18,7 @@ Unchanged baseline: `cargo test --workspace --offline` passed 330 tests across 1
 | 2: task transactions | `4068f5b`, `973fee3` | Twelve focused transaction tests, 24 existing native-task tests and 74 Todoist tests pass; workspace compile passes. Independent review fixes cover stale local-only delivery claims, Calendar conditional-update rollback, and activity metadata/no-op preservation. Scoped re-review approved. |
 | 3: queue/timer engine | `df20da8`, `dbfc422`, `6ddbbbd` | 48 focused schema/transaction/engine/recovery tests pass; existing native task tests and workspace compile pass. Review and two scoped fix rounds approved: mode/Pomodoro transitions, recurrence guard, storage/gap recovery, reorder, and 10-second neighbor-aware Undo. |
 | 4: backup/restore/replication | `9fd6d88`, `0a6117e` | Initial full core run: 336 tests across 15 targets pass; web build and workspace compile pass. Review fixes reran backup 3, replica 5, Google 5, reminders 4, web validator 2 plus compile/web build; scoped review approved. |
+| 5: service/providers/events | `a0f0272`, `e5a9baf` | Full workspace 412 Rust tests pass (incl. new `focus_routing` 10, `dt` contracts 15); frontend 110/110; desktop/web builds. Review fixes: per-chunk pulled applies with no revision bump for unfocused tasks, full cascaded-subtree delete reconciliation, `dt` direct-path due-identity guard, restored-marker backup test expectation (Task 4 regression), web history cursor parity. Scoped re-review approved. |
 
 Task 4 resolved the temporary v21 export/schema compatibility failures and added the real remote/web `sync_policy` column. Frozen v19/v20 policies remain compatible. Both restore routes verify source/copy equality before normalizing the activation copy; restored v21 profiles remain paused with ownership disabled, and a persistent activation gate blocks independent reminder, Google, backup, Todoist and Turso side effects. Pending evidence/configuration is preserved. Aggregate replication rejects stale/foreign revisions, delayed upserts and invalid numeric ledger fields at native/web boundaries. No build has been installed or deployed.
 
