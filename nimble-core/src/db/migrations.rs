@@ -537,7 +537,7 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             CREATE TABLE focus_queue_state (
                 id INTEGER PRIMARY KEY CHECK(id = 1), queue_id TEXT NOT NULL,
                 writer_device_id TEXT NOT NULL, owner_epoch TEXT NOT NULL,
-                revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+                revision INTEGER NOT NULL DEFAULT 0 CHECK(revision BETWEEN 0 AND 9007199254740991),
                 entries_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(entries_json) AND json_type(entries_json) = 'array'),
                 selected_occurrence_id TEXT, updated_at TEXT NOT NULL
             );
@@ -545,7 +545,7 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
                 id TEXT PRIMARY KEY, task_id TEXT REFERENCES local_tasks(id) ON DELETE SET NULL,
                 original_task_id TEXT NOT NULL, title_snapshot TEXT NOT NULL,
                 project_snapshot TEXT, scheduling_identity TEXT,
-                generation INTEGER NOT NULL CHECK(generation >= 1),
+                generation INTEGER NOT NULL CHECK(generation BETWEEN 1 AND 9007199254740991),
                 state TEXT NOT NULL CHECK(state IN ('open','completed','removed')),
                 created_at TEXT NOT NULL, completed_at TEXT, completion_reason TEXT,
                 archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1))
@@ -558,12 +558,12 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
                 status TEXT NOT NULL CHECK(status IN ('paused','running','ended')),
                 mode TEXT NOT NULL CHECK(mode IN ('count_up','timebox','pomodoro')),
                 config_json TEXT NOT NULL CHECK(json_valid(config_json)),
-                work_ms INTEGER NOT NULL DEFAULT 0 CHECK(work_ms >= 0),
-                break_ms INTEGER NOT NULL DEFAULT 0 CHECK(break_ms >= 0),
-                round_work_ms INTEGER NOT NULL DEFAULT 0 CHECK(round_work_ms >= 0),
-                round INTEGER NOT NULL DEFAULT 1 CHECK(round >= 1),
+                work_ms INTEGER NOT NULL DEFAULT 0 CHECK(work_ms BETWEEN 0 AND 9007199254740991),
+                break_ms INTEGER NOT NULL DEFAULT 0 CHECK(break_ms BETWEEN 0 AND 9007199254740991),
+                round_work_ms INTEGER NOT NULL DEFAULT 0 CHECK(round_work_ms BETWEEN 0 AND 9007199254740991),
+                round INTEGER NOT NULL DEFAULT 1 CHECK(round BETWEEN 1 AND 100),
                 started_at TEXT, checkpoint_at TEXT, ended_at TEXT,
-                session_revision INTEGER NOT NULL DEFAULT 0 CHECK(session_revision >= 0),
+                session_revision INTEGER NOT NULL DEFAULT 0 CHECK(session_revision BETWEEN 0 AND 9007199254740991),
                 end_reason TEXT
             );
             CREATE INDEX focus_sessions_occurrence ON focus_sessions(occurrence_id);
@@ -571,15 +571,15 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
                 id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES focus_sessions(id),
                 kind TEXT NOT NULL CHECK(kind IN ('work','break')),
                 started_at TEXT NOT NULL, checkpoint_at TEXT NOT NULL,
-                duration_ms INTEGER NOT NULL DEFAULT 0 CHECK(duration_ms >= 0),
+                duration_ms INTEGER NOT NULL DEFAULT 0 CHECK(duration_ms BETWEEN 0 AND 9007199254740991),
                 closed_at TEXT, close_reason TEXT
             );
             CREATE UNIQUE INDEX focus_one_open_segment ON focus_segments((1)) WHERE closed_at IS NULL;
             CREATE TABLE focus_runtime (
                 id INTEGER PRIMARY KEY CHECK(id = 1), live_session_id TEXT REFERENCES focus_sessions(id),
-                owner_epoch TEXT NOT NULL, process_generation INTEGER NOT NULL DEFAULT 0 CHECK(process_generation >= 0),
-                engine_revision INTEGER NOT NULL DEFAULT 0 CHECK(engine_revision >= 0),
-                heartbeat_sequence INTEGER NOT NULL DEFAULT 0 CHECK(heartbeat_sequence >= 0),
+                owner_epoch TEXT NOT NULL, process_generation INTEGER NOT NULL DEFAULT 0 CHECK(process_generation BETWEEN 0 AND 9007199254740991),
+                engine_revision INTEGER NOT NULL DEFAULT 0 CHECK(engine_revision BETWEEN 0 AND 9007199254740991),
+                heartbeat_sequence INTEGER NOT NULL DEFAULT 0 CHECK(heartbeat_sequence BETWEEN 0 AND 9007199254740991),
                 checkpoint_at TEXT, sound_token TEXT, boundary_token TEXT,
                 recovery_reason TEXT
             );
@@ -600,7 +600,7 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             CREATE TABLE focus_import_totals (
                 id TEXT PRIMARY KEY, source_namespace TEXT NOT NULL, record_key TEXT NOT NULL,
                 occurrence_id TEXT REFERENCES focus_occurrences(id), unresolved_task_id TEXT,
-                duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0), completed_at TEXT,
+                duration_ms INTEGER NOT NULL CHECK(duration_ms BETWEEN 0 AND 9007199254740991), completed_at TEXT,
                 source_kind TEXT NOT NULL, batch_id TEXT NOT NULL REFERENCES focus_import_batches(id),
                 inclusion TEXT NOT NULL CHECK(inclusion IN ('included','excluded','unresolved')),
                 UNIQUE(source_namespace, record_key)
@@ -608,7 +608,7 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             CREATE TABLE focus_command_receipts (
                 command_id TEXT PRIMARY KEY, request_hash TEXT NOT NULL,
                 result_json TEXT NOT NULL CHECK(json_valid(result_json)),
-                committed_revision INTEGER NOT NULL CHECK(committed_revision >= 0),
+                committed_revision INTEGER NOT NULL CHECK(committed_revision BETWEEN 0 AND 9007199254740991),
                 affected_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(affected_ids_json)),
                 committed_at TEXT NOT NULL
             );
@@ -617,7 +617,7 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
                 purpose TEXT NOT NULL, native_task_id TEXT, external_id TEXT,
                 payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), idempotency_key TEXT,
                 state TEXT NOT NULL CHECK(state IN ('pending','retry','sent','error','cancelled')),
-                attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0), next_attempt_at TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 9007199254740991), next_attempt_at TEXT,
                 last_error TEXT, remote_receipt TEXT, created_at TEXT NOT NULL,
                 UNIQUE(occurrence_id, purpose)
             );

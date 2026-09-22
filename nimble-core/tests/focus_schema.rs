@@ -91,3 +91,49 @@ async fn focus_constraints_preserve_history_and_unique_sources() {
     sqlx::query("INSERT INTO local_tasks (id, content) VALUES ('remaining', 'Task')").execute(&pool).await.unwrap();
     assert!(sqlx::query("UPDATE local_tasks SET sync_policy='bogus' WHERE id='remaining'").execute(&pool).await.is_err());
 }
+
+#[tokio::test]
+async fn persisted_focus_numbers_stay_within_javascript_safe_integer_range() {
+    let pool = test_pool().await;
+    sqlx::query("INSERT INTO focus_queue_state (id, queue_id, writer_device_id, owner_epoch, updated_at) VALUES (1,'q','d','e','now')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO focus_occurrences (id, original_task_id, title_snapshot, generation, state, created_at) VALUES ('o','t','T',1,'open','now')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO focus_sessions (id, occurrence_id, owner_device_id, owner_epoch, status, mode, config_json) VALUES ('s','o','d','e','paused','count_up','{}')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO focus_segments (id, session_id, kind, started_at, checkpoint_at, closed_at) VALUES ('g','s','work','now','now','now')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO focus_runtime (id, owner_epoch) VALUES (1,'e')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO focus_import_batches (id, source_namespace, file_hashes_json, preview_hash, mappings_json, created_at) VALUES ('b','source','{}','hash','{}','now')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO focus_import_totals (id, source_namespace, record_key, duration_ms, source_kind, batch_id, inclusion) VALUES ('i','source','record',0,'timer','b','included')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO focus_command_receipts (command_id, request_hash, result_json, committed_revision, committed_at) VALUES ('c','hash','{}',0,'now')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO focus_delivery (id, occurrence_id, purpose, payload_json, state, created_at) VALUES ('d','o','complete','{}','pending','now')")
+        .execute(&pool).await.unwrap();
+
+    for (table, column, id) in [
+        ("focus_queue_state", "revision", "1"),
+        ("focus_occurrences", "generation", "'o'"),
+        ("focus_sessions", "work_ms", "'s'"),
+        ("focus_sessions", "break_ms", "'s'"),
+        ("focus_sessions", "round_work_ms", "'s'"),
+        ("focus_sessions", "session_revision", "'s'"),
+        ("focus_segments", "duration_ms", "'g'"),
+        ("focus_runtime", "process_generation", "1"),
+        ("focus_runtime", "engine_revision", "1"),
+        ("focus_runtime", "heartbeat_sequence", "1"),
+        ("focus_import_totals", "duration_ms", "'i'"),
+        ("focus_command_receipts", "committed_revision", "'c'"),
+        ("focus_delivery", "attempts", "'d'"),
+    ] {
+        let key = if id == "1" { "id" } else if table == "focus_command_receipts" { "command_id" } else { "id" };
+        let sql = format!("UPDATE {table} SET {column}=? WHERE {key}={id}");
+        assert!(sqlx::query(&sql).bind(9_007_199_254_740_991_i64).execute(&pool).await.is_ok(), "max rejected: {table}.{column}");
+        assert!(sqlx::query(&sql).bind(9_007_199_254_740_992_i64).execute(&pool).await.is_err(), "unsafe integer accepted: {table}.{column}");
+    }
+    assert!(sqlx::query("UPDATE focus_sessions SET round=100 WHERE id='s'").execute(&pool).await.is_ok());
+    assert!(sqlx::query("UPDATE focus_sessions SET round=101 WHERE id='s'").execute(&pool).await.is_err());
+}
