@@ -2,30 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { useDataProvider } from '@/services/provider-context'
 import type { ActivityEntry } from '@nimble/types'
 import { cn } from '@/lib/utils'
-import {
-  Check, Plus, Trash2, Pencil, Play, Square, SkipForward,
-  FolderInput, Sparkles, Zap, ArrowRightLeft,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { Zap } from 'lucide-react'
 import { Meta } from '@/components/shared/typography'
-
-const ACTION_META: Record<string, { label: string; icon: LucideIcon; color: string }> = {
-  task_created: { label: 'Created', icon: Plus, color: 'text-green-500' },
-  task_completed: { label: 'Completed', icon: Check, color: 'text-green-500' },
-  task_uncompleted: { label: 'Reopened', icon: ArrowRightLeft, color: 'text-orange-500' },
-  task_deleted: { label: 'Deleted', icon: Trash2, color: 'text-red-500/60' },
-  task_updated: { label: 'Updated', icon: Pencil, color: 'text-accent-blue' },
-  status_changed: { label: 'Status changed', icon: ArrowRightLeft, color: 'text-accent-blue' },
-  task_moved: { label: 'Moved', icon: FolderInput, color: 'text-accent-blue' },
-  focus_started: { label: 'Focus started', icon: Play, color: 'text-accent-blue' },
-  focus_completed: { label: 'Focus completed', icon: Check, color: 'text-green-500' },
-  focus_paused: { label: 'Focus paused', icon: Square, color: 'text-muted-foreground' },
-  focus_resumed: { label: 'Focus resumed', icon: Play, color: 'text-accent-blue' },
-  focus_abandoned: { label: 'Focus stopped', icon: Square, color: 'text-muted-foreground' },
-  focus_skipped: { label: 'Skipped', icon: SkipForward, color: 'text-muted-foreground' },
-  task_breakdown_requested: { label: 'AI breakdown', icon: Sparkles, color: 'text-purple-500' },
-  task_breakdown_applied: { label: 'Subtasks created', icon: Sparkles, color: 'text-purple-500' },
-}
+import { ACTION_META, ACTIVITY_COLORS } from '@/lib/activityMeta'
 
 function formatTime(dateStr: string): string {
   const d = new Date(dateStr)
@@ -94,7 +73,7 @@ export function TaskActivityLog({ taskId }: { taskId: string }) {
         <div key={date}>
           <p className="text-label text-muted-foreground mb-1">{date}</p>
           {items.map((entry) => {
-            const meta = ACTION_META[entry.action_type] ?? { label: entry.action_type, icon: Zap, color: 'text-muted-foreground' }
+            const meta = ACTION_META[entry.action_type] ?? { label: entry.action_type, icon: Zap, color: ACTIVITY_COLORS.neutral }
             const Icon = meta.icon
             const desc = getDescription(entry)
             return (
@@ -104,7 +83,7 @@ export function TaskActivityLog({ taskId }: { taskId: string }) {
                 </span>
                 <Icon className={cn('size-3 shrink-0', meta.color)} />
                 <Meta>
-                  {meta.label}
+                  {meta.shortLabel ?? meta.label}
                   {desc && <span className="ml-1 text-muted-foreground">— {desc}</span>}
                 </Meta>
               </div>
