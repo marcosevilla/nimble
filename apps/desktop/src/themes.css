@@ -19,12 +19,16 @@
   --secondary-foreground: oklch(0.205 0.01 60);
   --muted: oklch(0.965 0.005 75);
   --muted-foreground: oklch(0.48 0.01 60);
+  /* Placeholder / breadcrumb / faint role. Measured 3.60:1 on background,
+     3.65:1 on card — the floor for the 12 `text-muted-foreground/NN` alpha
+     hacks it replaces (facelift A1). */
+  --muted-foreground-subtle: oklch(0.62 0.01 60);
   --accent: oklch(0.96 0.005 75);
   --accent-foreground: oklch(0.205 0.01 60);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.915 0.005 75);
   --input: oklch(0.915 0.005 75);
-  --ring: oklch(0.708 0.01 60);
+  --ring: oklch(0.58 0.01 60); /* 4.23:1 on background (was 0.708 → 2.56:1) */
   --accent-blue: oklch(0.65 0.15 250);
   --success: oklch(0.62 0.14 145);
   --success-fg: oklch(0.98 0 0);
@@ -57,13 +61,14 @@
   --secondary: oklch(0.22 0.008 60);
   --secondary-foreground: oklch(0.93 0.005 75);
   --muted: oklch(0.22 0.008 60);
-  --muted-foreground: oklch(0.58 0.01 60);
+  --muted-foreground: oklch(0.66 0.01 60); /* 6.39:1 on background, 5.93:1 on card (was 0.58 → 4.64 / 4.30) */
+  --muted-foreground-subtle: oklch(0.54 0.01 60); /* 3.93:1 on background, 3.64:1 on card */
   --accent: oklch(0.22 0.008 60);
   --accent-foreground: oklch(0.93 0.005 75);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.55 0.01 60);
+  --input: oklch(1 0 0 / 22%); /* border role; 1.89:1 on background — reported, see A1 */
+  --ring: oklch(0.65 0.01 60); /* 6.14:1 on background (was 0.55 → 2.55:1 at /50) */
   --accent-blue: oklch(0.65 0.15 250);
   --success: oklch(0.70 0.16 150);
   --success-fg: oklch(0.16 0 0);

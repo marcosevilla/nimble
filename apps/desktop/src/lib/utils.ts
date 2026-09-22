@@ -46,6 +46,7 @@ const customTwMerge = extendTailwindMerge({
             'secondary-foreground',
             'muted',
             'muted-foreground',
+            'muted-foreground-subtle',
             'accent',
             'accent-foreground',
             'destructive',

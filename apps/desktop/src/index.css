@@ -73,6 +73,7 @@
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
+    --color-muted-foreground-subtle: var(--muted-foreground-subtle);
     --color-muted: var(--muted);
     --color-secondary-foreground: var(--secondary-foreground);
     --color-secondary: var(--secondary);
@@ -109,7 +110,9 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    /* Full-alpha ring: the old `/50` composited to 1.44:1 light / 2.55:1
+       dark on the background (shell audit P2-4). */
+    @apply border-border outline-ring;
     }
   html, body {
     /* Lock the root on both axes — kills the native macOS webview
@@ -136,6 +139,14 @@
 }
 
 @layer components {
+  /* One focus ring for the whole app — 2px solid `--ring`, offset 2px, only
+     on :focus-visible so mouse clicks stay quiet. ui/ primitives and shell
+     controls compose this instead of carrying their own ring-3/ring-[3px]
+     recipes (shell audit P2-4). */
+  .focus-ring {
+    @apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring;
+  }
+
   /* Each text-<name> utility is a FULL typography style, not just size.
      Tailwind's @theme generates the font-size + line-height pair; these
      rules add the rest — font-family, weight, letter-spacing — each behind
@@ -516,4 +527,60 @@
 }
 .animate-count-pulse {
   animation: count-pulse var(--transition-slow) var(--ease-entrance);
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────
+   One global rule (shell P2-3, session P1-1). App keyframe classes are
+   switched off entirely; tw-animate-css `animate-in` / `animate-out`
+   keep their opacity fade but lose translate / scale / rotate / blur;
+   every remaining animation and transition collapses to 0.01ms so
+   `animationend` / `transitionend` handlers still fire. Inline confetti
+   (FocusCelebration) is covered by the wildcard duration rule. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-fast: 0ms;
+    --transition-base: 0ms;
+    --transition-slow: 0ms;
+  }
+  .help-panel-enter,
+  .capture-strip-in,
+  .bulk-action-bar-enter,
+  .ai-star-1,
+  .ai-star-2,
+  .ai-star-3,
+  .animate-task-complete,
+  .animate-progress-enter,
+  .command-bar-backdrop,
+  .command-bar-flyout,
+  .command-bar-backdrop-out,
+  .command-bar-flyout-out,
+  .checkmark-draw,
+  .timer-glow,
+  .animate-count-pulse {
+    animation: none !important;
+  }
+  .checkmark-draw {
+    stroke-dashoffset: 0;
+  }
+  .animate-in,
+  .animate-out {
+    --tw-enter-translate-x: 0 !important;
+    --tw-enter-translate-y: 0 !important;
+    --tw-enter-scale: 1 !important;
+    --tw-enter-rotate: 0 !important;
+    --tw-enter-blur: 0 !important;
+    --tw-exit-translate-x: 0 !important;
+    --tw-exit-translate-y: 0 !important;
+    --tw-exit-scale: 1 !important;
+    --tw-exit-rotate: 0 !important;
+    --tw-exit-blur: 0 !important;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
