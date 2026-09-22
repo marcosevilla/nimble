@@ -141,8 +141,8 @@ function HabitCircle({
     }, HOLD_DURATION)
   }, [completed, onToggle, cancelHold])
 
-  // One handler for mouse click, Enter and Space — the button's native
-  // activation covers all three (goals P1-1, P1-4).
+  // Mouse click completes at default intensity; the hold is optional
+  // (goals P1-1, P1-4). Keyboard goes through handleKeyDown below.
   const handleClick = useCallback(() => {
     if (firedByHold.current) { firedByHold.current = false; return }
     cancelHold()
@@ -151,11 +151,24 @@ function HabitCircle({
 
   useEffect(() => cancelHold, [cancelHold])
 
+  // Enter/Space toggle on keydown and stay local: stopPropagation keeps the
+  // Dashboard's window-level Space (pause a focus session) from eating the
+  // key, and preventDefault stops the native click so it can't toggle twice.
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.repeat) return
+    cancelHold()
+    onToggle()
+  }, [onToggle, cancelHold])
+
   return (
     <div className="flex w-14 flex-col items-center gap-1.5">
       <button
         type="button"
         onClick={handleClick}
+        onKeyDown={handleKeyDown}
         onPointerDown={startHold}
         onPointerUp={cancelHold}
         onPointerLeave={cancelHold}

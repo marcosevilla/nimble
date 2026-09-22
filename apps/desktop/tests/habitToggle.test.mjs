@@ -50,3 +50,18 @@ test('a completed habit calls unlog, an open one calls log', async () => {
   await toggleHabitOptimistically({ habits: habits(), id: 'b', ...opts })
   assert.deepEqual(calls, [['log', 'a'], ['unlog', 'b']])
 })
+
+test('rollback restores only the failed habit, keeping a concurrent flip of another', async () => {
+  let state = habits()
+  const read = () => state
+  const write = (h) => { state = h }
+  let failFirst
+  const first = toggleHabitOptimistically({
+    habits: read(), id: 'a', read, write,
+    log: () => new Promise((_, reject) => { failFirst = reject }), unlog: async () => {},
+  })
+  await toggleHabitOptimistically({ habits: read(), id: 'b', read, write, log: async () => {}, unlog: async () => {} })
+  failFirst(new Error('db down'))
+  await assert.rejects(first, /db down/)
+  assert.deepEqual(state.map((h) => h.today_completed), [false, false], 'a rolled back, b stays flipped')
+})

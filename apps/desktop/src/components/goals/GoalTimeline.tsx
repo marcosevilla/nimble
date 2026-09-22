@@ -61,6 +61,9 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
 
   // ← → pan; T snaps back to today while the region has focus (goals P2-5).
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Space on a goal row is that button's click; keep it from the
+    // Dashboard's window-level Space (pause a focus session).
+    if (e.key === ' ') { e.stopPropagation(); return }
     if (e.key === 'ArrowLeft' && scrollRef.current) {
       e.preventDefault()
       scrollRef.current.scrollLeft -= 100

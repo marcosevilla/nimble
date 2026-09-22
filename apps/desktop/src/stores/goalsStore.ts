@@ -63,6 +63,7 @@ export const useGoalsStore = create<GoalsStore>((set, get) => ({
       habits: get().habits,
       id,
       write: (habits) => set({ habits }),
+      read: () => get().habits,
       log: (habitId) => dp.habits.log(habitId),
       unlog: (habitId) => dp.habits.unlog(habitId),
     })
