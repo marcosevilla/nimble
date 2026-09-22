@@ -19,12 +19,16 @@
   --secondary-foreground: oklch(0.205 0.01 60);
   --muted: oklch(0.965 0.005 75);
   --muted-foreground: oklch(0.48 0.01 60);
+  /* Placeholder / breadcrumb / faint role. Measured 3.60:1 on background,
+     3.65:1 on card — the floor for the 12 `text-muted-foreground/NN` alpha
+     hacks it replaces (facelift A1). */
+  --muted-foreground-subtle: oklch(0.62 0.01 60);
   --accent: oklch(0.96 0.005 75);
   --accent-foreground: oklch(0.205 0.01 60);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.915 0.005 75);
   --input: oklch(0.915 0.005 75);
-  --ring: oklch(0.708 0.01 60);
+  --ring: oklch(0.58 0.01 60); /* 4.23:1 on background (was 0.708 → 2.56:1) */
   --accent-blue: oklch(0.65 0.15 250);
   --success: oklch(0.62 0.14 145);
   --success-fg: oklch(0.98 0 0);
@@ -34,14 +38,22 @@
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* Nav rail — a 0.004-chroma warm step off --background (shell P2-11).
+     The seven other shadcn sidebar tokens had zero consumers and are gone. */
+  --sidebar: oklch(0.985 0.004 75);
+
+  /* Semantic roles (facelift A2). Text-grade: every value measures ≥4.5:1
+     on --background AND --card (see commit body). Define here, consume via
+     text-warning / text-ai / text-status-* — never a Tailwind palette hue. */
+  --warning: oklch(0.55 0.13 70);            /* #a16100 — 4.91:1 bg / 4.98:1 card */
+  --ai: oklch(0.52 0.19 300);                /* #7c44c3 — 5.95:1 / 6.04:1 */
+  --status-todo: oklch(0.55 0.15 250);       /* #0f74c5 — 4.78:1 / 4.85:1 */
+  --status-in-progress: var(--warning);      /* same hue, same meaning (in flight) */
+  --status-blocked: oklch(0.55 0.21 27);     /* #d01d21 — 5.33:1 / 5.40:1 */
+  --status-complete: oklch(0.52 0.14 150);   /* #0a7e3a — 5.09:1 / 5.17:1 */
+  /* One overlay elevation for popover / dropdown / dialog / command bar
+     (shell P3-2): a tight contact layer + a soft ambient layer. */
+  --shadow-popover: 0 1px 2px oklch(0 0 0 / 0.06), 0 8px 24px oklch(0 0 0 / 0.10);
 }
 
 .dark,
@@ -57,13 +69,14 @@
   --secondary: oklch(0.22 0.008 60);
   --secondary-foreground: oklch(0.93 0.005 75);
   --muted: oklch(0.22 0.008 60);
-  --muted-foreground: oklch(0.58 0.01 60);
+  --muted-foreground: oklch(0.66 0.01 60); /* 6.39:1 on background, 5.93:1 on card (was 0.58 → 4.64 / 4.30) */
+  --muted-foreground-subtle: oklch(0.54 0.01 60); /* 3.93:1 on background, 3.64:1 on card */
   --accent: oklch(0.22 0.008 60);
   --accent-foreground: oklch(0.93 0.005 75);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.55 0.01 60);
+  --input: oklch(1 0 0 / 35%); /* border role: 3.12:1 on --background (22% was 1.89:1, 12% was 1.32:1) */
+  --ring: oklch(0.65 0.01 60); /* 6.14:1 on background (was 0.55 → 2.55:1 at /50) */
   --accent-blue: oklch(0.65 0.15 250);
   --success: oklch(0.70 0.16 150);
   --success-fg: oklch(0.16 0 0);
@@ -72,14 +85,15 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar: var(--card); /* one step up from background, same as cards (1.08:1 step; the old neutral #171717 was 1.11:1) */
+
+  --warning: oklch(0.80 0.14 80);            /* #edb345 — 10.52:1 bg / 9.76:1 card */
+  --ai: oklch(0.78 0.13 300);                /* #c4a4fe — 9.55:1 / 8.86:1 */
+  --status-todo: oklch(0.75 0.12 250);       /* #70b3f7 — 9.00:1 / 8.35:1 */
+  --status-in-progress: var(--warning);
+  --status-blocked: oklch(0.72 0.18 25);     /* #ff6f69 — 7.33:1 / 6.80:1 */
+  --status-complete: oklch(0.72 0.15 150);   /* #53be70 — 8.53:1 / 7.91:1 */
+  --shadow-popover: 0 1px 2px oklch(0 0 0 / 0.35), 0 8px 24px oklch(0 0 0 / 0.50);
 }
 
 

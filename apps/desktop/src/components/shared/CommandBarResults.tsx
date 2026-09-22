@@ -323,7 +323,7 @@ function TaskResultRow({
           <FocusPlayMenu task={task} />
           <ActionButton icon={Sparkles} hint="⌥B" title="Break down" onClick={onBreakDown} className="text-purple-400/70 hover:text-purple-400" />
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-accent/30 text-muted-foreground hover:text-foreground">
+            <DropdownMenuTrigger data-move-trigger className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-accent/30 text-muted-foreground hover:text-foreground">
               <Tooltip>
                 <TooltipTrigger className="flex size-6 items-center justify-center">
                   <FolderInput className="size-3.5" />
