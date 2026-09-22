@@ -72,6 +72,11 @@ Queued for Marco (Rust or decisions):
 
 ## Next execution order
 
+**C2 phone test — deferred mid-run by Marco, 2026-09-22.** Task `Phone test` (`8e8e2785-a6d6-4a32-b387-9a68723c546e`, due 14:45, 1-min reminder) is still open and linked; reuse it for the retest. Results so far:
+- Event reached the Nimble Google calendar ✅, but only after a manual Settings → Phone alerts → Sync now. Read-only DB shows the 60s background tick flips: 21:36:17Z `google_full_resync_needed` (410 on incremental list, token cleared), 21:37:18Z full sync OK. Suspect it alternates on every other tick. Not yet confirmed, no fix written. Investigate `run_once` 410 path (`nimble-core/src/integrations/google_calendar.rs:109`) and propose a fix before editing.
+- Phone did not ding ❌. Google event had the correct `popup` 1-min override and was still at 14:45 at alert time, so it's most likely phone notification settings (which app: Google Calendar vs Apple Calendar + syncselect is unknown). Event was moved to 14:50 at 21:45:20Z while Nimble was quit; unclear who moved it (Marco?). The next sync will pull that change into the task.
+- Retest: ask which calendar app → check its notification settings → task 10 min out, 5-min reminder → Sync now → quit Nimble → wait. Then do two-way edits (phone rename → Mac; Mac time change → phone; complete → event removed).
+
 1. Finish C2 live acceptance: publish one disposable timed task, confirm the physical phone alert, and verify edits in both directions. Check restart/reconnect behavior and testing-mode token longevity; keep real deadline reminders on the existing fallback until acceptance passes.
 2. Finish C3 activation: review/approve assistant routing, test a parent task with three subtasks, labels and due date in the app, and confirm signed-in web propagation. Preserve Instinct ownership and avoid duplicate fallback writes.
 3. Build C4: grouped labels (ENERGY / TIME / TYPE / CREATIVE) and indexed task-title/description search, including completed tasks.
