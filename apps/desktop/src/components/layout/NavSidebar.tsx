@@ -61,7 +61,7 @@ function navItemClasses(expanded: boolean, isActive: boolean) {
     expanded ? 'w-full gap-2.5 px-2.5' : 'w-9 justify-center',
     isActive
       ? 'bg-muted text-foreground before:absolute before:left-0 before:top-1/2 before:h-4 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-foreground'
-      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+      : 'text-muted-foreground hover:bg-hover hover:text-foreground',
   )
 }
 

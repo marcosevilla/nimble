@@ -377,7 +377,7 @@ function LinkedDocChip({
               onSelect(doc.id)
               setQuery('')
             }}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-body transition-colors hover:bg-muted"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-body transition-colors hover:bg-hover"
           >
             <FileText className="size-3 shrink-0 text-muted-foreground" />
             <span className="truncate">{doc.title || 'Untitled'}</span>

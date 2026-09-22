@@ -23,12 +23,21 @@ test('toggle from open requests a close and stays mounted for the exit transitio
   assert.equal(s.closing, true)
 })
 
-test('toggle while already closing does not reopen', () => {
+test('toggle while closing reopens (cancels the exit)', () => {
   useHelpPanelStore.setState({ open: true, closing: true })
   useHelpPanelStore.getState().toggle()
   const s = useHelpPanelStore.getState()
   assert.equal(s.open, true)
-  assert.equal(s.closing, true)
+  assert.equal(s.closing, false)
+})
+
+test('three quick toggles from closed end open', () => {
+  useHelpPanelStore.setState({ open: false, closing: false })
+  const { toggle } = useHelpPanelStore.getState()
+  toggle(); toggle(); toggle()
+  const s = useHelpPanelStore.getState()
+  assert.equal(s.open, true)
+  assert.equal(s.closing, false)
 })
 
 test('requestClose is a no-op when closed', () => {

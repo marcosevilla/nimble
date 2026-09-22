@@ -131,13 +131,13 @@ export function GoalDetailPage() {
             <PanelRight className="size-4" />
           </IconButton>
           <Popover>
-            <PopoverTrigger className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+            <PopoverTrigger className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover transition-colors">
               <MoreHorizontal className="size-4" />
             </PopoverTrigger>
             <PopoverContent side="bottom" align="end" sideOffset={4} className="w-44 gap-0 p-1">
               <button
                 onClick={() => setDeleteOpen(true)}
-                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-body text-destructive/60 hover:text-destructive hover:bg-muted transition-colors"
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-body text-destructive/60 hover:text-destructive hover:bg-hover transition-colors"
               >
                 <Trash2 className="size-3.5 shrink-0" />
                 <span className="flex-1 text-left">Delete goal</span>
@@ -254,7 +254,7 @@ function LifeAreaPicker({
 }) {
   return (
     <Popover>
-      <PopoverTrigger className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-meta text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+      <PopoverTrigger className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-meta text-muted-foreground hover:text-foreground hover:bg-hover transition-colors">
         {area ? (
           <>
             <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: area.color }} />
@@ -272,7 +272,7 @@ function LifeAreaPicker({
           onClick={() => onChange(null)}
           className={cn(
             'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-body transition-colors',
-            !area ? 'bg-accent/40' : 'hover:bg-muted',
+            !area ? 'bg-accent/40' : 'hover:bg-hover',
           )}
         >
           <Circle className="size-3 text-muted-foreground" />
@@ -284,7 +284,7 @@ function LifeAreaPicker({
             onClick={() => onChange(a.id)}
             className={cn(
               'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-body transition-colors',
-              area?.id === a.id ? 'bg-accent/40' : 'hover:bg-muted',
+              area?.id === a.id ? 'bg-accent/40' : 'hover:bg-hover',
             )}
           >
             <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
@@ -308,7 +308,7 @@ function StatusPicker({
   return (
     <Popover>
       <PopoverTrigger className={cn(
-        'flex items-center gap-1.5 rounded-md px-2 py-0.5 text-meta hover:bg-muted transition-colors',
+        'flex items-center gap-1.5 rounded-md px-2 py-0.5 text-meta hover:bg-hover transition-colors',
         statusColor(status),
       )}>
         {statusLabel(status)}
@@ -320,7 +320,7 @@ function StatusPicker({
             onClick={() => onChange(s.value)}
             className={cn(
               'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-body transition-colors',
-              status === s.value ? 'bg-accent/40' : 'hover:bg-muted',
+              status === s.value ? 'bg-accent/40' : 'hover:bg-hover',
             )}
           >
             <span className={cn('size-1.5 rounded-full bg-current', s.color)} />
@@ -359,7 +359,7 @@ function DatePicker({
         onChange(start, end)
       }
     }}>
-      <PopoverTrigger className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-meta text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+      <PopoverTrigger className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-meta text-muted-foreground hover:text-foreground hover:bg-hover transition-colors">
         <Calendar className="size-3" />
         {label}
       </PopoverTrigger>
@@ -409,7 +409,7 @@ function MilestonesSection({
           {milestones.map((m) => (
             <div
               key={m.id}
-              className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted transition-colors"
+              className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-hover transition-colors"
             >
               <Checkbox
                 checked={m.completed}

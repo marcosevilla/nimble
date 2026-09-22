@@ -310,7 +310,7 @@ export function CommandBar() {
       />
 
       {/* Centered command bar */}
-      <div className={cn('fixed inset-x-0 top-[28%] z-50 mx-auto w-full max-w-lg px-4', closing ? 'command-bar-flyout-out' : 'command-bar-flyout')}>
+      <div role="dialog" aria-label="Command bar" className={cn('fixed inset-x-0 top-[28%] z-50 mx-auto w-full max-w-lg px-4', closing ? 'command-bar-flyout-out' : 'command-bar-flyout')}>
         <div className="flex h-11 items-center gap-2 px-4 rounded-xl border border-border/50 bg-popover shadow-lg shadow-black/10">
           <Icon icon={Search} className="text-muted-foreground" />
           <input

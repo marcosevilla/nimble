@@ -56,11 +56,11 @@ function isDatePast(dateStr: string): boolean {
 
 // ── Sub-Components ──
 
-// 24px day chevrons: full-alpha hover (accent/30 measured 1.02:1) and a
-// 40px-tall hit target via `after:` — width stays 24px so the target never
-// overlaps the date button between them (shell P2-9, P3-4).
+// 24px day chevrons: --hover fill (accent/30 measured 1.02:1) and a 28×40
+// hit target via `after:` — 2px wider each side, half the gap-1 to the date
+// button, so targets never overlap (shell P2-9, P3-4).
 const DAY_CHEVRON_CLASS =
-  'relative flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-(--transition-fast) hover:bg-muted hover:text-foreground after:absolute after:-inset-y-2'
+  'relative flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground after:absolute after:-inset-x-0.5 after:-inset-y-2'
 
 function DayNavigationHeader({
   selectedDate,

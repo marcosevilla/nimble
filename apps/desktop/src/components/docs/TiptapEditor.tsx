@@ -79,7 +79,7 @@ const MentionList = forwardRef<MentionListRef, SuggestionProps<MentionItem>>((pr
           onClick={() => props.command(item)}
           className={cn(
             'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors',
-            i === selectedIndex ? 'bg-accent/40' : 'hover:bg-muted',
+            i === selectedIndex ? 'bg-accent/40' : 'hover:bg-hover',
           )}
         >
           {item.kind === 'task' ? (

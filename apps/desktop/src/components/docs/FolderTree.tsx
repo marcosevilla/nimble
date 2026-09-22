@@ -179,7 +179,7 @@ export function FolderTree() {
         {folders.map((folder) => (
           <div key={folder.id}>
             {/* Folder header */}
-            <div className="group flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-muted transition-colors">
+            <div className="group flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-hover transition-colors">
               <button onClick={() => toggleFolder(folder.id)} className="shrink-0">
                 <ChevronRight className={cn('size-3 text-muted-foreground transition-transform', expandedFolders.has(folder.id) && 'rotate-90')} />
               </button>
@@ -212,7 +212,7 @@ export function FolderTree() {
                       'group/doc flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left cursor-pointer transition-colors',
                       selectedDocId === doc.id
                         ? 'bg-accent/40 text-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                        : 'text-muted-foreground hover:text-foreground hover:bg-hover',
                     )}
                   >
                     <FileText className="size-3 shrink-0 text-muted-foreground" />
@@ -245,7 +245,7 @@ export function FolderTree() {
                     'group/doc flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left cursor-pointer transition-colors',
                     selectedDocId === doc.id
                       ? 'bg-accent/40 text-foreground'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                      : 'text-muted-foreground hover:text-foreground hover:bg-hover',
                   )}
                 >
                   <FileText className="size-3 shrink-0 text-muted-foreground" />
@@ -268,7 +268,7 @@ export function FolderTree() {
             <div className="flex items-center gap-0.5">
               <button
                 onClick={() => setVaultExpanded(!vaultExpanded)}
-                className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 hover:bg-muted transition-colors"
+                className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 hover:bg-hover transition-colors"
               >
                 <ChevronRight className={cn('size-3 text-muted-foreground transition-transform', vaultExpanded && 'rotate-90')} />
                 <Vault className="size-3.5 shrink-0 text-muted-foreground" />
@@ -319,7 +319,7 @@ export function FolderTree() {
         ) : (
           <button
             onClick={() => setNewFolderInput(true)}
-            className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-meta text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-meta text-muted-foreground hover:text-foreground hover:bg-hover transition-colors"
           >
             <Plus className="size-3" />
             New folder
@@ -362,7 +362,7 @@ function VaultBranch({
             <button
               onClick={() => onToggle(child.path)}
               title={child.path}
-              className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 hover:bg-muted transition-colors"
+              className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 hover:bg-hover transition-colors"
             >
               <ChevronRight className={cn('size-3 text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
               <Folder className="size-3.5 shrink-0 text-muted-foreground" />
@@ -391,7 +391,7 @@ function VaultBranch({
             'flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left cursor-pointer transition-colors',
             selectedPath === note.path
               ? 'bg-accent/40 text-foreground'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+              : 'text-muted-foreground hover:text-foreground hover:bg-hover',
           )}
         >
           <FileText className="size-3 shrink-0 text-muted-foreground" />

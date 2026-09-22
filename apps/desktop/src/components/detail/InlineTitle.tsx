@@ -56,7 +56,7 @@ export function InlineTitle({ value, completed, onSave, className }: InlineTitle
     <h1
       onClick={startEditing}
       className={cn(
-        'text-title cursor-text hover:bg-muted rounded-md -mx-1 px-1 transition-colors',
+        'text-title cursor-text hover:bg-hover rounded-md -mx-1 px-1 transition-colors',
         completed && 'text-muted-foreground line-through',
         className,
       )}

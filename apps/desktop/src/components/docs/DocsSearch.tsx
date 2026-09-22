@@ -97,7 +97,7 @@ export function DocsSearch() {
               onClick={() => openHit(hit)}
               className={cn(
                 'flex w-full flex-col items-start rounded-md px-1.5 py-1 text-left transition-colors',
-                'text-muted-foreground hover:bg-muted hover:text-foreground',
+                'text-muted-foreground hover:bg-hover hover:text-foreground',
               )}
             >
               <span className="w-full truncate text-meta">{hit.title}</span>

@@ -15,7 +15,7 @@ import { useHelpPanelStore } from '@/stores/helpPanelStore'
 export function HelpPanel() {
   const open = useHelpPanelStore((s) => s.open)
   const closing = useHelpPanelStore((s) => s.closing)
-  const setOpen = useHelpPanelStore((s) => s.setOpen)
+  const toggle = useHelpPanelStore((s) => s.toggle)
   const closePanel = useHelpPanelStore((s) => s.requestClose)
   const finishClose = useHelpPanelStore((s) => s.finishClose)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -42,21 +42,17 @@ export function HelpPanel() {
 
   // Escape closes the panel. Capture phase so the Dashboard's own Escape
   // (clear selection / close detail) doesn't also fire for this keypress —
-  // but only when the panel is the topmost layer: an open dialog, menu,
-  // select or popover, or a focused text field (the command bar's input),
-  // owns Escape first.
+  // but only when the panel is the topmost layer: an open dialog (the
+  // command bar is role=dialog), menu, select or popover owns Escape first.
+  // A focused page text field (inbox capture, etc.) does not block it.
   useEffect(() => {
     if (!open) return
     function handleKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return
-      const target = e.target as HTMLElement | null
-      const inEditable =
-        !!target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
       const overlayAbove = document.querySelector(
         '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-slot="popover-content"]',
       )
-      if (inEditable || overlayAbove) return
+      if (overlayAbove) return
       e.preventDefault()
       e.stopPropagation()
       closePanel()
@@ -71,10 +67,7 @@ export function HelpPanel() {
       <button
         aria-label="Keyboard shortcuts (?)"
         aria-expanded={open}
-        onClick={() => {
-          if (open) closePanel()
-          else setOpen(true)
-        }}
+        onClick={toggle}
         className={cn(
           'fixed bottom-4 right-4 z-30 flex size-9 items-center justify-center rounded-full transition-all duration-200',
           'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-muted-foreground hover:shadow-md',

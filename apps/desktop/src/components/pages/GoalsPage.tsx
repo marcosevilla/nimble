@@ -435,7 +435,7 @@ export function GoalsPage() {
       <Tooltip>
         <TooltipTrigger
           className={cn(
-            'inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+            'inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground',
             importing && 'opacity-50 pointer-events-none',
           )}
           onClick={handleImport}
@@ -459,7 +459,7 @@ export function GoalsPage() {
               'rounded-md px-2 py-1 text-meta transition-colors',
               areaFilter === null
                 ? 'bg-secondary text-secondary-foreground'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                : 'text-muted-foreground hover:text-foreground hover:bg-hover',
             )}
           >
             All
@@ -476,7 +476,7 @@ export function GoalsPage() {
                   'flex items-center gap-1 rounded-md px-2 py-1 text-meta transition-colors',
                   areaFilter === area.id
                     ? 'bg-secondary text-secondary-foreground'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                    : 'text-muted-foreground hover:text-foreground hover:bg-hover',
                 )}
               >
                 <span

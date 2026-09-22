@@ -31,7 +31,7 @@ export function LabelChip({
     selected
       ? 'border-transparent bg-secondary text-secondary-foreground'
       : 'border-border/60 text-muted-foreground',
-    onClick && !selected && 'cursor-pointer hover:text-foreground hover:bg-muted',
+    onClick && !selected && 'cursor-pointer hover:text-foreground hover:bg-hover',
   )
 
   const swatchAndName = (
@@ -168,7 +168,7 @@ export function LabelPicker({ value, onChange }: LabelPickerProps) {
               return (
                 <label
                   key={label.id}
-                  className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-muted transition-colors cursor-pointer"
+                  className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-hover transition-colors cursor-pointer"
                 >
                   <Checkbox
                     checked={checked}
@@ -188,7 +188,7 @@ export function LabelPicker({ value, onChange }: LabelPickerProps) {
               <button
                 onClick={handleEnter}
                 disabled={creating}
-                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-body text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-body text-muted-foreground hover:bg-hover hover:text-foreground transition-colors disabled:opacity-50"
               >
                 <Plus className="size-3" />
                 {creating ? 'Creating...' : `Create "${query.trim()}"`}

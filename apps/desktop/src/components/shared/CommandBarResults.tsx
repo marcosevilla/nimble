@@ -15,10 +15,12 @@ import type { LocalTask, Project, Document, Capture } from '@nimble/types'
 
 export type BarMode = 'search' | 'task' | 'capture' | 'breakdown' | 'doc'
 
-// 24px icon actions in the selected row. Hit target grows to 40px tall via
-// `after:`; horizontal stays 24px so the gap-0.5 siblings never overlap.
+// 24px icon actions in the selected row. Hit target is 24×36 via `after:` —
+// exactly the row's height, so it never reaches into the rows above/below
+// (`inset-x-0` gives the pseudo a width; horizontal stays 24px so the
+// gap-0.5 siblings never overlap).
 const ACTION_BUTTON_CLASS =
-  'relative flex size-6 items-center justify-center rounded-md transition-colors duration-(--transition-fast) hover:bg-muted after:absolute after:-inset-y-2'
+  'relative flex size-6 items-center justify-center rounded-md transition-colors duration-(--transition-fast) hover:bg-hover after:absolute after:inset-x-0 after:-inset-y-1.5'
 
 interface CommandBarResultsProps {
   query: string
@@ -134,7 +136,7 @@ export function CommandBarResults({
                 <div className="flex justify-end gap-2 pt-1">
                   <button
                     onClick={onBreakdownCancel}
-                    className="rounded-md px-2.5 py-1 text-meta text-muted-foreground hover:bg-muted"
+                    className="rounded-md px-2.5 py-1 text-meta text-muted-foreground hover:bg-hover"
                   >
                     Cancel
                   </button>
@@ -203,7 +205,7 @@ export function CommandBarResults({
                   key={doc.id}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                    selectedIndex === idx ? 'bg-muted' : 'hover:bg-muted',
+                    selectedIndex === idx ? 'bg-hover' : 'hover:bg-hover',
                   )}
                   onMouseEnter={() => onSelect(idx)}
                   onClick={() => onOpenDoc(doc.id)}
@@ -232,7 +234,7 @@ export function CommandBarResults({
                   key={capture.id}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                    selectedIndex === idx ? 'bg-muted' : 'hover:bg-muted',
+                    selectedIndex === idx ? 'bg-hover' : 'hover:bg-hover',
                   )}
                   onMouseEnter={() => onSelect(idx)}
                   onClick={() => onOpenCapture(capture.id)}
@@ -256,7 +258,7 @@ export function CommandBarResults({
             <button
               className={cn(
                 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                selectedIndex === createIndex ? 'bg-muted' : 'hover:bg-muted',
+                selectedIndex === createIndex ? 'bg-hover' : 'hover:bg-hover',
               )}
               onMouseEnter={() => onSelect(createIndex)}
               onClick={onCreateTask}
@@ -265,7 +267,7 @@ export function CommandBarResults({
               <span className="text-muted-foreground">Create task</span>
               <span className="flex-1 min-w-0 truncate font-medium">"{query}"</span>
               {selectedIndex === createIndex && (
-                <kbd className="rounded bg-muted px-1 py-0.5 text-label text-muted-foreground">Enter</kbd>
+                <kbd className="rounded-sm bg-muted px-1 py-0.5 text-label text-muted-foreground">Enter</kbd>
               )}
             </button>
           )}
@@ -273,7 +275,7 @@ export function CommandBarResults({
             <button
               className={cn(
                 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                selectedIndex === captureIndex ? 'bg-muted' : 'hover:bg-muted',
+                selectedIndex === captureIndex ? 'bg-hover' : 'hover:bg-hover',
               )}
               onMouseEnter={() => onSelect(captureIndex)}
               onClick={onCapture}
@@ -314,7 +316,7 @@ function TaskResultRow({
     <div
       className={cn(
         'group/result relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors',
-        isSelected ? 'bg-muted' : 'hover:bg-muted',
+        isSelected ? 'bg-hover' : 'hover:bg-hover',
       )}
       onMouseEnter={onSelect}
     >
@@ -406,7 +408,7 @@ function ActionButton({
         <Icon icon={Glyph} />
       </TooltipTrigger>
       <TooltipContent side="top" className="text-meta">
-        {title} <kbd className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-label">{hint}</kbd>
+        {title} <kbd className="ml-1 rounded-sm bg-muted px-1 py-0.5 font-mono text-label">{hint}</kbd>
       </TooltipContent>
     </Tooltip>
   )

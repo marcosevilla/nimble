@@ -26,6 +26,8 @@ export const useHelpPanelStore = create<HelpPanelState>((set) => ({
   toggle: () =>
     set((s) => {
       if (!s.open) return { open: true, closing: false }
-      return s.closing ? {} : { closing: true }
+      // Pressed during the exit transition: cancel the close and stay open,
+      // so a quick `?` never gets swallowed.
+      return s.closing ? { closing: false } : { closing: true }
     }),
 }))

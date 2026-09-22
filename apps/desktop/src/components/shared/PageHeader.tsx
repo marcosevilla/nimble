@@ -34,7 +34,7 @@ export function PageHeader({
         {backAction && (
           <button
             onClick={backAction.onClick}
-            className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 -ml-1 text-meta text-muted-foreground transition-colors duration-(--transition-fast) hover:bg-muted hover:text-foreground"
+            className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 -ml-1 text-meta text-muted-foreground transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground"
           >
             <Icon icon={ArrowLeft} />
             {backAction.label}

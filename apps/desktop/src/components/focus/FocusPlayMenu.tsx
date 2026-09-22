@@ -67,7 +67,7 @@ export function FocusPlayMenu({ task, onOpenChange }: FocusPlayMenuProps) {
       <DropdownMenuTrigger
         className={cn(
           'inline-flex size-6 items-center justify-center rounded-md transition-colors',
-          'text-accent-blue/60 hover:text-accent-blue hover:bg-muted',
+          'text-accent-blue/60 hover:text-accent-blue hover:bg-hover',
         )}
       >
         <Play className="size-3" />

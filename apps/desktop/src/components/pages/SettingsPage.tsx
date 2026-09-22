@@ -875,7 +875,7 @@ function CaptureRoutesSection() {
             <div className="space-y-1.5">
               <Label className="text-body-strong">Linked doc</Label>
               <DropdownMenu>
-                <DropdownMenuTrigger className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-body hover:bg-muted transition-colors">
+                <DropdownMenuTrigger className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-body hover:bg-hover transition-colors">
                   <span className={cn(formDocId ? 'text-foreground' : 'text-muted-foreground')}>
                     {formDocId ? docs.find((d) => d.id === formDocId)?.title ?? 'Unknown' : 'Auto-create on first use'}
                   </span>
@@ -1799,7 +1799,7 @@ export function SettingsPage() {
           className="group rounded-lg border"
           onToggle={(e) => setMaintenanceOpen(e.currentTarget.open)}
         >
-          <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg px-4 py-2 text-body transition-colors duration-(--transition-fast) hover:bg-muted [&::-webkit-details-marker]:hidden">
+          <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg px-4 py-2 text-body transition-colors duration-(--transition-fast) hover:bg-hover [&::-webkit-details-marker]:hidden">
             Maintenance tools
             <ChevronDown className="size-3 text-muted-foreground transition-transform duration-(--transition-fast) group-open:rotate-180" />
           </summary>
@@ -1862,7 +1862,7 @@ export function SettingsPage() {
                   aria-current={isActive ? 'true' : undefined}
                   onClick={() => selectSection(s.id)}
                   className={cn(
-                    'block rounded-md px-2 py-1 transition-colors duration-(--transition-fast) hover:bg-muted hover:text-foreground',
+                    'block rounded-md px-2 py-1 transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground',
                     isActive ? 'text-foreground' : 'text-muted-foreground',
                   )}
                 >

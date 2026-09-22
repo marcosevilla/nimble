@@ -85,7 +85,7 @@ export function DateStrip({ briefDates, selected, onSelect }: DateStripProps) {
                   ? 'bg-card text-foreground ring-1 ring-border shadow-xs'
                   : isToday
                     ? 'ring-1 ring-foreground/20 text-foreground'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                    : 'text-muted-foreground hover:text-foreground hover:bg-hover',
               )}
             >
               <span className="text-label">{weekday}</span>

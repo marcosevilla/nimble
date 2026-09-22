@@ -103,7 +103,7 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
           return (
             <div
               key={goal.id}
-              className="flex items-center gap-2 px-3 border-b border-border/10 cursor-pointer hover:bg-muted transition-colors"
+              className="flex items-center gap-2 px-3 border-b border-border/10 cursor-pointer hover:bg-hover transition-colors"
               style={{ height: ROW_HEIGHT }}
               onClick={() => onGoalClick(goal.id)}
             >
