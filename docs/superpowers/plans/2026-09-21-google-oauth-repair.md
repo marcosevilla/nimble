@@ -34,6 +34,6 @@ Files: google_credentials.rs, commands/google_calendar.rs, google_calendar_runne
 ## Task 3: Verify and install
 - [x] Run Rust suite, interface tests, desktop/web builds; independent review of auth and storage boundaries.
 - [x] Update setup docs and NEXT.md to describe actual client-secret requirements and remaining live acceptance.
-- [ ] Build signed release using existing development signing identity; verify signature.
-- [ ] Quit installed app, save private rollback app/data, install verified app, reopen, check task data/schema unchanged and setup fields visible.
+- [x] Build signed release using existing development signing identity; verify signature.
+- [x] Quit installed app, save private rollback app/data, install verified app, reopen, check task data/schema unchanged and setup fields visible.
 - [ ] Let Marco enter the client secret from his existing Google Desktop client into the new write-only field; retry consent and verify actual connected status/calendar. Do not claim live success before that acceptance.
