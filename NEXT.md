@@ -1,6 +1,28 @@
 # Nimble — Open loops
 
-Updated 2026-09-21 after installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
+Updated 2026-09-22 (design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
+
+## Design facelift — 2026-09-22 (loop 1, PAUSED before Stage C)
+
+Plan `docs/audit-findings/2026-09-22-loop1-plan.md` · audit brief `docs/audit-findings/2026-09-22-audit-brief.md` · baseline scorecard `docs/audit-findings/2026-09-22-scorecard.md` (grid 2.41/5, 45 P1 · 87 P2 · 42 P3) · before/after page `~/Developer/second-brain/outputs/2026/2026-09-22-nimble-facelift-before-after.html`.
+
+- [x] Loop 1 audit: 8 surface agents + cross-cutting agent → `docs/audit-findings/<surface>/2026-09-22-loop1.md`. Mock harness `tools/mock-tauri.js` now covers all 143 commands.
+- [x] Gate approved by Marco: all three stages; past-due dates go neutral.
+- [x] Stage A merged (`1c2caa7`): focus ring 1.44→4.2:1 light / 6.1:1 dark, global `:focus-visible`, `prefers-reduced-motion`, semantic color roles, `lib/shortcuts.ts` registry, `?` help, `g`-prefix nav, typography doc = live 8-token scale.
+- [x] Stage B merged, all six themes reviewed by fresh Opus reviewers and merged into main at `cc0263a` (97/97 frontend tests, desktop + web builds green): B2 no-guilt copy, B1 color semantics (palette literals 86→1 comment), B5 settings IA (5,559→4,663px, scroll-spy nav), B4 shell (no nested buttons, `--hover` token, hit areas), B3a Tasks/Inbox keyboard rows, B3b Docs/Goals/Session keyboard + states.
+- [ ] **Next: Marco says go on Stage C** (one PageFrame/SectionTitle/EmptyState on six pages — not Tasks/detail — plus motion tokens for ~45 literal durations, `Dashboard.tsx` scroller `flex-col` so sticky headers stick). Or re-score first.
+- [ ] Re-score step (loop N.5) not run: after-columns in the scorecard are empty; take a combined screenshot set of main.
+- [ ] Not pushed: main is 64 commits ahead of origin. Not installed to /Applications.
+- [ ] Prune worktrees when done: `.worktrees/facelift-{a,b1-color,b2-no-guilt,b3a-rows-tasks-inbox,b3b-docs-goals-session,b4-shell,b5-settings-ia}` (all merged).
+- [ ] Update `docs/audit-loop-playbook.md` with this run's lessons at final wrap (tabs not windows; pin subagent model; integrator agent per rebase; key-guard lesson).
+
+Queued for Marco (Rust or decisions):
+- Rust: drop `ical_feed_url` from `REQUIRED_SETTINGS` (`nimble-core/src/db/settings.rs`) so setup can be skippable — frontend gate kept until then.
+- Rust: `set_review_complete` escape hatch; `dueOnOrBefore` filter for a Today "Still open" group; energy-history query for the sparkline; soft-delete/restore for task/label/route/doc undo; habit `log()` intensity.
+- Decide: New Goal dialog preselects a color so every goal gets one — default to none?
+- Decide: amend `ux-intent.md` §2.7 to describe the Cmd+K palette (not a docked bar); two-step review (no triage step) is intended?
+- Figma: task-detail edit models, PageFrame on Tasks/detail, row inline editing for priority/due/labels/project, settings sub-pages, bingo card/compass. `chrono-node` for NL dates needs dependency approval.
+- Deferred minors (loop 2): row focus drops to page after a status pick moves groups; due/label popovers lack finalFocus; Up-next toast Start doesn't guard an active session; low-contrast informational marks; Todoist dot + Urgent reuse `--destructive`; 17 off-grid spacing sites in settings children; mock doesn't persist habit/capture mutations.
 
 ## Session wrap — 2026-09-21
 
