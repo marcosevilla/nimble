@@ -2,6 +2,7 @@ import { useDataVersion } from '@/hooks/useDataVersion'
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { Search } from 'lucide-react'
+import { Icon } from '@/components/shared/Icon'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { useDataProvider } from '@/services/provider-context'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
@@ -311,7 +312,7 @@ export function CommandBar() {
       {/* Centered command bar */}
       <div className={cn('fixed inset-x-0 top-[28%] z-50 mx-auto w-full max-w-lg px-4', closing ? 'command-bar-flyout-out' : 'command-bar-flyout')}>
         <div className="flex h-11 items-center gap-2 px-4 rounded-xl border border-border/50 bg-popover shadow-lg shadow-black/10">
-          <Search className="size-3.5 shrink-0 text-muted-foreground" />
+          <Icon icon={Search} className="text-muted-foreground" />
           <input
             ref={inputRef}
             type="text"
@@ -321,7 +322,7 @@ export function CommandBar() {
             placeholder={placeholder}
             className="flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
           />
-          <kbd className="rounded border border-border/30 px-1.5 py-0.5 text-label font-mono text-muted-foreground">
+          <kbd className="rounded-sm border border-border/30 px-1.5 py-0.5 text-label font-mono text-muted-foreground">
             Esc
           </kbd>
         </div>
