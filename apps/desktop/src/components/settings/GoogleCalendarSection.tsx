@@ -6,6 +6,10 @@ import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Meta, SectionTitle } from '@/components/shared/typography'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 
 export function GoogleCalendarSection() {
   const dp = useDataProvider()
@@ -46,7 +50,20 @@ export function GoogleCalendarSection() {
       <Button variant="outline" size="sm" disabled={busy || !status?.clientSecretConfigured} onClick={() => void act(() => dp.googleCalendar.connect())}>{status?.connected ? 'Reconnect Google Calendar' : 'Connect Google Calendar'}</Button>
       {status?.connected && <>
         <Button variant="outline" size="sm" disabled={busy} onClick={() => void act(async () => { const result = await dp.googleCalendar.syncNow(); if (result.errorCode) throw new Error(result.errorCode) })}>Sync now</Button>
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => void act(() => dp.googleCalendar.disconnect())}>Disconnect</Button>
+        {/* Same confirm as Remove feed / Delete label (settings P2-11): one click used to drop the connection. */}
+        <AlertDialog>
+          <AlertDialogTrigger render={<Button variant="ghost" size="sm" disabled={busy}>Disconnect</Button>} />
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Disconnect Google Calendar?</AlertDialogTitle>
+              <AlertDialogDescription>Phone alerts stop syncing until you connect again. The calendar and its events stay in Google.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void act(() => dp.googleCalendar.disconnect())}>Disconnect</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </>}
     </div>
     {status?.connected && <Meta as="p">Disconnecting leaves the existing calendar and its events in Google.</Meta>}
