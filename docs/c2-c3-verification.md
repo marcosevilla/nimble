@@ -43,3 +43,9 @@ Combined review identified Calendar URL assembly, expired-token reconnect, calen
 - [ ] Production app update and code integration, following review.
 
 Mocked transport success does not establish phone delivery. Mac reminders need Nimble running; missed occurrences appear on reopen. Already-published Google events can alert while the Mac app is closed, but new changes/current recurrence advancement need Nimble to sync.
+
+## Final native artifact
+
+The final debug test bundle built successfully and was reopened after the review fixes. The previously dismissed reminder remained dismissed; Settings includes Reminders and Phone alerts navigation. The test app was quit after verification. Build log: `/private/tmp/nimble-c23-final-native-build.log`.
+
+Implementation choices: workers shared one isolated feature worktree with exclusive file ownership (requiring coordinated integration), and frontend dependencies were installed separately because symlinking another worktree would resolve stale shared types. Neither choice changes production data or external account state.
