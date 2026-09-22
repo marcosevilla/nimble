@@ -1,6 +1,6 @@
 import { GoogleCalendarSection } from '@/components/settings/GoogleCalendarSection'
 import { ReminderSection } from '@/components/settings/ReminderSection'
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -51,6 +51,9 @@ import { TasksMigrationSection } from '@/components/settings/TasksMigrationSecti
 import { VaultSection } from '@/components/settings/VaultSection'
 import { LabelManager } from '@/components/settings/LabelManager'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
+import { visibleSections, activeSectionId } from '@/lib/settingsSections'
+import { settingsFailure, settingsMessage } from '@/lib/settingsMessage'
+import type { SettingsFailure } from '@/lib/settingsMessage'
 
 // ── Types ──
 
@@ -66,7 +69,7 @@ interface FieldState {
   value: string
   saving: boolean
   saved: boolean
-  error: string | null
+  error: SettingsFailure | null
 }
 
 // ── Field definitions by section ──
@@ -119,6 +122,33 @@ const ALL_FIELDS = [...INTEGRATIONS_FIELDS, ...OBSIDIAN_FIELDS, ...FOCUS_FIELDS]
 
 // ── Components ──
 
+/** Neutral headline + the raw error behind a disclosure (settings P2-16). */
+function FailureNote({ failure }: { failure: SettingsFailure | null }) {
+  if (!failure) return null
+  return (
+    <div className="space-y-1">
+      <p className="text-meta text-destructive" role="alert">{failure.message}</p>
+      {failure.detail && failure.detail !== failure.message && (
+        <details>
+          <summary className="cursor-pointer text-label text-muted-foreground">Details</summary>
+          <code className="block whitespace-pre-wrap break-all font-mono text-label text-muted-foreground">
+            {failure.detail}
+          </code>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function toastFailure(error: unknown) {
+  const failure = settingsFailure(error)
+  toast.error(failure.message, failure.detail ? { description: failure.detail } : undefined)
+}
+
+function fontLabel(value: ProductFont): string {
+  return FONT_OPTIONS.find((f) => f.value === value)?.label ?? value
+}
+
 function SettingFieldRow({
   field,
   state,
@@ -169,9 +199,7 @@ function SettingFieldRow({
         </Button>
       </div>
       <Meta as="p">{field.help}</Meta>
-      {state.error && (
-        <p className="text-meta text-destructive">{state.error}</p>
-      )}
+      <FailureNote failure={state.error} />
     </div>
   )
 }
@@ -179,13 +207,15 @@ function SettingFieldRow({
 function SectionHeader({
   title,
   description,
+  as = 'h2',
 }: {
   title: string
   description?: string
+  as?: 'h2' | 'h3'
 }) {
   return (
     <div className="space-y-1">
-      <SectionTitle as="h2">{title}</SectionTitle>
+      <SectionTitle as={as}>{title}</SectionTitle>
       {description && (
         <p className="text-body text-muted-foreground">{description}</p>
       )}
@@ -195,14 +225,110 @@ function SectionHeader({
 
 // ── Accent theme definitions ──
 
-const ACCENT_THEMES: { value: AccentTheme; label: string; swatch: string }[] = [
-  { value: 'warm', label: 'Warm', swatch: 'oklch(0.65 0.15 75)' },
-  { value: 'ocean', label: 'Ocean', swatch: 'oklch(0.55 0.18 230)' },
-  { value: 'rose', label: 'Rose', swatch: 'oklch(0.58 0.18 350)' },
-  { value: 'mono', label: 'Mono', swatch: 'oklch(0.45 0 0)' },
-  { value: 'forest', label: 'Forest', swatch: 'oklch(0.50 0.15 155)' },
-  { value: 'runner', label: 'Runner', swatch: 'oklch(0.60 0.13 50)' },
+const ACCENT_THEMES: { value: AccentTheme; label: string }[] = [
+  { value: 'warm', label: 'Warm' },
+  { value: 'ocean', label: 'Ocean' },
+  { value: 'rose', label: 'Rose' },
+  { value: 'mono', label: 'Mono' },
+  { value: 'forest', label: 'Forest' },
+  { value: 'runner', label: 'Runner' },
 ]
+
+interface ThemeSwatch {
+  background: string
+  primary: string
+  border: string
+}
+
+/** Reads each theme's real `--background` / `--primary` / `--border` by
+ *  parking a hidden probe under `.theme-*` (+ `.dark` when the app is dark)
+ *  and asking the cascade. The picker then shows the token system instead
+ *  of six hand-picked saturated dots (settings P2-7). */
+function readThemeSwatches(dark: boolean): Record<AccentTheme, ThemeSwatch> {
+  const probe = document.createElement('div')
+  probe.setAttribute('aria-hidden', 'true')
+  probe.style.position = 'absolute'
+  probe.style.visibility = 'hidden'
+  probe.style.pointerEvents = 'none'
+  document.body.appendChild(probe)
+  const out = {} as Record<AccentTheme, ThemeSwatch>
+  for (const t of ACCENT_THEMES) {
+    probe.className = cn(`theme-${t.value}`, dark && 'dark')
+    const style = getComputedStyle(probe)
+    out[t.value] = {
+      background: style.getPropertyValue('--background').trim(),
+      primary: style.getPropertyValue('--primary').trim(),
+      border: style.getPropertyValue('--border').trim(),
+    }
+  }
+  probe.remove()
+  return out
+}
+
+function useThemeSwatches(): Record<AccentTheme, ThemeSwatch> | null {
+  const [swatches, setSwatches] = useState<Record<AccentTheme, ThemeSwatch> | null>(null)
+  useEffect(() => {
+    const read = () => setSwatches(readThemeSwatches(document.documentElement.classList.contains('dark')))
+    read()
+    // Mode flips (light/dark/system) and accent swaps both land on <html class>.
+    const observer = new MutationObserver(read)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
+  return swatches
+}
+
+function AccentPicker({ accent, onChange }: { accent: AccentTheme; onChange: (next: AccentTheme) => void }) {
+  const swatches = useThemeSwatches()
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const delta = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+    if (delta === 0) return
+    e.preventDefault()
+    const index = ACCENT_THEMES.findIndex((t) => t.value === accent)
+    const next = ACCENT_THEMES[(index + delta + ACCENT_THEMES.length) % ACCENT_THEMES.length]
+    onChange(next.value)
+    const radios = e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+    radios[ACCENT_THEMES.indexOf(next)]?.focus()
+  }
+
+  return (
+    <div
+      role="radiogroup"
+      aria-labelledby="accent-label"
+      className="flex items-center gap-2"
+      onKeyDown={handleKeyDown}
+    >
+      {ACCENT_THEMES.map((t) => {
+        const selected = accent === t.value
+        const swatch = swatches?.[t.value]
+        return (
+          <button
+            key={t.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={t.label}
+            tabIndex={selected ? 0 : -1}
+            className={cn(
+              'flex size-8 items-center justify-center rounded-full border transition-[box-shadow,border-color] duration-(--transition-fast)',
+              selected
+                ? 'ring-2 ring-foreground ring-offset-2 ring-offset-background'
+                : 'hover:ring-2 hover:ring-border hover:ring-offset-2 hover:ring-offset-background',
+            )}
+            style={swatch ? { backgroundColor: swatch.background, borderColor: swatch.border } : undefined}
+            onClick={() => onChange(t.value)}
+          >
+            <span
+              className="size-3 rounded-full"
+              style={swatch ? { backgroundColor: swatch.primary } : undefined}
+            />
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 // ── Color presets for calendar feeds ──
 
@@ -226,7 +352,7 @@ function CalendarsSection() {
   const [newUrl, setNewUrl] = useState('')
   const [newColor, setNewColor] = useState(FEED_COLORS[0])
   const [adding, setAdding] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<SettingsFailure | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -244,7 +370,7 @@ function CalendarsSection() {
 
   const handleAdd = async () => {
     if (!newLabel.trim() || !newUrl.trim()) {
-      setError('Label and URL are required')
+      setError({ message: 'Label and URL are required', detail: null })
       return
     }
     setAdding(true)
@@ -257,7 +383,7 @@ function CalendarsSection() {
       setNewColor(FEED_COLORS[0])
       setShowForm(false)
     } catch (e) {
-      setError(String(e))
+      setError(settingsFailure(e))
     } finally {
       setAdding(false)
     }
@@ -268,13 +394,13 @@ function CalendarsSection() {
       await dp.calendar.removeFeed(feedId)
       setFeeds((prev) => prev.filter((f) => f.id !== feedId))
     } catch (e) {
-      setError(String(e))
+      setError(settingsFailure(e))
     }
   }
 
   if (loading) {
     return (
-      <section id="calendars" className="space-y-4 scroll-mt-6">
+      <section id="calendars" className={SECTION_CLASS}>
         <SectionHeader
           title="Calendars"
           description="Add iCal feeds from Google Calendar, Outlook, etc."
@@ -285,7 +411,7 @@ function CalendarsSection() {
   }
 
   return (
-    <section id="calendars" className="space-y-4 scroll-mt-6">
+    <section id="calendars" className={SECTION_CLASS}>
       <SectionHeader
         title="Calendars"
         description="Add iCal feeds from Google Calendar, Outlook, etc."
@@ -296,7 +422,7 @@ function CalendarsSection() {
         {feeds.map((feed) => (
           <div
             key={feed.id}
-            className="flex items-center gap-3 rounded-md border px-3 py-2"
+            className="flex items-center gap-2 rounded-md border px-3 py-2"
           >
             <span
               className="h-3 w-3 shrink-0 rounded-full"
@@ -349,7 +475,7 @@ function CalendarsSection() {
 
       {/* Add form */}
       {showForm ? (
-        <div className="space-y-3 rounded-md border p-3">
+        <div className="space-y-4 rounded-md border p-4">
           <div className="space-y-1.5">
             <Label className="text-body-strong">Label</Label>
             <Input
@@ -387,7 +513,7 @@ function CalendarsSection() {
               ))}
             </div>
           </div>
-          {error && <p className="text-meta text-destructive">{error}</p>}
+          <FailureNote failure={error} />
           <div className="flex items-center gap-2">
             <Button size="sm" onClick={handleAdd} disabled={adding}>
               {adding ? 'Adding...' : 'Add calendar'}
@@ -424,6 +550,9 @@ function DemoModeSection() {
     dp.system.getDemoStatus().then(setActive).catch(() => {})
   }, [dp])
 
+  // The switch only asks; the restart happens after the AlertDialog confirms.
+  const [pending, setPending] = useState<boolean | null>(null)
+
   const handleToggle = async (on: boolean) => {
     setSwitching(true)
     try {
@@ -433,7 +562,7 @@ function DemoModeSection() {
         description: 'Restarting Nimble.',
       })
     } catch (e) {
-      toast.error(`Failed to toggle demo mode: ${e}`)
+      toastFailure(e)
       setSwitching(false)
     }
   }
@@ -450,60 +579,35 @@ function DemoModeSection() {
       </div>
       <Switch
         checked={active}
-        onCheckedChange={handleToggle}
+        onCheckedChange={(on) => setPending(on)}
         disabled={switching}
         aria-label="Toggle demo mode"
       />
+      <AlertDialog open={pending !== null} onOpenChange={(open) => { if (!open) setPending(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{pending ? 'Restart into demo mode?' : 'Leave demo mode?'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pending
+                ? 'Nimble restarts into a blank throwaway workspace. Your real data stays untouched.'
+                : 'Nimble restarts with your real data. Everything created during the demo is discarded.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const on = pending === true
+                setPending(null)
+                void handleToggle(on)
+              }}
+            >
+              Restart
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
-  )
-}
-
-// ── Status Colors Section ──
-
-/* Swatches are the theme's own status roles (settings P1-2); the stub only
-   previews them today. B5 deletes this section — if that lands first, drop this. */
-const COLOR_OPTIONS = [
-  { label: 'Gray', value: 'text-muted-foreground', preview: 'bg-muted-foreground' },
-  { label: 'Blue', value: 'text-status-todo', preview: 'bg-status-todo' },
-  { label: 'Amber', value: 'text-status-in-progress', preview: 'bg-status-in-progress' },
-  { label: 'Red', value: 'text-status-blocked', preview: 'bg-status-blocked' },
-  { label: 'Green', value: 'text-status-complete', preview: 'bg-status-complete' },
-  { label: 'Purple', value: 'text-ai', preview: 'bg-ai' },
-]
-
-// Sentence-case copy for the appearance mode toggle (no CSS capitalize).
-const THEME_LABELS = { light: 'Light', dark: 'Dark', system: 'System' } as const
-
-const STATUS_DEFAULTS: Record<string, { label: string; defaultColor: string }> = {
-  backlog: { label: 'Backlog', defaultColor: 'Gray' },
-  todo: { label: 'Todo', defaultColor: 'Blue' },
-  in_progress: { label: 'In progress', defaultColor: 'Amber' },
-  blocked: { label: 'Blocked', defaultColor: 'Red' },
-  complete: { label: 'Complete', defaultColor: 'Green' },
-}
-
-function StatusColorsSection() {
-  return (
-    <section id="status-colors" className="space-y-4 scroll-mt-6">
-      <SectionHeader
-        title="Status colors"
-        description="Current color assignments for task statuses."
-      />
-      <div className="space-y-2">
-        {Object.entries(STATUS_DEFAULTS).map(([status, config]) => (
-          <div key={status} className="flex items-center justify-between py-1">
-            <div className="flex items-center gap-2">
-              <span className={cn('size-3 rounded-full', COLOR_OPTIONS.find((c) => c.label === config.defaultColor)?.preview)} />
-              <span className="text-body">{config.label}</span>
-            </div>
-            <span className="text-meta text-muted-foreground">{config.defaultColor}</span>
-          </div>
-        ))}
-      </div>
-      <p className="text-label text-muted-foreground">
-        Color customization coming soon. These are the current defaults.
-      </p>
-    </section>
   )
 }
 
@@ -622,7 +726,7 @@ function CaptureRoutesSection() {
       }
       resetForm()
     } catch (e) {
-      toast.error(`Failed: ${e}`)
+      toastFailure(e)
     } finally {
       setSaving(false)
     }
@@ -634,13 +738,13 @@ function CaptureRoutesSection() {
       setRoutes((prev) => prev.filter((r) => r.id !== id))
       toast.success('Route deleted')
     } catch (e) {
-      toast.error(`Failed: ${e}`)
+      toastFailure(e)
     }
   }
 
   if (loading) {
     return (
-      <section id="capture-routes" className="space-y-4 scroll-mt-6">
+      <section id="capture-routes" className={SECTION_CLASS}>
         <SectionHeader title="Capture routes" description="Prefix routing for quick capture to Docs or Tasks." />
         <Skeleton className="h-8" />
       </section>
@@ -648,7 +752,7 @@ function CaptureRoutesSection() {
   }
 
   return (
-    <section id="capture-routes" className="space-y-4 scroll-mt-6">
+    <section id="capture-routes" className={SECTION_CLASS}>
       <SectionHeader
         title="Capture routes"
         description="Type a prefix in the Inbox input to route captures to a Doc or create a Task."
@@ -662,7 +766,7 @@ function CaptureRoutesSection() {
           return (
             <div
               key={route.id}
-              className="flex items-center gap-3 rounded-md border px-3 py-2"
+              className="flex items-center gap-2 rounded-md border px-3 py-2"
             >
               <span
                 className="flex size-6 items-center justify-center rounded-md"
@@ -728,8 +832,8 @@ function CaptureRoutesSection() {
 
       {/* Add/Edit form */}
       {showForm ? (
-        <div className="space-y-3 rounded-md border p-3">
-          <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-4 rounded-md border p-4">
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className="text-body-strong">Prefix</Label>
               <Input
@@ -856,12 +960,11 @@ function SyncSection() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [initializing, setInitializing] = useState(false)
   const [tursoUrl, setTursoUrl] = useState('')
   const [tursoToken, setTursoToken] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<SettingsFailure | null>(null)
   const [syncResult, setSyncResult] = useState<string | null>(null)
   // True when the provider has no sync surface at all, as opposed to having one
   // that is merely unconfigured. See the catch in `load` below.
@@ -919,7 +1022,7 @@ function SyncSection() {
 
   const handleSaveConfig = async () => {
     if (!tursoUrl.trim() || !tursoToken.trim()) {
-      setError('Both URL and token are required')
+      setError({ message: 'Both URL and token are required', detail: null })
       return
     }
     setSaving(true)
@@ -930,7 +1033,7 @@ function SyncSection() {
       await refreshStatus()
       setTimeout(() => setSaved(false), 2000)
     } catch (e) {
-      setError(String(e))
+      setError(settingsFailure(e))
     } finally {
       setSaving(false)
     }
@@ -949,8 +1052,8 @@ function SyncSection() {
       toast.success(`Synced: ${msg}`)
       setTimeout(() => setSyncResult(null), 5000)
     } catch (e) {
-      setError(String(e))
-      toast.error(`Sync failed: ${e}`)
+      setError(settingsFailure(e))
+      toastFailure(e)
     } finally {
       setSyncing(false)
     }
@@ -958,7 +1061,7 @@ function SyncSection() {
 
   const handleTestConnection = async () => {
     if (!tursoUrl.trim() || !tursoToken.trim()) {
-      setError('Save Turso URL and token first')
+      setError({ message: 'Save Turso URL and token first', detail: null })
       return
     }
     setTesting(true)
@@ -967,31 +1070,16 @@ function SyncSection() {
       await dp.sync.testConnection(tursoUrl.trim(), tursoToken.trim())
       toast.success('Connection successful')
     } catch (e) {
-      setError(`Connection failed: ${e}`)
-      toast.error(`Connection failed: ${e}`)
+      setError(settingsFailure(e))
+      toastFailure(e)
     } finally {
       setTesting(false)
     }
   }
 
-  const handleInitializeRemote = async () => {
-    setInitializing(true)
-    setError(null)
-    try {
-      await dp.sync.initializeRemote()
-      await refreshStatus()
-      toast.success('Remote database initialized')
-    } catch (e) {
-      setError(`Initialization failed: ${e}`)
-      toast.error(`Initialization failed: ${e}`)
-    } finally {
-      setInitializing(false)
-    }
-  }
-
   if (loading) {
     return (
-      <section id="sync" className="space-y-4 scroll-mt-6">
+      <section id="sync" className={SECTION_CLASS}>
         <SectionHeader title="Sync" description="Multi-device sync via Turso." />
         <Skeleton className="h-8" />
       </section>
@@ -1007,7 +1095,7 @@ function SyncSection() {
   // disabled.
   if (unavailable) {
     return (
-      <section id="sync" className="space-y-4 scroll-mt-6">
+      <section id="sync" className={SECTION_CLASS}>
         <SectionHeader
           title="Sync"
           description="Sync data across devices using Turso (hosted SQLite). Single-user, last-write-wins."
@@ -1024,7 +1112,7 @@ function SyncSection() {
   }
 
   return (
-    <section id="sync" className="space-y-4 scroll-mt-6">
+    <section id="sync" className={SECTION_CLASS}>
       <SectionHeader
         title="Sync"
         description="Sync data across devices using Turso (hosted SQLite). Single-user, last-write-wins."
@@ -1066,7 +1154,7 @@ function SyncSection() {
       )}
 
       {/* Turso config */}
-      <div className="space-y-3 rounded-md border p-3">
+      <div className="space-y-4 rounded-md border p-4">
         <div className="space-y-1.5">
           <Label className="text-body-strong">Turso URL</Label>
           <Input
@@ -1109,18 +1197,15 @@ function SyncSection() {
 
       {/* Initialize Remote Database — only shown when configured but not initialized */}
       {isConfigured && !isInitialized && (
-        <div className="rounded-md border border-warning/30 bg-warning/5 p-3 space-y-2">
+        <div className="rounded-md border border-warning/30 bg-warning/5 p-4 space-y-2">
           <p className="text-body text-muted-foreground">
             Remote database needs to be initialized with the app schema before syncing.
+            {' '}
+            <a href="#maintenance" className="underline underline-offset-2 hover:text-foreground">
+              Initialize it under Maintenance
+            </a>
+            .
           </p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleInitializeRemote}
-            disabled={initializing}
-          >
-            {initializing ? 'Initializing...' : 'Initialize remote database'}
-          </Button>
         </div>
       )}
 
@@ -1133,35 +1218,146 @@ function SyncSection() {
         >
           {syncing ? 'Syncing...' : 'Sync now'}
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={async () => {
-            try {
-              setError(null)
-              const count = await dp.sync.seedExisting()
-              setSyncResult(`Seeded ${count} existing records to sync log`)
-              await refreshStatus()
-              setTimeout(() => setSyncResult(null), 5000)
-            } catch (e) {
-              setError(`Seed failed: ${e}`)
-            }
-          }}
-          disabled={syncing || !isConfigured}
-        >
-          Seed existing data
-        </Button>
         {syncResult && (
           <span className="text-meta text-muted-foreground">{syncResult}</span>
         )}
       </div>
 
-      {error && <p className="text-meta text-destructive">{error}</p>}
+      <FailureNote failure={error} />
     </section>
   )
 }
 
+// ── Sync maintenance (schema init + sync-log seeding; settings P2-1) ──
+
+function SyncMaintenance() {
+  const dp = useDataProvider()
+  const [status, setStatus] = useState<SyncStatus | null>(null)
+  const [busy, setBusy] = useState<'initialize' | 'seed' | null>(null)
+  const [result, setResult] = useState<string | null>(null)
+  const [error, setError] = useState<SettingsFailure | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await dp.sync.getStatus())
+    } catch {
+      setStatus(null)
+    }
+  }, [dp])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  if (!status) {
+    return <Meta as="p">Sync tools are available on the desktop app once Turso is set up under Sync.</Meta>
+  }
+  if (!status.turso_configured) {
+    return <Meta as="p">Set up Turso under Sync first.</Meta>
+  }
+
+  const run = async (kind: 'initialize' | 'seed') => {
+    setBusy(kind)
+    setError(null)
+    setResult(null)
+    try {
+      if (kind === 'initialize') {
+        await dp.sync.initializeRemote()
+        setResult('Remote database initialized')
+      } else {
+        const count = await dp.sync.seedExisting()
+        setResult(`Seeded ${count} existing records to sync log`)
+      }
+      await refresh()
+    } catch (e) {
+      setError(settingsFailure(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <Meta as="p">
+        {status.remote_initialized
+          ? 'The remote database has the app schema. Seeding re-adds existing rows to the sync log if a device missed them.'
+          : 'The remote database needs the app schema before the first sync.'}
+      </Meta>
+      <div className="flex flex-wrap items-center gap-2">
+        {!status.remote_initialized && (
+          <Button variant="outline" size="sm" onClick={() => run('initialize')} disabled={busy !== null}>
+            {busy === 'initialize' ? 'Initializing…' : 'Initialize remote database'}
+          </Button>
+        )}
+        <Button variant="outline" size="sm" onClick={() => run('seed')} disabled={busy !== null}>
+          {busy === 'seed' ? 'Seeding…' : 'Seed existing data'}
+        </Button>
+        {result && <span className="text-meta text-muted-foreground" role="status">{result}</span>}
+      </div>
+      <FailureNote failure={error} />
+    </div>
+  )
+}
+
+// ── Scroll-spy (settings P2-1) ──
+
+const SECTION_CLASS = 'space-y-4 scroll-mt-[calc(var(--page-header-h)+2rem)]'
+const SCROLL_SPY_THRESHOLDS = Array.from({ length: 21 }, (_, i) => i / 20)
+const NAV_CLICK_LOCK_MS = 800
+
+function findScroller(el: HTMLElement): HTMLElement {
+  let node: HTMLElement | null = el.parentElement
+  while (node) {
+    const overflowY = getComputedStyle(node).overflowY
+    if (overflowY === 'auto' || overflowY === 'scroll') return node
+    node = node.parentElement
+  }
+  return document.documentElement
+}
+
+/** Which `<section id>` sits under the active line (just below the sticky
+ *  header). IntersectionObserver wakes the computation; geometry decides,
+ *  so short trailing sections still resolve deterministically. A nav click
+ *  pins its target for NAV_CLICK_LOCK_MS so smooth-scrolling past other
+ *  sections does not flicker the highlight. */
+function useSettingsScrollSpy(ids: readonly string[]) {
+  const [active, setActive] = useState<string | null>(ids[0] ?? null)
+  const lockUntil = useRef(0)
+  const key = ids.join(',')
+
+  useEffect(() => {
+    const els = ids
+      .map((id) => document.getElementById(id))
+      .filter((el): el is HTMLElement => el !== null)
+    if (els.length === 0) return
+    const scroller = findScroller(els[0])
+    const headerH =
+      parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-header-h')) || 41
+
+    const compute = () => {
+      if (Date.now() < lockUntil.current) return
+      const line = scroller.getBoundingClientRect().top + headerH + 48
+      const atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2
+      setActive(activeSectionId(els.map((el) => ({ id: el.id, top: el.getBoundingClientRect().top })), line, atEnd))
+    }
+
+    const observer = new IntersectionObserver(compute, { threshold: SCROLL_SPY_THRESHOLDS })
+    els.forEach((el) => observer.observe(el))
+    compute()
+    return () => observer.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+
+  const select = useCallback((id: string) => {
+    lockUntil.current = Date.now() + NAV_CLICK_LOCK_MS
+    setActive(id)
+  }, [])
+
+  return { active, select }
+}
+
 // ── Main Page ──
+
+// Sentence-case copy for the appearance mode toggle (no CSS capitalize).
+const THEME_LABELS = { light: 'Light', dark: 'Dark', system: 'System' } as const
 
 export function SettingsPage() {
   const dp = useDataProvider()
@@ -1177,6 +1373,16 @@ export function SettingsPage() {
   const [resetting, setResetting] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const [checking, setChecking] = useState(false)
+
+  const backupSupported = dp.backup.supported
+  const remindersSupported = dp.reminders.supported
+  const googleSupported = dp.googleCalendar.supported
+  const sections = useMemo(
+    () => visibleSections({ backup: backupSupported, reminders: remindersSupported, googleCalendar: googleSupported }),
+    [backupSupported, remindersSupported, googleSupported],
+  )
+  const sectionIds = useMemo(() => sections.map((s) => s.id), [sections])
+  const { active: activeSection, select: selectSection } = useSettingsScrollSpy(sectionIds)
 
   // Load current values on mount
   useEffect(() => {
@@ -1216,7 +1422,7 @@ export function SettingsPage() {
       if (!value) {
         setFields((prev) => ({
           ...prev,
-          [key]: { ...prev[key], saving: false, error: 'Value cannot be empty' },
+          [key]: { ...prev[key], saving: false, error: { message: 'Value cannot be empty', detail: null } },
         }))
         return
       }
@@ -1235,7 +1441,7 @@ export function SettingsPage() {
     } catch (e) {
       setFields((prev) => ({
         ...prev,
-        [key]: { ...prev[key], saving: false, error: String(e) },
+        [key]: { ...prev[key], saving: false, error: settingsFailure(e) },
       }))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1265,108 +1471,18 @@ export function SettingsPage() {
         latest_version: null,
         update_available: false,
         release_url: null,
-        error: String(e),
+        error: settingsMessage(e),
       })
     } finally {
       setChecking(false)
     }
   }, [dp])
 
-  return (
-    <>
-      <PageHeader title="Settings" />
-      <div className="mx-auto flex max-w-3xl gap-8 p-6 w-full">
-      {/* Left rail — section navigation */}
-      <nav className="sticky top-16 hidden w-40 shrink-0 self-start md:block">
-        <ul className="space-y-0.5 text-body">
-          <li>
-            <a href="#appearance" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Appearance
-            </a>
-          </li>
-          <li>
-            <a href="#integrations" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Integrations
-            </a>
-          </li>
-          <li>
-            <a href="#vault" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Vault
-            </a>
-          </li>
-          <li>
-            <a href="#todoist-sync" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Todoist sync
-            </a>
-          </li>
-          <li>
-            <a href="#import-todoist" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Import from Todoist
-            </a>
-          </li>
-          <li>
-            <a href="#docs-format" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Docs storage format
-            </a>
-          </li>
-          <li>
-            <a href="#focus" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Focus mode
-            </a>
-          </li>
-          <li>
-            <a href="#obsidian" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Obsidian
-            </a>
-          </li>
-          <li>
-            <a href="#calendars" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Calendars
-            </a>
-          </li>
-          <li>
-            <a href="#status-colors" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Status colors
-            </a>
-          </li>
-          <li>
-            <a href="#capture-routes" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Capture routes
-            </a>
-          </li>
-          <li>
-            <a href="#labels" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Labels
-            </a>
-          </li>
-          <li>
-            <a href="#sync" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Sync
-            </a>
-          </li>
-          {dp.reminders.supported && <li>
-            <a href="#reminders" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">Reminders</a>
-          </li>}
-          {dp.googleCalendar.supported && <li>
-            <a href="#google-calendar" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">Phone alerts</a>
-          </li>}
-          <li>
-            <a href="#demo" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Demo mode
-            </a>
-          </li>
-          <li>
-            <a href="#about" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              About
-            </a>
-          </li>
-        </ul>
-      </nav>
-
-      {/* Main content */}
-      <div className="flex-1 min-w-0 space-y-8">
-      {/* Appearance */}
-      <section id="appearance" className="space-y-4 scroll-mt-6">
+  // One body per SETTINGS_SECTIONS row. The array owns the order; this map
+  // only owns the markup. A row without a body renders nothing.
+  const bodies: Record<string, React.ReactNode> = {
+    appearance: (
+      <section id="appearance" className={SECTION_CLASS}>
         <SectionHeader
           title="Appearance"
           description="Choose how Nimble looks on your machine."
@@ -1397,40 +1513,18 @@ export function SettingsPage() {
 
         {/* Accent theme selector */}
         <div className="space-y-1.5">
-          <SectionLabel as="div">Accent</SectionLabel>
-          <div className="flex items-center gap-2">
-            {ACCENT_THEMES.map((t) => (
-              <button
-                key={t.value}
-                type="button"
-                className={cn(
-                  'group relative flex size-8 items-center justify-center rounded-full border-2 transition-all',
-                  accent === t.value
-                    ? 'border-foreground scale-110'
-                    : 'border-transparent hover:border-muted-foreground/50',
-                )}
-                style={{ backgroundColor: t.swatch }}
-                onClick={() => setAccent(t.value)}
-                title={t.label}
-              >
-                {accent === t.value && (
-                  <svg className="size-3.5 text-white drop-shadow-sm" viewBox="0 0 16 16" fill="none">
-                    <path d="M3 8.5L6.5 12L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
-              </button>
-            ))}
-          </div>
+          <SectionLabel as="div" id="accent-label">Accent</SectionLabel>
+          <AccentPicker accent={accent} onChange={setAccent} />
           <p className="text-label text-muted-foreground">
             {ACCENT_THEMES.find((t) => t.value === accent)?.label ?? 'Warm'} theme
           </p>
         </div>
 
         {/* Typography */}
-        <div className="space-y-3">
+        <div className="space-y-4">
           <SectionLabel as="div">Typography</SectionLabel>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="heading-font" className="text-label text-muted-foreground">
                 Heading
@@ -1440,7 +1534,7 @@ export function SettingsPage() {
                 onValueChange={(v) => setHeadingFont(v as ProductFont)}
               >
                 <SelectTrigger id="heading-font" className="w-full">
-                  <SelectValue />
+                  <SelectValue>{fontLabel(headingFont)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {FONT_OPTIONS.map((font) => (
@@ -1465,7 +1559,7 @@ export function SettingsPage() {
                 onValueChange={(v) => setBodyFont(v as ProductFont)}
               >
                 <SelectTrigger id="body-font" className="w-full">
-                  <SelectValue />
+                  <SelectValue>{fontLabel(bodyFont)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {FONT_OPTIONS.map((font) => (
@@ -1486,7 +1580,7 @@ export function SettingsPage() {
               font-heading → var(--font-heading), font-sans → var(--font-sans).
               When setHeadingFont/setBodyFont updates :root, the preview follows
               automatically. One source of truth, no manual stack reconstruction. */}
-          <div className="rounded-lg border p-3 space-y-1">
+          <div className="rounded-lg border p-4 space-y-1">
             <p className="text-title">The quick brown fox jumps</p>
             <p className="text-body">
               Over the lazy dog. Body text for UI labels and content.
@@ -1497,16 +1591,15 @@ export function SettingsPage() {
           </div>
         </div>
       </section>
+    ),
 
-      <Separator />
-
-      {/* Integrations */}
-      <section id="integrations" className="space-y-4 scroll-mt-6">
+    integrations: (
+      <section id="integrations" className={SECTION_CLASS}>
         <SectionHeader
           title="Integrations"
           description="API tokens and URLs for connected services. Stored locally on your machine."
         />
-        <div className="space-y-5">
+        <div className="space-y-4">
           {INTEGRATIONS_FIELDS.map((field) => (
             <SettingFieldRow
               key={field.key}
@@ -1518,71 +1611,48 @@ export function SettingsPage() {
           ))}
         </div>
       </section>
+    ),
 
-      <Separator />
-
-      {/* Obsidian vault */}
-      <section id="vault" className="space-y-4 scroll-mt-6">
+    /* Vault path + index status are one feature (settings P2-2): the path
+       field first, then the status the path produces. */
+    obsidian: (
+      <section id="obsidian" className={SECTION_CLASS}>
         <SectionHeader
-          title="Vault"
-          description="Indexes your Obsidian notes so they're searchable and editable here. Files on disk stay the source of truth."
+          title="Obsidian"
+          description="Your vault path. Notes are indexed so they're searchable here; files on disk stay the source of truth."
         />
+        <div className="space-y-4">
+          {OBSIDIAN_FIELDS.map((field) => (
+            <SettingFieldRow
+              key={field.key}
+              field={field}
+              state={fields[field.key]}
+              onChange={(v) => updateFieldValue(field.key, v)}
+              onSave={() => saveField(field.key)}
+            />
+          ))}
+        </div>
         <VaultSection />
       </section>
+    ),
 
-      <Separator />
-
-      {/* Todoist sync */}
-      <section id="todoist-sync" className="space-y-4 scroll-mt-6">
+    'todoist-sync': (
+      <section id="todoist-sync" className={SECTION_CLASS}>
         <SectionHeader
           title="Todoist sync"
           description="Keeps your tasks mirrored in Todoist both ways."
         />
         <TodoistSyncSection />
       </section>
+    ),
 
-      <Separator />
-
-      {/* Import from Todoist */}
-      <section id="import-todoist" className="space-y-4 scroll-mt-6">
-        <SectionHeader
-          title="Import from Todoist"
-          description="One-time migration of your Todoist projects and tasks into the local database. Re-runs upsert in place."
-        />
-        <TodoistMigrationSection />
-      </section>
-
-      <Separator />
-
-      {/* Docs storage format */}
-      <section id="docs-format" className="space-y-4 scroll-mt-6">
-        <SectionHeader
-          title="Docs storage format"
-          description="Converts all docs from HTML to markdown. A backup of the database is saved first. Run the preview to see which docs contain formatting that may simplify during conversion."
-        />
-        <DocsMigrationSection />
-      </section>
-
-      <Separator />
-
-      {/* Task descriptions storage format */}
-      <section id="tasks-format" className="space-y-4 scroll-mt-6">
-        <SectionHeader
-          title="Task descriptions storage format"
-          description="Converts task descriptions from HTML to markdown. A backup of the database is saved first. Run the preview to see which descriptions contain formatting that may simplify during conversion."
-        />
-        <TasksMigrationSection />
-      </section>
-
-      <Separator />
-
-      {/* Focus Mode */}
-      <section id="focus" className="space-y-4 scroll-mt-6">
+    focus: (
+      <section id="focus" className={SECTION_CLASS}>
         <SectionHeader
           title="Focus mode"
           description="Configure Pomodoro and focus session behavior."
         />
-        <div className="space-y-5">
+        <div className="space-y-4">
           {FOCUS_FIELDS.map((field) => (
             <SettingFieldRow
               key={field.key}
@@ -1594,79 +1664,40 @@ export function SettingsPage() {
           ))}
         </div>
       </section>
+    ),
 
-      <Separator />
+    'capture-routes': <CaptureRoutesSection />,
 
-      {/* Status Colors */}
-      <StatusColorsSection />
-
-      <Separator />
-
-      {/* Capture Routes */}
-      <CaptureRoutesSection />
-
-      <Separator />
-
-      {/* Labels */}
-      <section id="labels" className="space-y-4 scroll-mt-6">
+    labels: (
+      <section id="labels" className={SECTION_CLASS}>
         <SectionHeader
           title="Labels"
           description="Reusable tags for tasks. Colors are for your own visual sorting."
         />
         <LabelManager />
       </section>
+    ),
 
-      <Separator />
+    calendars: <CalendarsSection />,
+    sync: <SyncSection />,
+    backups: <BackupSection />,
+    reminders: <ReminderSection />,
+    'google-calendar': <GoogleCalendarSection />,
 
-      {/* Calendars */}
-      <CalendarsSection />
-
-      <Separator />
-
-      {/* Sync */}
-      <SyncSection />
-      <BackupSection />
-      <ReminderSection />
-      <GoogleCalendarSection />
-
-      <Separator />
-
-      {/* Obsidian */}
-      <section id="obsidian" className="space-y-4 scroll-mt-6">
-        <SectionHeader
-          title="Obsidian"
-          description="Path to your Obsidian vault for Today.md and session logs."
-        />
-        <div className="space-y-5">
-          {OBSIDIAN_FIELDS.map((field) => (
-            <SettingFieldRow
-              key={field.key}
-              field={field}
-              state={fields[field.key]}
-              onChange={(v) => updateFieldValue(field.key, v)}
-              onSave={() => saveField(field.key)}
-            />
-          ))}
-        </div>
-      </section>
-
-      <Separator />
-
-      {/* Demo Mode */}
-      <section id="demo" className="space-y-4 scroll-mt-6">
+    demo: (
+      <section id="demo" className={SECTION_CLASS}>
         <SectionHeader
           title="Demo mode"
           description="A clean-slate workspace for demos and screen shares. Toggling restarts the app."
         />
         <DemoModeSection />
       </section>
+    ),
 
-      <Separator />
-
-      {/* About */}
-      <section id="about" className="space-y-4 scroll-mt-6">
+    about: (
+      <section id="about" className={SECTION_CLASS}>
         <SectionHeader title="About" />
-        <div className="space-y-3">
+        <div className="space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-body text-muted-foreground">Version</span>
             <span className="text-body font-mono">
@@ -1745,6 +1776,98 @@ export function SettingsPage() {
           </div>
         </div>
       </section>
+    ),
+
+    /* One-time migrations and developer verbs, collapsed and last
+       (settings P2-1). Each keeps its old id so deep links still land. */
+    maintenance: (
+      <section id="maintenance" className={SECTION_CLASS}>
+        <SectionHeader
+          title="Maintenance"
+          description="One-time migrations and sync tools. Nothing here is part of a normal day."
+        />
+        <details className="group rounded-lg border">
+          <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg px-4 py-2 text-body transition-colors duration-(--transition-fast) hover:bg-muted [&::-webkit-details-marker]:hidden">
+            Maintenance tools
+            <ChevronDown className="size-3 text-muted-foreground transition-transform duration-(--transition-fast) group-open:rotate-180" />
+          </summary>
+          <div className="space-y-8 border-t px-4 pb-4 pt-4">
+            <div id="import-todoist" className="space-y-4">
+              <SectionHeader
+                as="h3"
+                title="Import from Todoist"
+                description="One-time migration of your Todoist projects and tasks into the local database. Re-runs upsert in place."
+              />
+              <TodoistMigrationSection />
+            </div>
+
+            <div id="docs-format" className="space-y-4">
+              <SectionHeader
+                as="h3"
+                title="Docs storage format"
+                description="Converts all docs from HTML to markdown. A backup of the database is saved first. Run the preview to see which docs contain formatting that may simplify during conversion."
+              />
+              <DocsMigrationSection />
+            </div>
+
+            <div id="tasks-format" className="space-y-4">
+              <SectionHeader
+                as="h3"
+                title="Task descriptions storage format"
+                description="Converts task descriptions from HTML to markdown. A backup of the database is saved first. Run the preview to see which descriptions contain formatting that may simplify during conversion."
+              />
+              <TasksMigrationSection />
+            </div>
+
+            <div id="sync-tools" className="space-y-4">
+              <SectionHeader as="h3" title="Sync tools" />
+              <SyncMaintenance />
+            </div>
+          </div>
+        </details>
+      </section>
+    ),
+  }
+
+  return (
+    <>
+      <PageHeader title="Settings" />
+      <div className="mx-auto flex max-w-3xl gap-8 p-8 w-full">
+      {/* Left rail — section navigation, generated from SETTINGS_SECTIONS */}
+      <nav
+        aria-label="Settings sections"
+        className="sticky top-[calc(var(--page-header-h)+2rem)] hidden w-40 shrink-0 self-start md:block"
+      >
+        <ul className="space-y-0.5 text-body">
+          {sections.map((s) => {
+            const isActive = activeSection === s.id
+            return (
+              <li key={s.id}>
+                <a
+                  href={`#${s.id}`}
+                  aria-current={isActive ? 'true' : undefined}
+                  onClick={() => selectSection(s.id)}
+                  className={cn(
+                    'block rounded-md px-2 py-1 transition-colors duration-(--transition-fast) hover:bg-muted hover:text-foreground',
+                    isActive ? 'text-foreground' : 'text-muted-foreground',
+                  )}
+                >
+                  {s.label}
+                </a>
+              </li>
+            )
+          })}
+        </ul>
+      </nav>
+
+      {/* Main content — same array, same order */}
+      <div className="flex-1 min-w-0 space-y-8">
+        {sections.map((s, i) => (
+          <Fragment key={s.id}>
+            {i > 0 && !s.standalone && <Separator />}
+            {bodies[s.id] ?? null}
+          </Fragment>
+        ))}
       </div>
       </div>
     </>
