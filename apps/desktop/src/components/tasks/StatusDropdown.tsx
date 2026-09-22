@@ -24,10 +24,10 @@ export interface StatusConfig {
 
 export const STATUSES: StatusConfig[] = [
   { value: 'backlog', label: 'Backlog', icon: Circle, color: 'text-muted-foreground', iconColor: 'text-muted-foreground' },
-  { value: 'todo', label: 'Todo', icon: CircleDot, color: 'text-blue-500', iconColor: 'text-blue-500' },
-  { value: 'in_progress', label: 'In progress', icon: Loader, color: 'text-amber-500', iconColor: 'text-amber-500' },
-  { value: 'blocked', label: 'Blocked', icon: Ban, color: 'text-red-500', iconColor: 'text-red-500' },
-  { value: 'complete', label: 'Complete', icon: CheckCircle2, color: 'text-green-500', iconColor: 'text-green-500' },
+  { value: 'todo', label: 'Todo', icon: CircleDot, color: 'text-status-todo', iconColor: 'text-status-todo' },
+  { value: 'in_progress', label: 'In progress', icon: Loader, color: 'text-status-in-progress', iconColor: 'text-status-in-progress' },
+  { value: 'blocked', label: 'Blocked', icon: Ban, color: 'text-status-blocked', iconColor: 'text-status-blocked' },
+  { value: 'complete', label: 'Complete', icon: CheckCircle2, color: 'text-status-complete', iconColor: 'text-status-complete' },
 ]
 
 export function getStatusConfig(status: TaskStatus): StatusConfig {

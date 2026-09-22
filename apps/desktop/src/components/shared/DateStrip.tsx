@@ -84,14 +84,14 @@ export function DateStrip({ briefDates, selected, onSelect }: DateStripProps) {
                 isSelected
                   ? 'bg-card text-foreground ring-1 ring-border shadow-xs'
                   : isToday
-                    ? 'bg-accent-blue/10 text-accent-blue'
+                    ? 'ring-1 ring-foreground/20 text-foreground'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent/20',
               )}
             >
               <span className="text-label">{weekday}</span>
               <span className="text-title tabular-nums">{day}</span>
               {hasBrief && !isSelected && (
-                <span className="size-1 rounded-full bg-accent-blue/60" />
+                <span className="size-1 rounded-full bg-foreground/40" />
               )}
               {!hasBrief && <span className="size-1" />}
             </button>

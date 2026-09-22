@@ -126,7 +126,7 @@ export function CaptureDetailPage() {
             <span className="rounded-md bg-muted/40 px-1.5 py-0.5">via {capture.source}</span>
           )}
           {capture.converted_to_task_id && (
-            <span className="text-green-500/60">Converted to task</span>
+            <span className="text-success">Converted to task</span>
           )}
         </div>
       </div>

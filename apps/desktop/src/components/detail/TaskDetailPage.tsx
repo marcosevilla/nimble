@@ -574,9 +574,9 @@ export function TaskDetailPage() {
             <div className="space-y-2 py-2 animate-in fade-in duration-300">
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-0.5">
-                  <Sparkles className="size-3.5 text-purple-500 ai-star-1" />
-                  <Sparkles className="size-3 text-purple-400 ai-star-2" />
-                  <Sparkles className="size-2.5 text-purple-300 ai-star-3" />
+                  <Sparkles className="size-3.5 text-ai ai-star-1" />
+                  <Sparkles className="size-3 text-ai/70 ai-star-2" />
+                  <Sparkles className="size-2.5 text-ai/50 ai-star-3" />
                 </div>
                 <span className="text-meta text-muted-foreground">Breaking down with AI...</span>
               </div>

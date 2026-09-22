@@ -6,6 +6,7 @@ import type { Priority } from '@nimble/types'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
 import { Meta } from '@/components/shared/typography'
 import { toast } from 'sonner'
 import { Sparkles, RefreshCw, Battery, BatteryMedium, BatteryLow } from 'lucide-react'
@@ -18,11 +19,13 @@ const ENERGY_OPTIONS: { value: EnergyLevel; label: string; icon: typeof Battery 
   { value: 'high', label: 'High', icon: Battery },
 ]
 
-const SOURCE_STYLES: Record<string, string> = {
-  Calendar: 'bg-accent-blue/10 text-accent-blue',
-  Todoist: 'bg-red-500/10 text-red-500',
-  Obsidian: 'bg-purple-500/10 text-purple-500',
-  General: 'bg-muted text-muted-foreground',
+/* Source is a licensed semantic hue (§1.4) but only on the 6px dot — the
+   pill itself is the neutral LabelChipPill recipe (today P1-6). */
+const SOURCE_DOT: Record<string, string | null> = {
+  Calendar: 'bg-accent-blue',
+  Todoist: 'bg-destructive',
+  Obsidian: 'bg-ai',
+  General: null,
 }
 
 function buildCalendarSummary(events: { summary: string; start_time: string; end_time: string; all_day: boolean }[]): string {
@@ -52,7 +55,7 @@ function buildObsidianSummary(obsidianToday: string | null): string {
 }
 
 function PriorityCard({ priority, index }: { priority: Priority; index: number }) {
-  const sourceStyle = SOURCE_STYLES[priority.source] ?? SOURCE_STYLES.General
+  const sourceDot = SOURCE_DOT[priority.source] ?? SOURCE_DOT.General
 
   return (
     <div className="flex gap-3 py-2.5">
@@ -65,7 +68,8 @@ function PriorityCard({ priority, index }: { priority: Priority; index: number }
           <p className="text-body-strong">{priority.title}</p>
           {/* Badge base cva bakes in text-meta; !text-label wins via the
               important flag so the source pill renders at 11/500 as spec'd. */}
-          <Badge variant="secondary" className={`!text-label px-1.5 py-0 ${sourceStyle}`}>
+          <Badge variant="secondary" className="!text-label gap-1 px-1.5 py-0 text-muted-foreground">
+            {sourceDot && <span className={cn('size-1.5 rounded-full', sourceDot)} />}
             {priority.source}
           </Badge>
         </div>
@@ -148,7 +152,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, initialEnerg
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-2">
-          <Sparkles className="size-4 text-accent-blue" />
+          <Sparkles className="size-4 text-muted-foreground" />
           <h3 className="text-body-strong">How's your energy?</h3>
         </div>
         <Meta as="p">Pick your energy level and I'll suggest your top 3 priorities.</Meta>
@@ -178,7 +182,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, initialEnerg
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-2">
-          <Sparkles className="size-4 text-accent-blue animate-pulse" />
+          <Sparkles className="size-4 text-muted-foreground animate-pulse" />
           <h3 className="text-body-strong">Thinking...</h3>
         </div>
         <div className="space-y-3">
@@ -217,7 +221,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, initialEnerg
     <>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Sparkles className="size-4 text-accent-blue" />
+          <Sparkles className="size-4 text-muted-foreground" />
           <h3 className="text-body-strong">Today's priorities</h3>
         </div>
         <Button

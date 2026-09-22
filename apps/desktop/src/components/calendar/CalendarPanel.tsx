@@ -119,7 +119,7 @@ function AllDayStrip({ events }: { events: CalendarEvent[] }) {
           key={event.id}
           className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-label bg-muted/30"
           style={{
-            borderLeft: `3px solid ${event.feed_color || '#6366f1'}`,
+            borderLeft: `3px solid ${event.feed_color || 'var(--accent-blue)'}`,
           }}
         >
           <span className="truncate">{event.summary}</span>
@@ -247,7 +247,7 @@ function EventBlock({
   const rawHeight = (durationMin / 60) * HOUR_HEIGHT
   const height = Math.max(rawHeight, MIN_BLOCK_HEIGHT)
 
-  const feedColor = event.feed_color || '#6366f1'
+  const feedColor = event.feed_color || 'var(--accent-blue)'
 
   const columnGap = 2
   const columnWidthPct = 100 / event._totalColumns
@@ -263,7 +263,8 @@ function EventBlock({
         left: `calc(${TIME_LABEL_WIDTH + 4}px + (100% - ${TIME_LABEL_WIDTH + 4}px) * ${leftPct / 100})`,
         width: `calc((100% - ${TIME_LABEL_WIDTH + 4}px) * ${columnWidthPct / 100} - ${columnGap}px)`,
         borderLeft: `2px solid ${feedColor}`,
-        backgroundColor: `${feedColor}15`,
+        // color-mix instead of hex+alpha concat so the token fallback works too
+        backgroundColor: `color-mix(in oklch, ${feedColor} 8%, transparent)`,
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}

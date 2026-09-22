@@ -98,6 +98,8 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
         </div>
         {timelineGoals.map((goal) => {
           const area = goal.life_area_id ? areaMap[goal.life_area_id] : null
+          /* Identity dot: goal color, falling back to the life area's. */
+          const dotColor = goal.color || area?.color
           return (
             <div
               key={goal.id}
@@ -105,10 +107,10 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
               style={{ height: ROW_HEIGHT }}
               onClick={() => onGoalClick(goal.id)}
             >
-              {area && (
+              {dotColor && (
                 <span
                   className="size-2 rounded-full shrink-0"
-                  style={{ backgroundColor: area.color }}
+                  style={{ backgroundColor: dotColor }}
                 />
               )}
               <span className="text-meta truncate">{goal.name}</span>
@@ -153,18 +155,16 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
             className="absolute z-20 top-0"
             style={{ left: todayX, height: HEADER_HEIGHT + timelineGoals.length * ROW_HEIGHT }}
           >
-            <div className="w-px h-full bg-amber-500/60" />
-            <div className="absolute top-1 -translate-x-1/2 bg-amber-500 text-label font-semibold text-white px-1.5 py-0.5 rounded-full whitespace-nowrap">
-              {/* font-semibold kept for legibility on colored pill */}
+            <div className="w-px h-full bg-foreground/40" />
+            {/* The tooltip pair (bg-foreground / text-background) — measured 19.4:1;
+                white on amber-500 was 2.15:1 and needed a weight override (goals P1-5/P1-6). */}
+            <div className="absolute top-1 -translate-x-1/2 bg-foreground text-label text-background px-1.5 py-0.5 rounded-full whitespace-nowrap">
               Today
             </div>
           </div>
 
           {/* Goal bars */}
           {timelineGoals.map((goal, i) => {
-            const area = goal.life_area_id ? areaMap[goal.life_area_id] : null
-            const barColor = goal.color || area?.color || '#f59e0b'
-
             // Calculate positions
             const startDate = goal.start_date
               ? new Date(goal.start_date)
@@ -192,30 +192,26 @@ export function GoalTimeline({ goals, lifeAreas, onGoalClick }: GoalTimelineProp
                   style={{ left: x, top: y, width, height: BAR_HEIGHT }}
                   onClick={() => onGoalClick(goal.id)}
                 >
-                  {/* Background bar */}
-                  <div
-                    className="absolute inset-0 rounded-xl opacity-20 group-hover/bar:opacity-30 transition-opacity"
-                    style={{ backgroundColor: barColor }}
-                  />
+                  {/* Neutral track + fill (goals P2-1): the area color lives on the
+                      row's dot only. Fill stays at /20 rather than the card bars'
+                      /70 because the label sits on top of it — text-foreground on a
+                      20% foreground tint measures ~12:1 light / ~9:1 dark. */}
+                  <div className="absolute inset-0 rounded-xl bg-foreground/8 group-hover/bar:bg-foreground/12 transition-colors" />
                   {/* Progress fill */}
                   <div
-                    className="absolute inset-y-0 left-0 rounded-xl transition-all duration-300"
-                    style={{
-                      width: progressWidth,
-                      backgroundColor: barColor,
-                      opacity: 0.6,
-                    }}
+                    className="absolute inset-y-0 left-0 rounded-xl bg-foreground/20 transition-all duration-300"
+                    style={{ width: progressWidth }}
                   />
                   {/* Bar label (show if wide enough) */}
                   {width > 60 && (
-                    <span className="absolute inset-0 flex items-center px-2 text-label truncate" style={{ color: barColor }}>
+                    <span className="absolute inset-0 flex items-center px-2 text-label text-foreground truncate">
                       {goal.name}
                     </span>
                   )}
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   <div className="text-meta">
-                    <div className="font-medium">{goal.name}</div>
+                    <div className="text-meta-strong">{goal.name}</div>
                     <div className="opacity-70">{goal.progress}% complete</div>
                     {goal.milestone_count > 0 && (
                       <div className="opacity-70">{goal.milestone_completed}/{goal.milestone_count} milestones</div>

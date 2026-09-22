@@ -460,16 +460,15 @@ function DemoModeSection() {
 
 // ── Status Colors Section ──
 
+/* Swatches are the theme's own status roles (settings P1-2); the stub only
+   previews them today. B5 deletes this section — if that lands first, drop this. */
 const COLOR_OPTIONS = [
-  { label: 'Gray', value: 'text-muted-foreground/50', preview: 'bg-gray-400' },
-  { label: 'Blue', value: 'text-blue-500', preview: 'bg-blue-500' },
-  { label: 'Amber', value: 'text-amber-500', preview: 'bg-amber-500' },
-  { label: 'Red', value: 'text-red-500', preview: 'bg-red-500' },
-  { label: 'Green', value: 'text-green-500', preview: 'bg-green-500' },
-  { label: 'Purple', value: 'text-purple-500', preview: 'bg-purple-500' },
-  { label: 'Cyan', value: 'text-cyan-500', preview: 'bg-cyan-500' },
-  { label: 'Pink', value: 'text-pink-500', preview: 'bg-pink-500' },
-  { label: 'Orange', value: 'text-orange-500', preview: 'bg-orange-500' },
+  { label: 'Gray', value: 'text-muted-foreground', preview: 'bg-muted-foreground' },
+  { label: 'Blue', value: 'text-status-todo', preview: 'bg-status-todo' },
+  { label: 'Amber', value: 'text-status-in-progress', preview: 'bg-status-in-progress' },
+  { label: 'Red', value: 'text-status-blocked', preview: 'bg-status-blocked' },
+  { label: 'Green', value: 'text-status-complete', preview: 'bg-status-complete' },
+  { label: 'Purple', value: 'text-ai', preview: 'bg-ai' },
 ]
 
 // Sentence-case copy for the appearance mode toggle (no CSS capitalize).
@@ -1014,7 +1013,7 @@ function SyncSection() {
           description="Sync data across devices using Turso (hosted SQLite). Single-user, last-write-wins."
         />
         <div className="flex items-center gap-2">
-          <span className="size-2 rounded-full bg-green-500" />
+          <span className="size-2 rounded-full bg-success" />
           <span className="text-body text-muted-foreground">
             Managed server-side — this page is reading and writing Turso already.
             Credentials and sync settings live on the desktop app.
@@ -1035,7 +1034,7 @@ function SyncSection() {
       <div className="flex items-center gap-2">
         <span className={cn(
           'size-2 rounded-full',
-          isConfigured && isInitialized ? 'bg-green-500' : isConfigured ? 'bg-amber-500' : 'bg-muted-foreground/30',
+          isConfigured && isInitialized ? 'bg-success' : isConfigured ? 'bg-warning' : 'bg-muted-foreground/30',
         )} />
         <span className="text-body text-muted-foreground">
           {isConfigured && isInitialized ? 'Connected' : isConfigured ? 'Configured — needs initialization' : 'Not configured'}
@@ -1053,7 +1052,7 @@ function SyncSection() {
           </div>
           <div className="flex items-center justify-between">
             <span className="text-body text-muted-foreground">Pending changes</span>
-            <span className={cn('text-body font-mono', status.pending_changes > 0 && 'text-amber-500')}>
+            <span className={cn('text-body font-mono', status.pending_changes > 0 && 'text-warning')}>
               {status.pending_changes}
             </span>
           </div>
@@ -1110,7 +1109,7 @@ function SyncSection() {
 
       {/* Initialize Remote Database — only shown when configured but not initialized */}
       {isConfigured && !isInitialized && (
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+        <div className="rounded-md border border-warning/30 bg-warning/5 p-3 space-y-2">
           <p className="text-body text-muted-foreground">
             Remote database needs to be initialized with the app schema before syncing.
           </p>

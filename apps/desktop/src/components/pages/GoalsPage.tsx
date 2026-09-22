@@ -49,8 +49,10 @@ function GoalCard({
   area: LifeArea | null
   onClick: () => void
 }) {
-  const barColor = goal.color || area?.color || '#f59e0b'
   const progressLabel = goal.progress > 0 ? `${goal.progress}%` : 'Not started'
+  /* Identity dot: the goal's own color, falling back to its life area's.
+     The progress fill stays neutral (goals P2-1). */
+  const dotColor = goal.color || area?.color
 
   return (
     <Card
@@ -64,13 +66,15 @@ function GoalCard({
       <CardContent className="space-y-2.5">
         {/* Top row: life area chip + status */}
         <div className="flex items-center justify-between">
-          {area ? (
+          {area || dotColor ? (
             <span className="inline-flex items-center gap-1.5 text-meta-strong text-foreground">
-              <span
-                className="size-1.5 rounded-full shrink-0"
-                style={{ backgroundColor: area.color }}
-              />
-              {area.name}
+              {dotColor && (
+                <span
+                  className="size-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: dotColor }}
+                />
+              )}
+              {area?.name}
             </span>
           ) : (
             <span />
@@ -94,14 +98,13 @@ function GoalCard({
         <div className="flex items-center gap-2">
           <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
             <div
+              /* Neutral fill (goals P2-1): the area color is on the chip dot above;
+                 the bar encodes progress, not category. */
               className={cn(
-                'h-full rounded-full transition-all duration-500',
+                'h-full rounded-full bg-foreground/70 transition-all duration-500',
                 goal.progress >= 100 && 'animate-pulse',
               )}
-              style={{
-                width: `${Math.min(goal.progress, 100)}%`,
-                backgroundColor: barColor,
-              }}
+              style={{ width: `${Math.min(goal.progress, 100)}%` }}
             />
           </div>
           <span className="text-label text-muted-foreground tabular-nums shrink-0">
