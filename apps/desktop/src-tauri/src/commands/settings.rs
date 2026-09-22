@@ -5,6 +5,7 @@ pub use nimble_core::types::SettingRow;
 
 #[tauri::command]
 pub async fn check_setup_complete(app: AppHandle) -> Result<bool, String> {
+    if app.try_state::<crate::backup_runner::BackupRuntime>().is_some_and(|r|r.is_test_profile()) { return Ok(true); }
     // Demo mode runs against a blank throwaway db — never show onboarding.
     if let Ok(dir) = app.path().app_data_dir() {
         if dir.join("demo-mode").exists() {

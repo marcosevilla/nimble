@@ -1,3 +1,6 @@
+mod backup_runner;
+mod backup_git;
+mod backup_state;
 mod commands;
 mod selection;
 mod sync_runner;
@@ -175,14 +178,17 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            let test_root = crate::backup_runner::test_root()?;
+            let isolated_test = test_root.is_some();
             // Logging in ALL builds — the shift-shift permission failure went
             // invisible for a day because release builds had no logger
-            app.handle().plugin(
+            if !isolated_test { app.handle().plugin(
                 tauri_plugin_log::Builder::default()
                     .level(log::LevelFilter::Info)
                     .build(),
-            )?;
+            )?; }
 
+            if !isolated_test {
             // --- Register global shortcut: Cmd+Shift+T ---
             let cmd_shift_t = Shortcut::new(
                 Some(Modifiers::SUPER | Modifiers::SHIFT),
@@ -210,6 +216,7 @@ pub fn run() {
             // current bundle path even after the app is renamed or moved
             let autostart = app.autolaunch();
             let _ = autostart.enable();
+            }
 
             // --- System tray ---
             let show_item = MenuItemBuilder::with_id("show", "Show Nimble")
@@ -259,10 +266,7 @@ pub fn run() {
             // Initialize SQLite database
             let app_handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
-                let app_dir = app_handle
-                    .path()
-                    .app_data_dir()
-                    .expect("failed to get app data dir");
+                let app_dir = test_root.unwrap_or_else(|| app_handle.path().app_data_dir().expect("failed to get app data dir"));
                 std::fs::create_dir_all(&app_dir).expect("failed to create app data dir");
 
                 // Demo mode: a marker file switches the app to a throwaway
@@ -303,12 +307,13 @@ pub fn run() {
                 }
 
                 // Store pool in app state
+                app_handle.manage(crate::backup_runner::BackupRuntime::new(app_dir, db_path, demo_mode, isolated_test));
                 app_handle.manage(pool);
             });
 
             // --- Obsidian vault: launch scan, then debounced watch ---
             app.manage(crate::vault_runner::VaultWatchState(std::sync::Mutex::new(None)));
-            {
+            if !isolated_test {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     crate::vault_runner::start(&handle).await;
@@ -323,7 +328,7 @@ pub fn run() {
             // leaving it out (as this loop did until 2026-08-15) meant local
             // changes reached the cloud only when someone pressed the button on
             // the Settings page, and remote changes never arrived at all.
-            {
+            if !isolated_test {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
@@ -336,6 +341,19 @@ pub fn run() {
                 });
             }
 
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    loop {
+                        interval.tick().await;
+                        if crate::backup_runner::run_if_due(&handle).await.is_err() {
+                            log::warn!("Backup step did not finish; see Backups in Settings");
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -369,6 +387,7 @@ pub fn run() {
                 // coming back to the Mac, rather than on the next 5-minute tick.
                 WindowEvent::Focused(true) => {
                     let app = window.app_handle().clone();
+                    if app.try_state::<crate::backup_runner::BackupRuntime>().is_some_and(|r|r.is_test_profile()) { return; }
                     tauri::async_runtime::spawn(async move {
                         crate::sync_runner::run_if_due_and_emit(&app, 60).await;
                         crate::sync_runner::run_turso_sync_if_due(&app, 60).await;
@@ -378,6 +397,11 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::backup::backup_get_status,
+            commands::backup::backup_run_now,
+            commands::backup::backup_verify_latest,
+            commands::backup::backup_open_folder,
+            commands::backup::backup_configure_remote,
             dismiss_capture_strip,
             settings::check_setup_complete,
             settings::get_setting,
