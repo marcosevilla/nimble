@@ -370,6 +370,9 @@ pub async fn update_local_task(
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
+    let implicit_section_clear = project_id.is_some_and(|target| target != next.project_id.as_str())
+        && section_id.is_none()
+        && next.section_id.is_some();
     if let Some(value) = content {
         next.content = value.to_owned();
     }
@@ -378,6 +381,9 @@ pub async fn update_local_task(
     }
     if let Some(value) = project_id {
         next.project_id = value.to_owned();
+    }
+    if implicit_section_clear {
+        next.section_id = None;
     }
     if let Some(value) = priority {
         next.priority = value;
@@ -490,7 +496,7 @@ pub async fn update_local_task(
     if recurrence_rule.is_some() || clear_recurrence {
         fields_changed.push("recurrence_rule");
     }
-    if section_id.is_some() || clear_section {
+    if section_id.is_some() || clear_section || implicit_section_clear {
         fields_changed.push("section_id");
     }
     if reminder_offset_minutes.is_some() || clear_reminder || clear_due_date || clear_due_time {

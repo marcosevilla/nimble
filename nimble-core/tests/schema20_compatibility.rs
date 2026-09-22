@@ -295,3 +295,41 @@ async fn cancelled_immediate_transaction_releases_writer_lock() {
     pool.close().await;
     std::fs::remove_file(path).unwrap();
 }
+
+#[tokio::test]
+async fn project_move_clears_retained_section_but_accepts_explicit_destination_section() {
+    let (pool, path) = nimble_core::test_util::file_pool().await;
+    let first = nimble_core::db::projects::create_project(&pool, "First", "gray", None)
+        .await.unwrap();
+    let second = nimble_core::db::projects::create_project(&pool, "Second", "gray", None)
+        .await.unwrap();
+    let first_section = nimble_core::db::sections::create_section(&pool, &first.id, "First section")
+        .await.unwrap();
+    let second_section = nimble_core::db::sections::create_section(&pool, &second.id, "Second section")
+        .await.unwrap();
+    let task = create_local_task(&pool, CreateTaskInput {
+        content: "Move me".into(), project_id: Some(first.id.clone()),
+        section_id: Some(first_section.id.clone()), ..Default::default()
+    }).await.unwrap();
+    let same_project = update_local_task(&pool, &task.id, UpdateTaskInput {
+        content: Some("Edited".into()), ..Default::default()
+    }).await.unwrap();
+    assert_eq!(same_project.section_id.as_deref(), Some(first_section.id.as_str()));
+    let moved = update_local_task(&pool, &task.id, UpdateTaskInput {
+        project_id: Some(second.id.clone()), ..Default::default()
+    }).await.unwrap();
+    assert_eq!(moved.project_id, second.id);
+    assert!(moved.section_id.is_none());
+    let changed: Option<String> = sqlx::query_scalar("SELECT changed_columns FROM sync_log WHERE table_name='local_tasks' AND row_id=? AND operation='UPDATE' ORDER BY rowid DESC LIMIT 1")
+        .bind(&task.id).fetch_one(&pool).await.unwrap();
+    assert!(changed.unwrap().contains("section_id"));
+    assert!(update_local_task(&pool, &task.id, UpdateTaskInput {
+        project_id: Some(first.id.clone()), section_id: Some(second_section.id.clone()), ..Default::default()
+    }).await.is_err());
+    let explicit = update_local_task(&pool, &task.id, UpdateTaskInput {
+        project_id: Some(first.id.clone()), section_id: Some(first_section.id.clone()), ..Default::default()
+    }).await.unwrap();
+    assert_eq!(explicit.section_id.as_deref(), Some(first_section.id.as_str()));
+    pool.close().await;
+    std::fs::remove_file(path).unwrap();
+}

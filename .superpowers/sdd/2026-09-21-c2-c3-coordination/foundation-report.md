@@ -17,3 +17,7 @@ Task updates now use one `sqlx::Pool::begin_with("BEGIN IMMEDIATE")` transaction
 The historical recovery test now uses an immutable archive emitted by the original C1 exporter from git commit `254bcf1`, extracted with `git archive` into a temporary synthetic checkout. Generation `22a15675-9a61-40f3-840e-47bb23f279e2` contains an untouched schema-19 snapshot and portable export. SHA-256: snapshot `7524d01215d768200db5f65497f11d8482f6fbe7d18d667044d282bd68eb57b9`, manifest `557e3dcfecb78fee2a599d6f1b2f8a27af40a60649ad745445276a34ad51db88`, data `3e5a1a4db66d17c913ad7b11d2687f312ba1c544d1b61172f50109677e9b97c2`, format `23ef9cb87d32b2ccbd63d71f50295c8d9092fbb4f064425a15463c17e5bb4e89`. The new test copies these bytes into a disposable directory and verifies both restore routes without generating a new archive.
 
 Isolated-target `schema20_compatibility` passed 6/6; frozen C1 archive restore passed. Full core library ran 236 passing tests and one previously known filesystem-watcher test failure under the sandbox (`vault::watcher::tests::watcher_reports_changed_paths_within_the_debounce_window`).
+
+## Review round 2
+
+A task moved to another project without an explicit destination section now clears its retained section in the same transaction; the sync changed-columns list includes `section_id`. Edits within the same project retain the section, and an explicitly supplied section is still checked against the destination project. The focused `schema20_compatibility` suite passed 7/7 using the isolated build target.
