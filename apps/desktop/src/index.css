@@ -125,6 +125,13 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
     }
+  /* Rendered height of PageHeader's main row (40px min-height + 1px
+     border). Anything that sticks or scroll-margins beneath the header
+     (Settings section rail, `scroll-mt`) reads this instead of guessing
+     (settings P2-3). */
+  :root {
+    --page-header-h: 41px;
+    }
   html, body {
     /* Lock the root on both axes — kills the native macOS webview
        rubber-band / elastic overscroll at the window level. Inner

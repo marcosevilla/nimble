@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Meta } from '@/components/shared/typography'
 import { useDataProvider } from '@/services/provider-context'
+import { settingsMessage } from '@/lib/settingsMessage'
+import { isSetupReady } from '@/lib/setupGate'
 
 interface SetupDialogProps {
   open: boolean
@@ -62,9 +64,12 @@ export function SetupDialog({ open, onComplete }: SetupDialogProps) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const allFilled = SETUP_FIELDS.every((f) => values[f.key]?.trim())
+  // Every field is required until the Rust launch check stops reading
+  // ical_feed_url (see lib/setupGate.ts); otherwise setup reappears each launch.
+  const ready = isSetupReady(values)
 
   async function handleSave() {
+    if (saving || !ready) return
     setSaving(true)
     setError(null)
     try {
@@ -76,16 +81,16 @@ export function SetupDialog({ open, onComplete }: SetupDialogProps) {
       }
       onComplete()
     } catch (e) {
-      setError(String(e))
+      setError(settingsMessage(e))
     } finally {
       setSaving(false)
     }
   }
 
   return (
+    // Setup is blocking: no close control, and Escape / outside click are
+    // ignored (open is controlled, no onOpenChange). Only Get started completes.
     <Dialog open={open}>
-      {/* Setup is mandatory today, so no dead close X (settings P2-14). Once
-          setup becomes skippable, wire onOpenChange to onComplete instead. */}
       <DialogContent
         className="sm:max-w-lg"
         showCloseButton={false}
@@ -125,7 +130,7 @@ export function SetupDialog({ open, onComplete }: SetupDialogProps) {
 
           <Button
             onClick={handleSave}
-            disabled={!allFilled || saving}
+            disabled={!ready || saving}
             className="w-full"
           >
             {saving ? 'Saving...' : 'Get started'}

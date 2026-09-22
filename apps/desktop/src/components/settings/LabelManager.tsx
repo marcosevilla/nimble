@@ -21,6 +21,12 @@ import {
 import { IconButton } from '@/components/shared/IconButton'
 import { Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { settingsFailure } from '@/lib/settingsMessage'
+
+function toastFailure(error: unknown) {
+  const failure = settingsFailure(error)
+  toast.error(failure.message, failure.detail ? { description: failure.detail } : undefined)
+}
 
 export function LabelManager() {
   const dp = useDataProvider()
@@ -35,7 +41,7 @@ export function LabelManager() {
     dp.labels
       .list()
       .then(setLabels)
-      .catch((e) => toast.error(`Failed to load labels: ${e}`))
+      .catch((e) => toastFailure(e))
       .finally(() => setLoading(false))
   }, [dp])
 
@@ -51,7 +57,7 @@ export function LabelManager() {
       setNewColor(DEFAULT_LABEL_COLOR)
       setShowForm(false)
     } catch (e) {
-      toast.error(`Failed to create label: ${e}`)
+      toastFailure(e)
     } finally {
       setSaving(false)
     }
@@ -63,7 +69,7 @@ export function LabelManager() {
       setLabels((prev) => prev.map((l) => (l.id === id ? updated : l)))
       return true
     } catch (e) {
-      toast.error(`Failed to rename label: ${e}`)
+      toastFailure(e)
       return false
     }
   }, [dp])
@@ -73,7 +79,7 @@ export function LabelManager() {
       const updated = await dp.labels.update(id, { color })
       setLabels((prev) => prev.map((l) => (l.id === id ? updated : l)))
     } catch (e) {
-      toast.error(`Failed to update label color: ${e}`)
+      toastFailure(e)
     }
   }, [dp])
 
@@ -83,7 +89,7 @@ export function LabelManager() {
       setLabels((prev) => prev.filter((l) => l.id !== label.id))
       toast.success(`Label deleted: "${label.name}"`)
     } catch (e) {
-      toast.error(`Failed to delete label: ${e}`)
+      toastFailure(e)
     }
   }, [dp])
 
@@ -97,7 +103,7 @@ export function LabelManager() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {/* Label list */}
       <div className="space-y-0.5">
         {labels.map((label) => (
@@ -116,7 +122,7 @@ export function LabelManager() {
 
       {/* Add form */}
       {showForm ? (
-        <div className="space-y-3 rounded-md border p-3">
+        <div className="space-y-4 rounded-md border p-4">
           <Input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
@@ -217,6 +223,9 @@ function LabelRow({
         </PopoverContent>
       </Popover>
 
+      {/* Inline rename (settings P2-12): named for AT, keyboard focus ring
+          from the global :focus-visible rule, a hover underline so the row
+          reads as editable. Grouping by ENERGY/TIME/TYPE/CREATIVE is C4. */}
       <input
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -225,7 +234,8 @@ function LabelRow({
           if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur() }
           if (e.key === 'Escape') { setDraft(label.name); (e.target as HTMLInputElement).blur() }
         }}
-        className="flex-1 min-w-0 bg-transparent text-body outline-none"
+        aria-label={`Rename ${label.name}`}
+        className="flex-1 min-w-0 rounded-md bg-transparent px-1 text-body underline-offset-4 decoration-muted-foreground-subtle hover:underline focus-visible:no-underline"
       />
 
       <AlertDialog>
