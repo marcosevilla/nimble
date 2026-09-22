@@ -1,5 +1,7 @@
 # Focus Queue → Nimble: integration plan
 
+> Historical proposal (2026-08-20), superseded by the [2026-09-22 Focus Queue absorption architecture spec](superpowers/specs/2026-09-22-focus-queue-absorption-design.md), which awaits written review. Do not execute this older plan: its session-table, task-table, duration-field, sync and test-runner assumptions are stale. Retained as design history.
+
 *Written 2026-08-20. Source project: `~/Developer/todoist-focus` (GitHub: `marcosevilla/todoist-focus`). Read `todoist-focus/docs/BUILD-STORY.md` for the history and `todoist-focus/CLAUDE.md` for the 19 gotchas.*
 
 ## Goal

@@ -1,6 +1,14 @@
 # Nimble — Open loops
 
-Updated 2026-09-22 (design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
+Updated 2026-09-22 (Focus Queue architecture approved; written spec awaiting review; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
+
+## Focus Queue absorption — 2026-09-22 (written review gate)
+
+- [x] Marco approved the architecture: native tasks, deliberately ordered durable queue, one authoritative durable timer/session engine across main and companion windows, full shipped Focus Queue capability coverage, optional Nimble Pomodoro, previewed import and reversible daily trial. Follow-up: preserve Focus Queue layout, interaction and information hierarchy as much as practical within Nimble's current design system.
+- [x] Draft and self-review the [replacement architecture spec](docs/superpowers/specs/2026-09-22-focus-queue-absorption-design.md). The August integration plan is historical; it incorrectly assumes existing session persistence and conflates scheduling duration with focus budgets.
+- [ ] **Next: Marco reviews the written spec**, particularly the proposed shared-queue/source-view behavior, pause-on-sleep recovery, desktop-only live ownership/web read-only support, temporary opt-in Todoist time-comment bridge, and listed UI/interaction deviations. These defaults were not previously approved.
+- [ ] After written-spec approval, prepare a separate bounded implementation plan for review and execution selection. No product implementation, install, live import/replay, external writes or app retirement performed in this documentation stage.
+- [ ] Before future migration, verify source/installed parity, pause/quit Focus Queue for final snapshot, preview/deduplicate all saved state and reconcile pending close/comment intents. Roughly two weeks of accepted daily use precedes a separate reversible app-retirement decision; Todoist C1–C5 and Instinct ownership remain unchanged.
 
 ## Design facelift — 2026-09-22 (loop 1, PAUSED before Stage C)
 
@@ -96,7 +104,7 @@ Queued for Marco (Rust or decisions):
 - Durable conflict journal is explicitly deferred from C1; production restore activation and remote reconciliation remain required before the broader Todoist cutover. Private online backups are configured at `marcosevilla/nimble-backups`.
 
 - Native Expo app remains dormant; the web client is the phone path.
-- [Focus Queue integration](docs/focus-queue-integration-plan.md) is planned separately and is outside the Todoist-cutover critical path. Pomodoro rounds versus timeboxes remains undecided.
+- [Focus Queue absorption](docs/superpowers/specs/2026-09-22-focus-queue-absorption-design.md) has architecture approval and awaits written-spec review (see above). It remains separate from the Todoist-cutover critical path. Count-up/timeboxes and optional Pomodoro share one ledger; the August integration plan is historical.
 - Keep Todoist operational until the safety, reminder, agent-access, and trial-period gates pass.
 
 ## What is here
