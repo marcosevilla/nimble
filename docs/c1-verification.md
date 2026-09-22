@@ -32,3 +32,9 @@ See [recovery runbook](backup-recovery.md) for the offline commands and activati
 ## Standalone test app follow-up
 
 Built with `tauri build --debug --bundles app` plus a temporary configuration override. Bundle: `target/debug/bundle/macos/Nimble Backup Test.app`; distinct identifier `com.marcosevilla.nimble-backup-test`. Build and code-signature verification passed. Its Info.plist pins `NIMBLE_BACKUP_TEST_ROOT` to `/private/tmp/nimble-backup-test-owylwbx_`, a marked empty synthetic profile. All three native backup controls were exercised successfully. No production installation or upload occurred. The app remains open for Marco to inspect.
+
+## Authorized production update — 2026-09-21
+
+Marco requested “update my app.” Built the release from `e196d1c` with the existing `Marco Task App Dev` signing identity; signing required an unsandboxed retry. Signature verification passed. Quit Nimble, preserved its app-data directory, old app bundle and WebKit cache in the private rollback folder `~/Library/Application Support/Nimble Rollbacks/20260921-194254-c1`, installed the verified bundle in `/Applications/Nimble.app`, and reopened it. The installed executable hash matches the release artifact. Existing local task/project counts match the saved pre-update copy. Persisted local backup success: `2026-09-22T02:42:59.935462+00:00`. No private remote was configured or uploaded.
+
+An initial pre-swap verification used the wrong `tasks` table name and stopped safely; it left an additional app-data copy at `20260921-194229-c1`. The corrected check uses `local_tasks` and `projects`. Both rollback directories are retained. Git branch integration remains separate and unperformed.

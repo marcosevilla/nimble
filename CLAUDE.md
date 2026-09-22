@@ -165,6 +165,6 @@ nimble/
 
 ## Current State
 
-Read `NEXT.md` for current work and remaining acceptance gates. C1 backup/restore is implemented on `codex/c1-backup-restore`; see `docs/c1-verification.md` and `docs/backup-recovery.md`. Native Settings smoke passed in a standalone synthetic test bundle; production activation is still open. The installed app has not been replaced.
+Read `NEXT.md` for current work and remaining acceptance gates. C1 backup/restore is implemented on `codex/c1-backup-restore`; see `docs/c1-verification.md` and `docs/backup-recovery.md`. Native Settings smoke passed in a standalone synthetic test bundle; the signed release was installed in `/Applications/Nimble.app` on 2026-09-21 and completed its first real local backup. Private online archive setup and Git integration remain open.
 
 Backups run at 02:00 local while the app is running, with launch/five-minute catch-up. Development builds disable backups unless a marked synthetic temporary profile is selected with `NIMBLE_BACKUP_TEST_ROOT`; demo mode disables backups. Full local snapshots contain credentials and must remain private. Only reviewed portable JSON goes to a verified private GitHub repository. Recovery creates a new isolated directory and never replaces live data or reconnects integrations.
