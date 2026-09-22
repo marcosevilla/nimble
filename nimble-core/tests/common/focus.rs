@@ -6,18 +6,20 @@ use sqlx::SqlitePool;
 pub struct Harness {
     pub pool: SqlitePool,
     pub service: FocusService,
+    pub clock: std::sync::Arc<ManualClock>,
 }
 
 impl Harness {
     pub async fn new() -> Self {
         let pool = nimble_core::test_util::test_pool().await;
-        let service = FocusService::with_clock(
-            pool.clone(),
-            "test-device".into(),
-            std::sync::Arc::new(ManualClock::default()),
-        );
+        let clock = std::sync::Arc::new(ManualClock::default());
+        let service = FocusService::with_clock(pool.clone(), "test-device".into(), clock.clone());
         service.initialize().await.unwrap();
-        Self { pool, service }
+        Self {
+            pool,
+            service,
+            clock,
+        }
     }
 
     pub async fn task(&self, title: &str) -> String {

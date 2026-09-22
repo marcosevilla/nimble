@@ -120,6 +120,118 @@ async fn native_delete_undo_restores_parent_and_child_behind_running_entry() {
 }
 
 #[tokio::test]
+async fn undo_restores_paused_first_before_next_and_expires_after_ten_seconds() {
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    let b = h.task("B").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![a.clone(), b],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    h.send(FocusAction::Pause).await.unwrap();
+    let deleted = h
+        .service
+        .execute_native_task(NativeTaskCommand {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            action: NativeTaskAction::Delete { id: a.clone() },
+        })
+        .await
+        .unwrap();
+    let token = deleted.undo_token.unwrap();
+    let (issued, expires): (String, String) =
+        sqlx::query_as("SELECT issued_at,expires_at FROM focus_undo WHERE token=?")
+            .bind(&token)
+            .fetch_one(&h.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (chrono::DateTime::parse_from_rfc3339(&expires).unwrap()
+            - chrono::DateTime::parse_from_rfc3339(&issued).unwrap())
+        .num_seconds(),
+        10
+    );
+    h.send(FocusAction::UndoDelete { token }).await.unwrap();
+    let s = h.snapshot().await;
+    assert_eq!(s.queue[0].task_id, a);
+    assert_eq!(s.selected_occurrence_id, Some(oid));
+    assert_ne!(
+        s.session.map(|session| session.status),
+        Some(FocusStatus::Running)
+    );
+
+    let deleted = h
+        .service
+        .execute_native_task(NativeTaskCommand {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            action: NativeTaskAction::Delete { id: a },
+        })
+        .await
+        .unwrap();
+    let token = deleted.undo_token.unwrap();
+    sqlx::query("UPDATE focus_undo SET expires_at=? WHERE token=?")
+        .bind((chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339())
+        .bind(&token)
+        .execute(&h.pool)
+        .await
+        .unwrap();
+    assert!(h
+        .send(FocusAction::UndoDelete { token })
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("expired"));
+}
+
+#[tokio::test]
+async fn undo_uses_surviving_neighbors_after_intervening_reorder() {
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    let b = h.task("B").await;
+    let c = h.task("C").await;
+    let d = h.task("D").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![a.clone(), b.clone(), c.clone(), d.clone()],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let q = h.snapshot().await.queue;
+    let deleted = h
+        .service
+        .execute_native_task(NativeTaskCommand {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            action: NativeTaskAction::Delete { id: b.clone() },
+        })
+        .await
+        .unwrap();
+    let token = deleted.undo_token.unwrap();
+    h.send(FocusAction::Reorder {
+        entry_ids: vec![q[3].id.clone(), q[0].id.clone(), q[2].id.clone()],
+    })
+    .await
+    .unwrap();
+    h.send(FocusAction::UndoDelete { token }).await.unwrap();
+    let tasks: Vec<String> = h
+        .snapshot()
+        .await
+        .queue
+        .iter()
+        .map(|e| e.task_id.clone())
+        .collect();
+    assert_eq!(tasks, vec![d, a, b, c]);
+}
+
+#[tokio::test]
 async fn parent_completion_cascades_queue_and_preserves_child_history() {
     let h = fixture::Harness::new().await;
     let parent = h.task("parent").await;
@@ -193,6 +305,49 @@ async fn simultaneous_start_and_reorder_do_not_lose_an_entry() {
     let (a, b) = tokio::join!(h.service.execute(start), h.service.execute(reorder));
     assert_eq!(a.is_ok() as u8 + b.is_ok() as u8, 1);
     assert_eq!(h.snapshot().await.queue.len(), 2);
+}
+
+#[tokio::test]
+async fn reorder_below_running_keeps_clock_but_new_first_pauses_old() {
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    let b = h.task("B").await;
+    let c = h.task("C").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![a, b, c],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let q = h.snapshot().await.queue;
+    h.send(FocusAction::Start {
+        occurrence_id: q[0].occurrence_id.clone(),
+    })
+    .await
+    .unwrap();
+    h.advance(3_000).await;
+    h.send(FocusAction::Reorder {
+        entry_ids: vec![q[0].id.clone(), q[2].id.clone(), q[1].id.clone()],
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        h.snapshot().await.session.unwrap().status,
+        FocusStatus::Running
+    );
+    h.send(FocusAction::Reorder {
+        entry_ids: vec![q[1].id.clone(), q[0].id.clone(), q[2].id.clone()],
+    })
+    .await
+    .unwrap();
+    let s = h.snapshot().await;
+    assert_eq!(s.selected_occurrence_id, Some(q[1].occurrence_id.clone()));
+    assert_ne!(
+        s.session.map(|session| session.status),
+        Some(FocusStatus::Running)
+    );
+    assert_eq!(s.totals[&q[0].occurrence_id], 3_000);
 }
 
 #[tokio::test]

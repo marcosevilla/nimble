@@ -25,6 +25,10 @@ use crate::{
 fn err(code: &str, detail: &str) -> crate::Error {
     crate::Error::Other(format!("{code}: {detail}"))
 }
+fn is_storage_error(error: &crate::Error) -> bool {
+    matches!(error, crate::Error::Database(_) | crate::Error::Io(_))
+        || matches!(error,crate::Error::Other(message) if message.starts_with("storage: "))
+}
 /// Stable wire classification for Tauri and agent RPC wrappers.
 pub fn focus_error(error: &crate::Error) -> FocusError {
     let raw = error.to_string();
@@ -95,6 +99,7 @@ pub enum NativeTaskAction {
         id: String,
         status: String,
         note: Option<String>,
+        expected_due_date: Option<String>,
     },
     Delete {
         id: String,
@@ -113,6 +118,14 @@ pub struct NativeTaskReply {
     pub undo_token: Option<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct UndoEntry {
+    position: usize,
+    entry: FocusEntry,
+    previous_entry_id: Option<String>,
+    next_entry_id: Option<String>,
+}
+
 struct Anchor {
     sampled_ms: u64,
     frozen: bool,
@@ -129,36 +142,39 @@ pub struct FocusService {
 /// guard exists, then passes exact TaskEffects to commit. Network fetches must
 /// finish before acquiring it. Dropping it rolls back without moving the clock.
 pub struct FocusTaskWriteGuard<'a> {
-    tx: sqlx::Transaction<'a, sqlx::Sqlite>,
+    tx: Option<sqlx::Transaction<'a, sqlx::Sqlite>>,
     anchor: tokio::sync::MutexGuard<'a, Anchor>,
     sampled_ms: u64,
+    committed: bool,
 }
 impl FocusTaskWriteGuard<'_> {
     pub fn connection(&mut self) -> &mut SqliteConnection {
-        &mut self.tx
+        self.tx
+            .as_mut()
+            .expect("uncommitted focus task transaction")
     }
     pub async fn commit(mut self, effects: &TaskEffects) -> crate::Result<FocusSnapshot> {
-        if let Err(e) = reconcile_task_effects_owned_tx(&mut self.tx, effects).await {
-            if matches!(e, crate::Error::Database(_)) {
-                self.anchor.frozen = true;
-            }
-            return Err(e);
-        }
-        let snapshot = match snapshot_tx(&mut self.tx).await {
-            Ok(s) => s,
-            Err(e) => {
-                if matches!(e, crate::Error::Database(_)) {
-                    self.anchor.frozen = true;
-                }
-                return Err(e);
-            }
-        };
-        if let Err(e) = self.tx.commit().await {
-            self.anchor.frozen = true;
-            return Err(e.into());
-        }
+        let tx = self
+            .tx
+            .as_mut()
+            .expect("uncommitted focus task transaction");
+        reconcile_task_effects_owned_tx(tx, effects).await?;
+        let snapshot = snapshot_tx(tx).await?;
+        self.tx
+            .take()
+            .expect("uncommitted focus task transaction")
+            .commit()
+            .await?;
         self.anchor.sampled_ms = self.sampled_ms;
+        self.committed = true;
         Ok(snapshot)
+    }
+}
+impl Drop for FocusTaskWriteGuard<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.anchor.frozen = true;
+        }
     }
 }
 
@@ -233,6 +249,26 @@ impl FocusService {
         let mut conn = self.pool.acquire().await?;
         snapshot_tx(&mut conn).await
     }
+    async fn recover_storage_failure(&self, guard: &mut Anchor) {
+        guard.frozen = true;
+        if let Ok(mut tx) = self.pool.begin_with("BEGIN IMMEDIATE").await {
+            let result = async {
+                ensure_process_tx(&mut tx, guard.process_generation).await?;
+                pause_at_checkpoint_tx(
+                    &mut tx,
+                    "storage failure; paused at last durable checkpoint",
+                )
+                .await?;
+                tx.commit().await?;
+                Ok::<(), crate::Error>(())
+            }
+            .await;
+            if result.is_ok() {
+                guard.sampled_ms = self.clock.elapsed_ms();
+                guard.frozen = false;
+            }
+        }
+    }
     pub async fn begin_task_write(&self) -> crate::Result<FocusTaskWriteGuard<'_>> {
         let mut anchor = self.lock.lock().await;
         if anchor.frozen {
@@ -252,13 +288,25 @@ impl FocusService {
             return Err(e);
         }
         Ok(FocusTaskWriteGuard {
-            tx,
+            tx: Some(tx),
             anchor,
             sampled_ms,
+            committed: false,
         })
     }
     pub async fn execute(&self, command: FocusCommand) -> crate::Result<FocusReply> {
         let mut guard = self.lock.lock().await;
+        let result = self.execute_inner(&mut guard, command).await;
+        if result.as_ref().err().is_some_and(is_storage_error) {
+            self.recover_storage_failure(&mut guard).await;
+        }
+        result
+    }
+    async fn execute_inner(
+        &self,
+        guard: &mut Anchor,
+        command: FocusCommand,
+    ) -> crate::Result<FocusReply> {
         if command.command_id.is_empty() {
             return Err(err("invalid", "empty command id"));
         }
@@ -326,6 +374,19 @@ impl FocusService {
             guard.frozen = true;
             return Err(e);
         }
+        if delta > 40_000
+            && before
+                .session
+                .as_ref()
+                .is_some_and(|s| s.status == FocusStatus::Running)
+        {
+            tx.commit().await?;
+            guard.sampled_ms = sampled;
+            return Err(err(
+                "needs_review",
+                "suspension gap paused focus; refresh before a new action",
+            ));
+        }
         let mut entries = before.queue.clone();
         let mut selected = before.selected_occurrence_id.clone();
         let mut changed_queue = false;
@@ -380,6 +441,28 @@ impl FocusService {
         wall_time: String,
     ) -> crate::Result<FocusSnapshot> {
         let mut guard = self.lock.lock().await;
+        let result = self
+            .checkpoint_inner(&mut guard, elapsed_ms, wall_time)
+            .await;
+        if result.as_ref().err().is_some_and(is_storage_error) {
+            self.recover_storage_failure(&mut guard).await;
+        }
+        result
+    }
+    async fn checkpoint_inner(
+        &self,
+        guard: &mut Anchor,
+        elapsed_ms: u64,
+        wall_time: String,
+    ) -> crate::Result<FocusSnapshot> {
+        if guard.frozen {
+            self.recover_storage_failure(guard).await;
+            if guard.frozen {
+                return Err(err("storage", "focus recovery persistence unavailable"));
+            }
+            let mut conn = self.pool.acquire().await?;
+            return snapshot_tx(&mut conn).await;
+        }
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         ensure_process_tx(&mut tx, guard.process_generation).await?;
         if let Err(e) = settle_tx(&mut tx, elapsed_ms, &wall_time).await {
@@ -397,6 +480,17 @@ impl FocusService {
     }
     pub async fn interrupt(&self, reason: &str) -> crate::Result<FocusSnapshot> {
         let mut guard = self.lock.lock().await;
+        let result = self.interrupt_inner(&mut guard, reason).await;
+        if result.as_ref().err().is_some_and(is_storage_error) {
+            self.recover_storage_failure(&mut guard).await;
+        }
+        result
+    }
+    async fn interrupt_inner(
+        &self,
+        guard: &mut Anchor,
+        reason: &str,
+    ) -> crate::Result<FocusSnapshot> {
         let sampled = self.clock.elapsed_ms();
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         ensure_process_tx(&mut tx, guard.process_generation).await?;
@@ -464,6 +558,17 @@ impl FocusService {
         command: NativeTaskCommand,
     ) -> crate::Result<NativeTaskReply> {
         let mut guard = self.lock.lock().await;
+        let result = self.execute_native_task_inner(&mut guard, command).await;
+        if result.as_ref().err().is_some_and(is_storage_error) {
+            self.recover_storage_failure(&mut guard).await;
+        }
+        result
+    }
+    async fn execute_native_task_inner(
+        &self,
+        guard: &mut Anchor,
+        command: NativeTaskCommand,
+    ) -> crate::Result<NativeTaskReply> {
         let request = serde_json::to_vec(&command).map_err(|e| err("invalid", &e.to_string()))?;
         let hash = blake3::hash(&request).to_hex().to_string();
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -511,7 +616,28 @@ impl FocusService {
                 id,
                 status,
                 note: _,
+                expected_due_date,
             } => {
+                if status == "complete" {
+                    let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+                        "SELECT due_date,recurrence_rule FROM local_tasks WHERE id=?",
+                    )
+                    .bind(&id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    let Some((due, rule)) = row else {
+                        return Err(err("not_found", "task missing"));
+                    };
+                    if due.is_some()
+                        && rule
+                            .as_deref()
+                            .and_then(crate::recurrence::parse_rule)
+                            .is_some()
+                        && expected_due_date.as_ref() != due.as_ref()
+                    {
+                        return Err(err("stale_occurrence", "recurring due identity changed"));
+                    }
+                }
                 let effects = task_tx::set_status_tx(
                     &mut tx,
                     &id,
@@ -558,7 +684,6 @@ impl FocusService {
             return Err(e.into());
         }
         guard.sampled_ms = sampled;
-        drop(guard);
         match action_for_log {
             NativeTaskAction::Create { .. } => {
                 if let Some(task) = &reply.task {
@@ -568,7 +693,9 @@ impl FocusService {
             NativeTaskAction::Update { id, .. } => {
                 activity::log_activity(&self.pool, "task_updated", Some(&id), None).await
             }
-            NativeTaskAction::SetStatus { id, status, note } => {
+            NativeTaskAction::SetStatus {
+                id, status, note, ..
+            } => {
                 if let Some(recurrence) = &effects.recurrence {
                     activity::log_activity(&self.pool,"task_recurred",Some(&id),Some(serde_json::json!({"from":recurrence.before_due,"to":recurrence.after_due}))).await;
                 } else if !effects.changed.is_empty() {
@@ -839,6 +966,22 @@ async fn pause_live_tx(
     }
     Ok(())
 }
+
+async fn pause_at_checkpoint_tx(conn: &mut SqliteConnection, reason: &str) -> crate::Result<()> {
+    let live: Option<String> =
+        sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+            .fetch_one(&mut *conn)
+            .await?;
+    if let Some(sid) = live {
+        sqlx::query("UPDATE focus_segments SET closed_at=checkpoint_at,close_reason=? WHERE session_id=? AND closed_at IS NULL")
+            .bind(reason).bind(&sid).execute(&mut *conn).await?;
+        sqlx::query("UPDATE focus_sessions SET status='paused',session_revision=session_revision+1 WHERE id=?")
+            .bind(&sid).execute(&mut *conn).await?;
+        sqlx::query("UPDATE focus_runtime SET live_session_id=NULL,recovery_reason=?,engine_revision=engine_revision+1 WHERE id=1")
+            .bind(reason).execute(&mut *conn).await?;
+    }
+    Ok(())
+}
 async fn open_segment_tx(
     conn: &mut SqliteConnection,
     sid: &str,
@@ -948,14 +1091,9 @@ async fn apply_action_tx(
                     .await?;
             let first = entries.first().map(|e| e.occurrence_id.clone());
             if live.is_some() && *selected != first {
-                return Err(err(
-                    "conflict",
-                    "cannot move the running entry from first position",
-                ));
+                pause_live_tx(conn, "reordered", stamp).await?;
             }
-            if live.is_none() {
-                *selected = first;
-            }
+            *selected = first;
         }
         FocusAction::Promote { occurrence_id } => {
             if !entries.iter().any(|e| &e.occurrence_id == occurrence_id) {
@@ -1141,19 +1279,26 @@ async fn apply_action_tx(
                 .iter_mut()
                 .find(|e| &e.occurrence_id == occurrence_id)
                 .ok_or_else(|| err("stale_occurrence", "not queued"))?;
+            let mode_changed = entry.config.mode != config.mode;
+            if mode_changed && selected.as_ref() == Some(occurrence_id) {
+                pause_live_tx(conn, "mode_changed", stamp).await?;
+            }
             entry.config = config.clone();
             *changed = true;
             if let Some(session) = read_session_tx(conn, occurrence_id).await? {
-                sqlx::query("UPDATE focus_sessions SET mode=?,config_json=? WHERE id=?")
-                    .bind(
-                        serde_json::to_string(&config.mode)
-                            .unwrap()
-                            .trim_matches('"'),
-                    )
-                    .bind(serde_json::to_string(config).unwrap())
-                    .bind(session.id)
-                    .execute(&mut *conn)
-                    .await?;
+                if mode_changed {
+                    sqlx::query("UPDATE focus_sessions SET status='ended',ended_at=?,end_reason='mode_changed' WHERE id=?")
+                        .bind(stamp).bind(session.id).execute(&mut *conn).await?;
+                } else {
+                    sqlx::query("UPDATE focus_sessions SET config_json=? WHERE id=?")
+                        .bind(
+                            serde_json::to_string(config)
+                                .map_err(|e| err("invalid", &e.to_string()))?,
+                        )
+                        .bind(session.id)
+                        .execute(&mut *conn)
+                        .await?;
+                }
             }
         }
         FocusAction::StartBreak => {
@@ -1165,6 +1310,9 @@ async fn apply_action_tx(
                 .ok_or_else(|| err("not_found", "no session"))?;
             if session.phase != FocusPhase::RoundReady {
                 return Err(err("invalid", "break not ready"));
+            }
+            if session.round >= session.config.rounds {
+                return Err(err("invalid", "final round has no next break"));
             }
             sqlx::query("UPDATE focus_sessions SET phase='break',round_break_ms=0 WHERE id=?")
                 .bind(&session.id)
@@ -1179,7 +1327,7 @@ async fn apply_action_tx(
             let session = read_session_tx(conn, oid)
                 .await?
                 .ok_or_else(|| err("not_found", "no session"))?;
-            if session.phase != FocusPhase::Break && session.phase != FocusPhase::WorkReady {
+            if session.phase != FocusPhase::Break {
                 return Err(err("invalid", "not in break"));
             }
             pause_live_tx(conn, "break_ended", stamp).await?;
@@ -1203,14 +1351,18 @@ async fn apply_action_tx(
         FocusAction::UndoDelete { token } => {
             let row=sqlx::query("SELECT task_snapshot_json,queue_entry_json,occurrence_ids_json,expires_at,consumed FROM focus_undo WHERE token=?")
                 .bind(token).fetch_optional(&mut *conn).await?.ok_or_else(||err("not_found","undo token missing"))?;
+            let expires = chrono::DateTime::parse_from_rfc3339(&row.get::<String, _>("expires_at"))
+                .map_err(|e| err("storage", &e.to_string()))?;
             if row.get::<i64, _>("consumed") != 0
-                || row.get::<String, _>("expires_at").as_str() < stamp
+                || expires
+                    < chrono::DateTime::parse_from_rfc3339(stamp)
+                        .map_err(|e| err("storage", &e.to_string()))?
             {
                 return Err(err("stale_occurrence", "undo token expired or used"));
             }
             let tasks: Vec<LocalTask> = serde_json::from_str(row.get("task_snapshot_json"))
                 .map_err(|e| err("storage", &e.to_string()))?;
-            let saved: Vec<(usize, FocusEntry)> = serde_json::from_str(row.get("queue_entry_json"))
+            let saved: Vec<UndoEntry> = serde_json::from_str(row.get("queue_entry_json"))
                 .map_err(|e| err("storage", &e.to_string()))?;
             let ids: Vec<String> = serde_json::from_str(row.get("occurrence_ids_json"))
                 .map_err(|e| err("storage", &e.to_string()))?;
@@ -1226,21 +1378,47 @@ async fn apply_action_tx(
                         .bind(task_id).bind(oid).execute(&mut *conn).await?;
                 }
             }
-            // Restore behind the active entry, retaining current selection and clock.
-            for (position, entry) in saved {
+            // Only a running slot pins first place. Paused work can yield its
+            // original position; neighbor IDs survive an intervening reorder.
+            let live: Option<String> =
+                sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+                    .fetch_one(&mut *conn)
+                    .await?;
+            let mut last_at = None::<usize>;
+            for item in saved {
+                let entry = item.entry;
                 if entries
                     .iter()
                     .any(|e| e.occurrence_id == entry.occurrence_id)
                 {
                     continue;
                 }
-                let at = position
-                    .max(if selected.is_some() { 1 } else { 0 })
-                    .min(entries.len());
+                let mut at = if let Some(ref prev) = item.previous_entry_id {
+                    entries
+                        .iter()
+                        .position(|e| &e.id == prev)
+                        .map(|index| index + 1)
+                } else {
+                    None
+                }
+                .or_else(|| {
+                    item.next_entry_id
+                        .as_ref()
+                        .and_then(|next| entries.iter().position(|e| &e.id == next))
+                })
+                .unwrap_or(item.position.min(entries.len()));
+                if let Some(previous) = last_at {
+                    at = at.max(previous + 1);
+                }
+                if live.is_some() {
+                    at = at.max(1);
+                }
+                at = at.min(entries.len());
                 entries.insert(at, entry);
+                last_at = Some(at);
                 *changed = true;
             }
-            if selected.is_none() {
+            if live.is_none() {
                 *selected = entries.first().map(|e| e.occurrence_id.clone());
             }
             sqlx::query("UPDATE focus_undo SET consumed=1 WHERE token=?")
@@ -1386,12 +1564,28 @@ async fn capture_undo_tx(
         .transpose()?
         .unwrap_or_default();
     let ids: HashSet<&str> = effects.deleted.iter().map(|t| t.id.as_str()).collect();
-    let saved: Vec<(usize, FocusEntry)> = entries
-        .into_iter()
+    let saved: Vec<UndoEntry> = entries
+        .iter()
         .enumerate()
         .filter(|(_, e)| ids.contains(e.task_id.as_str()))
+        .map(|(position, entry)| UndoEntry {
+            position,
+            entry: entry.clone(),
+            previous_entry_id: entries[..position]
+                .iter()
+                .rev()
+                .find(|e| !ids.contains(e.task_id.as_str()))
+                .map(|e| e.id.clone()),
+            next_entry_id: entries[position + 1..]
+                .iter()
+                .find(|e| !ids.contains(e.task_id.as_str()))
+                .map(|e| e.id.clone()),
+        })
         .collect();
-    let oids: Vec<String> = saved.iter().map(|(_, e)| e.occurrence_id.clone()).collect();
+    let oids: Vec<String> = saved
+        .iter()
+        .map(|item| item.entry.occurrence_id.clone())
+        .collect();
     let token = id();
     let issued = Utc::now();
     sqlx::query("INSERT INTO focus_undo(token,original_task_id,task_snapshot_json,queue_entry_json,occurrence_ids_json,issued_at,expires_at) VALUES(?,?,?,?,?,?,?)")
@@ -1399,7 +1593,7 @@ async fn capture_undo_tx(
         .bind(serde_json::to_string(&effects.deleted).map_err(|e|err("storage",&e.to_string()))?)
         .bind(serde_json::to_string(&saved).map_err(|e|err("storage",&e.to_string()))?)
         .bind(serde_json::to_string(&oids).map_err(|e|err("storage",&e.to_string()))?)
-        .bind(issued.to_rfc3339()).bind((issued+chrono::Duration::minutes(10)).to_rfc3339())
+        .bind(issued.to_rfc3339()).bind((issued+chrono::Duration::seconds(10)).to_rfc3339())
         .execute(&mut *conn).await?;
     Ok(token)
 }

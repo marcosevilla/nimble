@@ -160,6 +160,56 @@ async fn recurring_completion_freezes_old_occurrence_and_does_not_autoqueue_next
 }
 
 #[tokio::test]
+async fn distinct_native_completion_ids_cannot_advance_same_recurring_due_twice() {
+    let h = fixture::Harness::new().await;
+    let task = nimble_core::db::tasks::create_local_task(
+        &h.pool,
+        CreateTaskInput {
+            content: "repeat".into(),
+            due_date: Some("2026-09-22".into()),
+            recurrence_rule: Some("every day".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let action = || NativeTaskAction::SetStatus {
+        id: task.id.clone(),
+        status: "complete".into(),
+        note: None,
+        expected_due_date: Some("2026-09-22".into()),
+    };
+    h.service
+        .execute_native_task(NativeTaskCommand {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            action: action(),
+        })
+        .await
+        .unwrap();
+    let after_first: String = sqlx::query_scalar("SELECT due_date FROM local_tasks WHERE id=?")
+        .bind(&task.id)
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+    assert_ne!(after_first, "2026-09-22");
+    let second = h
+        .service
+        .execute_native_task(NativeTaskCommand {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            action: action(),
+        })
+        .await
+        .unwrap_err();
+    assert!(second.to_string().contains("stale_occurrence"));
+    let after_second: String = sqlx::query_scalar("SELECT due_date FROM local_tasks WHERE id=?")
+        .bind(&task.id)
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+    assert_eq!(after_second, after_first);
+}
+
+#[tokio::test]
 async fn receipt_write_failure_rolls_back_task_completion_and_time() {
     let h = fixture::Harness::new().await;
     let a = h.task("A").await;
@@ -218,6 +268,80 @@ async fn suspension_gap_keeps_last_checkpoint_and_pauses() {
     assert_eq!(s.totals[&oid], 20_000);
     assert_eq!(s.session.unwrap().status, FocusStatus::Paused);
     assert!(s.recovery_reason.is_some());
+}
+
+#[tokio::test]
+async fn command_after_sixty_second_gap_commits_pause_and_rejects_old_start() {
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![a],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    h.advance(8_000).await;
+    h.clock.advance(60_000);
+    let error = h
+        .send(FocusAction::Start {
+            occurrence_id: oid.clone(),
+        })
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("needs_review"));
+    let s = h.snapshot().await;
+    assert_eq!(s.totals[&oid], 8_000);
+    assert_eq!(s.session.unwrap().status, FocusStatus::Paused);
+    assert!(s.recovery_reason.is_some());
+}
+
+#[tokio::test]
+async fn failed_queue_write_discards_sampled_delta_and_recovers_paused() {
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![a],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    h.advance(10_000).await;
+    h.clock.advance(5_000);
+    sqlx::query("CREATE TRIGGER fail_queue_update BEFORE UPDATE ON focus_queue_state BEGIN SELECT RAISE(ABORT, 'synthetic queue disk error'); END")
+        .execute(&h.pool).await.unwrap();
+    assert!(h
+        .send(FocusAction::Configure {
+            occurrence_id: oid.clone(),
+            config: FocusConfig {
+                mode: FocusMode::Timebox,
+                budget_ms: Some(60_000),
+                work_ms: 1_500_000,
+                break_ms: 300_000,
+                rounds: 4
+            }
+        })
+        .await
+        .is_err());
+    let s = h.snapshot().await;
+    assert_eq!(s.totals[&oid], 10_000);
+    assert_eq!(s.session.unwrap().status, FocusStatus::Paused);
+    assert!(s.recovery_reason.unwrap().contains("storage failure"));
+    h.advance(20_000).await;
+    assert_eq!(h.snapshot().await.totals[&oid], 10_000);
 }
 
 #[tokio::test]
@@ -321,6 +445,117 @@ async fn three_rounds_preserve_paused_break_and_only_credit_work() {
     assert_eq!(s.session.as_ref().unwrap().break_ms, 120_000);
     assert_eq!(s.session.as_ref().unwrap().round, 3);
     assert_eq!(s.session.as_ref().unwrap().phase, FocusPhase::RoundReady);
+}
+
+#[tokio::test]
+async fn mode_switch_during_break_ends_old_session_and_preserves_work_total() {
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![a],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Configure {
+        occurrence_id: oid.clone(),
+        config: FocusConfig {
+            mode: FocusMode::Pomodoro,
+            budget_ms: None,
+            work_ms: 60_000,
+            break_ms: 60_000,
+            rounds: 3,
+        },
+    })
+    .await
+    .unwrap();
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    h.advance(40_000).await;
+    h.advance(20_000).await;
+    h.send(FocusAction::StartBreak).await.unwrap();
+    h.advance(20_000).await;
+    h.send(FocusAction::Configure {
+        occurrence_id: oid.clone(),
+        config: FocusConfig {
+            mode: FocusMode::CountUp,
+            budget_ms: None,
+            work_ms: 1_500_000,
+            break_ms: 300_000,
+            rounds: 4,
+        },
+    })
+    .await
+    .unwrap();
+    let s = h.snapshot().await;
+    assert_eq!(s.totals[&oid], 60_000);
+    assert!(s.session.is_none());
+    h.advance(20_000).await;
+    assert_eq!(h.snapshot().await.totals[&oid], 60_000);
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    let session = h.snapshot().await.session.unwrap();
+    assert_eq!(session.round, 1);
+    assert_eq!(session.phase, FocusPhase::Work);
+}
+
+#[tokio::test]
+async fn natural_break_boundary_cannot_advance_round_twice_or_start_final_break() {
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![a],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Configure {
+        occurrence_id: oid.clone(),
+        config: FocusConfig {
+            mode: FocusMode::Pomodoro,
+            budget_ms: None,
+            work_ms: 60_000,
+            break_ms: 60_000,
+            rounds: 2,
+        },
+    })
+    .await
+    .unwrap();
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    h.advance(40_000).await;
+    h.advance(20_000).await;
+    h.send(FocusAction::StartBreak).await.unwrap();
+    h.advance(40_000).await;
+    h.advance(20_000).await;
+    assert_eq!(h.snapshot().await.session.as_ref().unwrap().round, 2);
+    assert!(h.send(FocusAction::EndBreak).await.is_err());
+    assert_eq!(h.snapshot().await.session.as_ref().unwrap().round, 2);
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    h.advance(40_000).await;
+    h.advance(20_000).await;
+    assert!(h.send(FocusAction::StartBreak).await.is_err());
+    assert_eq!(
+        h.snapshot().await.session.unwrap().phase,
+        FocusPhase::RoundReady
+    );
 }
 
 #[tokio::test]
@@ -438,6 +673,13 @@ async fn budget_change_preserves_recorded_time() {
     })
     .await
     .unwrap();
+    assert_eq!(h.snapshot().await.totals[&oid], 25_000);
+    assert!(h.snapshot().await.session.is_none());
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
     h.advance(30_000).await;
     assert_eq!(h.snapshot().await.totals[&oid], 55_000);
 }
@@ -460,6 +702,7 @@ async fn native_task_receipt_replay_and_failure_are_atomic() {
             id: a.clone(),
             status: "complete".into(),
             note: None,
+            expected_due_date: None,
         },
     };
     let first = h.service.execute_native_task(cmd.clone()).await.unwrap();
@@ -487,6 +730,7 @@ async fn native_task_receipt_replay_and_failure_are_atomic() {
             id: b.clone(),
             status: "complete".into(),
             note: None,
+            expected_due_date: None,
         },
     };
     sqlx::query("CREATE TRIGGER fail_native_receipt BEFORE INSERT ON focus_command_receipts BEGIN SELECT RAISE(ABORT, 'synthetic receipt failure'); END")
@@ -540,4 +784,33 @@ async fn remote_guard_reconciles_atomically_after_checkpoint() {
             .total_ms,
         4_000
     );
+}
+
+#[tokio::test]
+async fn abandoned_task_write_guard_freezes_uncommitted_time() {
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![a],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    h.advance(10_000).await;
+    h.clock.advance(5_000);
+    drop(h.service.begin_task_write().await.unwrap());
+    let recovered = h
+        .service
+        .checkpoint(20_000, chrono::Utc::now().to_rfc3339())
+        .await
+        .unwrap();
+    assert_eq!(recovered.totals[&oid], 10_000);
+    assert_eq!(recovered.session.unwrap().status, FocusStatus::Paused);
 }
