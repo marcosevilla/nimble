@@ -524,7 +524,7 @@
 }
 @keyframes timer-glow {
   0% { background-color: transparent; box-shadow: none; }
-  30% { background-color: oklch(0.85 0.1 145 / 15%); box-shadow: 0 0 30px oklch(0.85 0.1 145 / 20%); }
+  30% { background-color: oklch(from var(--success) l c h / 15%); box-shadow: 0 0 30px oklch(from var(--success) l c h / 20%); }
   100% { background-color: transparent; box-shadow: none; }
 }
 

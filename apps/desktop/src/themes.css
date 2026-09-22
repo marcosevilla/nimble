@@ -30,7 +30,10 @@
   --input: oklch(0.915 0.005 75);
   --ring: oklch(0.58 0.01 60); /* 4.23:1 on background (was 0.708 → 2.56:1) */
   --accent-blue: oklch(0.65 0.15 250);
-  --success: oklch(0.62 0.14 145);
+  /* Text-grade success (facelift B1): 0.62 measured 3.39:1 on --background —
+     icon-only. 0.52 measures 5.11:1 on --background, 5.19:1 on --card,
+     4.69:1 on --secondary; --success-fg on it 4.90:1. */
+  --success: oklch(0.52 0.14 145);
   --success-fg: oklch(0.98 0 0);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);

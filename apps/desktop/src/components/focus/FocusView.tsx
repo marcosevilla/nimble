@@ -113,7 +113,7 @@ export function FocusView() {
           <span className={cn(
             'text-timer',
             isPaused && 'animate-pulse text-muted-foreground',
-            timerDone && 'text-green-500',
+            timerDone && 'text-success',
           )}>
             {formatTime(displayTime)}
           </span>
@@ -128,7 +128,7 @@ export function FocusView() {
                 className={cn(
                   'size-2 rounded-full transition-colors',
                   i < currentPomodoro - 1
-                    ? 'bg-green-500'
+                    ? 'bg-success'
                     : i === currentPomodoro - 1
                       ? 'bg-accent-blue'
                       : 'bg-muted/40',
@@ -148,8 +148,8 @@ export function FocusView() {
 
         {/* Timer done prompt */}
         {timerDone && currentPomodoro < config.totalPomodoros && (
-          <div className="rounded-lg bg-green-500/10 p-3 animate-in fade-in duration-300">
-            <p className="text-body text-green-600 dark:text-green-400">
+          <div className="rounded-lg bg-success/10 p-3 animate-in fade-in duration-300">
+            <p className="text-body text-success">
               Round {currentPomodoro} complete!
             </p>
             <Button size="sm" className="mt-2" onClick={startBreak}>
@@ -171,7 +171,7 @@ export function FocusView() {
               Pause
             </Button>
           )}
-          <Button size="sm" onClick={handleComplete} className="gap-1.5 bg-green-600 hover:bg-green-700 text-white">
+          <Button size="sm" variant="success" onClick={handleComplete} className="gap-1.5">
             <Check className="size-3.5" />
             Complete
           </Button>

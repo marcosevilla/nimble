@@ -15,7 +15,16 @@ const PARTICLES = Array.from({ length: 18 }, (_, i) => {
   const distance = 60 + Math.random() * 40
   const size = 4 + Math.random() * 4
   const delay = Math.random() * 0.15
-  const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4']
+  // Theme tokens at three opacities (session P1-4) so the burst re-themes
+  // with the palette instead of spraying Tailwind's cool 500s on a warm page.
+  const colors = [
+    'var(--success)',
+    'var(--accent-blue)',
+    'var(--foreground)',
+    'oklch(from var(--success) l c h / 0.6)',
+    'oklch(from var(--accent-blue) l c h / 0.6)',
+    'oklch(from var(--foreground) l c h / 0.35)',
+  ]
   const color = colors[i % colors.length]
   return { angle, distance, size, delay, color }
 })
@@ -79,7 +88,7 @@ export function FocusCelebration() {
 
         {/* Checkmark */}
         <div className="relative mx-auto flex size-20 items-center justify-center rounded-full timer-glow">
-          <svg viewBox="0 0 24 24" className="size-10 text-green-500">
+          <svg viewBox="0 0 24 24" className="size-10 text-success">
             <path
               d="M5 13l4 4L19 7"
               fill="none"

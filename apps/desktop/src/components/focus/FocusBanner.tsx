@@ -33,7 +33,7 @@ export function FocusBanner() {
       <span className={cn(
         'font-mono text-body tabular-nums',
         isPaused && 'animate-pulse text-muted-foreground',
-        isOnBreak && 'text-orange-500',
+        isOnBreak && 'text-warning',
       )}>
         {formatTime(displayTime)}
       </span>
