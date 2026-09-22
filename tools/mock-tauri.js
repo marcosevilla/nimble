@@ -774,6 +774,13 @@
     review_complete: true,
   }
 
+  // ?review=open forces the first-open guided review flow (audit screenshots).
+  try {
+    if (new URLSearchParams(window.location.search).get('review') === 'open') {
+      DAILY_STATE.review_complete = false
+    }
+  } catch (e) { /* noop */ }
+
   // ── Obsidian today.md ────────────────────────────────────────────────────
 
   var TODAY_MD = {
@@ -791,6 +798,156 @@
       { line_number: 16, checked: false, text: 'Stretch' },
       { line_number: 17, checked: true, text: '10k steps' },
     ],
+  }
+
+  // ── Reminders / Google Calendar (C2) ──────────────────────────────────
+
+  var REMINDER_STATUS = { permission: 'granted', timezone: 'America/Los_Angeles', errorCode: null }
+
+  var REMINDER_CATCH_UP = [
+    {
+      occurrenceKey: 'task-05@' + iso(TODAY, '09:00:00'),
+      taskId: 'task-05',
+      title: 'Ship v1.5: quick-capture polish',
+      scheduledAt: iso(TODAY, '09:00:00'),
+      errorCode: null,
+    },
+    {
+      occurrenceKey: 'task-06@needs-attention',
+      taskId: 'task-06',
+      title: 'Design empty states for Goals page',
+      scheduledAt: iso(TODAY, '00:00:00'),
+      errorCode: 'schedule_needs_attention',
+    },
+  ]
+  var ACKNOWLEDGED = {}
+
+  // Fresh install: OAuth client not configured, nothing connected.
+  var GOOGLE_STATUS = {
+    connected: false,
+    clientSecretConfigured: false,
+    calendarLabel: null,
+    timezone: 'America/Los_Angeles',
+    errorCode: null,
+  }
+
+  // ── Obsidian vault notes (12 of the 1,104 indexed) ───────────────────
+
+  function vaultNote(o) {
+    var fm = '---\n' + Object.keys(o.frontmatter).map(function (k) {
+      var v = o.frontmatter[k]
+      return k + ': ' + (Array.isArray(v) ? '[' + v.join(', ') + ']' : v)
+    }).join('\n') + '\n---\n\n'
+    return {
+      id: o.id,
+      path: o.path,
+      title: o.title,
+      frontmatter: o.frontmatter,
+      content: fm + o.body,
+      updated_at: o.updated_at,
+    }
+  }
+
+  var VAULT_NOTES = [
+    vaultNote({
+      id: 'vault-001', path: 'journal/2026-08-01.md', title: '2026-08-01',
+      frontmatter: { type: 'daily', tags: ['journal'], energy: 7 },
+      updated_at: iso(TODAY, '07:52:00'),
+      body: '# Saturday, August 1\n\nSlow start, coffee on the stoop. Long run this morning before it gets hot.\n\n## Intentions\n\n- [ ] Case study work block — [[Canary check-in case study]]\n- [ ] Charge camera batteries for [[Turnstile at the Warfield]]\n- [x] Morning pages\n\n## Notes\n\nRe-read [[Design principles]] before the portfolio pass. The empty-states thinking from [[Goals page empty states]] applies to the case study intro too.\n',
+    }),
+    vaultNote({
+      id: 'vault-002', path: 'projects/Canary check-in case study.md', title: 'Canary check-in case study',
+      frontmatter: { type: 'project', status: 'active', tags: ['portfolio', 'design'] },
+      updated_at: iso('2026-07-30', '16:10:00'),
+      body: '# Canary check-in case study\n\nRework the narrative around the mobile check-in flow.\n\n## Outline\n\n1. Lead with the outcome: **34% drop in front-desk calls**\n2. Research — 12 front-desk interviews, 3 hotels\n3. Flows — arrival, ID capture, room-ready notification\n4. Visual pass — see [[Design principles]]\n\n## Open questions\n\n- How much of the metrics story can be shared publicly?\n- Pair with [[Portfolio site rebuild]] timeline\n',
+    }),
+    vaultNote({
+      id: 'vault-003', path: 'resources/Design principles.md', title: 'Design principles',
+      frontmatter: { type: 'reference', tags: ['design', 'craft'] },
+      updated_at: iso('2026-07-12', '11:30:00'),
+      body: '# Design principles\n\nWorking list, revised whenever something bites.\n\n- **No guilt UI.** Neutral framing for overdue work; never shame.\n- **One decision per screen.** Batch choices, reduce overhead.\n- **Keyboard first, mouse welcome.**\n- **Warm, not loud.** Muted palette, one accent.\n\nApplied in [[Canary check-in case study]] and the [[Nimble]] roadmap.\n',
+    }),
+    vaultNote({
+      id: 'vault-004', path: 'projects/Nimble.md', title: 'Nimble',
+      frontmatter: { type: 'project', status: 'active', tags: ['code', 'adhd'] },
+      updated_at: iso('2026-07-31', '22:05:00'),
+      body: '# Nimble\n\nDaily triage app. Todoist replacement decisions are locked — see [[Todoist replacement decisions]].\n\n## This week\n\n- [ ] C1 safety net: backups + export\n- [ ] Mock 7 Figma surfaces\n- [ ] Task-detail inline editors\n\n## Principles\n\nPulls from [[Design principles]]. Empty states per [[Goals page empty states]].\n',
+    }),
+    vaultNote({
+      id: 'vault-005', path: 'projects/Todoist replacement decisions.md', title: 'Todoist replacement decisions',
+      frontmatter: { type: 'decision', date: '2026-08-25', tags: ['nimble'] },
+      updated_at: iso('2026-07-29', '14:40:00'),
+      body: '# Todoist replacement decisions\n\nR1–R5 retired for C1–C5.\n\n| Track | Scope | Hours |\n| --- | --- | --- |\n| C1 | Backups / export | 6 |\n| C2 | Reminders via Google Calendar OAuth | 10 |\n| C3 | `dt` CLI | 5 |\n\nTodoist downgrades to free at cutover — never cancels. Context in [[Nimble]].\n',
+    }),
+    vaultNote({
+      id: 'vault-006', path: 'photography/Turnstile at the Warfield.md', title: 'Turnstile at the Warfield',
+      frontmatter: { type: 'gig', date: '2026-08-01', venue: 'The Warfield', tags: ['photo', 'concert'] },
+      updated_at: iso('2026-07-31', '18:20:00'),
+      body: '# Turnstile at the Warfield\n\nDoors 7pm, photo pit first three songs.\n\n## Kit\n\n- [ ] Two bodies, 24-70 + 70-200\n- [ ] Batteries charged\n- [ ] Cards formatted\n\nDeliver edits by Monday per [[Photo delivery checklist]].\n',
+    }),
+    vaultNote({
+      id: 'vault-007', path: 'photography/Photo delivery checklist.md', title: 'Photo delivery checklist',
+      frontmatter: { type: 'checklist', tags: ['photo', 'process'] },
+      updated_at: iso('2026-06-18', '09:15:00'),
+      body: '# Photo delivery checklist\n\n1. Cull in Photo Mechanic\n2. Edit in Lightroom, export 2048px\n3. Watermark + renumber\n4. Upload gallery, send link\n\nUsed after every gig — most recently [[Turnstile at the Warfield]].\n',
+    }),
+    vaultNote({
+      id: 'vault-008', path: 'resources/Goals page empty states.md', title: 'Goals page empty states',
+      frontmatter: { type: 'research', tags: ['design', 'nimble'] },
+      updated_at: iso('2026-07-22', '13:05:00'),
+      body: '# Goals page empty states\n\nPositive, forward-looking copy. Never "you have no goals".\n\n- "Pick one thing to move this quarter."\n- Show a single primary action, not a grid of options.\n\nInformed by [[Design principles]]; ships in [[Nimble]].\n',
+    }),
+    vaultNote({
+      id: 'vault-009', path: 'projects/Portfolio site rebuild.md', title: 'Portfolio site rebuild',
+      frontmatter: { type: 'project', status: 'paused', tags: ['portfolio'] },
+      updated_at: iso('2026-07-08', '10:00:00'),
+      body: '# Portfolio site rebuild\n\nAstro + MDX. Paused until [[Canary check-in case study]] is written.\n\n## Pages\n\n- Home\n- Work (case studies)\n- Photo\n- About\n',
+    }),
+    vaultNote({
+      id: 'vault-010', path: 'journal/2026-07-31.md', title: '2026-07-31',
+      frontmatter: { type: 'daily', tags: ['journal'], energy: 5 },
+      updated_at: iso('2026-07-31', '21:48:00'),
+      body: '# Friday, July 31\n\nPaid the quarterly taxes, replied to the Fillmore pass email. Low energy afternoon.\n\n- [x] Taxes\n- [x] Fillmore reply\n- [ ] Case study outline — pushed to [[2026-08-01]]\n',
+    }),
+    vaultNote({
+      id: 'vault-011', path: 'resources/Job hunt direction.md', title: 'Job hunt direction',
+      frontmatter: { type: 'note', tags: ['career'], updated: '2026-07-28' },
+      updated_at: iso('2026-07-28', '17:33:00'),
+      body: '# Job hunt direction\n\nSenior IC product design at a creative-tools company, photo- or music-adjacent.\n\n## Signals\n\n- Design-led, a head of design to learn from\n- AI-forward but not AI-only\n\nPortfolio depends on [[Canary check-in case study]].\n',
+    }),
+    vaultNote({
+      id: 'vault-012', path: 'inbox/Quick capture 2026-07-30.md', title: 'Quick capture 2026-07-30',
+      frontmatter: { type: 'capture', tags: ['inbox'] },
+      updated_at: iso('2026-07-30', '08:12:00'),
+      body: '# Quick capture 2026-07-30\n\n- Idea: keyboard-only triage for the inbox — see [[Nimble]]\n- Book: *Show Your Work*\n- Call the dentist\n',
+    }),
+  ]
+
+  function findVaultNote(path) {
+    if (!path) return null
+    var p = String(path).toLowerCase()
+    return VAULT_NOTES.filter(function (n) {
+      return n.path.toLowerCase() === p || n.id === path
+    })[0] || null
+  }
+
+  function vaultSummary(n) {
+    return { id: n.id, path: n.path, title: n.title, updated_at: n.updated_at }
+  }
+
+  function vaultDetail(n) {
+    return {
+      id: n.id,
+      path: n.path,
+      title: n.title,
+      content: n.content,
+      frontmatter_json: JSON.stringify(n.frontmatter),
+      mtime: n.updated_at,
+      size: n.content.length,
+      hash: 'sha256:' + String(hash01(n.content)).slice(2, 10).padEnd(8, '0') + 'f0e1d2c3',
+      updated_at: n.updated_at,
+      deleted_at: null,
+    }
   }
 
   // ── Activity log ─────────────────────────────────────────────────────────
@@ -1401,6 +1558,143 @@
     // Demo mode
     demo_status: function () { return false },
     demo_toggle: function () { return null },
+
+    // ── Capture strip (C-track) ────────────────────────────────────────────
+    dismiss_capture_strip: function () { return null },
+
+    // ── Reminders (C2, macOS notifications) ────────────────────────────────
+    reminder_get_status: function () { return REMINDER_STATUS },
+    reminder_request_permission: function () { return REMINDER_STATUS },
+    reminder_list_catch_up: function () {
+      return REMINDER_CATCH_UP.filter(function (i) { return !ACKNOWLEDGED[i.occurrenceKey] })
+    },
+    reminder_acknowledge: function (args) {
+      if (args && args.occurrenceKey) ACKNOWLEDGED[args.occurrenceKey] = true
+      return null
+    },
+
+    // ── Google Calendar (C2, OAuth) — fresh install: not configured ────────
+    google_calendar_status: function () { return GOOGLE_STATUS },
+    google_calendar_configure: function () {
+      return Object.assign({}, GOOGLE_STATUS, { clientSecretConfigured: true })
+    },
+    google_calendar_connect: function () {
+      return Object.assign({}, GOOGLE_STATUS, {
+        connected: true,
+        clientSecretConfigured: true,
+        calendarLabel: 'marco@gmail.com',
+      })
+    },
+    google_calendar_disconnect: function () { return GOOGLE_STATUS },
+    google_calendar_sync_now: function () { return { changedTaskIds: [], errorCode: null } },
+    google_calendar_list_conflicts: function () { return [] },
+    google_calendar_resolve_conflict: function () { return null },
+
+    // ── Markdown migrations (Settings → Data) ──────────────────────────────
+    preview_tasks_markdown_migration: function () {
+      return { total: 14, convertible: 3, already_plain: 11, flagged: [] }
+    },
+    migrate_tasks_to_markdown: function () {
+      return {
+        converted: 3,
+        skipped_plain: 11,
+        backup_path: '/Users/marcosevilla/Library/Application Support/nimble/backups/tasks-pre-md-' + TODAY + '.json',
+      }
+    },
+    preview_docs_markdown_migration: function () {
+      return { total: 6, convertible: 2, already_plain: 4, flagged: [] }
+    },
+    migrate_docs_to_markdown: function () {
+      return {
+        converted: 2,
+        skipped_plain: 4,
+        backup_path: '/Users/marcosevilla/Library/Application Support/nimble/backups/docs-pre-md-' + TODAY + '.json',
+      }
+    },
+
+    // ── Obsidian vault library (plan 2; read-only in the UI) ──────────────
+    vault_status: function () {
+      return {
+        configured: true,
+        root: SETTINGS.obsidian_vault_path,
+        note_count: 1104,
+        last_scan_at: iso(TODAY, '08:04:12'),
+        last_error: null,
+        excludes: ['.obsidian', '.trash', 'templates'],
+      }
+    },
+    vault_rescan: function () {
+      return { scanned: 1104, indexed: 3, unchanged: 1101, removed: 0, skipped: 2, walk_errors: 0 }
+    },
+    vault_list_notes: function () { return VAULT_NOTES.map(vaultSummary) },
+    vault_get_note: function (args) {
+      var n = findVaultNote(args && args.path)
+      return n ? vaultDetail(n) : null
+    },
+    vault_search: function (args) {
+      var q = String((args && args.query) || '').trim().toLowerCase()
+      var limit = (args && args.limit) || 20
+      if (!q) return []
+      return VAULT_NOTES.filter(function (n) {
+        return (
+          n.title.toLowerCase().indexOf(q) >= 0 ||
+          n.path.toLowerCase().indexOf(q) >= 0 ||
+          n.content.toLowerCase().indexOf(q) >= 0
+        )
+      })
+        .slice(0, limit)
+        .map(function (n) {
+          var body = n.content.replace(/^---[\s\S]*?---\n/, '')
+          var idx = body.toLowerCase().indexOf(q)
+          var start = Math.max(0, idx - 40)
+          var snippet = (start > 0 ? '…' : '') + body.slice(start, start + 120).replace(/\n+/g, ' ') + '…'
+          return { id: n.id, path: n.path, title: n.title, snippet: snippet }
+        })
+    },
+    vault_backlinks: function (args) {
+      var target = findVaultNote(args && args.path)
+      if (!target) return []
+      var stem = target.title.toLowerCase()
+      var hits = VAULT_NOTES.filter(function (n) {
+        return n.id !== target.id && n.content.toLowerCase().indexOf('[[' + stem) >= 0
+      })
+      // Every note gets at least two backlinks so the panel never looks empty.
+      if (hits.length < 2) {
+        hits = hits.concat(
+          VAULT_NOTES.filter(function (n) { return n.id !== target.id && hits.indexOf(n) < 0 }).slice(0, 2 - hits.length),
+        )
+      }
+      return hits.map(vaultSummary)
+    },
+    vault_resolve_link: function (args) {
+      var to = String((args && args.toPath) || '').replace(/\.md$/, '').toLowerCase()
+      var n = VAULT_NOTES.filter(function (x) {
+        return x.title.toLowerCase() === to || x.path.replace(/\.md$/, '').toLowerCase() === to
+      })[0]
+      return n ? vaultSummary(n) : null
+    },
+    vault_save_note: function (args) {
+      var n = findVaultNote(args && args.path)
+      if (n && args.content != null) {
+        n.content = args.content
+        n.updated_at = iso(TODAY, '09:41:00')
+      }
+      return { kind: 'written', hash: 'sha256:' + hash01(String((args && args.content) || '')).toFixed(3).slice(2) + 'a1b2c3' }
+    },
+    vault_create_note: function (args) {
+      var path = (args && args.path) || 'inbox/Untitled.md'
+      var n = {
+        id: newId('vault'),
+        path: path,
+        title: path.split('/').pop().replace(/\.md$/, ''),
+        frontmatter: { created: TODAY },
+        content: (args && args.content) || '# ' + path.split('/').pop().replace(/\.md$/, '') + '\n\n',
+        updated_at: iso(TODAY, '09:42:00'),
+      }
+      VAULT_NOTES.unshift(n)
+      return vaultDetail(n)
+    },
+    vault_open_in_obsidian: function () { return null },
   }
 
   // ── Tauri internals ──────────────────────────────────────────────────────
@@ -1453,7 +1747,7 @@
         return Promise.resolve(null)
       }
     }
-    console.debug('[mock-tauri] unmocked command (resolving null):', cmd, args)
+    console.warn('[mock-tauri] unhandled command', cmd, args)
     return Promise.resolve(null)
   }
 
