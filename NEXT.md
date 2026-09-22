@@ -1,14 +1,15 @@
 # Nimble — Open loops
 
-Updated 2026-09-22 (Focus Queue spec approved; implementation plan ready and execution authorized; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
+Updated 2026-09-22 (Focus Queue implementation Tasks 1–4 reviewed; PAUSED before Task 5 at Marco’s request; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
 
-## Focus Queue absorption — 2026-09-22 (implementation authorized)
+## Focus Queue absorption — 2026-09-22 (PAUSED after Task 4)
 
 - [x] Marco approved the architecture: native tasks, deliberately ordered durable queue, one authoritative durable timer/session engine across main and companion windows, full shipped Focus Queue capability coverage, optional Nimble Pomodoro, previewed import and reversible daily trial. Follow-up: preserve Focus Queue layout, interaction and information hierarchy as much as practical within Nimble's current design system.
 - [x] Draft and self-review the [replacement architecture spec](docs/superpowers/specs/2026-09-22-focus-queue-absorption-design.md). The August integration plan is historical; it incorrectly assumes existing session persistence and conflates scheduling duration with focus budgets.
 - [x] Marco approved the full written spec, including §2 defaults and §4 source-UI mapping/deviations.
 - [x] Prepare the [12-task implementation plan](docs/superpowers/plans/2026-09-22-focus-queue-absorption.md), with schema/transaction/timer/provider/UI/companion/import/delivery gates. Marco explicitly authorized execution immediately after planning; no repeat plan/method approval needed.
-- [ ] Execute in an isolated checkout with staged subagent implementation/review, preserve the Focus Queue interaction hierarchy, and record synthetic/native verification. Live migration, installation, uncertain external writes and retirement retain their separate gates.
+- [x] Implement and independently review Tasks 1–4: schema/domain, atomic native task transactions, durable queue/timer engine, backup/safe restore/ordered replication. Code through `0a6117e`; [verification evidence](docs/focus-queue-verification.md) records tests and review fixes.
+- [ ] **PAUSED at Marco’s request after Task 4. Resume with Task 5:** one shared desktop service/provider, native/CLI/sync mutation routing and events. Continue Tasks 5–12 in the existing `codex/focus-absorption` checkout at `/Users/marcosevilla/Developer/marco-task-app/.worktrees/nimble-focus-absorption`; do not restart Tasks 1–4. The ignored `.superpowers/sdd/2026-09-22-focus-queue-absorption/` ledger and Task 3/4 reports preserve API and test handoffs. No Task 5 implementation, merge, push, deployment or installation occurred. Live migration, uncertain external writes and retirement retain their separate gates.
 - [ ] Before future migration, verify source/installed parity, pause/quit Focus Queue for final snapshot, preview/deduplicate all saved state and reconcile pending close/comment intents. Roughly two weeks of accepted daily use precedes a separate reversible app-retirement decision; Todoist C1–C5 and Instinct ownership remain unchanged.
 
 ## Design facelift — 2026-09-22 (loop 1, PAUSED before Stage C)
