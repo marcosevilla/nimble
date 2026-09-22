@@ -1373,6 +1373,7 @@ export function SettingsPage() {
   const [resetting, setResetting] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const [checking, setChecking] = useState(false)
+  const [maintenanceOpen, setMaintenanceOpen] = useState(false)
 
   const backupSupported = dp.backup.supported
   const remindersSupported = dp.reminders.supported
@@ -1786,7 +1787,10 @@ export function SettingsPage() {
           title="Maintenance"
           description="One-time migrations and sync tools. Nothing here is part of a normal day."
         />
-        <details className="group rounded-lg border">
+        <details
+          className="group rounded-lg border"
+          onToggle={(e) => setMaintenanceOpen(e.currentTarget.open)}
+        >
           <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg px-4 py-2 text-body transition-colors duration-(--transition-fast) hover:bg-muted [&::-webkit-details-marker]:hidden">
             Maintenance tools
             <ChevronDown className="size-3 text-muted-foreground transition-transform duration-(--transition-fast) group-open:rotate-180" />
@@ -1821,7 +1825,9 @@ export function SettingsPage() {
 
             <div id="sync-tools" className="space-y-4">
               <SectionHeader as="h3" title="Sync tools" />
-              <SyncMaintenance />
+              {/* Mounted per expand so it re-reads sync status each time
+                  (Turso may have been set up under Sync since). */}
+              {maintenanceOpen && <SyncMaintenance />}
             </div>
           </div>
         </details>
@@ -1861,7 +1867,9 @@ export function SettingsPage() {
       </nav>
 
       {/* Main content — same array, same order */}
-      <div className="flex-1 min-w-0 space-y-8">
+      {/* Section offset on every direct child, so the standalone Backups /
+          Reminders / Phone alerts components land like the rest. */}
+      <div className="flex-1 min-w-0 space-y-8 [&>section]:scroll-mt-[calc(var(--page-header-h)+2rem)]">
         {sections.map((s, i) => (
           <Fragment key={s.id}>
             {i > 0 && !s.standalone && <Separator />}

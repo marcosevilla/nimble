@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Meta } from '@/components/shared/typography'
 import { useDataProvider } from '@/services/provider-context'
 import { settingsMessage } from '@/lib/settingsMessage'
+import { isSetupReady } from '@/lib/setupGate'
 
 interface SetupDialogProps {
   open: boolean
@@ -33,6 +34,12 @@ const SETUP_FIELDS: SetupField[] = [
     placeholder: 'Paste your token here',
     help: 'Settings → Integrations → Developer → API token',
     type: 'password',
+  },
+  {
+    key: 'ical_feed_url',
+    label: 'Google Calendar iCal URL',
+    placeholder: 'https://calendar.google.com/calendar/ical/...',
+    help: 'Google Calendar → Settings → Calendar → "Secret address in iCal format"',
   },
   {
     key: 'obsidian_vault_path',
@@ -57,10 +64,12 @@ export function SetupDialog({ open, onComplete }: SetupDialogProps) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Nothing is required (setup P1-4): the vault path has a default and every
-  // field can be filled later under Settings. Whatever IS filled gets saved.
+  // Every field is required until the Rust launch check stops reading
+  // ical_feed_url (see lib/setupGate.ts); otherwise setup reappears each launch.
+  const ready = isSetupReady(values)
+
   async function handleSave() {
-    if (saving) return
+    if (saving || !ready) return
     setSaving(true)
     setError(null)
     try {
@@ -79,11 +88,12 @@ export function SetupDialog({ open, onComplete }: SetupDialogProps) {
   }
 
   return (
-    // Setup is skippable, so the close control and Escape are real: both
-    // run the same save-what's-filled path as the button (settings P2-14).
-    <Dialog open={open} onOpenChange={(next) => { if (!next) void handleSave() }}>
+    // Setup is blocking: no close control, and Escape / outside click are
+    // ignored (open is controlled, no onOpenChange). Only Get started completes.
+    <Dialog open={open}>
       <DialogContent
         className="sm:max-w-lg"
+        showCloseButton={false}
       >
         <DialogHeader>
           <DialogTitle className="text-title">Welcome to Nimble</DialogTitle>
@@ -120,12 +130,11 @@ export function SetupDialog({ open, onComplete }: SetupDialogProps) {
 
           <Button
             onClick={handleSave}
-            disabled={saving}
+            disabled={!ready || saving}
             className="w-full"
           >
             {saving ? 'Saving...' : 'Get started'}
           </Button>
-          <Meta as="p" className="text-center">You can add these later in Settings.</Meta>
         </div>
       </DialogContent>
     </Dialog>
