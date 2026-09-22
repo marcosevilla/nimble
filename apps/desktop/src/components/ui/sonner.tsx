@@ -9,7 +9,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       theme={theme}
-      className="toaster group"
+      className="toaster group font-sans"
+      // Clear of the floating help button (size-9 at bottom-4/right-4 → 52px tall band).
+      offset={{ bottom: 64, right: 24 }}
       icons={{
         success: (
           <CircleCheckIcon className="size-4" />
@@ -33,6 +35,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
+          "--shadow": "var(--shadow-popover)",
         } as React.CSSProperties
       }
       toastOptions={{
