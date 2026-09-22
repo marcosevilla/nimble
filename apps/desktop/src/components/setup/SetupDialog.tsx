@@ -28,7 +28,7 @@ interface SetupField {
 const SETUP_FIELDS: SetupField[] = [
   {
     key: 'todoist_api_token',
-    label: 'Todoist API Token',
+    label: 'Todoist API token',
     placeholder: 'Paste your token here',
     help: 'Settings → Integrations → Developer → API token',
     type: 'password',
@@ -41,13 +41,13 @@ const SETUP_FIELDS: SetupField[] = [
   },
   {
     key: 'obsidian_vault_path',
-    label: 'Obsidian Vault Path',
+    label: 'Obsidian vault path',
     placeholder: '~/Obsidian/marcowits',
     help: 'Absolute path to your vault folder',
   },
   {
     key: 'anthropic_api_key',
-    label: 'Anthropic API Key',
+    label: 'Anthropic API key',
     placeholder: 'sk-ant-...',
     help: 'console.anthropic.com → API Keys',
     type: 'password',
@@ -84,8 +84,11 @@ export function SetupDialog({ open, onComplete }: SetupDialogProps) {
 
   return (
     <Dialog open={open}>
+      {/* Setup is mandatory today, so no dead close X (settings P2-14). Once
+          setup becomes skippable, wire onOpenChange to onComplete instead. */}
       <DialogContent
         className="sm:max-w-lg"
+        showCloseButton={false}
       >
         <DialogHeader>
           <DialogTitle className="text-title">Welcome to Nimble</DialogTitle>
@@ -125,7 +128,7 @@ export function SetupDialog({ open, onComplete }: SetupDialogProps) {
             disabled={!allFilled || saving}
             className="w-full"
           >
-            {saving ? 'Saving...' : 'Get Started'}
+            {saving ? 'Saving...' : 'Get started'}
           </Button>
         </div>
       </DialogContent>

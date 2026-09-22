@@ -74,14 +74,14 @@ interface FieldState {
 const INTEGRATIONS_FIELDS: SettingField[] = [
   {
     key: 'todoist_api_token',
-    label: 'Todoist API Token',
+    label: 'Todoist API token',
     placeholder: 'Paste your token here',
     help: 'Settings \u2192 Integrations \u2192 Developer \u2192 API token',
     type: 'password',
   },
   {
     key: 'anthropic_api_key',
-    label: 'Anthropic API Key',
+    label: 'Anthropic API key',
     placeholder: 'sk-ant-...',
     help: 'console.anthropic.com \u2192 API Keys',
     type: 'password',
@@ -91,7 +91,7 @@ const INTEGRATIONS_FIELDS: SettingField[] = [
 const OBSIDIAN_FIELDS: SettingField[] = [
   {
     key: 'obsidian_vault_path',
-    label: 'Vault Path',
+    label: 'Vault path',
     placeholder: '~/Obsidian/marcowits',
     help: 'Absolute path to your Obsidian vault folder',
     type: 'text',
@@ -101,14 +101,14 @@ const OBSIDIAN_FIELDS: SettingField[] = [
 const FOCUS_FIELDS: SettingField[] = [
   {
     key: 'focus_break_minutes',
-    label: 'Break Duration (minutes)',
+    label: 'Break duration (minutes)',
     placeholder: '5',
     help: 'Default break length between Pomodoro rounds (e.g., 5, 10, 15)',
     type: 'text',
   },
   {
     key: 'focus_abandon_status',
-    label: 'Status on Abandon',
+    label: 'Status on abandon',
     placeholder: 'todo',
     help: 'What status a task gets when you stop a focus session (todo or in_progress)',
     type: 'text',
@@ -353,7 +353,7 @@ function CalendarsSection() {
           <div className="space-y-1.5">
             <Label className="text-body-strong">Label</Label>
             <Input
-              placeholder="Work Calendar"
+              placeholder="Work calendar"
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
             />
@@ -390,7 +390,7 @@ function CalendarsSection() {
           {error && <p className="text-meta text-destructive">{error}</p>}
           <div className="flex items-center gap-2">
             <Button size="sm" onClick={handleAdd} disabled={adding}>
-              {adding ? 'Adding...' : 'Add Calendar'}
+              {adding ? 'Adding...' : 'Add calendar'}
             </Button>
             <Button
               variant="ghost"
@@ -472,10 +472,13 @@ const COLOR_OPTIONS = [
   { label: 'Orange', value: 'text-orange-500', preview: 'bg-orange-500' },
 ]
 
+// Sentence-case copy for the appearance mode toggle (no CSS capitalize).
+const THEME_LABELS = { light: 'Light', dark: 'Dark', system: 'System' } as const
+
 const STATUS_DEFAULTS: Record<string, { label: string; defaultColor: string }> = {
   backlog: { label: 'Backlog', defaultColor: 'Gray' },
   todo: { label: 'Todo', defaultColor: 'Blue' },
-  in_progress: { label: 'In Progress', defaultColor: 'Amber' },
+  in_progress: { label: 'In progress', defaultColor: 'Amber' },
   blocked: { label: 'Blocked', defaultColor: 'Red' },
   complete: { label: 'Complete', defaultColor: 'Green' },
 }
@@ -484,7 +487,7 @@ function StatusColorsSection() {
   return (
     <section id="status-colors" className="space-y-4 scroll-mt-6">
       <SectionHeader
-        title="Status Colors"
+        title="Status colors"
         description="Current color assignments for task statuses."
       />
       <div className="space-y-2">
@@ -639,7 +642,7 @@ function CaptureRoutesSection() {
   if (loading) {
     return (
       <section id="capture-routes" className="space-y-4 scroll-mt-6">
-        <SectionHeader title="Capture Routes" description="Prefix routing for quick capture to Docs or Tasks." />
+        <SectionHeader title="Capture routes" description="Prefix routing for quick capture to Docs or Tasks." />
         <Skeleton className="h-8" />
       </section>
     )
@@ -648,7 +651,7 @@ function CaptureRoutesSection() {
   return (
     <section id="capture-routes" className="space-y-4 scroll-mt-6">
       <SectionHeader
-        title="Capture Routes"
+        title="Capture routes"
         description="Type a prefix in the Inbox input to route captures to a Doc or create a Task."
       />
 
@@ -754,10 +757,10 @@ function CaptureRoutesSection() {
                   key={value}
                   variant={formTargetType === value ? 'default' : 'outline'}
                   size="sm"
-                  className="flex-1 capitalize"
+                  className="flex-1"
                   onClick={() => setFormTargetType(value)}
                 >
-                  {value === 'doc' ? 'Doc Note' : 'Task'}
+                  {value === 'doc' ? 'Doc note' : 'Task'}
                 </Button>
               ))}
             </div>
@@ -765,7 +768,7 @@ function CaptureRoutesSection() {
 
           {formTargetType === 'doc' && (
             <div className="space-y-1.5">
-              <Label className="text-body-strong">Linked Doc</Label>
+              <Label className="text-body-strong">Linked doc</Label>
               <DropdownMenu>
                 <DropdownMenuTrigger className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-body hover:bg-accent/10 transition-colors">
                   <span className={cn(formDocId ? 'text-foreground' : 'text-muted-foreground')}>
@@ -830,7 +833,7 @@ function CaptureRoutesSection() {
 
           <div className="flex items-center gap-2">
             <Button size="sm" onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving...' : editingId ? 'Update Route' : 'Add Route'}
+              {saving ? 'Saving...' : editingId ? 'Update route' : 'Add route'}
             </Button>
             <Button variant="ghost" size="sm" onClick={resetForm}>
               Cancel
@@ -1077,7 +1080,7 @@ function SyncSection() {
           </p>
         </div>
         <div className="space-y-1.5">
-          <Label className="text-body-strong">Auth Token</Label>
+          <Label className="text-body-strong">Auth token</Label>
           <Input
             type="password"
             placeholder="eyJ..."
@@ -1100,7 +1103,7 @@ function SyncSection() {
             onClick={handleTestConnection}
             disabled={testing || !tursoUrl.trim() || !tursoToken.trim()}
           >
-            {testing ? 'Testing...' : 'Test Connection'}
+            {testing ? 'Testing...' : 'Test connection'}
           </Button>
         </div>
       </div>
@@ -1117,7 +1120,7 @@ function SyncSection() {
             onClick={handleInitializeRemote}
             disabled={initializing}
           >
-            {initializing ? 'Initializing...' : 'Initialize Remote Database'}
+            {initializing ? 'Initializing...' : 'Initialize remote database'}
           </Button>
         </div>
       )}
@@ -1129,7 +1132,7 @@ function SyncSection() {
           onClick={handleSyncNow}
           disabled={syncing || !isConfigured || !isInitialized}
         >
-          {syncing ? 'Syncing...' : 'Sync Now'}
+          {syncing ? 'Syncing...' : 'Sync now'}
         </Button>
         <Button
           size="sm"
@@ -1147,7 +1150,7 @@ function SyncSection() {
           }}
           disabled={syncing || !isConfigured}
         >
-          Seed Existing Data
+          Seed existing data
         </Button>
         {syncResult && (
           <span className="text-meta text-muted-foreground">{syncResult}</span>
@@ -1309,7 +1312,7 @@ export function SettingsPage() {
           </li>
           <li>
             <a href="#focus" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Focus Mode
+              Focus mode
             </a>
           </li>
           <li>
@@ -1324,12 +1327,12 @@ export function SettingsPage() {
           </li>
           <li>
             <a href="#status-colors" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Status Colors
+              Status colors
             </a>
           </li>
           <li>
             <a href="#capture-routes" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Capture Routes
+              Capture routes
             </a>
           </li>
           <li>
@@ -1350,7 +1353,7 @@ export function SettingsPage() {
           </li>}
           <li>
             <a href="#demo" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
-              Demo Mode
+              Demo mode
             </a>
           </li>
           <li>
@@ -1380,14 +1383,14 @@ export function SettingsPage() {
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  'flex-1 capitalize',
+                  'flex-1',
                   theme === value
                     ? 'bg-card text-foreground shadow-xs hover:bg-card'
                     : 'text-muted-foreground hover:text-foreground',
                 )}
                 onClick={() => setTheme(value)}
               >
-                {value}
+                {THEME_LABELS[value]}
               </Button>
             ))}
           </div>
@@ -1577,7 +1580,7 @@ export function SettingsPage() {
       {/* Focus Mode */}
       <section id="focus" className="space-y-4 scroll-mt-6">
         <SectionHeader
-          title="Focus Mode"
+          title="Focus mode"
           description="Configure Pomodoro and focus session behavior."
         />
         <div className="space-y-5">
@@ -1653,7 +1656,7 @@ export function SettingsPage() {
       {/* Demo Mode */}
       <section id="demo" className="space-y-4 scroll-mt-6">
         <SectionHeader
-          title="Demo Mode"
+          title="Demo mode"
           description="A clean-slate workspace for demos and screen shares. Toggling restarts the app."
         />
         <DemoModeSection />
@@ -1680,7 +1683,7 @@ export function SettingsPage() {
               onClick={handleCheckForUpdates}
               disabled={checking}
             >
-              {checking ? 'Checking...' : 'Check for Updates'}
+              {checking ? 'Checking...' : 'Check for updates'}
             </Button>
             {updateStatus && !updateStatus.error && !updateStatus.update_available && (
               <p className="text-meta text-muted-foreground">
