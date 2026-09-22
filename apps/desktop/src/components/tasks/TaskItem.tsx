@@ -208,7 +208,7 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
       <div className="flex flex-1 h-10 items-center gap-3 min-w-0 ml-4 border-b border-secondary">
         {/* Status (before priority per updated row anatomy) */}
         {task.source === 'local' && task.status ? (
-          <StatusDropdown taskId={task.id} status={task.status} />
+          <StatusDropdown taskId={task.id} status={task.status} dueDate={task.dueDate} />
         ) : (
           <div className="w-4 shrink-0" />
         )}

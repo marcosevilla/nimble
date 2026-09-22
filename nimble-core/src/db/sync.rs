@@ -15,7 +15,7 @@ use crate::types::{LocalTask, SyncLogEntry, SyncStatus};
 /// against a table with no `labels` column — a `no such column` error on
 /// every apply, local or remote, for every task, not just labeled ones.
 /// Strip it here so the snapshot only ever carries real columns.
-pub(crate) fn task_sync_snapshot(task: &LocalTask) -> String {
+pub fn task_sync_snapshot(task: &LocalTask) -> String {
     let mut value = serde_json::to_value(task).unwrap_or_default();
     if let Some(obj) = value.as_object_mut() {
         obj.remove("labels");
@@ -1481,6 +1481,18 @@ async fn fetch_pull_chunk(
 /// entries; on a chunk failure it stops and returns the error, keeping the
 /// progress already committed.
 pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<u64> {
+    pull_with_focus(pool, turso_url, turso_token, None).await
+}
+
+/// Pull under the desktop's live focus service when one is given. Each chunk
+/// is fetched first; `local_tasks` rows are then applied one at a time inside
+/// `FocusService::begin_task_write`, never holding the guard across a fetch.
+pub async fn pull_with_focus(
+    pool: &SqlitePool,
+    turso_url: &str,
+    turso_token: &str,
+    focus: Option<&crate::db::focus::engine::FocusService>,
+) -> crate::Result<u64> {
     crate::db::recovery::require_activation_clear(pool).await?;
     let device_id = get_or_create_device_id(pool).await?;
     let mut cursor = load_pull_cursor(pool).await?;
@@ -1587,7 +1599,7 @@ pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
             } else { None };
 
             // Apply the change locally
-            if let Err(e) = apply_remote_change(pool, &table_name, &row_id, &operation, snapshot.as_deref()).await {
+            if let Err(e) = apply_remote_change_with_focus(pool, focus, &table_name, &row_id, &operation, snapshot.as_deref()).await {
                 log::warn!("Failed to apply remote change {}: {}", entry_id, e);
                 continue;
             }
@@ -1660,6 +1672,47 @@ pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     Ok(applied)
 }
 
+/// Apply one pulled row. `local_tasks` rows go through the focus task-write
+/// boundary (service guard when live, headless reconcile otherwise) so a
+/// remote completion, delete or edit updates the queue and ledger in the same
+/// transaction. Other tables apply as before.
+pub async fn apply_remote_change_with_focus(
+    pool: &SqlitePool,
+    focus: Option<&crate::db::focus::engine::FocusService>,
+    table_name: &str,
+    row_id: &str,
+    operation: &str,
+    snapshot: Option<&str>,
+) -> crate::Result<()> {
+    if table_name != "local_tasks" {
+        return apply_remote_change(pool, table_name, row_id, operation, snapshot).await;
+    }
+    let select = format!("SELECT {} FROM local_tasks WHERE id = ?", crate::db::tasks::SELECT_COLS);
+    let mut write = crate::db::focus::task_write::TaskWrite::begin(pool, focus).await?;
+    let applied = async {
+        let conn = write.conn();
+        let before: Option<LocalTask> = sqlx::query_as(&select).bind(row_id).fetch_optional(&mut *conn).await?;
+        apply_row_conn(conn, table_name, row_id, operation, snapshot).await?;
+        let after: Option<LocalTask> = sqlx::query_as(&select).bind(row_id).fetch_optional(&mut *conn).await?;
+        let mut effects = crate::db::task_tx::TaskEffects::default();
+        match (after, before) {
+            (Some(task), _) => effects.changed.push(task),
+            (None, Some(task)) => effects.deleted.push(task),
+            (None, None) => {}
+        }
+        Ok::<_, crate::Error>(effects)
+    }
+    .await;
+    match applied {
+        Ok(effects) => write.commit(&effects).await,
+        Err(e) => {
+            // A poison row is skipped by the caller; it must not freeze the clock.
+            write.abandon().await?;
+            Err(e)
+        }
+    }
+}
+
 /// Apply a single remote change to the local database.
 /// Uses last-write-wins: the snapshot contains the full row state.
 async fn apply_remote_change(
@@ -1682,6 +1735,17 @@ async fn apply_remote_change(
         tx.commit().await?;
         return Ok(());
     }
+    let mut conn = pool.acquire().await?;
+    apply_row_conn(&mut conn, table_name, row_id, operation, snapshot).await
+}
+
+async fn apply_row_conn(
+    conn: &mut sqlx::SqliteConnection,
+    table_name: &str,
+    row_id: &str,
+    operation: &str,
+    snapshot: Option<&str>,
+) -> crate::Result<()> {
     match operation {
         "DELETE" => {
             let table = sanitize_table_name(table_name)?;
@@ -1692,13 +1756,13 @@ async fn apply_remote_change(
                     sqlx::query("DELETE FROM task_labels WHERE task_id = ? AND label_id = ?")
                         .bind(task_id)
                         .bind(label_id)
-                        .execute(pool)
+                        .execute(&mut *conn)
                         .await?;
                 }
                 return Ok(());
             }
             let sql = format!("DELETE FROM {} WHERE id = ?", table);
-            sqlx::query(&sql).bind(row_id).execute(pool).await?;
+            sqlx::query(&sql).bind(row_id).execute(&mut *conn).await?;
         }
         "INSERT" | "UPDATE" => {
             let snapshot = snapshot.ok_or_else(|| {
@@ -1736,7 +1800,7 @@ async fn apply_remote_change(
                 }
             }
 
-            query.execute(pool).await?;
+            query.execute(&mut *conn).await?;
         }
         _ => {
             log::warn!("Unknown sync operation: {}", operation);

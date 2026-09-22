@@ -5,6 +5,7 @@ pub mod engine;
 pub mod clock;
 pub mod queue;
 pub mod replica;
+pub mod task_write;
 
 use crate::db::activity;
 use crate::db::sync;

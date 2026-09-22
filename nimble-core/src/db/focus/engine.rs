@@ -640,12 +640,24 @@ impl FocusService {
         let sampled = self.clock.elapsed_ms();
         settle_tx(&mut tx, sampled.saturating_sub(guard.sampled_ms), &now()).await?;
         let action_for_log = command.action.clone();
+        // Same activity detail as the pool CRUD path (fields_changed / task_moved).
+        let mut update_fields: Vec<&'static str> = Vec::new();
         let (task, effects) = match command.action {
             NativeTaskAction::Create { input } => (
                 Some(task_tx::create_task_tx(&mut tx, input, MutationPolicy::User).await?),
                 TaskEffects::default(),
             ),
             NativeTaskAction::Update { id, input } => {
+                let old: Option<LocalTask> = sqlx::query_as(&format!(
+                    "SELECT {} FROM local_tasks WHERE id=?",
+                    crate::db::tasks::SELECT_COLS
+                ))
+                .bind(&id)
+                .fetch_optional(&mut *tx)
+                .await?;
+                if let Some(old) = &old {
+                    update_fields = crate::db::tasks::activity_fields(&input, old);
+                }
                 let task =
                     task_tx::update_task_tx(&mut tx, &id, input, MutationPolicy::User).await?;
                 let effects = TaskEffects {
@@ -734,7 +746,11 @@ impl FocusService {
                 }
             }
             NativeTaskAction::Update { id, .. } => {
-                activity::log_activity(&self.pool, "task_updated", Some(&id), None).await
+                if !update_fields.is_empty() {
+                    let action = if update_fields == ["project_id"] { "task_moved" } else { "task_updated" };
+                    activity::log_activity(&self.pool, action, Some(&id),
+                        Some(serde_json::json!({"fields_changed": update_fields}))).await
+                }
             }
             NativeTaskAction::SetStatus {
                 id, status, note, ..

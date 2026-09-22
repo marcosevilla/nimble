@@ -7,9 +7,15 @@ pub async fn run_and_emit(
     app: &AppHandle,
 ) -> nimble_core::Result<nimble_core::integrations::todoist::sync_loop::SyncReport> {
     let pool = app.state::<SqlitePool>();
-    let report = nimble_core::integrations::todoist::sync_loop::run_sync(pool.inner()).await?;
+    let focus = crate::focus_service::live(app).await;
+    let report = nimble_core::integrations::todoist::sync_loop::run_sync_with_focus(
+        pool.inner(),
+        focus.as_deref(),
+    )
+    .await?;
     if report.changed_anything() {
         let _ = app.emit("todoist-sync-applied", ());
+        crate::focus_service::broadcast(app).await;
     }
     Ok(report)
 }
@@ -21,14 +27,17 @@ pub async fn run_and_emit(
 /// the next trigger to retry (the outbox and sync_token make this safe).
 pub async fn run_if_due_and_emit(app: &AppHandle, min_interval_secs: i64) {
     let pool = app.state::<SqlitePool>();
-    match nimble_core::integrations::todoist::sync_loop::run_sync_if_due(
+    let focus = crate::focus_service::live(app).await;
+    match nimble_core::integrations::todoist::sync_loop::run_sync_if_due_with_focus(
         pool.inner(),
         min_interval_secs,
+        focus.as_deref(),
     )
     .await
     {
         Ok(report) if report.changed_anything() => {
             let _ = app.emit("todoist-sync-applied", ());
+            crate::focus_service::broadcast(app).await;
         }
         Ok(_) => {}
         Err(e) => log::warn!("todoist sync failed (will retry on next trigger): {e}"),
@@ -114,9 +123,11 @@ async fn run_turso_report(app: &AppHandle, min_interval_secs: i64) -> TursoRunRe
     .await;
     // Independent outcomes preserve the existing rule: failed push must not suppress pull.
     let pushed = nimble_core::db::sync::push(pool, &url, &token).await;
-    let pulled = nimble_core::db::sync::pull(pool, &url, &token).await;
+    let focus = crate::focus_service::live(app).await;
+    let pulled = nimble_core::db::sync::pull_with_focus(pool, &url, &token, focus.as_deref()).await;
     if pulled.as_ref().is_ok_and(|n| *n > 0) {
         let _ = app.emit("remote-sync-applied", ());
+        crate::focus_service::broadcast(app).await;
     }
     turso_outcomes(pushed, pulled)
 }
@@ -159,11 +170,13 @@ pub async fn pull_turso(app: &AppHandle) -> Result<u64, String> {
         .await
         .map_err(|_| "Cannot read sync configuration")?
         .ok_or("Turso is not configured")?;
-    let count = nimble_core::db::sync::pull(pool.inner(), &url, &token)
+    let focus = crate::focus_service::live(app).await;
+    let count = nimble_core::db::sync::pull_with_focus(pool.inner(), &url, &token, focus.as_deref())
         .await
         .map_err(|_| "Turso pull failed")?;
     if count > 0 {
         let _ = app.emit("remote-sync-applied", ());
+        crate::focus_service::broadcast(app).await;
     }
     Ok(count)
 }

@@ -129,9 +129,9 @@ export const useFocusStore = create<FocusStore>((set, get) => ({
 
   completeFocus: (nextTask) => {
     const dp = getDataProvider()
-    const { taskId, elapsed, queue } = get()
+    const { taskId, task, elapsed, queue } = get()
     if (taskId) {
-      dp.tasks.updateStatus(taskId, 'complete').catch(() => {})
+      dp.tasks.updateStatus(taskId, 'complete', undefined, task?.id === taskId ? task.due_date : undefined).catch(() => {})
       dp.focus.endSession(taskId, 'focus_completed', elapsed).catch(() => {})
     }
     // If no explicit next task was passed, pull the next one from the queue.

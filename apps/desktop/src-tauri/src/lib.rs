@@ -7,6 +7,7 @@ mod backup_runner;
 mod backup_git;
 mod backup_state;
 mod commands;
+mod focus_service;
 mod selection;
 mod sync_runner;
 mod vault_runner;
@@ -317,6 +318,10 @@ pub fn run() {
 
                 // Store pool in app state
                 app_handle.manage(crate::backup_runner::BackupRuntime::new(app_dir.clone(), db_path.clone(), demo_mode, isolated_test));
+                // One process-wide focus engine. Initialization errors (e.g. a
+                // restored profile's wrong_owner) never block startup; they
+                // surface as typed capability reasons.
+                app_handle.manage(crate::focus_service::FocusRuntime::start(pool.clone()).await);
                 app_handle.manage(pool);
                 if !demo_mode {
                     match nimble_core::agent_protocol::AgentProfile::from_database(&db_path, isolated_test)
@@ -345,6 +350,7 @@ pub fn run() {
                     if let Ok(result) = crate::google_calendar_runner::tick(&handle).await {
                         if !result.changed_task_ids.is_empty() {
                             let _ = handle.emit("nimble-data-changed", serde_json::json!({"version":1,"domains":["tasks"],"ids":result.changed_task_ids}));
+                            crate::focus_service::broadcast(&handle).await;
                         }
                     }
                 }
@@ -547,6 +553,11 @@ pub fn run() {
             capture_routes::update_capture_route,
             capture_routes::delete_capture_route,
             capture_routes::route_capture,
+            focus::focus_capabilities,
+            focus::focus_snapshot,
+            focus::focus_execute,
+            focus::focus_history,
+            focus::focus_open_companion,
             focus::start_focus_session,
             focus::end_focus_session,
             focus::get_active_focus,

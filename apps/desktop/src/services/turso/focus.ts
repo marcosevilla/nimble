@@ -1,6 +1,7 @@
-import type { FocusEntry } from '@nimble/types'
+import type { FocusConfig, FocusEntry, FocusHistoryPage, FocusSession, FocusSnapshot } from '@nimble/types'
 import { query, str, text, TursoError } from './client'
 import { validRecords, safeDuration, record } from './focus-validation'
+import { FocusRequestError } from '../focus-events'
 
 export interface SettledFocusReplica {
   version: 1
@@ -71,5 +72,117 @@ export async function readFocusReplica(): Promise<WebFocusReplica | null> {
     })),
     as_of: snapshot.as_of,
     replica: true,
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* DataProvider.focus reads for the web (settled replica only)         */
+/* ------------------------------------------------------------------ */
+
+const noReplica = () => new FocusRequestError('not_found',
+  'No settled focus replica has synced from the desktop yet.')
+
+function sessionFor(snapshot: SettledFocusReplica, occurrenceId: string): FocusSession | null {
+  // The replica keeps no insertion order, so prefer the highest-revision open
+  // session, mirroring the desktop "latest non-ended session" read.
+  const candidates = snapshot.sessions
+    .filter((s) => s.occurrence_id === occurrenceId && s.status !== 'ended')
+    .sort((a, b) => Number(b.session_revision ?? 0) - Number(a.session_revision ?? 0))
+  const raw = candidates[0]
+  if (!raw) return null
+  let config: FocusConfig
+  try {
+    config = JSON.parse(String(raw.config_json)) as FocusConfig
+  } catch {
+    throw new TursoError('Invalid settled focus session configuration')
+  }
+  return {
+    id: String(raw.id),
+    occurrence_id: occurrenceId,
+    // The replica already projects a running session as paused.
+    status: raw.status === 'ended' ? 'ended' : 'paused',
+    phase: raw.phase as FocusSession['phase'],
+    work_ms: Number(raw.work_ms),
+    break_ms: Number(raw.break_ms),
+    round_work_ms: Number(raw.round_work_ms),
+    round: Number(raw.round),
+    config,
+  }
+}
+
+/** Settled FocusSnapshot for web. `replica: true`; nothing here is live. */
+export async function readFocusSnapshot(): Promise<FocusSnapshot> {
+  const replica = await readFocusReplica()
+  if (!replica) throw noReplica()
+  const s = replica.snapshot
+  const totals: Record<string, number> = {}
+  for (const entry of s.queue) totals[entry.occurrence_id] = s.totals[entry.occurrence_id] ?? 0
+  const selected = s.selected_occurrence_id
+  const session = selected ? sessionFor(s, selected) : null
+  const checkpoint = selected
+    ? s.sessions.find((x) => x.id === session?.id)?.checkpoint_at
+    : null
+  return {
+    queue_revision: s.queue_revision,
+    engine_revision: s.revision,
+    owner_epoch: s.owner_epoch,
+    // Process generation is local runtime state and is never replicated.
+    process_generation: 0,
+    writer_device_id: s.writer_device_id,
+    queue: s.queue,
+    selected_occurrence_id: selected,
+    session,
+    totals,
+    as_of: s.as_of,
+    checkpoint_at: typeof checkpoint === 'string' ? checkpoint : null,
+    recovery_reason: null,
+    replica: true,
+  }
+}
+
+const PAGE = 50
+
+/** History rows from the settled replica, ordered and paged like the desktop. */
+export async function readFocusHistory(opts?: { cursor?: string; task_id?: string }): Promise<FocusHistoryPage> {
+  const replica = await readFocusReplica()
+  if (!replica) throw noReplica()
+  const s = replica.snapshot
+  const imported = new Map<string, number>()
+  for (const row of s.import_totals) {
+    const oid = row.occurrence_id
+    if (typeof oid === 'string') imported.set(oid, (imported.get(oid) ?? 0) + row.duration_ms)
+  }
+  const sortKey = (o: SettledFocusReplica['occurrences'][number]) =>
+    String(o.completed_at ?? o.created_at ?? '')
+  const rows = s.occurrences
+    .filter((o) => !opts?.task_id || o.original_task_id === opts.task_id)
+    .sort((a, b) => {
+      const ka = sortKey(a), kb = sortKey(b)
+      if (ka !== kb) return ka < kb ? 1 : -1
+      return a.id < b.id ? 1 : a.id > b.id ? -1 : 0
+    })
+  let start = 0
+  if (opts?.cursor) {
+    const at = rows.findIndex((o) => o.id === opts.cursor)
+    if (at < 0) throw new FocusRequestError('invalid', 'History cursor missing')
+    start = at + 1
+  }
+  const page = rows.slice(start, start + PAGE)
+  return {
+    rows: page.map((o) => {
+      const total = s.totals[o.id] ?? 0
+      const importedMs = imported.get(o.id) ?? 0
+      return {
+        occurrence_id: o.id,
+        task_id: typeof o.task_id === 'string' ? o.task_id : null,
+        title: o.title_snapshot,
+        total_ms: total,
+        recorded_ms: total - importedMs,
+        imported_ms: importedMs,
+        completed_at: typeof o.completed_at === 'string' ? o.completed_at : null,
+        archived: Number(o.archived ?? 0) !== 0,
+      }
+    }),
+    next_cursor: rows.length > start + PAGE ? page[page.length - 1].id : null,
   }
 }

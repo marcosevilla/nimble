@@ -61,6 +61,8 @@ pub async fn tick(app:&AppHandle)->Result<nimble_core::integrations::google_cale
     }
     let transport=nimble_core::api::google_calendar::CalendarTransport::new(client,nimble_core::api::google_calendar::GOOGLE_API_BASE,token.access_token)
         .map_err(|_|"google_transport_failed")?;
-    nimble_core::integrations::google_calendar::run_once(pool.inner(),&transport,chrono::Utc::now())
+    // Calendar HTTP runs outside the focus guard; each local edit enters it.
+    let focus=crate::focus_service::live(app).await;
+    nimble_core::integrations::google_calendar::run_once_with_focus(pool.inner(),&transport,chrono::Utc::now(),focus.as_deref())
         .await.map_err(|_|"google_sync_failed".into())
 }

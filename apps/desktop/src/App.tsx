@@ -1,6 +1,4 @@
-import { dispatchDataChanges, type DataDomain } from '@/lib/dataChanges'
 import { useEffect, useRef, useState } from 'react'
-import { listen } from '@tauri-apps/api/event'
 import { useAppStore } from '@/stores/appStore'
 import { SetupDialog } from '@/components/setup/SetupDialog'
 import { Dashboard } from '@/components/layout/Dashboard'
@@ -8,7 +6,6 @@ import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useTheme } from '@/hooks/useTheme'
 import { useDataProvider } from '@/services/provider-context'
-import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { Agentation } from 'agentation'
 import { DialRoot } from 'dialkit'
 import { TypographyTuner } from '@/components/shared/TypographyTuner'
@@ -55,28 +52,8 @@ function App() {
     })
   }, [dp])
 
-  // Refresh task lists whenever a background/focus-triggered Todoist sync
-  // applies a remote change. Note: this re-triggers emitTasksChanged's
-  // debounced push, but that push finds an empty outbox and is a cheap
-  // no-op — not worth guarding against unless it proves chatty in practice.
-  // `remote-sync-applied` is the Turso equivalent: the device sync pulled rows
-  // that changed underneath the UI (a task completed on the phone, say), so the
-  // lists have to re-read. Kept as a separate event rather than reusing the
-  // Todoist one so the log and any future handler can tell the two apart.
-  useEffect(() => {
-    const unlisteners = [
-      listen<{ version: number; domains: DataDomain[] }>('nimble-data-changed', ({ payload }) => {
-        if (payload.version !== 1 || !Array.isArray(payload.domains)) return
-        dispatchDataChanges(payload.domains)
-        if (payload.domains.some(d => ['tasks', 'projects', 'labels', 'sections'].includes(d))) emitTasksChanged()
-      }),
-      listen('todoist-sync-applied', () => emitTasksChanged()),
-      listen('remote-sync-applied', () => emitTasksChanged()),
-    ]
-    return () => {
-      unlisteners.forEach((u) => u.then((f) => f()))
-    }
-  }, [])
+  // Data/sync/focus event subscriptions live in <DataProviderRoot>
+  // (services/provider-events.ts) so every window receives them.
 
   /* Typography tuner — ⌘⇧Y toggles the live tuning panel. DEV-only; the
    * gate in the render block below prevents shipping the panel or its

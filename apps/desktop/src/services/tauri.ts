@@ -1,5 +1,13 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { BackupStatus } from '@nimble/types'
+import type {
+  BackupStatus,
+  FocusCapabilities,
+  FocusCommand,
+  FocusHistoryPage,
+  FocusReply,
+  FocusSnapshot,
+} from '@nimble/types'
+import { FocusRequestError } from './focus-events'
 
 // Re-export all types from the shared package so existing imports continue to work
 export type {
@@ -345,12 +353,14 @@ export async function updateLocalTask(opts: {
   return invoke<LocalTask>('update_local_task', opts)
 }
 
-export async function updateTaskStatus(id: string, status: TaskStatus, note?: string): Promise<void> {
-  return invoke<void>('update_task_status', { id, status, note })
+/** `expectedDueDate`: the due date the user saw (null = none). Required for
+ * recurring completion — the focus service refuses a changed occurrence. */
+export async function updateTaskStatus(id: string, status: TaskStatus, note?: string, expectedDueDate?: string | null): Promise<void> {
+  return invoke<void>('update_task_status', { id, status, note, expectedDueDate })
 }
 
-export async function completeLocalTask(id: string): Promise<void> {
-  return invoke<void>('complete_local_task', { id })
+export async function completeLocalTask(id: string, expectedDueDate: string | null): Promise<void> {
+  return invoke<void>('complete_local_task', { id, expectedDueDate })
 }
 
 export async function uncompleteLocalTask(id: string): Promise<void> {
@@ -652,14 +662,46 @@ export async function breakDownTask(taskContent: string, taskDescription?: strin
   return invoke<string[]>('break_down_task', { taskContent, taskDescription })
 }
 
-// ── Focus Mode ──
+// ── Focus Queue (one revisioned service) ──
+// Rust rejects with a FocusError `{code,message}`; these wrappers rethrow it
+// as FocusRequestError, keeping the command so a retry reuses its command_id.
+
+async function focusInvoke<T>(cmd: string, args?: Record<string, unknown>, command?: FocusCommand): Promise<T> {
+  try {
+    return await invoke<T>(cmd, args)
+  } catch (error) {
+    throw FocusRequestError.from(error, command)
+  }
+}
+
+export function focusCapabilities(): Promise<FocusCapabilities> {
+  return focusInvoke<FocusCapabilities>('focus_capabilities')
+}
+
+export function focusSnapshot(): Promise<FocusSnapshot> {
+  return focusInvoke<FocusSnapshot>('focus_snapshot')
+}
+
+export function focusExecute(command: FocusCommand): Promise<FocusReply> {
+  return focusInvoke<FocusReply>('focus_execute', { command }, command)
+}
+
+export function focusHistory(opts?: { cursor?: string; task_id?: string }): Promise<FocusHistoryPage> {
+  return focusInvoke<FocusHistoryPage>('focus_history', { cursor: opts?.cursor, taskId: opts?.task_id })
+}
+
+export function focusOpenCompanion(): Promise<void> {
+  return focusInvoke<void>('focus_open_companion')
+}
+
+// ── Legacy focus mode (compatibility errors until Task 8 replaces consumers) ──
 
 export async function startFocusSession(taskId: string, taskContent: string): Promise<void> {
-  return invoke<void>('start_focus_session', { taskId, taskContent })
+  return focusInvoke<void>('start_focus_session', { taskId, taskContent })
 }
 
 export async function endFocusSession(taskId: string, outcome: string, durationSecs: number): Promise<void> {
-  return invoke<void>('end_focus_session', { taskId, outcome, durationSecs: Math.floor(durationSecs) })
+  return focusInvoke<void>('end_focus_session', { taskId, outcome, durationSecs: Math.floor(durationSecs) })
 }
 
 export async function getActiveFocus(): Promise<FocusState> {

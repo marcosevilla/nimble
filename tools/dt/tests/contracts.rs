@@ -322,20 +322,20 @@ async fn invalidation_acknowledgement_and_wrong_response_never_duplicate_write()
     });
     let path = root.clone();
     let (c, v) =
-        tokio::task::spawn_blocking(move || run(&path, &["task", "create", "Acknowledged"]))
+        tokio::task::spawn_blocking(move || run(&path, &["capture", "create", "Acknowledged"]))
             .await
             .unwrap();
     assert_eq!(c, 0, "{v}");
     assert_eq!(v["refresh"], "acknowledged");
     let path = root.clone();
     let (c, v) =
-        tokio::task::spawn_blocking(move || run(&path, &["task", "create", "Unacknowledged"]))
+        tokio::task::spawn_blocking(move || run(&path, &["capture", "create", "Unacknowledged"]))
             .await
             .unwrap();
     assert_eq!(c, 0, "{v}");
     assert_eq!(v["refresh"], "unavailable");
     server.await.unwrap();
-    let (_, v) = run(&root, &["task", "list"]);
+    let (_, v) = run(&root, &["capture", "list"]);
     assert_eq!(v["data"].as_array().unwrap().len(), 2);
     std::fs::remove_file(&profile.socket).unwrap();
     std::fs::remove_dir(profile.socket.parent().unwrap()).unwrap();
@@ -383,5 +383,137 @@ async fn task_mutation_feeds_existing_todoist_outbox_without_network() {
         .unwrap();
     assert!(count > 0);
     db.close().await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A fake app endpoint that answers each NativeTask request with `reply`.
+/// `None` reads the request and hangs up without answering (uncertain).
+async fn native_server(
+    root: &std::path::Path,
+    replies: Vec<Option<fn(&nimble_core::db::focus::engine::NativeTaskCommand) -> (bool, Value)>>,
+) -> (
+    nimble_core::agent_protocol::AgentProfile,
+    tokio::task::JoinHandle<Vec<nimble_core::db::focus::engine::NativeTaskCommand>>,
+) {
+    use nimble_core::agent_protocol::*;
+    use std::os::unix::fs::PermissionsExt;
+    use tokio::io::AsyncWriteExt;
+    let profile = AgentProfile::from_database(&root.join("nimble.db"), true).unwrap();
+    profile.ensure_socket_directory().unwrap();
+    let listener = tokio::net::UnixListener::bind(&profile.socket).unwrap();
+    std::fs::set_permissions(&profile.socket, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let server = tokio::spawn(async move {
+        let mut seen = vec![];
+        for reply in replies {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request: AgentRequest =
+                serde_json::from_slice(&read_frame(&mut stream).await.unwrap()).unwrap();
+            let AgentOperation::NativeTask { command } = request.operation else {
+                panic!("task writes must route through the app's focus service");
+            };
+            if let Some(reply) = reply {
+                let (ok, data) = reply(&command);
+                let response = AgentResponse {
+                    version: VERSION,
+                    request_id: request.request_id,
+                    ok,
+                    data: Some(data),
+                    error: if ok { None } else { Some("rejected".into()) },
+                };
+                let mut bytes = serde_json::to_vec(&response).unwrap();
+                bytes.push(b'\n');
+                stream.write_all(&bytes).await.unwrap();
+            }
+            seen.push(command);
+        }
+        seen
+    });
+    (profile, server)
+}
+
+fn cleanup(profile: &nimble_core::agent_protocol::AgentProfile, root: &std::path::Path) {
+    let _ = std::fs::remove_file(&profile.socket);
+    let _ = std::fs::remove_dir(profile.socket.parent().unwrap());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn running_app_executes_task_writes_through_its_service() {
+    let root = fixture().await;
+    let (profile, server) = native_server(
+        &root,
+        vec![Some(|_| (true, json!({"task": {"id": "from-app", "content": "App wrote"}, "replayed": false})))],
+    )
+    .await;
+    let path = root.clone();
+    let (c, v) = tokio::task::spawn_blocking(move || run(&path, &["task", "create", "App wrote"]))
+        .await
+        .unwrap();
+    assert_eq!(c, 0, "{v}");
+    assert_eq!(v["refresh"], "acknowledged");
+    assert_eq!(v["data"]["id"], "from-app");
+    let seen = server.await.unwrap();
+    assert!(uuid::Uuid::parse_str(&seen[0].command_id).is_ok());
+    // dt never wrote the row itself: the (fake) app owns the write.
+    let (_, list) = run(&root, &["task", "list"]);
+    assert_eq!(list["data"].as_array().unwrap().len(), 0);
+    cleanup(&profile, &root);
+}
+
+#[tokio::test]
+async fn uncertain_app_reply_never_falls_back_and_names_the_retry_id() {
+    let root = fixture().await;
+    let (profile, server) = native_server(&root, vec![None]).await;
+    let path = root.clone();
+    let (c, v) = tokio::task::spawn_blocking(move || run(&path, &["task", "create", "Maybe"]))
+        .await
+        .unwrap();
+    assert_eq!(c, 1, "{v}");
+    assert_eq!(v["error"]["code"], "uncertain");
+    let seen = server.await.unwrap();
+    let message = v["error"]["message"].as_str().unwrap();
+    assert!(message.contains(&format!("--command-id {}", seen[0].command_id)), "{message}");
+    let (_, list) = run(&root, &["task", "list"]);
+    assert_eq!(list["data"].as_array().unwrap().len(), 0, "no direct-DB fallback");
+    cleanup(&profile, &root);
+}
+
+#[tokio::test]
+async fn retry_reuses_command_id_and_typed_rejection_is_reported() {
+    let root = fixture().await;
+    let (_, t) = run(&root, &["task", "create", "Recurring", "--due", "2030-01-01", "--recurrence", "every day"]);
+    let id = t["data"]["id"].as_str().unwrap().to_owned();
+    let (profile, server) = native_server(
+        &root,
+        vec![Some(|_| (false, json!({"code": "stale_occurrence", "message": "date moved"})))],
+    )
+    .await;
+    let retry = uuid::Uuid::new_v4().to_string();
+    let (path, task_id, retry_id) = (root.clone(), id.clone(), retry.clone());
+    let (c, v) = tokio::task::spawn_blocking(move || {
+        run(&path, &["task", "complete", &task_id, "--command-id", &retry_id, "--expected-due", "2030-01-01"])
+    })
+    .await
+    .unwrap();
+    assert_eq!(c, 1, "{v}");
+    assert_eq!(v["error"]["code"], "stale_occurrence");
+    let seen = server.await.unwrap();
+    assert_eq!(seen[0].command_id, retry);
+    let body = serde_json::to_value(&seen[0].action).unwrap();
+    assert_eq!(body["expected_due_date"], "2030-01-01");
+    cleanup(&profile, &root);
+}
+
+#[tokio::test]
+async fn retry_without_the_app_is_refused_instead_of_written_directly() {
+    let root = fixture().await;
+    let (_, t) = run(&root, &["task", "create", "Once"]);
+    let id = t["data"]["id"].as_str().unwrap().to_owned();
+    let retry = uuid::Uuid::new_v4().to_string();
+    let (c, v) = run(&root, &["task", "complete", &id, "--command-id", &retry]);
+    assert_eq!(c, 1, "{v}");
+    assert_eq!(v["error"]["code"], "app_required");
+    let (_, got) = run(&root, &["task", "get", &id]);
+    assert_eq!(got["data"]["completed"], false);
     std::fs::remove_dir_all(root).unwrap();
 }

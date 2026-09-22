@@ -35,6 +35,12 @@ pub enum AgentOperation {
     BackupVerify,
     SyncStatus,
     SyncNow,
+    /// A task write the running app executes through its one FocusService.
+    /// `command.command_id` is the retry identity: a caller whose previous
+    /// attempt had an uncertain outcome must resend the identical command.
+    NativeTask {
+        command: crate::db::focus::engine::NativeTaskCommand,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -245,6 +251,15 @@ mod tests {
         std::os::unix::fs::symlink(root.join(".nimble-schema.lock"), &link).unwrap();
         assert!(SchemaLock::at(&link, true).is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn native_task_operation_round_trips_its_command_id() {
+        let json = r#"{"kind":"native_task","command":{"command_id":"c1","action":{"kind":"delete","id":"t1"}}}"#;
+        let op: AgentOperation = serde_json::from_str(json).unwrap();
+        match op {
+            AgentOperation::NativeTask { command } => assert_eq!(command.command_id, "c1"),
+            _ => panic!("wrong variant"),
+        }
     }
     #[test]
     fn protocol_rejects_unknown_operations() {

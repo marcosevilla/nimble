@@ -1,4 +1,5 @@
 import { subscribeDataChanges } from '@/lib/dataChanges'
+import { displayedDueDate, rememberDisplayedTasks } from '@/lib/displayedTasks'
 import { useCallback, useEffect, useState } from 'react'
 import { useDataProvider, getDataProvider } from '@/services/provider-context'
 import type { LocalTask, Project } from '@nimble/types'
@@ -41,6 +42,7 @@ export function useLocalTasks(opts?: { projectId?: string; dueDate?: string; inc
         dueDate: opts?.dueDate,
         includeCompleted: opts?.includeCompleted ?? true,
       })
+      rememberDisplayedTasks(data)
       setTasks(data)
     } catch (e) {
       setError(String(e))
@@ -92,7 +94,7 @@ export function useLocalTasks(opts?: { projectId?: string; dueDate?: string; inc
       ),
     )
     try {
-      await dp.tasks.complete(id)
+      await dp.tasks.complete(id, displayedDueDate(id) ?? null)
       emitTasksChanged()
     } catch (e) {
       toast.error(`Failed to complete task: ${e}`)

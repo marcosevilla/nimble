@@ -40,7 +40,7 @@ const plural = (n: number) => (n === 1 ? 'task' : 'tasks')
  * fails, so the caller never says "restored" for a half-restore. */
 export async function restoreTask(dp: DataProvider, task: LocalTask): Promise<LocalTask> {
   const created = await dp.tasks.create(snapshotToCreateInput(task))
-  if (task.status !== created.status) await dp.tasks.updateStatus(created.id, task.status)
+  if (task.status !== created.status) await dp.tasks.updateStatus(created.id, task.status, undefined, created.due_date)
   if (task.linked_doc_id) await dp.tasks.update({ id: created.id, linkedDocId: task.linked_doc_id })
   return created
 }

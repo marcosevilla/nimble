@@ -202,7 +202,8 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
     Ok(task)
 }
 
-fn activity_fields(input: &UpdateTaskInput, old: &LocalTask) -> Vec<&'static str> {
+/// Field names an update touches, for the `task_updated`/`task_moved` activity.
+pub(crate) fn activity_fields(input: &UpdateTaskInput, old: &LocalTask) -> Vec<&'static str> {
     let mut fields = Vec::new();
     if input.sync_policy.is_some() { fields.push("sync_policy"); }
     if input.content.is_some() { fields.push("content"); }
@@ -233,6 +234,19 @@ pub async fn update_local_task_if_unchanged(
     expected: &LocalTask,
     input: UpdateTaskInput,
 ) -> crate::Result<Option<LocalTask>> {
+    update_local_task_if_unchanged_with_focus(pool, None, id, expected, input).await
+}
+
+/// Same conditional apply, under the desktop's live focus service guard when
+/// given (the calendar fetch has already finished). A refused comparison
+/// rolls back without touching the queue or the focus clock anchor.
+pub async fn update_local_task_if_unchanged_with_focus(
+    pool: &SqlitePool,
+    focus: Option<&crate::db::focus::engine::FocusService>,
+    id: &str,
+    expected: &LocalTask,
+    input: UpdateTaskInput,
+) -> crate::Result<Option<LocalTask>> {
     if input.project_id.is_some()
         || input.priority.is_some()
         || input.linked_doc_id.is_some()
@@ -246,25 +260,41 @@ pub async fn update_local_task_if_unchanged(
             "calendar update contains unsupported fields".into(),
         ));
     }
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let current: Option<LocalTask> = sqlx::query_as(&format!(
-        "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
-    ))
-    .bind(id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(current) = current else {
-        return Ok(None);
-    };
-    if sync::task_sync_snapshot(&current) != sync::task_sync_snapshot(expected) {
-        return Ok(None);
+    let mut write = crate::db::focus::task_write::TaskWrite::begin(pool, focus).await?;
+    let applied = async {
+        let tx = write.conn();
+        let current: Option<LocalTask> = sqlx::query_as(&format!(
+            "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
+        ))
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if !current
+            .as_ref()
+            .is_some_and(|c| sync::task_sync_snapshot(c) == sync::task_sync_snapshot(expected))
+        {
+            return Ok(None);
+        }
+        crate::db::task_tx::update_task_tx(tx, id, input,
+            crate::db::task_tx::MutationPolicy::User).await.map(Some)
     }
-    let updated = crate::db::task_tx::update_task_tx(&mut tx, id, input,
-        crate::db::task_tx::MutationPolicy::User).await?;
-    crate::db::focus::engine::reconcile_task_effects_tx(&mut tx, &crate::db::task_tx::TaskEffects {
+    .await;
+    let updated = match applied {
+        Ok(Some(updated)) => updated,
+        // Refused comparison or failed edit: nothing is kept, and the live
+        // focus clock is settled rather than frozen.
+        Ok(None) => {
+            write.abandon().await?;
+            return Ok(None);
+        }
+        Err(e) => {
+            write.abandon().await?;
+            return Err(e);
+        }
+    };
+    write.commit(&crate::db::task_tx::TaskEffects {
         changed: vec![updated.clone()], ..Default::default()
     }).await?;
-    tx.commit().await?;
     activity::log_activity(
         pool,
         "task_updated",

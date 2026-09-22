@@ -488,45 +488,25 @@ async fn find_task_by_external(
     .await
 }
 
-/// Transactional pull apply: projects -> sections (pseudo-projects) -> items
-/// (two-pass, so a child that arrives before its parent still links up), then
-/// persists the new sync_token in the SAME transaction as the applied deltas.
-/// All writes here are direct SQL against `local_tasks`/`projects` — never the
-/// `db::tasks`/`db::projects` CRUD helpers — because those helpers fire the
-/// Todoist mutation observer, which would re-enqueue outbox ops for changes
-/// that originated from Todoist itself (an echo/infinite-loop risk). Direct
-/// SQL sidesteps the observer entirely.
-pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate::Result<SyncReport> {
-    let mut report = SyncReport::default();
+/// Rows a pull applied inside its transaction, for post-commit sync_log and
+/// focus reconciliation.
+struct PulledRows {
+    logged: Vec<(String, &'static str)>,
+    label_sync_ops: Vec<(String, String, &'static str)>,
+    project_sync_ops: Vec<(String, &'static str)>,
+    effects: crate::db::task_tx::TaskEffects,
+}
 
-    // Resolve/create every distinct remote label name to a local label id
-    // BEFORE opening the transaction below: `get_or_create_label_by_name`
-    // opens its own transaction, and the pool has as few as one connection
-    // (test pools always do) — doing this while apply_pull's own transaction
-    // holds that connection would deadlock.
-    let mut label_id_by_name: HashMap<String, String> = HashMap::new();
-    for item in &resp.items {
-        if item.is_deleted.unwrap_or(false) {
-            continue;
-        }
-        for name in &item.labels {
-            if !label_id_by_name.contains_key(name) {
-                let label = crate::db::labels::get_or_create_label_by_name(pool, name).await?;
-                label_id_by_name.insert(name.clone(), label.id);
-            }
-        }
-    }
-    // id -> name for every label, used to resolve an existing local task's
-    // current `task_labels` ids into the sorted names `TaskSnapshot` compares
-    // by (Todoist labels are compared/pushed by name, never by Nimble's
-    // local-only label id).
-    let label_name_by_id: HashMap<String, String> = crate::db::labels::list_labels(pool)
-        .await?
-        .into_iter()
-        .map(|l| (l.id, l.name))
-        .collect();
-
-    let mut tx = pool.begin().await?;
+/// The local half of a pull: SQL only, on the caller's transaction.
+async fn apply_pull_tx(
+    tx: &mut sqlx::SqliteConnection,
+    resp: &client::SyncResponse,
+    label_id_by_name: &HashMap<String, String>,
+    label_name_by_id: &HashMap<String, String>,
+    report: &mut SyncReport,
+) -> crate::Result<PulledRows> {
+    // Rows removed by this pull, captured before deletion for focus effects.
+    let mut deleted_tasks: Vec<crate::types::LocalTask> = Vec::new();
     // (local_task_id, snapshot) pairs to sync_log AFTER commit
     let mut logged: Vec<(String, &'static str)> = Vec::new();
     // (task_id, label_id, op) pairs for `task_labels` rows to sync_log AFTER
@@ -644,18 +624,22 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
                 // per-item deletes for descendants too, but if that
                 // assumption is ever violated, don't leave local children
                 // orphaned with a parent_id pointing at a now-deleted row.
-                let child_ids: Vec<(String,)> =
-                    sqlx::query_as("SELECT id FROM local_tasks WHERE parent_id = ?")
-                        .bind(&t.id)
-                        .fetch_all(&mut *tx)
-                        .await?;
-                for (child_id,) in &child_ids {
-                    sqlx::query("DELETE FROM local_tasks WHERE id = ?").bind(child_id).execute(&mut *tx).await?;
-                    logged.push((child_id.clone(), "DELETE"));
+                let children: Vec<crate::types::LocalTask> = sqlx::query_as(&format!(
+                    "SELECT {} FROM local_tasks WHERE parent_id = ?",
+                    crate::db::tasks::SELECT_COLS
+                ))
+                .bind(&t.id)
+                .fetch_all(&mut *tx)
+                .await?;
+                for child in children {
+                    sqlx::query("DELETE FROM local_tasks WHERE id = ?").bind(&child.id).execute(&mut *tx).await?;
+                    logged.push((child.id.clone(), "DELETE"));
+                    deleted_tasks.push(child);
                     report.deleted += 1;
                 }
                 sqlx::query("DELETE FROM local_tasks WHERE id = ?").bind(&t.id).execute(&mut *tx).await?;
-                logged.push((t.id, "DELETE"));
+                logged.push((t.id.clone(), "DELETE"));
+                deleted_tasks.push(t);
                 report.deleted += 1;
             }
             continue;
@@ -899,7 +883,93 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
                 .execute(&mut *tx).await?;
         }
     }
-    tx.commit().await?;
+    // Focus effects: every surviving row this pull touched (completion,
+    // title/project changes) plus the rows it deleted.
+    let mut effects = crate::db::task_tx::TaskEffects {
+        deleted: deleted_tasks,
+        ..Default::default()
+    };
+    let mut seen = std::collections::HashSet::new();
+    for (row_id, op) in &logged {
+        if *op == "DELETE" || !seen.insert(row_id.clone()) {
+            continue;
+        }
+        if let Some(task) = sqlx::query_as::<_, crate::types::LocalTask>(&format!(
+            "SELECT {} FROM local_tasks WHERE id = ?",
+            crate::db::tasks::SELECT_COLS
+        ))
+        .bind(row_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        {
+            effects.changed.push(task);
+        }
+    }
+    Ok(PulledRows { logged, label_sync_ops, project_sync_ops, effects })
+}
+
+/// Transactional pull apply: projects -> sections (pseudo-projects) -> items
+/// (two-pass, so a child that arrives before its parent still links up), then
+/// persists the new sync_token in the SAME transaction as the applied deltas.
+/// All writes here are direct SQL against `local_tasks`/`projects` — never the
+/// `db::tasks`/`db::projects` CRUD helpers — because those helpers fire the
+/// Todoist mutation observer, which would re-enqueue outbox ops for changes
+/// that originated from Todoist itself (an echo/infinite-loop risk). Direct
+/// SQL sidesteps the observer entirely.
+pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate::Result<SyncReport> {
+    apply_pull_with_focus(pool, resp, None).await
+}
+
+/// `apply_pull` under the desktop's live focus service when one is given: the
+/// Todoist fetch already finished, so the local apply runs inside
+/// `FocusService::begin_task_write` and reconciles queue/ledger effects with
+/// the service clock in the same transaction as the rows and sync token.
+pub async fn apply_pull_with_focus(
+    pool: &SqlitePool,
+    resp: &client::SyncResponse,
+    focus: Option<&crate::db::focus::engine::FocusService>,
+) -> crate::Result<SyncReport> {
+    let mut report = SyncReport::default();
+
+    // Resolve/create every distinct remote label name to a local label id
+    // BEFORE opening the transaction below: `get_or_create_label_by_name`
+    // opens its own transaction, and the pool has as few as one connection
+    // (test pools always do) — doing this while apply_pull's own transaction
+    // holds that connection would deadlock.
+    let mut label_id_by_name: HashMap<String, String> = HashMap::new();
+    for item in &resp.items {
+        if item.is_deleted.unwrap_or(false) {
+            continue;
+        }
+        for name in &item.labels {
+            if !label_id_by_name.contains_key(name) {
+                let label = crate::db::labels::get_or_create_label_by_name(pool, name).await?;
+                label_id_by_name.insert(name.clone(), label.id);
+            }
+        }
+    }
+    // id -> name for every label, used to resolve an existing local task's
+    // current `task_labels` ids into the sorted names `TaskSnapshot` compares
+    // by (Todoist labels are compared/pushed by name, never by Nimble's
+    // local-only label id).
+    let label_name_by_id: HashMap<String, String> = crate::db::labels::list_labels(pool)
+        .await?
+        .into_iter()
+        .map(|l| (l.id, l.name))
+        .collect();
+
+    let mut write = crate::db::focus::task_write::TaskWrite::begin(pool, focus).await?;
+    let applied = apply_pull_tx(write.conn(), resp, &label_id_by_name, &label_name_by_id, &mut report).await;
+    let PulledRows { logged, label_sync_ops, project_sync_ops, effects } = match applied {
+        Ok(rows) => rows,
+        Err(e) => {
+            // Roll back every row and the sync token together; the focus
+            // clock settle still commits, so a bad delta never freezes it.
+            write.abandon().await?;
+            return Err(e);
+        }
+    };
+    write.commit(&effects).await?;
 
     // 6. after commit: sync_log so Turso propagates (fire-and-forget, matches codebase pattern)
     for (row_id, op) in logged {
@@ -972,6 +1042,15 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
 }
 
 pub async fn run_sync(pool: &SqlitePool) -> crate::Result<SyncReport> {
+    run_sync_with_focus(pool, None).await
+}
+
+/// Push then pull. The HTTP fetch completes before `apply_pull_with_focus`
+/// opens the focus guard, so no network I/O ever runs under it.
+pub async fn run_sync_with_focus(
+    pool: &SqlitePool,
+    focus: Option<&crate::db::focus::engine::FocusService>,
+) -> crate::Result<SyncReport> {
     crate::db::recovery::require_activation_clear(pool).await?;
     let lock = SYNC_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
     let Ok(_guard) = lock.try_lock() else {
@@ -990,7 +1069,7 @@ pub async fn run_sync(pool: &SqlitePool) -> crate::Result<SyncReport> {
             "sync_token": sync_token,
             "resource_types": ["items", "projects", "sections", "completed_info"],
         })).await?;
-        let mut report = apply_pull(pool, &resp).await?;
+        let mut report = apply_pull_with_focus(pool, &resp, focus).await?;
         report.pushed = pushed;
         Ok(report)
     }.await;
@@ -1006,6 +1085,14 @@ pub async fn run_sync(pool: &SqlitePool) -> crate::Result<SyncReport> {
 }
 
 pub async fn run_sync_if_due(pool: &SqlitePool, min_interval_secs: i64) -> crate::Result<SyncReport> {
+    run_sync_if_due_with_focus(pool, min_interval_secs, None).await
+}
+
+pub async fn run_sync_if_due_with_focus(
+    pool: &SqlitePool,
+    min_interval_secs: i64,
+    focus: Option<&crate::db::focus::engine::FocusService>,
+) -> crate::Result<SyncReport> {
     let (pending, _) = outbox::counts(pool).await?;
     if pending == 0 {
         if let Some(state) = crate::integrations::get_state(pool, "todoist").await? {
@@ -1016,7 +1103,7 @@ pub async fn run_sync_if_due(pool: &SqlitePool, min_interval_secs: i64) -> crate
             }
         }
     }
-    run_sync(pool).await
+    run_sync_with_focus(pool, focus).await
 }
 
 #[cfg(test)]

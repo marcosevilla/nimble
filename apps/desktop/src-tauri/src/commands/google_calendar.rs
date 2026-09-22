@@ -139,7 +139,8 @@ pub async fn google_calendar_resolve_conflict(app:AppHandle,task_id:String,resol
         "use_calendar" => {
             let remote=conflict.remote.ok_or("google_remote_unsupported")?;
             // Reconciliation rechecks the latest local task before applying.
-            if !nimble_core::integrations::google_calendar::apply_remote_if_unchanged(pool.inner(),&conflict.local,&remote)
+            let focus=crate::focus_service::live(&app).await;
+            if !nimble_core::integrations::google_calendar::apply_remote_if_unchanged_with_focus(pool.inner(),focus.as_deref(),&conflict.local,&remote)
                 .await.map_err(|_|"google_resolution_failed")? { return Err("google_local_changed_review_again".into()) }
             nimble_core::db::google_calendar::acknowledge_upsert(pool.inner(),&task_id,None,&remote)
                 .await.map_err(|_|"google_resolution_failed")?;
@@ -148,6 +149,7 @@ pub async fn google_calendar_resolve_conflict(app:AppHandle,task_id:String,resol
     }
     sqlx::query("DELETE FROM google_calendar_conflicts WHERE task_id=?").bind(&task_id).execute(pool.inner()).await.map_err(|_|"google_resolution_failed")?;
     let _=app.emit("nimble-data-changed",serde_json::json!({"version":1,"domains":["tasks"],"ids":[task_id]}));
+    crate::focus_service::broadcast(&app).await;
     Ok(())
 }
 

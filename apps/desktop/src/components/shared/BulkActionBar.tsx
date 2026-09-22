@@ -1,3 +1,4 @@
+import { displayedDueDate } from '@/lib/displayedTasks'
 import { useCallback, useEffect, useState } from 'react'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { useDetailStore } from '@/stores/detailStore'
@@ -121,7 +122,7 @@ export function BulkActionBar() {
       const lastStartDelay = (ids.length - 1) * 40
       setTimeout(async () => {
         for (const id of ids) {
-          try { await dp.tasks.updateStatus(id, status) } catch { /* skip */ }
+          try { await dp.tasks.updateStatus(id, status, undefined, displayedDueDate(id)) } catch { /* skip */ }
           clearTaskCompleting(id)
         }
         toast.success(`Completed ${ids.length} task${ids.length !== 1 ? 's' : ''}`)

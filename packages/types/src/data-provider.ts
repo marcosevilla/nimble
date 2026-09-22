@@ -63,6 +63,11 @@ import type {
   TodoistMigrationResult,
   SyncReport,
   TodoistSyncStatus,
+  FocusCapabilities,
+  FocusSnapshot,
+  FocusCommand,
+  FocusReply,
+  FocusHistoryPage,
 } from './index'
 
 export interface DataProvider {
@@ -197,8 +202,14 @@ export interface DataProvider {
       clearSection?: boolean
       clearDuration?: boolean
     }): Promise<LocalTask>
-    updateStatus(id: string, status: TaskStatus, note?: string): Promise<void>
-    complete(id: string): Promise<void>
+    /**
+     * `expectedDueDate` is the due date the user SAW on the task (null when it
+     * had none). Completing a recurring task is refused as `stale_occurrence`
+     * if it no longer matches, so a sync that already advanced the date can't
+     * be advanced twice. Pass it for every completion.
+     */
+    updateStatus(id: string, status: TaskStatus, note?: string, expectedDueDate?: string | null): Promise<void>
+    complete(id: string, expectedDueDate: string | null): Promise<void>
     uncomplete(id: string): Promise<void>
     delete(id: string): Promise<void>
     reorder(taskIds: string[]): Promise<void>
@@ -250,9 +261,22 @@ export interface DataProvider {
     getSummary(date: string): Promise<ActivitySummary[]>
   }
 
+  /**
+   * One revisioned focus engine. Desktop owns it (single writer); web reads
+   * the settled replica and rejects every write with a typed `unsupported`
+   * FocusError. Failures reject with `{ code, message }` (FocusErrorCode).
+   */
   focus: {
+    capabilities(): Promise<FocusCapabilities>
+    snapshot(): Promise<FocusSnapshot>
+    execute(command: FocusCommand): Promise<FocusReply>
+    history(opts?: { cursor?: string; task_id?: string }): Promise<FocusHistoryPage>
+    openCompanion(): Promise<void>
+    /** @deprecated Legacy single-task timer. Rejects `unsupported` until Task 8 replaces its consumers. */
     startSession(taskId: string, taskContent: string): Promise<void>
+    /** @deprecated Legacy single-task timer. Rejects `unsupported` until Task 8 replaces its consumers. */
     endSession(taskId: string, outcome: string, durationSecs: number): Promise<void>
+    /** @deprecated Legacy resume marker (cleared by the v21 migration). */
     getActive(): Promise<FocusState>
   }
 

@@ -475,7 +475,7 @@ export function TaskDetailPage() {
           default `sm`, same as TaskItem) and is vertically centered against
           the title's line via items-center, not a manual mt- nudge. */}
       <div className="flex items-center gap-2">
-        <StatusDropdown taskId={task.id} status={task.status ?? 'todo'} onComplete={handleTaskCompleted} />
+        <StatusDropdown taskId={task.id} status={task.status ?? 'todo'} dueDate={task.due_date} onComplete={handleTaskCompleted} />
         <div className="flex-1 min-w-0">
           <InlineTitle
             value={task.content}

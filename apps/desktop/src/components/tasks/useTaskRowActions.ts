@@ -24,7 +24,7 @@ export function useTaskRowActions(tasks: LocalTask[]) {
   return useMemo(
     () => ({
       onOpen: (id: string) => useDetailStore.getState().openTask(id),
-      onComplete: (id: string) => completeTaskWithExit(dp, id),
+      onComplete: (id: string) => completeTaskWithExit(dp, id, tasks.find((t) => t.id === id)?.due_date),
       onSnooze: async (id: string) => {
         const dueDate = format(addDays(new Date(), 1), 'yyyy-MM-dd')
         try {

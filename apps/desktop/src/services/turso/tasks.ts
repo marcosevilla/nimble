@@ -338,12 +338,17 @@ async function fetchTask(id: string): Promise<LocalTask> {
  * entries are ordinary UPDATEs and are safe for desktop to apply; the desktop-side
  * omission is filed separately as a bug.
  */
-export async function setTaskStatus(id: string, status: TaskStatus): Promise<void> {
+export async function setTaskStatus(id: string, status: TaskStatus, expectedDueDate?: string | null): Promise<void> {
   const task = await fetchTask(id)
   const now = rowTimestamp()
 
   if (status === 'complete' && task.recurrence_rule != null && task.due_date != null) {
     const rule = parseRule(task.recurrence_rule)
+    // Same guard as the desktop focus service: completing the occurrence the
+    // user saw must not advance a date another device already advanced.
+    if (rule != null && expectedDueDate !== undefined && expectedDueDate !== task.due_date) {
+      throw new TursoError('stale_occurrence: recurring due identity changed; refresh and retry')
+    }
     // Rust parses `due_date` OUTSIDE the recurrence module — `if let Ok(current_due)`
     // at tasks.rs:564 — so a row whose due_date is not a valid `YYYY-MM-DD` falls
     // through and completes normally. Here that parse lives inside
