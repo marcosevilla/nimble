@@ -443,3 +443,8 @@ pub fn apply_retention(
     storage::flush_dir(&root)?;
     Ok(())
 }
+
+/// Check that this root still names the inode locked by the current job.
+pub fn validate_guard(paths: &BackupPaths, guard: &BackupJobGuard) -> crate::Result<()> {
+    require_guard(paths, guard).map(|_| ())
+}

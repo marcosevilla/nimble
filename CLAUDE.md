@@ -16,7 +16,7 @@ Nimble (formerly "Daily Triage") — a personal daily triage and briefing macOS 
 - ~~`cd apps/mobile && npx expo start`~~ — **mobile app is DORMANT as of 2026-08-14** (unplugged from npm workspaces; see `apps/mobile/DORMANT.md`)
 - `cd apps/desktop && npm run build` — Build desktop frontend for production
 - `cd apps/desktop && npm run tauri build` — Build distributable .app
-- **No test suite yet** — no unit or integration tests
+- **Rust tests:** `cargo test --workspace --offline`; desktop `npm run build`, web `npm run build:web`. C1 verification is recorded in `docs/c1-verification.md`.
 
 ## Project Structure (Monorepo)
 ```
@@ -150,7 +150,7 @@ nimble/
 - **The interface lives in `packages/types` (`@nimble/types`)** as of 2026-08-15 — THE single definition. `apps/desktop/src/services/data-provider.ts` is now just a type-only re-export shim. Drift between an implementation and the contract is a compile error.
 - Runtime provider access is `@/services/provider-context` (`useDataProvider` / `getDataProvider`). The type-only/runtime split is deliberate — see the Known Gotchas entry.
 - **Exactly 1** desktop file still imports `@/services/tauri`: `CaptureStrip.tsx`, for `dismissCaptureStrip`. Deliberate — it drives the always-on-top capture window, which has no web equivalent, so it does not belong on `DataProvider`. An ESLint `no-restricted-imports` rule over `src/components/**` bans `@tauri-apps/*` and `@/services/tauri`; that one site carries a documented disable. **Don't add another** — put the capability on `DataProvider` instead.
-- Implementations: `TauriProvider` (desktop, delegates to invoke wrappers) and `TursoProvider` (web, `services/turso-provider.ts` — currently a skeleton where every method rejects).
+- Implementations: `TauriProvider` (desktop, delegates to invoke wrappers) and `TursoProvider` (web, `services/turso-provider.ts` — implements the web data layer; desktop-only backups explicitly report unsupported).
 - ⚠️ `apps/mobile/services/data-provider.ts` is still a **stale parallel copy** (mobile is DORMANT). It has drifted badly: missing the `todoist`, `vault` and `sections` domains entirely, `captures.create` lacks the v16 `context` param, and `tasks.create/update` lack every R1/v19 field. If mobile is ever revived, delete that copy and import from `@nimble/types` — but expect to fix all of the above first.
 
 ## Sync Protocol
@@ -165,12 +165,6 @@ nimble/
 
 ## Current State
 
-- **Last session:** 2026-04-16 (loop-closing + logging-system design)
-- **Completed this session:**
-  - Committed the outstanding CLAUDE.md monorepo/mobile/sync refresh (a58eaa1)
-  - Audited all 48 files importing from `services/tauri`; split into Wave A (22 type-only) and Wave B (26 UI components still calling invoke wrappers)
-  - Executed Wave A: bulk renamed `@/services/tauri` → `@nimble/types` across 22 files (7e3252a). All 4 stores + 6 hooks now fully decoupled from tauri.ts. `tsc --noEmit` clean.
-  - Added git remote `origin` → github.com/marcosevilla/nimble and force-pushed clean 50-commit history (overwrote the README-only placeholder commit)
-  - Designed v2 logging system proposal with Marco (hooks + nightly rollup + opt-in /note); saved to `~/Obsidian/marcowits/claude-sync/logging-system-v2.md`
-- **Known issues:** Tiptap duplicate link extension warning. HelpPanel roadmap data is stale. First sync push is slow with large datasets. 26 desktop UI components still call invoke wrappers directly (Wave B — scoped as a dedicated follow-up session).
-- **Next up:** Per the v2 proposal's build order, next session = drop-or-fix decision on `daily-brief-data` repo. After that: hook scripts → /note skill → nightly rollup. Unrelated work still pending: Phase 3 mobile polish, evening review flow, goals detail page, Wave B migration (~26 files × ~100 callsites).
+Read `NEXT.md` for current work and remaining acceptance gates. C1 backup/restore is implemented on `codex/c1-backup-restore`; see `docs/c1-verification.md` and `docs/backup-recovery.md`. Native Settings smoke and production activation are still open. The installed app has not been replaced.
+
+Backups run at 02:00 local while the app is running, with launch/five-minute catch-up. Development builds disable backups unless a marked synthetic temporary profile is selected with `NIMBLE_BACKUP_TEST_ROOT`; demo mode disables backups. Full local snapshots contain credentials and must remain private. Only reviewed portable JSON goes to a verified private GitHub repository. Recovery creates a new isolated directory and never replaces live data or reconnects integrations.

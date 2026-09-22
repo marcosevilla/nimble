@@ -280,7 +280,7 @@ pub fn run() {
                     // once if nimble.db doesn't exist yet, so an update never
                     // boots against an empty database.
                     let legacy = app_dir.join("daily-triage.db");
-                    if !path.exists() && legacy.exists() {
+                    if !isolated_test && !path.exists() && legacy.exists() {
                         std::fs::copy(&legacy, &path)
                             .expect("failed to adopt legacy daily-triage.db");
                         log::info!("Adopted legacy database from {:?}", legacy);

@@ -1,7 +1,7 @@
 use crate::backup_runner::{self, BackupStatus};
 use tauri::AppHandle;
-fn public_error(_: nimble_core::Error) -> String {
-    "The backup action could not finish. Check Backups in Settings.".into()
+fn public_error(error: nimble_core::Error) -> String {
+    backup_runner::public_error_code(&error).into()
 }
 #[tauri::command]
 pub async fn backup_get_status(app: AppHandle) -> Result<BackupStatus, String> {

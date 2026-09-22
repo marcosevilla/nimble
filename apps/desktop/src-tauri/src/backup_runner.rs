@@ -39,6 +39,31 @@ pub struct BackupStatus {
     todoist_failed: Option<i64>,
     error: Option<StageError>,
 }
+/// Stable allowlisted codes only. Never return process output or database error details.
+pub fn public_error_code(error: &Error) -> &'static str {
+    match error.to_string().as_str() {
+        "backup_busy" => "backup_busy",
+        "backup_disabled" => "backup_disabled",
+        "backup_tool_unavailable" => "backup_tool_unavailable",
+        "remote_privacy_unverified" => "remote_privacy_unverified",
+        "remote_must_be_private" => "remote_must_be_private",
+        "remote_identity_changed" => "remote_identity_changed",
+        "invalid_repository_name" => "invalid_repository_name",
+        "backup_repository_dirty" | "backup_journal_conflict" => "backup_repository_dirty",
+        "backup_branch_must_be_main" => "backup_branch_must_be_main",
+        "unrelated_backup_repository"
+        | "unexpected_backup_files"
+        | "unexpected_backup_remote"
+        | "unexpected_backup_history" => "unrelated_backup_repository",
+        "unexpected_backup_transport" | "git_url_rewrite_refused" => "unexpected_backup_transport",
+        "backup_push_failed" | "backup_push_not_acknowledged" => "backup_push_failed",
+        "backup_process_timeout" => "backup_process_timeout",
+        "backup_generation_missing" | "backup_no_verified_backup" => "backup_no_verified_backup",
+        "backup_test_profile_upload_disabled" => "backup_test_profile_upload_disabled",
+        "backup_lock_replaced" => "backup_lock_replaced",
+        _ => "backup_action_failed",
+    }
+}
 fn err(code: &str) -> Error {
     Error::Other(format!("backup_{code}"))
 }
@@ -82,11 +107,15 @@ pub fn test_root() -> Result<Option<PathBuf>> {
     let Some(root) = std::env::var_os("NIMBLE_BACKUP_TEST_ROOT") else {
         return Ok(None);
     };
-    let path = PathBuf::from(root);
+    validate_test_root(&PathBuf::from(root)).map(Some)
+}
+fn validate_test_root(path: &std::path::Path) -> Result<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
     let temp = std::fs::canonicalize(std::env::temp_dir())?;
     let resolved = std::fs::canonicalize(&path)?;
-    if !resolved.starts_with(&temp)
+    if (!resolved.starts_with(&temp) && !resolved.starts_with("/private/tmp"))
         || resolved == temp
+        || resolved == std::path::Path::new("/private/tmp")
         || std::fs::symlink_metadata(&path)?.file_type().is_symlink()
         || !resolved
             .file_name()
@@ -94,11 +123,33 @@ pub fn test_root() -> Result<Option<PathBuf>> {
     {
         return Err(err("unsafe_test_root"));
     }
+    for name in [
+        "synthetic-profile",
+        "nimble.db",
+        "nimble.db-wal",
+        "nimble.db-shm",
+        "nimble.db-journal",
+        "daily-triage.db",
+        "daily-triage.db-wal",
+        "daily-triage.db-shm",
+        "demo.db",
+        "demo.db-wal",
+        "demo.db-shm",
+    ] {
+        match std::fs::symlink_metadata(resolved.join(name)) {
+            Ok(meta) if !meta.is_file() || meta.file_type().is_symlink() || meta.nlink() != 1 => {
+                return Err(err("linked_test_file"))
+            }
+            Ok(_) => (),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(e) => return Err(e.into()),
+        }
+    }
     // Test profiles must be explicitly marked; never point this at real restored data.
     if std::fs::read(resolved.join("synthetic-profile"))? != b"nimble-synthetic-only\n" {
         return Err(err("invalid_test_profile"));
     }
-    Ok(Some(resolved))
+    Ok(resolved)
 }
 pub fn due_slot(now: DateTime<FixedOffset>, last: Option<NaiveDate>) -> Option<NaiveDate> {
     let date = now.date_naive();
@@ -138,7 +189,12 @@ fn local_success(state: &mut BackupState, generation: &VerifiedGeneration, slot:
         .map(|_| generation.manifest().id.clone());
     state.cleanup_generation_id = Some(generation.manifest().id.clone());
     state.next_local_attempt_at = None;
-    state.stage_error = None;
+    clear_error(state, "snapshot");
+}
+fn clear_error(state: &mut BackupState, stage: &str) {
+    if state.stage_error.as_ref().is_some_and(|e| e.stage == stage) {
+        state.stage_error = None;
+    }
 }
 fn failure(state: &mut BackupState, stage: &str, now: DateTime<Utc>) {
     state.stage_error = Some(StageError {
@@ -325,10 +381,10 @@ async fn execute_job(
                 state.publish_failures = 0;
                 state.next_publish_attempt_at = None;
                 state.pending_generation_id = None;
-                state.stage_error = None;
+                clear_error(&mut state, "publish");
                 backup_state::save_state(&runtime.paths.app_data, &state)?;
             }
-            Err(_) => {
+            Err(error) => {
                 if !runtime.test_mode {
                     state.export_commit = backup_git::current_commit(&remote).await.ok().flatten();
                 }
@@ -336,6 +392,7 @@ async fn execute_job(
                 state.next_publish_attempt_at =
                     Some((now + publish_delay(state.publish_failures)).to_rfc3339());
                 failure(&mut state, "publish", now);
+                state.stage_error.as_mut().unwrap().code = public_error_code(&error).into();
                 backup_state::save_state(&runtime.paths.app_data, &state)?;
                 return Err(err("publish_failed"));
             }
@@ -344,7 +401,8 @@ async fn execute_job(
     if let Some(id) = state.cleanup_generation_id.clone() {
         let result: Result<()> = async {
             let saved = generation(&runtime.paths, &id).await?;
-            nimble_core::db::sync::prune_backed_up_log(pool, &saved, now).await?;
+            nimble_core::db::sync::prune_backed_up_log(pool, &saved, now, &runtime.paths, &guard)
+                .await?;
             let generations = backup::list_verified(&runtime.paths).await?;
             let manifests = generations
                 .iter()
@@ -361,7 +419,7 @@ async fn execute_job(
         match result {
             Ok(()) => {
                 state.cleanup_generation_id = None;
-                state.stage_error = None;
+                clear_error(&mut state, "cleanup");
             }
             Err(_) => {
                 failure(&mut state, "cleanup", now);
@@ -398,7 +456,18 @@ pub async fn configure_remote(app: &AppHandle, owner_repo: &str) -> Result<Backu
     let root = dirs::home_dir()
         .ok_or_else(|| err("home_unavailable"))?
         .join("Nimble-backups");
-    state.remote = Some(backup_git::configure_remote(owner_repo, &root).await?);
+    match backup_git::configure_remote(owner_repo, &root).await {
+        Ok(remote) => {
+            state.remote = Some(remote);
+            clear_error(&mut state, "setup");
+        }
+        Err(error) => {
+            failure(&mut state, "setup", Utc::now());
+            state.stage_error.as_mut().unwrap().code = public_error_code(&error).into();
+            backup_state::save_state(&runtime.paths.app_data, &state)?;
+            return Err(error);
+        }
+    }
     state.pending_generation_id = state.generation_id.clone();
     state.next_publish_attempt_at = None;
     backup_state::save_state(&runtime.paths.app_data, &state)?;
@@ -474,7 +543,10 @@ pub async fn verify_latest(app: &AppHandle) -> Result<()> {
     runtime.running.store(true, Ordering::SeqCst);
     let _running = Running(&runtime.running);
     let state = backup_state::load_state(&runtime.paths.app_data)?;
-    let id = state.generation_id.as_deref().ok_or_else(|| err("no_verified_backup"))?;
+    let id = state
+        .generation_id
+        .as_deref()
+        .ok_or_else(|| err("no_verified_backup"))?;
     let saved = generation(&runtime.paths, id).await?;
     let root = std::fs::canonicalize(std::env::temp_dir())?
         .join(format!("nimble-verify-{}", uuid::Uuid::new_v4()));
@@ -592,6 +664,71 @@ mod orchestration_tests {
             0
         );
         assert!(!runtime.running.load(Ordering::SeqCst));
+        pool.close().await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod isolation_regressions {
+    use super::*;
+    #[test]
+    fn profile_rejects_linked_database_before_opening_it() {
+        use std::os::unix::fs::symlink;
+        let root = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("nimble-backup-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("synthetic-profile"), b"nimble-synthetic-only\n").unwrap();
+        let unrelated = root.join("unrelated.db");
+        std::fs::write(&unrelated, b"must stay unchanged").unwrap();
+        symlink(&unrelated, root.join("nimble.db")).unwrap();
+        assert!(validate_test_root(&root).is_err());
+        std::fs::remove_file(root.join("nimble.db")).unwrap();
+        std::fs::hard_link(&unrelated, root.join("nimble.db")).unwrap();
+        assert!(validate_test_root(&root).is_err());
+        assert_eq!(std::fs::read(unrelated).unwrap(), b"must stay unchanged");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
+    async fn new_snapshot_preserves_pending_publish_error() {
+        let root = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("nimble-backup-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("nimble.db");
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        nimble_core::db::migrations::run_migrations(&pool)
+            .await
+            .unwrap();
+        let runtime = BackupRuntime::new(root.clone(), path, false, true);
+        let now = DateTime::parse_from_rfc3339("2026-09-22T02:00:00-07:00").unwrap();
+        let mut state = BackupState::default();
+        state.remote = Some(crate::backup_state::RemoteConfig {
+            owner_repo: "test/private".into(),
+            repository_id: "test".into(),
+            root: root.join("unused"),
+        });
+        state.last_local_slot = Some("2026-09-21".into());
+        state.next_publish_attempt_at = Some((now + chrono::Duration::hours(2)).to_rfc3339());
+        failure(&mut state, "publish", now.with_timezone(&Utc));
+        backup_state::save_state(&root, &state).unwrap();
+        execute_job(&runtime, &pool, false, now).await.unwrap();
+        assert_eq!(
+            backup_state::load_state(&root)
+                .unwrap()
+                .stage_error
+                .unwrap()
+                .stage,
+            "publish"
+        );
         pool.close().await;
         std::fs::remove_dir_all(root).unwrap();
     }

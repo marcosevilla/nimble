@@ -4,16 +4,16 @@ Updated 2026-09-21 from the current checkout and committed planning documents.
 
 ## Start here
 
-- [ ] Execute Task 1 of the [C1 implementation plan](docs/superpowers/plans/2026-09-21-c1-backup-restore.md): deterministic portable export and explicit schema/credential-exclusion tests. Implementation has not started.
-- [x] Marco approved the [C1 backup/restore spec](docs/superpowers/specs/2026-09-21-c1-backup-restore-design.md), including catch-up scheduling, isolated recovery, conservative pruning, and conflict-journal deferral.
-- [x] Write the eight-task C1 implementation plan with interfaces, tests, recovery drills and activation boundaries.
-- [x] Draft the C1 safety-net spec against current database, settings, sync, and desktop lifecycle code. No application implementation or live-data changes.
+- [ ] Finish the native Settings smoke check in the synthetic test profile, then integrate `codex/c1-backup-restore` into main. The installed production app has not been updated.
+- [x] Implement C1 tasks 1–7: local snapshots, portable export, isolated recovery, conservative pruning, private Git publication, scheduling, and Settings controls.
+- [x] Verify 279 Rust tests, desktop/web builds, targeted frontend lint, snapshot recovery and export recovery after local Git retrieval. Independent integration review approved with no remaining blockers. See [verification record](docs/c1-verification.md).
+- [ ] Select and configure an existing private GitHub archive after release; real offsite activation has not been tested or enabled.
+- Approved [spec](docs/superpowers/specs/2026-09-21-c1-backup-restore-design.md) and [plan](docs/superpowers/plans/2026-09-21-c1-backup-restore.md). Work is isolated in `codex/c1-backup-restore`, based on `2b0421a`.
 - Canonical decisions: [Todoist replacement](docs/todoist-replacement-decisions.md), dated 2026-08-25. Its C1–C5 order supersedes the older R1–R5 plan.
-- Latest existing commit at this review: `2b0421a` (locked decisions). Working tree was clean on `main`, matching the locally cached `origin/main`; no remote fetch, build, live app, or production verification was performed.
 
 ## Code track — agreed order
 
-- [ ] **C1: Safety net.** SQLite snapshots, deterministic JSON export, nightly private-repo backup, sync-log pruning, Settings visibility. Exit: restore a snapshot and compare its export with the original using a safe test copy.
+- [ ] **C1: Safety net activation.** Implementation and isolated recovery checks passed. Native button smoke, integration/release and real private-repository activation remain.
 - [ ] **C2: Reminders.** Persistent desktop reminders, catch-up after sleep, Google Calendar OAuth for phone alerts; schema v20 also introduces label groups.
 - [ ] **C3: Agent access.** Local `dt` CLI over `nimble-core` CRUD, JSON output, instant running-app refresh, then adapt agent workflows with Todoist as fallback during the trial period.
 - [ ] **C4: Labels and search.** Restore ENERGY / TIME / TYPE / CREATIVE grouping; indexed task-title and description search including completed tasks.
@@ -29,9 +29,9 @@ Updated 2026-09-21 from the current checkout and committed planning documents.
 ## Verification still open
 
 - [ ] Live recurrence exit test: verify the intended biweekly recurrence twice in a row. Unit-test coverage is not this exit test.
-- [ ] Backup/restore exit test after C1 exists.
-- [ ] Before merging implementation, run `cargo test --workspace` and the desktop `npm run build` (uses `tsc -b`); include the web build for shared UI/provider changes.
-- [ ] Refresh stale guidance: `CLAUDE.md` still says no tests, has an April Current State section, and describes the web provider as a rejecting skeleton. The August decisions report about 225 Rust tests and a working web client. `docs/buildplan.md` is a March snapshot.
+- [x] Isolated backup/restore exit test: both routes verified, including canonical export equality; no live activation.
+- [x] Implementation checks: `cargo test --workspace --offline`, desktop `npm run build`, web `npm run build:web`, and targeted lint passed. Rerun appropriate checks if integration changes the code.
+- [x] Refresh CLAUDE.md test/provider guidance and point current state here. `docs/buildplan.md` remains a historical March snapshot.
 - [ ] Review older R1 soak follow-ups and reliability deferrals before cutover; the locked-decisions doc is the starting point, not proof those checks passed.
 
 ## Deferred / boundaries

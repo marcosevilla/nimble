@@ -2693,7 +2693,7 @@ mod backup_prune_tests {
         }
         let ids = ["old", "max", "tie", "pending", "unknown", "bad", "only"].into_iter().map(String::from).collect();
         let now = chrono::DateTime::parse_from_rfc3339("2026-09-21T00:00:00Z").unwrap().with_timezone(&Utc);
-        assert_eq!(prune_log_ids(&pool, &ids, now).await.unwrap(), 1);
+        assert_eq!(prune_log_ids(&pool, &ids, now, None).await.unwrap(), 1);
         let left: Vec<String> = sqlx::query_scalar("SELECT id FROM sync_log ORDER BY id").fetch_all(&pool).await.unwrap();
         assert_eq!(left, ["bad", "max", "only", "pending", "tie", "unbacked", "unknown"]);
         assert!(has_newer_local_change(&pool, "local_tasks", "task", "2026-01-15T00:00:00Z").await.unwrap());
@@ -2715,7 +2715,8 @@ fn parse_log_time(value: &str) -> Option<chrono::DateTime<Utc>> {
         .or_else(|| chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f").ok().map(|v| v.and_utc()))
 }
 
-async fn prune_log_ids(pool: &SqlitePool, backed_up: &std::collections::HashSet<String>, now: chrono::DateTime<Utc>) -> crate::Result<u64> {
+async fn prune_log_ids(pool: &SqlitePool, backed_up: &std::collections::HashSet<String>, now: chrono::DateTime<Utc>, guard: Option<(&crate::db::backup::BackupPaths, &crate::db::backup::BackupJobGuard)>) -> crate::Result<u64> {
+    if let Some((paths, guard)) = guard { crate::db::backup::validate_guard(paths, guard)?; }
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let rows: Vec<(String,String,String,String,Option<i64>)> = sqlx::query_as(
         "SELECT id,table_name,row_id,timestamp,synced FROM sync_log"
@@ -2738,6 +2739,7 @@ async fn prune_log_ids(pool: &SqlitePool, backed_up: &std::collections::HashSet<
         removed += sqlx::query("DELETE FROM sync_log WHERE id = ? AND synced = 1 AND EXISTS (SELECT 1 FROM sync_log AS newer WHERE newer.table_name = sync_log.table_name AND newer.row_id = sync_log.row_id AND newer.timestamp = ? AND newer.timestamp > sync_log.timestamp)")
             .bind(id).bind(max).execute(&mut *tx).await?.rows_affected();
     }
+    if let Some((paths, guard)) = guard { crate::db::backup::validate_guard(paths, guard)?; }
     tx.commit().await?;
     Ok(removed)
 }
@@ -2748,7 +2750,10 @@ pub async fn prune_backed_up_log(
     pool: &SqlitePool,
     generation: &crate::db::backup::VerifiedGeneration,
     now: chrono::DateTime<Utc>,
+    paths: &crate::db::backup::BackupPaths,
+    guard: &crate::db::backup::BackupJobGuard,
 ) -> crate::Result<u64> {
+    crate::db::backup::validate_guard(paths, guard)?;
     let checked = crate::db::backup::verify_generation(generation.directory()).await?;
     let snapshot = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect_with(
         sqlx::sqlite::SqliteConnectOptions::new().filename(checked.directory().join("snapshot.db"))
@@ -2757,5 +2762,32 @@ pub async fn prune_backed_up_log(
     let result = sqlx::query_scalar::<_, String>("SELECT id FROM sync_log").fetch_all(&snapshot).await;
     snapshot.close().await;
     let ids = result?.into_iter().collect();
-    prune_log_ids(pool, &ids, now).await
+    prune_log_ids(pool, &ids, now, Some((paths, guard))).await
+}
+
+#[cfg(test)]
+mod backup_lock_regression {
+    use super::*;
+    #[tokio::test]
+    async fn replaced_job_lock_prevents_any_pruning() {
+        use crate::db::backup;
+        let root=std::fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("nimble-prune-{}",Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let paths=backup::BackupPaths { app_data:root.clone(),database:root.join("nimble.db"),generations:root.join("backups") };
+        let pool=sqlx::sqlite::SqlitePoolOptions::new().connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&paths.database).create_if_missing(true)).await.unwrap();
+        crate::db::migrations::run_migrations(&pool).await.unwrap();
+        for (id,time) in [("old","2026-01-01T00:00:00Z"),("new","2026-02-01T00:00:00Z")] {
+            sqlx::query("INSERT INTO sync_log(id,table_name,row_id,operation,device_id,timestamp,synced) VALUES (?,'local_tasks','test','DELETE','test',?,1)")
+                .bind(id).bind(time).execute(&pool).await.unwrap();
+        }
+        let guard=backup::try_lock(&paths).unwrap().unwrap();
+        let now=chrono::DateTime::parse_from_rfc3339("2026-09-21T02:00:00-07:00").unwrap();
+        let saved=backup::create_generation(&paths,now,"test",&guard).await.unwrap();
+        std::fs::rename(paths.generations.join(".job.lock"),paths.generations.join(".held-lock")).unwrap();
+        std::fs::write(paths.generations.join(".job.lock"),b"").unwrap();
+        assert!(prune_backed_up_log(&pool,&saved,now.with_timezone(&Utc),&paths,&guard).await.is_err());
+        let count:i64=sqlx::query_scalar("SELECT COUNT(*) FROM sync_log").fetch_one(&pool).await.unwrap();
+        assert_eq!(count,2);
+        drop(guard);pool.close().await;std::fs::remove_dir_all(root).unwrap();
+    }
 }
