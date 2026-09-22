@@ -2,6 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { useFocusStore } from '@/stores/focusStore'
 import { useFocusQueue } from '@/hooks/useFocusQueue'
 import { cn } from '@/lib/utils'
+import { shouldIgnoreKey } from '@/lib/keyGuard'
 import { Pause, Play, Check, SkipForward, Minimize2, X, Coffee } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -87,14 +88,15 @@ export function FocusView() {
   }, [completeFocus, nextTask])
 
   // Expanded-view keys (registry: Session). Enter completes (or ends the
-  // break), Escape minimizes to the banner, `s` stops. Skips inputs and
-  // modifier chords; the celebration overlay owns the keys once it is up
-  // (session P1-3). Space (pause) stays in the Dashboard handler.
+  // break), Escape minimizes to the banner, `s` stops. Skips text entry,
+  // open popovers/dialogs, a focused button (so Enter activates that button
+  // instead of also completing), key repeat and modifier chords; the
+  // celebration overlay owns the keys once it is up (session P1-3). Space
+  // (pause) stays in the Dashboard handler.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const t = e.target as HTMLElement
-      const isInput = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
-      if (isInput || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
+      if (shouldIgnoreKey(e.target as HTMLElement)) return
       const store = useFocusStore.getState()
       if (!store.isActive || store.isCompact || store.showCelebration) return
       if (e.key === 'Enter') {

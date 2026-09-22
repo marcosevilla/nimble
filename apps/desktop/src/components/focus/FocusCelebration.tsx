@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from 'react'
 import { useFocusStore } from '@/stores/focusStore'
 import { playCompletionSound } from '@/lib/sound'
+import { shouldIgnoreKey } from '@/lib/keyGuard'
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
@@ -50,14 +51,24 @@ export function FocusCelebration() {
   }, [parkCelebration])
 
   // Escape and a stray click end the session; only Enter commits to the
-  // next task. Space follows Enter (it is "confirm" everywhere else here).
+  // next task. The overlay owns these keys while it is up (capture phase,
+  // so the focused Complete button underneath can't fire twice), except in
+  // text entry or an open dialog. Space is swallowed, not mapped: it means
+  // "pause" everywhere else, so it must never start a 25-minute session.
+  // Held-key repeats are ignored — the Enter that completed the task must
+  // not auto-repeat into starting the next one.
   const handleEnd = useCallback(() => { endCelebration() }, [endCelebration])
   const handleNext = useCallback(() => { dismissCelebration() }, [dismissCelebration])
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); handleEnd() }
-      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleNext() }
+      if (e.key !== 'Escape' && e.key !== 'Enter' && e.key !== ' ') return
+      if (shouldIgnoreKey(e.target as HTMLElement, { allowInteractive: true })) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.repeat) return
+      if (e.key === 'Escape') handleEnd()
+      else if (e.key === 'Enter') handleNext()
     }
     window.addEventListener('keydown', handleKey, true)
     return () => window.removeEventListener('keydown', handleKey, true)
