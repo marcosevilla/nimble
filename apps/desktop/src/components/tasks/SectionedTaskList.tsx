@@ -20,9 +20,19 @@ import { LocalTaskRow } from './LocalTaskRow'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { useDataProvider } from '@/services/provider-context'
 import { UNSECTIONED, type TaskGroup } from '@/lib/task-view'
-import type { LocalTask } from '@nimble/types'
+import type { LocalTask, Project } from '@nimble/types'
 
-interface TaskLaneProps {
+interface RowNavProps {
+  /** Keyboard-focused row id from `useTaskNavigation` (tasks audit P1-1). */
+  focusedId?: string | null
+  /** Rows report DOM focus so the navigation index follows Tab/click. */
+  onFocusRow?: (id: string) => void
+  /** Per-row project lookup for multi-project lists (All Tasks); a
+   * single-project list passes `projectName`/`projectColor` instead. */
+  projectsById?: Record<string, Project>
+}
+
+interface TaskLaneProps extends RowNavProps {
   containerId: string
   itemIds: string[]
   taskMap: Record<string, LocalTask>
@@ -52,6 +62,9 @@ function TaskLane({
   onDelete,
   onAddSubtask,
   emptyLabel,
+  focusedId,
+  onFocusRow,
+  projectsById,
 }: TaskLaneProps) {
   const { setNodeRef } = useDroppable({ id: containerId, disabled: !dragEnabled })
 
@@ -65,28 +78,24 @@ function TaskLane({
     const subtasks = subtaskMap[id] ?? []
     const done = subtasks.filter((s) => s.completed || s.status === 'complete').length
     const stats = subtasks.length > 0 ? { done, total: subtasks.length } : undefined
+    const project = projectsById?.[task.project_id]
+    const rowProps = {
+      task,
+      projectName: project?.name ?? projectName,
+      projectColor: project?.color ?? projectColor,
+      subtaskStats: stats,
+      onDelete,
+      onAddSubtask,
+      focused: focusedId === id,
+      onFocusRow: onFocusRow ? () => onFocusRow(id) : undefined,
+    }
 
     return [
       <div key={id}>
         {dragEnabled ? (
-          <SortableTaskItem
-            task={task}
-            projectName={projectName}
-            projectColor={projectColor}
-            subtaskStats={stats}
-            onDelete={onDelete}
-            onAddSubtask={onAddSubtask}
-          />
+          <SortableTaskItem {...rowProps} />
         ) : (
-          <LocalTaskRow
-            task={task}
-            projectName={projectName}
-            projectColor={projectColor}
-            subtaskStats={stats}
-            onDelete={onDelete}
-            onAddSubtask={onAddSubtask}
-            showGrip={false}
-          />
+          <LocalTaskRow {...rowProps} showGrip={false} />
         )}
       </div>,
     ]
@@ -113,7 +122,7 @@ function TaskLane({
   )
 }
 
-interface SectionedTaskListProps {
+interface SectionedTaskListProps extends RowNavProps {
   /** Pre-grouped, pre-filtered lanes from `groupTasks()` (task-view.ts) —
    * top-level tasks only, in display order. */
   groups: TaskGroup[]
@@ -145,6 +154,9 @@ export function SectionedTaskList({
   onDelete,
   onAddSubtask,
   onUpdated,
+  focusedId,
+  onFocusRow,
+  projectsById,
 }: SectionedTaskListProps) {
   const dp = useDataProvider()
 
@@ -296,6 +308,9 @@ export function SectionedTaskList({
             onDelete={onDelete}
             onAddSubtask={onAddSubtask}
             emptyLabel={dragEnabled ? 'No tasks in this section yet.' : undefined}
+            focusedId={focusedId}
+            onFocusRow={onFocusRow}
+            projectsById={projectsById}
           />
         )
 

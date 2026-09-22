@@ -8,7 +8,7 @@ import { useSelectionStore } from '@/stores/selectionStore'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { playCompletionSound } from '@/lib/sound'
 import { toast } from 'sonner'
-import type { TaskStatus } from '@nimble/types'
+import type { DataProvider, TaskStatus } from '@nimble/types'
 import type { LucideIcon } from 'lucide-react'
 
 /** Matches the `task-complete-exit` keyframe duration in index.css. */
@@ -34,6 +34,26 @@ export function getStatusConfig(status: TaskStatus): StatusConfig {
   return STATUSES.find((s) => s.value === status) ?? STATUSES[1]
 }
 
+/** Complete a task the way the status menu does: play the row's exit
+ * animation first, then fire the mutation as the row finishes sliding out.
+ * Shared with the `x` row shortcut (tasks audit P1-1) so keyboard and mouse
+ * completion look identical. */
+export function completeTaskWithExit(dp: DataProvider, taskId: string) {
+  const store = useSelectionStore.getState()
+  playCompletionSound()
+  store.markTaskCompleting(taskId)
+  setTimeout(async () => {
+    try {
+      await dp.tasks.updateStatus(taskId, 'complete')
+      emitTasksChanged()
+    } catch (e) {
+      toast.error(`Failed to update status: ${e}`)
+    } finally {
+      useSelectionStore.getState().clearTaskCompleting(taskId)
+    }
+  }, TASK_COMPLETE_ANIM_MS)
+}
+
 interface StatusDropdownProps {
   taskId: string
   status: TaskStatus
@@ -50,6 +70,7 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete }: Stat
   const markTaskCompleting = useSelectionStore((s) => s.markTaskCompleting)
   const clearTaskCompleting = useSelectionStore((s) => s.clearTaskCompleting)
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const [showBlockedInput, setShowBlockedInput] = useState(false)
   const [blockedReason, setBlockedReason] = useState('')
 
@@ -121,10 +142,14 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete }: Stat
 
   return (
     <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setShowBlockedInput(false); setBlockedReason('') } }}>
+      {/* The 16px glyph stays; the target grows to 28px via negative margin
+          so the row height is unaffected (tasks audit P3-3). */}
       <PopoverTrigger
+        ref={triggerRef}
+        aria-label={`Status: ${current.label}`}
         className={cn(
-          'shrink-0 rounded-md transition-colors hover:bg-hover',
-          size === 'md' ? 'p-0.5' : 'p-0',
+          'flex shrink-0 items-center justify-center rounded-md transition-colors hover:bg-hover',
+          size === 'md' ? 'size-8 -m-1.5' : 'size-7 -m-1.5',
         )}
         onClick={(e) => e.stopPropagation()}
       >
@@ -147,6 +172,9 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete }: Stat
         align="start"
         sideOffset={4}
         className="w-44 gap-0 p-1"
+        // In a list, closing hands focus to the row (not this trigger) so
+        // j/k keep going (fix round 2, N1); elsewhere the default applies.
+        finalFocus={() => triggerRef.current?.closest<HTMLElement>('[data-nav-row]') ?? true}
         onClick={(e) => e.stopPropagation()}
       >
         {showBlockedInput ? (

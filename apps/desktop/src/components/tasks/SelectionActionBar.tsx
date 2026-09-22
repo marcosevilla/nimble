@@ -5,6 +5,8 @@ import { useSelectionStore } from '@/stores/selectionStore'
 import { useDataProvider } from '@/services/provider-context'
 import { useProjects, emitTasksChanged } from '@/hooks/useLocalTasks'
 import { cn } from '@/lib/utils'
+import { useDeleteTasks } from './useDeleteTasks'
+import type { LocalTask } from '@nimble/types'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import {
   DropdownMenu,
@@ -23,8 +25,10 @@ const PRIORITY_OPTIONS = [
   { value: 4, label: 'Urgent' },
 ]
 
+// No `outline-none`: the global :focus-visible ring (index.css) is the
+// focus state (tasks audit P1-4).
 const ACTION_BUTTON =
-  'h-7 rounded-md px-2 text-body text-foreground hover:bg-accent transition-colors inline-flex items-center outline-none'
+  'h-7 rounded-md px-2 text-body text-foreground hover:bg-accent transition-colors inline-flex items-center'
 
 const s = (n: number) => (n !== 1 ? 's' : '')
 
@@ -125,28 +129,26 @@ export function SelectionActionBar() {
     [selectedIds, dp, clear],
   )
 
+  // Leaves delete with Undo; a selection that takes subtasks with it
+  // confirms first (tasks audit P1-6, review I1 — see useDeleteTasks).
+  const { requestDelete, dialog: deleteDialog } = useDeleteTasks()
   const handleDelete = useCallback(async () => {
-    const ids = Array.from(selectedIds)
-    if (!window.confirm(`Delete ${ids.length} task${s(ids.length)}? This can't be undone.`)) {
+    const ids = new Set(selectedIds)
+    const all = await dp.tasks.list({ includeCompleted: true }).catch(() => [] as LocalTask[])
+    const snapshot = all.filter((t) => ids.has(t.id))
+    if (snapshot.length === 0) {
+      clear()
+      emitTasksChanged()
       return
     }
-    let successCount = 0
-    for (const id of ids) {
-      try {
-        await dp.tasks.delete(id)
-        successCount++
-      } catch {
-        /* counted as failed below */
-      }
-    }
-    emitTasksChanged()
-    clear()
-    reportBatch(successCount, ids.length, (n) => `Deleted ${n} task${s(n)}`)
-  }, [selectedIds, dp, clear])
+    await requestDelete(snapshot, clear)
+  }, [selectedIds, dp, clear, requestDelete])
 
   if (selectionType !== 'task' || count === 0) return null
 
   return (
+    <>
+    {deleteDialog}
     <div className="sticky bottom-4 z-20 mx-auto w-fit animate-in fade-in slide-in-from-bottom-2">
       <div className="flex items-center gap-1 rounded-[10px] border border-input bg-card px-2 py-1.5 shadow-[0px_6px_16px_-2px_rgba(0,0,0,0.12)]">
         <span className="px-2 text-meta text-muted-foreground tabular-nums">
@@ -203,5 +205,6 @@ export function SelectionActionBar() {
         </button>
       </div>
     </div>
+    </>
   )
 }

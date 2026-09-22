@@ -7,7 +7,10 @@ import { SelectionActionBar } from '@/components/tasks/SelectionActionBar'
 import { PageDragRegion } from '@/components/shared/PageDragRegion'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import { List, PanelLeftOpen } from 'lucide-react'
+import { List, PanelLeftOpen, Plus } from 'lucide-react'
+import { useTaskNavigation } from '@/hooks/useTaskNavigation'
+import { useTaskRowActions } from '@/components/tasks/useTaskRowActions'
+import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { ProjectSidebar } from '@/components/tasks/ProjectSidebar'
 import { ProjectDetailPage } from '@/components/tasks/ProjectDetailPage'
 import { TaskDetailPage } from '@/components/detail/TaskDetailPage'
@@ -17,7 +20,7 @@ import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataProvider } from '@/services/provider-context'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView, type GroupBy } from '@/lib/task-view'
-import type { LocalTask, Label } from '@nimble/types'
+import type { LocalTask, Label, Project } from '@nimble/types'
 
 // Section/manual grouping don't have a coherent cross-project meaning here —
 // `sections` are scoped to a single project (see task-view.ts), so a merged
@@ -33,12 +36,14 @@ const ALL_TASKS_GROUP_BY: readonly GroupBy[] = ['status', 'priority', 'due']
 
 function AllTasksView({
   tasks,
+  projects,
   visibleLabels,
   onDelete,
   onAddSubtask,
   refresh,
 }: {
   tasks: LocalTask[]
+  projects: Project[]
   visibleLabels: Label[]
   onDelete: (id: string) => void
   onAddSubtask: (parentId: string, content: string) => void
@@ -64,6 +69,18 @@ function AllTasksView({
     () => groupTasks(filteredTasks, viewState.groupBy, []),
     [filteredTasks, viewState.groupBy],
   )
+
+  // j/k/x/s/f/Enter over the rows in display order (tasks audit P1-1).
+  const visibleIds = useMemo(() => groups.flatMap((g) => g.tasks.map((t) => t.id)), [groups])
+  const rowActions = useTaskRowActions(tasks)
+  const { focusedId, focusRow } = useTaskNavigation(visibleIds, rowActions, { memoryKey: 'tasks:all' })
+
+  // All Tasks mixes projects — each row resolves its own badge (P2-1).
+  const projectsById = useMemo(() => {
+    const map: Record<string, Project> = {}
+    for (const p of projects) map[p.id] = p
+    return map
+  }, [projects])
 
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -110,7 +127,26 @@ function AllTasksView({
                 onDelete={onDelete}
                 onAddSubtask={onAddSubtask}
                 onUpdated={refresh}
+                focusedId={focusedId}
+                onFocusRow={focusRow}
+                projectsById={projectsById}
               />
+            )}
+
+            {/* Same "Add a task" row a project view has, with the shortcut
+                it stands in for (tasks audit P2-7). */}
+            {filteredTasks.length > 0 && (
+              <div className="pt-5 pl-4">
+                <button
+                  type="button"
+                  onClick={() => useQuickCreateStore.getState().openCreate()}
+                  className="flex w-full items-center gap-2 rounded-md text-left text-meta text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Plus className="size-3 shrink-0" />
+                  <span className="flex-1">Add a task…</span>
+                  <kbd className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-label text-muted-foreground">Q</kbd>
+                </button>
+              </div>
             )}
 
             <SelectionActionBar />
@@ -278,6 +314,7 @@ export function TasksPage() {
       ) : (
         <AllTasksView
           tasks={tasks}
+          projects={projects}
           visibleLabels={visibleLabels}
           onDelete={remove}
           onAddSubtask={handleAddSubtask}

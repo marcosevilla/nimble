@@ -7,6 +7,8 @@ import { PageDragRegion } from '@/components/shared/PageDragRegion'
 import { useDataProvider } from '@/services/provider-context'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView } from '@/lib/task-view'
 import { useQuickCreateStore } from '@/stores/quickCreateStore'
+import { useTaskNavigation } from '@/hooks/useTaskNavigation'
+import { useTaskRowActions } from './useTaskRowActions'
 import { Plus } from 'lucide-react'
 import type { Project, LocalTask, Section, Label } from '@nimble/types'
 
@@ -90,6 +92,11 @@ export function ProjectDetailPage({
 
   const dragEnabled = viewState.groupBy === 'section' || viewState.groupBy === 'manual'
 
+  // j/k/x/s/f/Enter over the rows in display order (tasks audit P1-1).
+  const visibleIds = useMemo(() => groups.flatMap((g) => g.tasks.map((t) => t.id)), [groups])
+  const rowActions = useTaskRowActions(projectTasks)
+  const { focusedId, focusRow } = useTaskNavigation(visibleIds, rowActions, { memoryKey: `tasks:project:${project.id}` })
+
   // Only surface labels that are actually applied to something in this
   // project — an empty label taxonomy in the filter menu is just noise.
   const usedLabelIds = useMemo(() => {
@@ -156,6 +163,8 @@ export function ProjectDetailPage({
                 onDelete={onDeleteTask}
                 onAddSubtask={handleAddSubtask}
                 onUpdated={handleUpdated}
+                focusedId={focusedId}
+                onFocusRow={focusRow}
               />
             )}
 
@@ -166,10 +175,11 @@ export function ProjectDetailPage({
               <button
                 type="button"
                 onClick={() => useQuickCreateStore.getState().openCreate({ projectId: project.id })}
-                className="flex w-full items-center gap-2 text-left text-meta text-muted-foreground hover:text-foreground transition-colors"
+                className="flex w-full items-center gap-2 rounded-md text-left text-meta text-muted-foreground hover:text-foreground transition-colors"
               >
                 <Plus className="size-3 shrink-0" />
-                Add a task...
+                <span className="flex-1">Add a task…</span>
+                <kbd className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-label text-muted-foreground">Q</kbd>
               </button>
             </div>
 

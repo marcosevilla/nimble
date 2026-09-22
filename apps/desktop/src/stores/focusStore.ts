@@ -11,7 +11,9 @@ export interface FocusConfig {
   totalPomodoros: number
 }
 
-const DEFAULT_CONFIG: FocusConfig = {
+/** Exported for the `f` row shortcut (tasks audit P1-1), which starts a
+ * session without the setup screen. */
+export const DEFAULT_FOCUS_CONFIG: FocusConfig = {
   timerMode: 'down',
   targetMinutes: 25,
   breakMinutes: 5,
@@ -60,7 +62,7 @@ export const useFocusStore = create<FocusStore>((set, get) => ({
   isPendingSetup: false,
   taskId: null,
   task: null,
-  config: DEFAULT_CONFIG,
+  config: DEFAULT_FOCUS_CONFIG,
   startedAt: null,
   pausedAt: null,
   pausedElapsed: 0,
@@ -80,7 +82,7 @@ export const useFocusStore = create<FocusStore>((set, get) => ({
       isPendingSetup: true,
       task,
       taskId: task.id,
-      config: DEFAULT_CONFIG,
+      config: DEFAULT_FOCUS_CONFIG,
     })
   },
 
@@ -214,7 +216,7 @@ export const useFocusStore = create<FocusStore>((set, get) => ({
       isPendingSetup: false,
       taskId: null,
       task: null,
-      config: DEFAULT_CONFIG,
+      config: DEFAULT_FOCUS_CONFIG,
       startedAt: null,
       pausedAt: null,
       pausedElapsed: 0,

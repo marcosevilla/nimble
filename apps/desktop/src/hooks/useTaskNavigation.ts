@@ -1,77 +1,187 @@
-import { useEffect, useState } from 'react'
-import { useAppStore } from '@/stores/appStore'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAppStore, type Page } from '@/stores/appStore'
+import {
+  stepIndex,
+  resolveRowFocus,
+  decideRowKey,
+  NO_ROW_FOCUS,
+  type RowFocus,
+} from '@/lib/rowNav'
 
-interface TaskNavActions {
-  onComplete: (taskId: string) => void
-  onSnooze: (taskId: string) => void
-  onOpen: (taskId: string) => void
+/* Keyboard row navigation for list surfaces (tasks audit P1-1/P1-2, inbox
+   P1-2). One window `keydown` listener per mounted list; the pure parts
+   (index math, focus-by-id, key-target guard) live in `lib/rowNav.ts` and
+   are node-tested.
+
+   Focus is tracked by row id (review C1): a row added above the focused one
+   (an optimistic capture) never moves focus. DOM focus only moves when the
+   user navigated — j/k/arrows, or coming back to a list whose focused row
+   was remembered (review I3) while nothing else holds focus. A list
+   mutation never pulls focus out of the capture field.
+
+   Key targets (review C2, fix round 2 N1 — `decideRowKey`): fields and
+   open menus/popovers keep every key; a control nested in a row keeps
+   Enter/Space and passes the other list keys to its row. Space is not a list key at all (review I2): a row
+   opens on Space like any `role="button"` (TaskItem / InboxNoteRow), and
+   Dashboard's Space-pauses-focus wins while a session runs. Rows carry
+   `data-nav-row="<id>"` so the hook can find them. */
+
+export type RowKeyHandler = (id: string) => void
+
+export interface RowNavigationOptions {
+  enabled?: boolean
+  /** Pages this list is active on. */
+  pages: Page[]
+  /** Single-key actions on the focused row, e.g. `{ x: complete }`. */
+  keys?: Record<string, RowKeyHandler>
+  /** Remembers the focused row across unmounts (open detail, come back). */
+  memoryKey?: string
 }
 
-export function useTaskNavigation(
-  taskIds: string[],
-  actions: TaskNavActions,
-  enabled: boolean = true,
-) {
-  const [focusedIndex, setFocusedIndex] = useState(-1)
-  const currentPage = useAppStore((s) => s.currentPage)
+// Focused row per list, kept for the session (review I3). Module state is
+// enough: it only needs to outlive the list's unmount while detail is open.
+const rememberedFocus = new Map<string, RowFocus>()
 
-  const isActive = enabled && (currentPage === 'today' || currentPage === 'tasks')
+function focusRowElement(id: string) {
+  const el = document.querySelector<HTMLElement>(`[data-nav-row="${CSS.escape(id)}"]`)
+  if (!el) return
+  if (document.activeElement !== el) el.focus({ preventScroll: true })
+  el.scrollIntoView({ block: 'nearest' })
+}
+
+function nothingElseFocused() {
+  const active = document.activeElement
+  return !active || active === document.body
+}
+
+export function useRowNavigation(ids: string[], onOpen: RowKeyHandler, options: RowNavigationOptions) {
+  const { enabled = true, pages, keys, memoryKey } = options
+  const [raw, setRaw] = useState<RowFocus>(() =>
+    (memoryKey && rememberedFocus.get(memoryKey)) || NO_ROW_FOCUS,
+  )
+  const focus = useMemo(() => resolveRowFocus(raw, ids), [raw, ids])
+  const currentPage = useAppStore((s) => s.currentPage)
+  const isActive = enabled && pages.includes(currentPage)
+
+  // Latest values without re-binding the listener on every render.
+  const keysRef = useRef(keys)
+  keysRef.current = keys
+  const onOpenRef = useRef(onOpen)
+  onOpenRef.current = onOpen
+  const idsRef = useRef(ids)
+  idsRef.current = ids
+  const focusRef = useRef(focus)
+  focusRef.current = focus
+
+  // Set by j/k (and by a remembered focus on mount); consumed once the
+  // focused row has rendered. Nothing else moves DOM focus.
+  const moveDomFocus = useRef<'nav' | 'restore' | null>(raw.id ? 'restore' : null)
 
   useEffect(() => {
     if (!isActive) return
 
     function handleKeyDown(e: KeyboardEvent) {
-      const target = e.target as HTMLElement
-      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
-      if (isInput) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const decision = decideRowKey(e.target, e.key)
+      if (!decision.handle) return
 
-      // Don't interfere with meta/ctrl shortcuts
-      if (e.metaKey || e.ctrlKey) return
+      const list = idsRef.current
+      // A key from a row (or a control inside it) acts on that row.
+      const fromRow = decision.rowId ? list.indexOf(decision.rowId) : -1
+      const focusedId = fromRow >= 0 ? list[fromRow] : focusRef.current.id
+      const index = fromRow >= 0 ? fromRow : focusRef.current.index
 
       switch (e.key) {
         case 'j':
         case 'ArrowDown':
-          e.preventDefault()
-          setFocusedIndex(prev => Math.min(prev + 1, taskIds.length - 1))
-          break
         case 'k':
-        case 'ArrowUp':
+        case 'ArrowUp': {
           e.preventDefault()
-          setFocusedIndex(prev => Math.max(prev - 1, 0))
-          break
-        case 'x':
-        case ' ':
-          if (focusedIndex >= 0 && focusedIndex < taskIds.length) {
-            e.preventDefault()
-            actions.onComplete(taskIds[focusedIndex])
+          const next = stepIndex(index, e.key === 'j' || e.key === 'ArrowDown' ? 1 : -1, list.length)
+          if (next < 0) return
+          if (list[next] === focusedId) {
+            focusRowElement(list[next])
+            return
           }
-          break
-        case 's':
-          if (focusedIndex >= 0 && focusedIndex < taskIds.length) {
-            e.preventDefault()
-            actions.onSnooze(taskIds[focusedIndex])
-          }
-          break
+          moveDomFocus.current = 'nav'
+          setRaw({ id: list[next], index: next })
+          return
+        }
         case 'Enter':
-          if (focusedIndex >= 0 && focusedIndex < taskIds.length) {
+          // A row's own handler already opened it when it had focus.
+          if (focusedId && !e.defaultPrevented) {
             e.preventDefault()
-            actions.onOpen(taskIds[focusedIndex])
+            onOpenRef.current(focusedId)
           }
-          break
+          return
         case 'Escape':
-          setFocusedIndex(-1)
-          break
+          if (focusedId) {
+            setRaw(NO_ROW_FOCUS)
+            ;(document.activeElement as HTMLElement | null)?.blur?.()
+          }
+          return
+      }
+
+      const handler = keysRef.current?.[e.key]
+      if (handler && focusedId) {
+        e.preventDefault()
+        handler(focusedId)
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isActive, focusedIndex, taskIds, actions])
+  }, [isActive])
 
-  // Reset focus when task list changes
+  // Move DOM focus after a navigation (or a restore) once the row exists.
   useEffect(() => {
-    setFocusedIndex(-1)
-  }, [taskIds.length])
+    const reason = moveDomFocus.current
+    if (!reason || !focus.id) return
+    moveDomFocus.current = null
+    // A restore never takes focus from something the user is in.
+    if (reason === 'restore' && !nothingElseFocused()) return
+    focusRowElement(focus.id)
+  }, [focus.id])
 
-  return { focusedIndex, setFocusedIndex }
+  // Remember the resolved focus (and fold a fallback back into state) so
+  // the next mount of this list starts where the user was.
+  useEffect(() => {
+    if (ids.length === 0) return
+    if (focus.id !== raw.id || focus.index !== raw.index) setRaw(focus)
+    if (memoryKey) rememberedFocus.set(memoryKey, focus)
+  }, [focus, raw, ids.length, memoryKey])
+
+  /** Rows report DOM focus (Tab, click) here so the ring and j/k agree. */
+  const focusRow = useCallback((id: string) => {
+    setRaw({ id, index: idsRef.current.indexOf(id) })
+  }, [])
+
+  return { focusedIndex: focus.index, focusedId: focus.id, focusRow }
+}
+
+interface TaskNavActions {
+  onOpen: (taskId: string) => void
+  onComplete?: (taskId: string) => void
+  onSnooze?: (taskId: string) => void
+  onFocusStart?: (taskId: string) => void
+}
+
+/** Tasks-flavored wrapper: j/k/Enter plus `x` complete, `s` snooze, `f`
+ * start a focus session. Registered in `lib/shortcuts.ts` under Tasks. */
+export function useTaskNavigation(
+  taskIds: string[],
+  actions: TaskNavActions,
+  options: { enabled?: boolean; memoryKey?: string } = {},
+) {
+  const keys: Record<string, RowKeyHandler> = {}
+  if (actions.onComplete) keys.x = actions.onComplete
+  if (actions.onSnooze) keys.s = actions.onSnooze
+  if (actions.onFocusStart) keys.f = actions.onFocusStart
+
+  return useRowNavigation(taskIds, actions.onOpen, {
+    enabled: options.enabled ?? true,
+    pages: ['today', 'tasks'],
+    keys,
+    memoryKey: options.memoryKey,
+  })
 }

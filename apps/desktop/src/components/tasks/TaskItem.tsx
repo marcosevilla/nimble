@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 import { StatusDropdown } from './StatusDropdown'
 import { useSelectionStore } from '@/stores/selectionStore'
+import { useFocusStore } from '@/stores/focusStore'
 import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import type { TaskStatus } from '@nimble/types'
@@ -110,7 +111,16 @@ interface TaskItemProps {
    * children (grip, checkbox, status) stop propagation so they don't trigger it. */
   onOpen?: () => void
   allIds?: string[]
+  /** Keyboard-focused row (j/k) — the tint. DOM focus is moved by
+   * `useRowNavigation` (only on j/k), never by this prop, so a list change
+   * can't pull focus out of a field (review C1). */
   focused?: boolean
+  /** Id the list's `useRowNavigation` knows this row by (`data-nav-row`).
+   * Defaults to the task id. */
+  navId?: string
+  /** Fired when the row itself receives DOM focus (Tab, click) so the
+   * list's navigation index follows the user. */
+  onFocusRow?: () => void
   className?: string
   /** dnd-kit `{...attributes, ...listeners}` from the sortable wrapper, spread
    * onto the grip so only the grip — not the whole row — initiates a drag. */
@@ -129,7 +139,7 @@ interface TaskItemProps {
   selectable?: boolean
 }
 
-export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleProps, showGrip = true, selectable = true }: TaskItemProps) {
+export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, className, dragHandleProps, showGrip = true, selectable = true }: TaskItemProps) {
   const isSelected = useSelectionStore((s) => s.selectedIds.has(task.id))
   const isCompleting = useSelectionStore((s) => s.completingTaskIds.has(task.id))
 
@@ -139,9 +149,25 @@ export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleP
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      data-nav-row={navId ?? task.id}
       onClick={onOpen}
+      onFocus={(e) => { if (e.target === e.currentTarget) onFocusRow?.() }}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget || !onOpen) return
+        // Enter and Space open, like any role="button" (review I2). Space
+        // stays with Dashboard's pause/resume while a focus session runs.
+        if (e.key === 'Enter' || (e.key === ' ' && !useFocusStore.getState().isActive)) {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
       className={cn(
         'group relative flex h-10 items-center min-w-0 transition-colors hover:bg-hover cursor-default',
+        // Inset ring: the row spans the column, so an outside offset would
+        // paint over its neighbours.
+        'focus-visible:-outline-offset-2',
         focused && 'bg-accent/10',
         isSelected && 'bg-accent-blue/10',
         isCompleting && 'animate-task-complete',
@@ -157,13 +183,19 @@ export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleP
           it never nudges the border or the status icon. */}
       {(showGrip || selectable) && (
         <div className="absolute right-full top-0 flex h-10 items-center gap-1 pr-2">
+          {/* dnd-kit's attributes make the grip a focusable button — so it
+              reveals on focus-within too, never an invisible tab stop, and
+              the 12px glyph gets a 24px target (P1-2, P3-3). */}
           {showGrip && (
-            <GripVertical
+            <button
+              type="button"
               aria-label="Drag to reorder"
-              className="size-3 shrink-0 cursor-grab text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+              className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
               onClick={(e) => e.stopPropagation()}
               {...dragHandleProps}
-            />
+            >
+              <GripVertical className="size-3" />
+            </button>
           )}
           {selectable && <SelectionCheckbox id={task.id} type="task" allIds={allIds} />}
         </div>
@@ -206,6 +238,16 @@ export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleP
             <LabelChipPill key={`${label.name}-${i}`} name={label.name} color={label.color} />
           ))}
           {overflowCount > 0 && <LabelChipPill name={`+${overflowCount}`} />}
+          {/* Project badge — All Tasks mixes projects, so the row says which
+              one it belongs to (tasks audit P2-1). Swatch is project data. */}
+          {task.projectName && (
+            <span className="flex shrink-0 items-center gap-1 text-meta text-muted-foreground">
+              {task.projectColor && (
+                <span className="size-1.5 rounded-full" style={{ backgroundColor: task.projectColor }} />
+              )}
+              {task.projectName}
+            </span>
+          )}
           {task.dueDate && <DueDateBadge date={task.dueDate} />}
         </div>
       </div>

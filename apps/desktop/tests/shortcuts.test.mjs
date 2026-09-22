@@ -38,3 +38,32 @@ test('section titles are sentence case', () => {
     assert.equal(s, s[0].toUpperCase() + s.slice(1).toLowerCase(), s)
   }
 })
+
+// ── B3a: Tasks + Inbox rows ──
+
+import { SHORTCUT_SECTIONS } from '../src/lib/shortcuts.ts'
+
+const keysIn = (section) => SHORTCUTS.filter((s) => s.section === section).map((s) => s.keys)
+
+test('Tasks section lists the row keys, including f and Escape', () => {
+  const keys = keysIn('Tasks')
+  for (const k of ['j / ↓', 'k / ↑', 'x', 's', 'Enter', 'f', 'Escape']) {
+    assert.ok(keys.includes(k), `Tasks missing ${k}`)
+  }
+})
+
+test('Inbox section lists capture and row keys', () => {
+  const keys = keysIn('Inbox')
+  for (const k of ['c', 'j / ↓', 'k / ↑', 'Enter', 't', 'm', 'd', 'Escape']) {
+    assert.ok(keys.includes(k), `Inbox missing ${k}`)
+  }
+})
+
+test('Inbox is appended as the last section, existing order untouched', () => {
+  assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox'])
+})
+
+test('Space is not a Tasks row key — it stays Focus pause/resume (review I2)', () => {
+  assert.ok(!keysIn('Tasks').some((k) => k.includes('Space')))
+  assert.ok(keysIn('Focus').includes('Space'))
+})

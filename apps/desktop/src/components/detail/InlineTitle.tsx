@@ -47,7 +47,7 @@ export function InlineTitle({ value, completed, onSave, className }: InlineTitle
         onChange={(e) => setDraft(e.target.value)}
         onBlur={save}
         onKeyDown={handleKeyDown}
-        className={cn('w-full bg-transparent text-title outline-none', className)}
+        className={cn('w-full bg-transparent text-title', className)}
       />
     )
   }
