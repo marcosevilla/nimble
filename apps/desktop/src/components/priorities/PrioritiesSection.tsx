@@ -80,10 +80,13 @@ function PriorityCard({ priority, index }: { priority: Priority; index: number }
 interface PrioritiesSectionProps {
   onGenerated?: (priorities: Priority[]) => void
   initialPriorities?: Priority[] | null
+  initialEnergy?: string | null // cached daily_state.energy_level
   compact?: boolean // skip card wrapper (used inside ReviewStep)
 }
 
-export function PrioritiesSection({ onGenerated, initialPriorities, compact }: PrioritiesSectionProps) {
+const isEnergyLevel = (v: unknown): v is EnergyLevel => v === 'high' || v === 'medium' || v === 'low'
+
+export function PrioritiesSection({ onGenerated, initialPriorities, initialEnergy, compact }: PrioritiesSectionProps) {
   const dp = useDataProvider()
   const calendarEvents = useAppStore((s) => s.calendarEvents)
   const obsidianToday = useAppStore((s) => s.obsidianToday)
@@ -96,7 +99,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, compact }: P
     return map
   }, [projects])
 
-  const [energy, setEnergy] = useState<EnergyLevel | null>(null)
+  const [energy, setEnergy] = useState<EnergyLevel | null>(isEnergyLevel(initialEnergy) ? initialEnergy : null)
   const [priorities, setPriorities] = useState<Priority[] | null>(initialPriorities ?? null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -105,6 +108,9 @@ export function PrioritiesSection({ onGenerated, initialPriorities, compact }: P
   useEffect(() => {
     if (initialPriorities) setPriorities(initialPriorities)
   }, [initialPriorities])
+  useEffect(() => {
+    if (isEnergyLevel(initialEnergy)) setEnergy(initialEnergy)
+  }, [initialEnergy])
 
   const generate = useCallback(async (level: EnergyLevel) => {
     setEnergy(level)
@@ -232,7 +238,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, compact }: P
 
       <div className="flex items-center gap-2 pt-1">
         <span className="text-label text-muted-foreground">
-          Energy: {energy ?? 'set'}
+          Energy: {energy ?? 'not set'}
         </span>
         <button
           onClick={() => { setPriorities(null); setEnergy(null) }}
