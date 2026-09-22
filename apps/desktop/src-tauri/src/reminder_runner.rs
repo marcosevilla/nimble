@@ -13,6 +13,8 @@ pub async fn tick(app: &AppHandle) -> Result<(), String> {
         return Err("reminder_debug_profile_disabled".into());
     }
     let pool = app.state::<SqlitePool>();
+    nimble_core::db::recovery::require_activation_clear(pool.inner()).await
+        .map_err(|_| "restore_activation_required")?;
     let timezone = crate::commands::reminders::reminder_timezone(pool.inner()).await?;
     let now = Utc::now();
     let due = nimble_core::db::reminders::collect_due(pool.inner(), now, &timezone)

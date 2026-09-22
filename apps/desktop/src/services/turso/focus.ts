@@ -1,5 +1,6 @@
 import type { FocusEntry } from '@nimble/types'
 import { query, str, text, TursoError } from './client'
+import { validRecords, safeDuration, record } from './focus-validation'
 
 export interface SettledFocusReplica {
   version: 1
@@ -41,12 +42,12 @@ export async function readFocusReplica(): Promise<WebFocusReplica | null> {
   } catch {
     throw new TursoError('Invalid settled focus replica')
   }
-  if (snapshot.version !== 1 || !Number.isSafeInteger(snapshot.revision)
-    || !Number.isSafeInteger(snapshot.queue_revision) || !Array.isArray(snapshot.queue)
+  if (!record(snapshot) || snapshot.version !== 1 || !safeDuration(snapshot.revision)
+    || !safeDuration(snapshot.queue_revision) || snapshot.queue_revision > snapshot.revision
+    || !Array.isArray(snapshot.queue)
     || !Array.isArray(snapshot.occurrences) || !Array.isArray(snapshot.sessions)
     || !Array.isArray(snapshot.import_totals)
-    || snapshot.sessions.some((session) => session.status === 'running')
-    || typeof snapshot.as_of !== 'string') {
+    || typeof snapshot.as_of !== 'string' || !validRecords(snapshot)) {
     throw new TursoError('Invalid settled focus replica')
   }
   const ids = [...new Set(snapshot.queue.map((entry) => entry.task_id))]

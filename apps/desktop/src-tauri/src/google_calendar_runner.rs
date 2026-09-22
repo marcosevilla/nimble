@@ -32,6 +32,8 @@ pub async fn tick(app:&AppHandle)->Result<nimble_core::integrations::google_cale
     let _guard=lock().await;
     if !network_allowed(app) { return Err("google_live_network_disabled".into()) }
     let pool=app.state::<SqlitePool>();
+    nimble_core::db::recovery::require_activation_clear(pool.inner()).await
+        .map_err(|_|"restore_activation_required")?;
     let state=nimble_core::db::google_calendar::state(pool.inner()).await.map_err(|_|"google_status_failed")?;
     if matches!(state.error_code.as_deref(),Some("google_reconnect_required"|"google_permission_denied")) {
         return Ok(nimble_core::integrations::google_calendar::ReconcileResult { changed_task_ids:vec![],error_code:state.error_code });

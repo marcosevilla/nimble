@@ -88,6 +88,7 @@ pub struct ReconcileResult { pub changed_task_ids: Vec<String>, pub error_code: 
 /// A cycle stages local intent before any HTTP mutation. An incremental sync
 /// token is acknowledged only after every page and mapped event is handled.
 pub async fn run_once<T: crate::api::google_calendar::CalendarApi>(pool: &sqlx::SqlitePool, transport: &T, _now: DateTime<Utc>) -> crate::Result<ReconcileResult> {
+    crate::db::recovery::require_activation_clear(pool).await?;
     use crate::api::google_calendar::{parse_event, CalendarApiError};
     use crate::db::google_calendar as db;
     use std::collections::HashMap;

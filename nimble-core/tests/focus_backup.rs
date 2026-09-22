@@ -42,7 +42,7 @@ async fn restored_pool(path: &std::path::Path) -> sqlx::SqlitePool {
 async fn paused_20_second_ledger_round_trips_both_archive_routes() {
     let (h, source_path) = file_harness().await;
     let a = h.task("Timed work").await;
-    h.send(FocusAction::Enqueue { task_ids: vec![a], source: FocusSource::Today,
+    h.send(FocusAction::Enqueue { task_ids: vec![a.clone()], source: FocusSource::Today,
         explicit_still_open: false }).await.unwrap();
     let oid = h.snapshot().await.queue[0].occurrence_id.clone();
     h.send(FocusAction::Start { occurrence_id: oid.clone() }).await.unwrap();
@@ -54,6 +54,12 @@ async fn paused_20_second_ledger_round_trips_both_archive_routes() {
         .execute(&h.pool).await.unwrap();
     sqlx::query("INSERT INTO focus_import_records(id,batch_id,source_namespace,record_key,fingerprint,status) VALUES('record-a','batch-a','legacy','opaque-key','fingerprint','unresolved')")
         .execute(&h.pool).await.unwrap();
+    sqlx::query("INSERT INTO reminder_deliveries(occurrence_key,task_id,scheduled_at,state) VALUES('pending-reminder',?,'2026-09-22T00:00:00Z','pending')")
+        .bind(&a).execute(&h.pool).await.unwrap();
+    sqlx::query("INSERT INTO google_calendar_state(id,calendar_id,timezone,error_code) VALUES(1,'synthetic-calendar','America/Los_Angeles',NULL) ON CONFLICT(id) DO UPDATE SET calendar_id='synthetic-calendar'")
+        .execute(&h.pool).await.unwrap();
+    nimble_core::db::settings::set_setting(&h.pool,"turso_url","https://example.invalid").await.unwrap();
+    nimble_core::db::settings::set_setting(&h.pool,"turso_token","synthetic-token").await.unwrap();
     let source = h.snapshot().await;
     let root = std::env::temp_dir().canonicalize().unwrap()
         .join(format!("focus-backup-{}", uuid::Uuid::new_v4()));
@@ -68,6 +74,28 @@ async fn paused_20_second_ledger_round_trips_both_archive_routes() {
             recovery::restore_export(&generation.join("export"), &dest).await
         }.unwrap();
         let restored = restored_pool(&result.output).await;
+        assert!(recovery::require_activation_clear(&restored).await.is_err());
+        let activation: String = sqlx::query_scalar("SELECT value FROM settings WHERE key='restored_activation_required'")
+            .fetch_one(&restored).await.unwrap();
+        assert_eq!(activation, "1");
+        // The gate wins before any transport or adapter can inspect saved credentials.
+        assert!(nimble_core::db::sync::push(&restored, "https://example.invalid", "synthetic-token")
+            .await.unwrap_err().to_string().contains("restore_activation_required"));
+        assert!(nimble_core::db::sync::pull(&restored, "https://example.invalid", "synthetic-token")
+            .await.unwrap_err().to_string().contains("restore_activation_required"));
+        assert!(nimble_core::integrations::todoist::sync_loop::run_sync(&restored)
+            .await.unwrap_err().to_string().contains("restore_activation_required"));
+        if route == "snapshot" {
+            let reminder: String = sqlx::query_scalar("SELECT state FROM reminder_deliveries WHERE occurrence_key='pending-reminder'")
+                .fetch_one(&restored).await.unwrap();
+            assert_eq!(reminder, "pending");
+            let calendar: String = sqlx::query_scalar("SELECT calendar_id FROM google_calendar_state WHERE id=1")
+                .fetch_one(&restored).await.unwrap();
+            assert_eq!(calendar, "synthetic-calendar");
+            let url: String = sqlx::query_scalar("SELECT value FROM settings WHERE key='turso_url'")
+                .fetch_one(&restored).await.unwrap();
+            assert_eq!(url, "https://example.invalid");
+        }
         let queue: String = sqlx::query_scalar("SELECT entries_json FROM focus_queue_state WHERE id=1")
             .fetch_one(&restored).await.unwrap();
         let entries: Vec<serde_json::Value> = serde_json::from_str(&queue).unwrap();

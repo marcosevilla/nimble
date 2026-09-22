@@ -11,6 +11,7 @@ pub struct Harness {
 }
 
 impl Harness {
+    #[allow(dead_code)] // Shared fixture: file-backed backup tests construct the fields directly.
     pub async fn new() -> Self {
         let pool = nimble_core::test_util::test_pool().await;
         let clock = std::sync::Arc::new(ManualClock::default());

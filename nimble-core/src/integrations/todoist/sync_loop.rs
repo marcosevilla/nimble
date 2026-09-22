@@ -972,6 +972,7 @@ pub async fn apply_pull(pool: &SqlitePool, resp: &client::SyncResponse) -> crate
 }
 
 pub async fn run_sync(pool: &SqlitePool) -> crate::Result<SyncReport> {
+    crate::db::recovery::require_activation_clear(pool).await?;
     let lock = SYNC_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
     let Ok(_guard) = lock.try_lock() else {
         return Ok(SyncReport { skipped: Some("already running".into()), ..Default::default() });

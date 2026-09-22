@@ -85,6 +85,9 @@ async fn run_turso_report(app: &AppHandle, min_interval_secs: i64) -> TursoRunRe
     };
     let state = app.state::<SqlitePool>();
     let pool = state.inner();
+    if nimble_core::db::recovery::require_activation_clear(pool).await.is_err() {
+        return TursoRunReport::skipped("restore_activation_required");
+    }
     let (url, token) = match turso_credentials(pool).await {
         Ok(Some(v)) => v,
         Ok(None) => return TursoRunReport::skipped("not_configured"),

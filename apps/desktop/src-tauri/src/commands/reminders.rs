@@ -34,6 +34,8 @@ pub async fn reminder_get_status(app: AppHandle) -> Result<ReminderStatus, Strin
 
 #[tauri::command]
 pub async fn reminder_request_permission(app: AppHandle) -> Result<ReminderStatus, String> {
+    nimble_core::db::recovery::require_activation_clear(app.state::<SqlitePool>().inner())
+        .await.map_err(|_| "restore_activation_required")?;
     app.notification().request_permission().map_err(|_| "notification_permission_failed")?;
     reminder_get_status(app).await
 }

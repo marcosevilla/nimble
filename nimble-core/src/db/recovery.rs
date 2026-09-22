@@ -123,6 +123,8 @@ pub async fn normalize_focus_restore(pool: &SqlitePool) -> crate::Result<()> {
     let version: i64 = sqlx::query_scalar("SELECT MAX(version) FROM schema_version").fetch_one(pool).await?;
     if version < 21 { return Ok(()); }
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('restored_activation_required','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value='1',updated_at=datetime('now')")
+        .execute(&mut *tx).await?;
     let work: Vec<(String, i64)> = sqlx::query_as(
         "SELECT occurrence_id,work_ms FROM focus_sessions").fetch_all(&mut *tx).await?;
     let imported: Vec<(String, i64)> = sqlx::query_as(
@@ -148,14 +150,20 @@ pub async fn normalize_focus_restore(pool: &SqlitePool) -> crate::Result<()> {
     sqlx::query("DELETE FROM focus_undo").execute(&mut *tx).await?;
     sqlx::query("UPDATE daily_state SET focus_task_id=NULL,focus_started_at=NULL,focus_paused_at=NULL")
         .execute(&mut *tx).await?;
-    sqlx::query("UPDATE integration_sync_state SET enabled=0").execute(&mut *tx).await?;
-    sqlx::query("UPDATE todoist_outbox SET status='error',error='restored; needs review' WHERE status IN ('pending','sending')")
-        .execute(&mut *tx).await?;
-    sqlx::query("UPDATE sync_log SET synced=1 WHERE synced=0").execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM settings WHERE key IN ('turso_url','turso_token','todoist_api_token')")
-        .execute(&mut *tx).await?;
     tx.commit().await?;
     validate(pool).await
+}
+
+/// A restored v21 profile remains inert until a separate, explicit activation
+/// procedure clears this marker. Runners and direct network entrypoints share it.
+pub async fn require_activation_clear(pool: &SqlitePool) -> crate::Result<()> {
+    let marker: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM settings WHERE key='restored_activation_required'")
+        .fetch_optional(pool).await?;
+    if marker.as_deref() == Some("1") {
+        return Err(invalid("restore_activation_required"));
+    }
+    Ok(())
 }
 
 pub async fn restore_snapshot(source: &Path, dest: &Path) -> crate::Result<RecoveryReport> {

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::{Column, Row, SqliteConnection, TypeInfo, ValueRef};
 
-use crate::focus_types::{FocusEntry, MAX_SAFE_INTEGER};
+use crate::focus_types::{FocusConfig, FocusEntry, MAX_SAFE_INTEGER};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FocusReplica {
@@ -40,6 +40,59 @@ fn invalid(message: &str) -> crate::Error {
 fn safe(v: i64) -> crate::Result<u64> {
     if v < 0 || v as u64 > MAX_SAFE_INTEGER { return Err(invalid("unsafe_integer")); }
     Ok(v as u64)
+}
+
+fn bounded_field(record: &Value, field: &str) -> crate::Result<u64> {
+    record.get(field).and_then(Value::as_u64)
+        .filter(|value| *value <= MAX_SAFE_INTEGER)
+        .ok_or_else(|| invalid("unsafe_integer"))
+}
+
+fn validate_records(payload: &FocusReplica) -> crate::Result<()> {
+    for occurrence in &payload.occurrences {
+        if !(1..=MAX_SAFE_INTEGER).contains(&bounded_field(occurrence, "generation")?) {
+            return Err(invalid("occurrence_generation"));
+        }
+    }
+    let mut totals = BTreeMap::<String, u64>::new();
+    for session in &payload.sessions {
+        if !matches!(session.get("status").and_then(Value::as_str), Some("paused" | "ended")) {
+            return Err(invalid("session_status"));
+        }
+        for field in ["work_ms", "break_ms", "round_work_ms", "round_break_ms", "session_revision"] {
+            bounded_field(session, field)?;
+        }
+        let round = bounded_field(session, "round")?;
+        if !(1..=100).contains(&round) { return Err(invalid("session_round")); }
+        let offset = session.get("timezone_offset_minutes").and_then(Value::as_i64)
+            .ok_or_else(|| invalid("timezone_offset"))?;
+        if !(-840..=840).contains(&offset) { return Err(invalid("timezone_offset")); }
+        let config: FocusConfig = serde_json::from_str(session.get("config_json")
+            .and_then(Value::as_str).ok_or_else(|| invalid("config"))?)
+            .map_err(|_| invalid("config"))?;
+        if config.work_ms > MAX_SAFE_INTEGER || config.break_ms > MAX_SAFE_INTEGER
+            || config.budget_ms.is_some_and(|ms| ms > MAX_SAFE_INTEGER) {
+            return Err(invalid("config_duration"));
+        }
+        let oid = session.get("occurrence_id").and_then(Value::as_str)
+            .ok_or_else(|| invalid("session_occurrence"))?;
+        let total = totals.entry(oid.to_owned()).or_default();
+        *total = total.checked_add(bounded_field(session, "work_ms")?)
+            .filter(|sum| *sum <= MAX_SAFE_INTEGER).ok_or_else(|| invalid("total_overflow"))?;
+    }
+    for imported in &payload.import_totals {
+        let ms = bounded_field(imported, "duration_ms")?;
+        if !imported.get("occurrence_id").is_some_and(|value| value.is_null() || value.is_string()) {
+            return Err(invalid("import_occurrence"));
+        }
+        if let Some(oid) = imported.get("occurrence_id").and_then(Value::as_str) {
+            let total = totals.entry(oid.to_owned()).or_default();
+            *total = total.checked_add(ms).filter(|sum| *sum <= MAX_SAFE_INTEGER)
+                .ok_or_else(|| invalid("total_overflow"))?;
+        }
+    }
+    if totals != payload.totals { return Err(invalid("totals_mismatch")); }
+    Ok(())
 }
 
 fn row_value(row: &sqlx::sqlite::SqliteRow) -> crate::Result<Value> {
@@ -139,12 +192,12 @@ pub async fn publish_focus_replica_tx(conn: &mut SqliteConnection) -> crate::Res
 pub async fn apply_focus_replica_tx(conn: &mut SqliteConnection, payload: FocusReplica) -> crate::Result<bool> {
     if payload.version != 1 || payload.revision > MAX_SAFE_INTEGER
         || payload.queue_revision > payload.revision
-        || payload.sessions.iter().any(|session| session["status"] == "running")
         || payload.totals.values().any(|total| *total > MAX_SAFE_INTEGER)
         || super::queue::validate(&payload.queue, payload.selected_occurrence_id.as_deref()).is_err()
     {
         return Err(invalid("version_or_revision"));
     }
+    validate_records(&payload)?;
     let pinned_writer: Option<String> = sqlx::query_scalar(
         "SELECT value FROM settings WHERE key='focus_replica_writer_device_id'")
         .fetch_optional(&mut *conn).await?;

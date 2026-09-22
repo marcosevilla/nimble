@@ -36,6 +36,7 @@ pub async fn google_calendar_connect(app:AppHandle)->Result<GoogleConnectionStat
     let _guard=crate::google_calendar_runner::lock().await;
     if !crate::google_calendar_runner::network_allowed(&app) { return Err("google_live_network_disabled".into()) }
     let pool=app.state::<SqlitePool>();
+    nimble_core::db::recovery::require_activation_clear(pool.inner()).await.map_err(|_|"restore_activation_required")?;
     let client_id=crate::google_calendar_runner::client_id(pool.inner()).await?;
     let state=nimble_core::db::google_calendar::state(pool.inner()).await.map_err(|_|"google_status_failed")?;
     let profile=crate::google_calendar_runner::profile_identity(&app)?;
@@ -98,6 +99,7 @@ mod tests {
 pub async fn google_calendar_disconnect(app:AppHandle)->Result<GoogleConnectionStatus,String> {
     let _guard=crate::google_calendar_runner::lock().await;
     if !crate::google_calendar_runner::network_allowed(&app) { return Err("google_live_network_disabled".into()) }
+    nimble_core::db::recovery::require_activation_clear(app.state::<SqlitePool>().inner()).await.map_err(|_|"restore_activation_required")?;
     let profile=crate::google_calendar_runner::profile_identity(&app)?;
     let credentials=KeychainCredentials;
     if let Some(token)=credentials.load(&profile).map_err(str::to_owned)? {
@@ -154,6 +156,7 @@ pub async fn google_calendar_configure(app:AppHandle,client_id:String,client_sec
     let _guard=crate::google_calendar_runner::lock().await;
     if !crate::google_calendar_runner::network_allowed(&app) { return Err("google_live_network_disabled".into()) }
     let pool=app.state::<SqlitePool>();
+    nimble_core::db::recovery::require_activation_clear(pool.inner()).await.map_err(|_|"restore_activation_required")?;
     let profile=crate::google_calendar_runner::profile_identity(&app)?;
     let state=nimble_core::db::google_calendar::state(pool.inner()).await.map_err(|_|"google_status_failed")?;
     let bound=state.calendar_id.is_some() || KeychainCredentials.load(&profile).map_err(str::to_owned)?.is_some();

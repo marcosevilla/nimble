@@ -1,7 +1,7 @@
 #[path = "common/focus.rs"]
 mod fixture;
 
-use nimble_core::db::focus::replica::{accept_revision, FocusReplica};
+use nimble_core::db::focus::replica::{accept_revision, apply_focus_replica_tx, FocusReplica};
 use nimble_core::focus_types::{FocusAction, FocusSource};
 
 async fn latest(h: &fixture::Harness) -> FocusReplica {
@@ -76,4 +76,35 @@ async fn seed_republishes_one_aggregate_after_missing_focus_log() {
         .fetch_one(&h.pool).await.unwrap();
     assert_eq!(count, 1);
     assert_eq!(latest(&h).await.queue.len(), 1);
+}
+
+#[tokio::test]
+async fn native_apply_rejects_unsafe_record_durations_and_accepts_safe_boundary() {
+    let h = fixture::Harness::new().await;
+    let task = h.task("A").await;
+    h.send(FocusAction::Enqueue { task_ids: vec![task], source: FocusSource::Today,
+        explicit_still_open: false }).await.unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Start { occurrence_id: oid.clone() }).await.unwrap();
+    h.send(FocusAction::Pause).await.unwrap();
+    let base = latest(&h).await;
+    for bad in [serde_json::json!(-1), serde_json::json!(1.5),
+        serde_json::json!(9_007_199_254_740_992_u64)] {
+        for field in ["work_ms", "break_ms", "round_work_ms", "round_break_ms", "session_revision"] {
+            let mut replica = base.clone();
+            replica.sessions[0][field] = bad.clone();
+            let mut tx = h.pool.begin().await.unwrap();
+            assert!(apply_focus_replica_tx(&mut tx, replica).await.is_err(), "{field}: {bad}");
+        }
+        let mut replica = base.clone();
+        replica.import_totals.push(serde_json::json!({"duration_ms":bad,"occurrence_id":oid}));
+        let mut tx = h.pool.begin().await.unwrap();
+        assert!(apply_focus_replica_tx(&mut tx, replica).await.is_err(), "import: {bad}");
+    }
+    let mut boundary = base;
+    boundary.sessions[0]["work_ms"] = serde_json::json!(9_007_199_254_740_991_u64);
+    boundary.sessions[0]["break_ms"] = serde_json::json!(9_007_199_254_740_991_u64);
+    boundary.totals.insert(oid, 9_007_199_254_740_991_u64);
+    let mut tx = h.pool.begin().await.unwrap();
+    assert_eq!(apply_focus_replica_tx(&mut tx, boundary).await.unwrap(), false);
 }

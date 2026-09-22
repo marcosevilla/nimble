@@ -42,6 +42,7 @@ pub struct BackupStatus {
 /// Stable allowlisted codes only. Never return process output or database error details.
 pub fn public_error_code(error: &Error) -> &'static str {
     match error.to_string().as_str() {
+        "backup_recovery_restore_activation_required" => "restore_activation_required",
         "backup_busy" => "backup_busy",
         "backup_disabled" => "backup_disabled",
         "backup_tool_unavailable" => "backup_tool_unavailable",
@@ -305,6 +306,7 @@ async fn execute_job(
     local: DateTime<FixedOffset>,
 ) -> Result<()> {
     runtime.enabled()?;
+    nimble_core::db::recovery::require_activation_clear(pool).await?;
     let Ok(_mutex) = runtime.job.try_lock() else {
         return if manual { Err(err("busy")) } else { Ok(()) };
     };
@@ -444,6 +446,7 @@ pub async fn run_now(app: &AppHandle) -> Result<BackupStatus> {
 pub async fn configure_remote(app: &AppHandle, owner_repo: &str) -> Result<BackupStatus> {
     let runtime = app.state::<BackupRuntime>();
     runtime.enabled()?;
+    nimble_core::db::recovery::require_activation_clear(app.state::<SqlitePool>().inner()).await?;
     if runtime.test_mode {
         return Err(err("test_profile_upload_disabled"));
     }

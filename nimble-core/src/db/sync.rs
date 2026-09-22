@@ -343,6 +343,7 @@ const FOCUS_REPLICA_DDL: &str = "CREATE TABLE IF NOT EXISTS focus_replica (
 /// Create all synced tables on the remote Turso database.
 /// Only runs once — checks for `turso_initialized` setting.
 pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    crate::db::recovery::require_activation_clear(pool).await?;
     // Check if already initialized
     let initialized: Option<(String,)> = sqlx::query_as(
         "SELECT value FROM settings WHERE key = 'turso_initialized'",
@@ -1195,6 +1196,7 @@ async fn push_batch(
 /// entries pushed; on a batch failure it stops and returns the error, leaving
 /// the batches that already landed marked synced.
 pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<u64> {
+    crate::db::recovery::require_activation_clear(pool).await?;
     // Guard against C1: on an already-initialized remote, ensure the columns
     // this branch added (external_id, external_source, remote_updated_at,
     // synced_snapshot, captures.context) exist before we try to write them.
@@ -1479,6 +1481,7 @@ async fn fetch_pull_chunk(
 /// entries; on a chunk failure it stops and returns the error, keeping the
 /// progress already committed.
 pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<u64> {
+    crate::db::recovery::require_activation_clear(pool).await?;
     let device_id = get_or_create_device_id(pool).await?;
     let mut cursor = load_pull_cursor(pool).await?;
 
