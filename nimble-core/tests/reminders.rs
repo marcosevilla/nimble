@@ -47,3 +47,22 @@ async fn title_edit_keeps_occurrence_key_and_dst_gap_needs_attention() {
     assert_eq!(items[0].task_id,task.id);
     assert_eq!(items[0].error_code.as_deref(),Some("schedule_needs_attention"));
 }
+
+#[tokio::test]
+async fn superseded_unfired_occurrence_reactivates_but_not_fired_one() {
+    let pool=nimble_core::test_util::test_pool().await;
+    let task=tasks::create_local_task(&pool,CreateTaskInput { content:"A".into(),due_date:Some("2026-09-22".into()),due_time:Some("09:00".into()),reminder_offset_minutes:Some(30),..Default::default() }).await.unwrap();
+    let a=candidate(&task,"America/Los_Angeles").unwrap().unwrap().occurrence_key;
+    reminders::collect_due(&pool,at("2026-09-22T15:00:00Z"),"America/Los_Angeles").await.unwrap();
+    tasks::update_local_task(&pool,&task.id,UpdateTaskInput { due_time:Some("10:00".into()),..Default::default() }).await.unwrap();
+    reminders::collect_due(&pool,at("2026-09-22T15:00:00Z"),"America/Los_Angeles").await.unwrap();
+    tasks::update_local_task(&pool,&task.id,UpdateTaskInput { due_time:Some("09:00".into()),..Default::default() }).await.unwrap();
+    reminders::collect_due(&pool,at("2026-09-22T15:00:00Z"),"America/Los_Angeles").await.unwrap();
+    assert!(reminders::claim_notification(&pool,&a).await.unwrap());
+    reminders::mark_notified(&pool,&a,at("2026-09-22T15:00:00Z")).await.unwrap();
+    tasks::update_local_task(&pool,&task.id,UpdateTaskInput { due_time:Some("10:00".into()),..Default::default() }).await.unwrap();
+    reminders::collect_due(&pool,at("2026-09-22T15:00:00Z"),"America/Los_Angeles").await.unwrap();
+    tasks::update_local_task(&pool,&task.id,UpdateTaskInput { due_time:Some("09:00".into()),..Default::default() }).await.unwrap();
+    reminders::collect_due(&pool,at("2026-09-22T15:00:00Z"),"America/Los_Angeles").await.unwrap();
+    assert!(!reminders::claim_notification(&pool,&a).await.unwrap());
+}

@@ -43,7 +43,7 @@ impl CalendarTransport {
     fn url(&self, calendar_id: &str, tail: &str) -> Result<Url, CalendarApiError> {
         if calendar_id.is_empty() || calendar_id.contains('/') || calendar_id.contains("..") { return Err(CalendarApiError::InvalidResponse) }
         let mut url = self.base.join("calendars/").map_err(|_| CalendarApiError::InvalidResponse)?;
-        url.path_segments_mut().map_err(|_| CalendarApiError::InvalidResponse)?.push(calendar_id).push("events");
+        url.path_segments_mut().map_err(|_| CalendarApiError::InvalidResponse)?.pop_if_empty().push(calendar_id).push("events");
         if !tail.is_empty() { url.path_segments_mut().map_err(|_| CalendarApiError::InvalidResponse)?.push(tail); }
         Ok(url)
     }

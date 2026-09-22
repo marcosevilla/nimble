@@ -139,7 +139,7 @@ pub async fn run_once<T: crate::api::google_calendar::CalendarApi>(pool: &sqlx::
     for (task_id,link) in links {
         if link.state=="conflict" { continue }
         if link.state=="pending_delete" {
-            match transport.delete(&calendar_id,&link.event_id,link.etag.as_deref()).await {
+            match delete_owned_event(transport,&calendar_id,&link.event_id,&task_id).await {
                 Ok(()) => db::acknowledge_delete(pool,&task_id).await?,
                 Err(e) => return fail_cycle(pool,&e).await,
             }
@@ -196,6 +196,9 @@ pub async fn run_once<T: crate::api::google_calendar::CalendarApi>(pool: &sqlx::
                     db::conflict(pool,&task_id,"remote_unsupported",local_p,event.projection.as_ref()).await?; continue;
                 }
                 let remote_p=event.projection.as_ref().unwrap();
+                if remote_p.timezone != state.timezone {
+                    db::conflict(pool,&task_id,"remote_timezone_unsupported",local_p,Some(remote_p)).await?; continue;
+                }
                 let decision=if let Some(base)=link.base.as_ref() { merge(base,local_p,remote_p) }
                     else if local_p==remote_p { MergeDecision::Unchanged } else { MergeDecision::Conflict };
                 match decision {
@@ -236,6 +239,27 @@ pub async fn run_once<T: crate::api::google_calendar::CalendarApi>(pool: &sqlx::
     Ok(ReconcileResult { changed_task_ids:changed, error_code:None })
 }
 
+async fn delete_owned_event<T: crate::api::google_calendar::CalendarApi>(transport:&T,calendar_id:&str,event_id:&str,task_id:&str)->Result<(),crate::api::google_calendar::CalendarApiError> {
+    use crate::api::google_calendar::CalendarApiError;
+    for _ in 0..2 {
+        let raw=match transport.get_raw(calendar_id,event_id).await {
+            Ok(v)=>v,
+            Err(CalendarApiError::NotFound|CalendarApiError::Gone)=>return Ok(()),
+            Err(e)=>return Err(e),
+        };
+        if raw.get("status").and_then(|v|v.as_str())==Some("cancelled") { return Ok(()) }
+        if raw.pointer("/extendedProperties/private/nimbleTaskId").and_then(|v|v.as_str())!=Some(task_id) {
+            return Err(CalendarApiError::Conflict);
+        }
+        let etag=raw.get("etag").and_then(|v|v.as_str());
+        match transport.delete(calendar_id,event_id,etag).await {
+            Err(CalendarApiError::Precondition)=>continue,
+            result=>return result,
+        }
+    }
+    Err(CalendarApiError::Precondition)
+}
+
 fn api_error_code(e:&crate::api::google_calendar::CalendarApiError)->&'static str {
     use crate::api::google_calendar::CalendarApiError::*;
     match e { Unauthorized=>"google_reconnect_required", Forbidden=>"google_permission_denied", NotFound=>"google_event_missing", Gone=>"google_full_resync_needed", Conflict=>"google_event_conflict", Precondition=>"google_event_changed", Retryable(_)=>"google_retry_later", InvalidResponse=>"google_invalid_response" }
@@ -259,7 +283,8 @@ pub async fn apply_remote_if_unchanged(pool:&sqlx::SqlitePool,expected:&Calendar
     let Some(task)=tasks.into_iter().find(|t|t.id==expected.task_id) else { return Ok(false) };
     if project(&task,&expected.timezone)?.as_ref()!=Some(expected) { return Ok(false) }
     let start=projection_start(new)?;
-    let zone:chrono_tz::Tz=new.timezone.parse().map_err(|_|crate::Error::Parse("Invalid calendar timezone".into()))?;
+    if new.timezone != expected.timezone { return Ok(false) }
+    let zone:chrono_tz::Tz=expected.timezone.parse().map_err(|_|crate::Error::Parse("Invalid calendar timezone".into()))?;
     let wall=start.with_timezone(&zone);
     let end=DateTime::parse_from_rfc3339(&new.end_rfc3339).map_err(|_|crate::Error::Parse("Invalid calendar end".into()))?;
     let duration=(end.with_timezone(&Utc)-start).num_minutes();

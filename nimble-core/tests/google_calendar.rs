@@ -25,6 +25,19 @@ fn deterministic_event_id_and_private_marker() {
 }
 
 #[tokio::test]
+async fn remote_timezone_change_does_not_shift_global_wall_time() {
+    use nimble_core::{db::tasks,types::CreateTaskInput};
+    let pool=nimble_core::test_util::test_pool().await;
+    let task=tasks::create_local_task(&pool,CreateTaskInput { content:"Timed".into(),due_date:Some("2026-09-22".into()),due_time:Some("09:00".into()),reminder_offset_minutes:Some(30),google_calendar_enabled:Some(true),..Default::default() }).await.unwrap();
+    let expected=nimble_core::integrations::google_calendar::project(&task,"America/Los_Angeles").unwrap().unwrap();
+    let mut remote=expected.clone();
+    remote.timezone="America/New_York".into();
+    assert!(!nimble_core::integrations::google_calendar::apply_remote_if_unchanged(&pool,&expected,&remote).await.unwrap());
+    let after=tasks::get_local_tasks(&pool,None,None,false).await.unwrap().into_iter().find(|t|t.id==task.id).unwrap();
+    assert_eq!(after.due_time.as_deref(),Some("09:00"));
+}
+
+#[tokio::test]
 async fn retry_after_restart_uses_same_event_id_and_owned_calendar() {
     use nimble_core::{db::{google_calendar as db,tasks},types::CreateTaskInput};
     use nimble_core::api::google_calendar::{CalendarApi,CalendarApiError};
@@ -64,4 +77,38 @@ async fn retry_after_restart_uses_same_event_id_and_owned_calendar() {
     assert_eq!(calls.iter().filter(|line|line.starts_with("insert:")).count(),1);
     assert!(calls.iter().any(|line|line.contains(&event_id)));
     assert_eq!(db::state(&pool).await.unwrap().sync_token.as_deref(),Some("token-2"));
+}
+
+#[tokio::test]
+async fn pending_delete_refreshes_stale_etag_and_never_deletes_unowned_event() {
+    use nimble_core::{api::google_calendar::{CalendarApi,CalendarApiError},db::{google_calendar as db,tasks},types::{CreateTaskInput,UpdateTaskInput}};
+    use serde_json::Value;
+    use std::sync::Mutex;
+    struct FakeDelete { event:Value, etags:Mutex<Vec<String>>, wrong_marker:bool }
+    impl CalendarApi for FakeDelete {
+        async fn list_page(&self,c:&str,_:Option<&str>,_:Option<&str>)->Result<(Vec<Value>,Option<String>,Option<String>),CalendarApiError>{assert_eq!(c,"owned-calendar");Ok((vec![],None,Some("next".into())))}
+        async fn get_raw(&self,c:&str,_:&str)->Result<Value,CalendarApiError>{assert_eq!(c,"owned-calendar");let mut v=self.event.clone(); if self.wrong_marker {v["extendedProperties"]["private"]["nimbleTaskId"]="other".into();} else if !self.etags.lock().unwrap().is_empty(){v["etag"]="fresh-2".into();} Ok(v)}
+        async fn get(&self,_:&str,_:&str)->Result<nimble_core::integrations::google_calendar::RemoteEvent,CalendarApiError>{panic!("unexpected")}
+        async fn insert(&self,_:&str,_:&str,_:&CalendarProjection)->Result<nimble_core::integrations::google_calendar::RemoteEvent,CalendarApiError>{panic!("unexpected")}
+        async fn update(&self,_:&str,_:&str,_:&CalendarProjection,_:&str,_:&Value)->Result<nimble_core::integrations::google_calendar::RemoteEvent,CalendarApiError>{panic!("unexpected")}
+        async fn delete(&self,c:&str,_:&str,e:Option<&str>)->Result<(),CalendarApiError>{assert_eq!(c,"owned-calendar");let etag=e.unwrap_or("").to_string();self.etags.lock().unwrap().push(etag.clone());if etag=="fresh-1"{Err(CalendarApiError::Precondition)}else{Ok(())}}
+    }
+    let pool=nimble_core::test_util::test_pool().await;
+    db::set_calendar(&pool,"owned-calendar","America/Los_Angeles").await.unwrap();
+    let task=tasks::create_local_task(&pool,CreateTaskInput {content:"Delete".into(),due_date:Some("2026-09-22".into()),due_time:Some("09:00".into()),reminder_offset_minutes:Some(30),google_calendar_enabled:Some(true),..Default::default()}).await.unwrap();
+    let p=nimble_core::integrations::google_calendar::project(&task,"America/Los_Angeles").unwrap().unwrap();
+    let id=event_id(&task.id);
+    db::queue_upsert(&pool,&task.id,&id,&p).await.unwrap();db::acknowledge_upsert(&pool,&task.id,Some("old-etag"),&p).await.unwrap();
+    tasks::update_local_task(&pool,&task.id,UpdateTaskInput {google_calendar_enabled:Some(false),..Default::default()}).await.unwrap();
+    let mut event=nimble_core::api::google_calendar::event_body(&id,&p); event["etag"]="fresh-1".into();
+    let fake=FakeDelete {event:event.clone(),etags:Mutex::new(vec![]),wrong_marker:false};
+    nimble_core::integrations::google_calendar::run_once(&pool,&fake,"2026-09-22T00:00:00Z".parse().unwrap()).await.unwrap();
+    assert_eq!(*fake.etags.lock().unwrap(),vec!["fresh-1","fresh-2"]);
+    assert!(db::links(&pool).await.unwrap().is_empty());
+    db::queue_upsert(&pool,&task.id,&id,&p).await.unwrap();db::acknowledge_upsert(&pool,&task.id,Some("old-etag"),&p).await.unwrap();
+    let wrong=FakeDelete {event,etags:Mutex::new(vec![]),wrong_marker:true};
+    let result=nimble_core::integrations::google_calendar::run_once(&pool,&wrong,"2026-09-22T00:01:00Z".parse().unwrap()).await.unwrap();
+    assert_eq!(result.error_code.as_deref(),Some("google_event_conflict"));
+    assert!(wrong.etags.lock().unwrap().is_empty());
+    assert_eq!(db::links(&pool).await.unwrap().len(),1);
 }

@@ -9,7 +9,9 @@
 
 ## Automated checks
 
-`cargo test -p nimble-core --test reminders --test google_calendar --offline`: six focused tests pass, covering decision boundaries, durable claims and restart recovery, title-key stability, DST gap review, merge behavior, deterministic private event projection, and a fake-transport restart without duplicate insertion. `cargo check -p app --offline` passes with the desktop OAuth, Keychain, commands, and runner registered. Full workspace and native signed-bundle gates are coordinated separately.
+`cargo check -p app --offline` passes with the desktop OAuth, Keychain, commands, and runner registered. Full workspace and native signed-bundle gates are coordinated separately.
+
+Final review regressions: eleven focused core tests pass across `reminders`, `google_calendar`, and `google_calendar_http`; the two HTTP tests ran with local loopback access and checked exact request paths, encoded pagination, bearer and If-Match headers, Retry-After, and no sync-token advancement on a failed second page. Four desktop Google tests pass, including reconnecting to the stored calendar without a new POST. The reminder test covers A→B→A restoration before delivery; Google tests cover timezone review and fresh-ETag managed deletion. The signed native reminder smoke test is coordinated separately.
 
 No real Google events or production task records were touched during implementation.
 

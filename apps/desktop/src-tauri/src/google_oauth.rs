@@ -83,6 +83,17 @@ pub async fn refresh(client_id:&str, refresh_token:&str, client:&reqwest::Client
     response.json().await.map_err(|_|"google_refresh_failed")
 }
 
+pub async fn validate_existing_calendar(client:&reqwest::Client,base_url:&str,calendar_id:&str,access_token:&str)->Result<(),&'static str> {
+    if calendar_id.is_empty() || calendar_id.contains('/') || calendar_id.contains("..") { return Err("google_calendar_reconnect_needs_review") }
+    let mut url=reqwest::Url::parse(base_url).map_err(|_|"google_calendar_setup_failed")?;
+    url.path_segments_mut().map_err(|_|"google_calendar_setup_failed")?.pop_if_empty().push(calendar_id);
+    let response=client.get(url).bearer_auth(access_token).send().await.map_err(|_|"google_calendar_reconnect_needs_review")?;
+    if !response.status().is_success() { return Err("google_calendar_reconnect_needs_review") }
+    let body:serde_json::Value=response.json().await.map_err(|_|"google_calendar_reconnect_needs_review")?;
+    if body.get("id").and_then(|v|v.as_str())!=Some(calendar_id) { return Err("google_calendar_reconnect_needs_review") }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +105,28 @@ mod tests {
         assert!(AttemptGuard::acquire().is_err());
         drop(guard);
         assert!(AttemptGuard::acquire().is_ok());
+    }
+    #[tokio::test]
+    async fn reconnect_validates_stored_calendar_without_creating_another() {
+        let listener=match TcpListener::bind("127.0.0.1:0").await {
+            Ok(v)=>v,
+            Err(e) if e.kind()==std::io::ErrorKind::PermissionDenied=>return,
+            Err(e)=>panic!("loopback bind failed: {e}"),
+        };
+        let port=listener.local_addr().unwrap().port();
+        let server=tokio::spawn(async move {
+            let (mut stream,_)=listener.accept().await.unwrap();
+            let mut bytes=[0u8;4096]; let n=stream.read(&mut bytes).await.unwrap();
+            let request=String::from_utf8_lossy(&bytes[..n]).into_owned();
+            let body=r#"{"id":"owned-calendar"}"#;
+            let response=format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
+            stream.write_all(response.as_bytes()).await.unwrap();
+            request
+        });
+        let client=reqwest::Client::builder().no_proxy().build().unwrap();
+        validate_existing_calendar(&client,&format!("http://127.0.0.1:{port}/calendar/v3/calendars/"),"owned-calendar","fake-access").await.unwrap();
+        let request=server.await.unwrap();
+        assert!(request.starts_with("GET /calendar/v3/calendars/owned-calendar "),"{request}");
+        assert!(!request.contains("POST "));
     }
 }

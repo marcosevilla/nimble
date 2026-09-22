@@ -31,11 +31,15 @@ pub async fn collect_due(pool: &SqlitePool, now: DateTime<Utc>, timezone: &str) 
     }
     let mut tx = pool.begin().await?;
     for item in &active {
+        sqlx::query("UPDATE reminder_deliveries SET state='pending' WHERE occurrence_key=? AND state='superseded' AND last_fired_at IS NULL AND acknowledged_at IS NULL")
+            .bind(&item.occurrence_key).execute(&mut *tx).await?;
         sqlx::query("INSERT OR IGNORE INTO reminder_deliveries (occurrence_key,task_id,scheduled_at,state) VALUES (?,?,?,'pending')")
             .bind(&item.occurrence_key).bind(&item.task_id).bind(item.scheduled_at.to_rfc3339())
             .execute(&mut *tx).await?;
     }
     for (key,task_id) in &invalid {
+        sqlx::query("UPDATE reminder_deliveries SET state='catch_up' WHERE occurrence_key=? AND state='superseded' AND last_fired_at IS NULL AND acknowledged_at IS NULL")
+            .bind(key).execute(&mut *tx).await?;
         sqlx::query("INSERT OR IGNORE INTO reminder_deliveries (occurrence_key,task_id,scheduled_at,state,error_code) VALUES (?,?,?,'catch_up','schedule_needs_attention')")
             .bind(key).bind(task_id).bind(now.to_rfc3339()).execute(&mut *tx).await?;
     }

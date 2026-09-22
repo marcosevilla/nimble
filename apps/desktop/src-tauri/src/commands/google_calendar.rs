@@ -21,6 +21,7 @@ pub async fn google_calendar_status(app:AppHandle)->Result<GoogleConnectionStatu
     } else {
         let profile=crate::google_calendar_runner::profile_identity(&app)?;
         KeychainCredentials.load(&profile).map_err(str::to_owned)?.is_some() && state.calendar_id.is_some()
+            && !matches!(state.error_code.as_deref(),Some("google_reconnect_required"|"google_permission_denied"))
     };
     Ok(GoogleConnectionStatus { connected, calendar_label:state.calendar_id.map(|_|"Nimble".into()), timezone:state.timezone, error_code:state.error_code })
 }
@@ -32,17 +33,28 @@ pub async fn google_calendar_connect(app:AppHandle)->Result<GoogleConnectionStat
     let pool=app.state::<SqlitePool>();
     let client_id=crate::google_calendar_runner::client_id(pool.inner()).await?;
     let state=nimble_core::db::google_calendar::state(pool.inner()).await.map_err(|_|"google_status_failed")?;
-    if state.calendar_id.is_some() && google_calendar_status(app.clone()).await?.connected { return google_calendar_status(app).await }
-    if state.error_code.as_deref()==Some("google_calendar_create_pending") { return Err("google_calendar_setup_needs_review".into()) }
+    let profile=crate::google_calendar_runner::profile_identity(&app)?;
+    let credentials=KeychainCredentials;
+    let has_credential=credentials.load(&profile).map_err(str::to_owned)?.is_some();
+    if should_reuse_session(state.calendar_id.is_some(),has_credential,state.error_code.as_deref()) {
+        return google_calendar_status(app).await;
+    }
+    if state.calendar_id.is_none() && state.error_code.as_deref()==Some("google_calendar_create_pending") { return Err("google_calendar_setup_needs_review".into()) }
     let client=reqwest::Client::builder().timeout(std::time::Duration::from_secs(20))
         .connect_timeout(std::time::Duration::from_secs(10)).build().map_err(|_|"google_transport_failed")?;
     let token=crate::google_oauth::authorize(&client_id,&client).await.map_err(str::to_owned)?;
-    let profile=crate::google_calendar_runner::profile_identity(&app)?;
-    let credentials=KeychainCredentials;
     if let Some(refresh_token)=token.refresh_token.as_deref() {
         credentials.store(&profile,refresh_token).map_err(str::to_owned)?;
     } else if credentials.load(&profile).map_err(str::to_owned)?.is_none() {
         return Err("google_refresh_token_missing".into());
+    }
+    if let Some(calendar_id)=state.calendar_id.as_deref() {
+        // Reconnect only to the owned calendar already linked to tasks. A
+        // missing/inaccessible calendar needs review, never a replacement POST.
+        crate::google_oauth::validate_existing_calendar(&client,"https://www.googleapis.com/calendar/v3/calendars/",calendar_id,&token.access_token)
+            .await.map_err(str::to_owned)?;
+        nimble_core::db::google_calendar::set_error(pool.inner(),None,None).await.map_err(|_|"google_status_failed")?;
+        return google_calendar_status(app).await;
     }
     // Keep an ambiguous POST from silently creating multiple calendars.
     nimble_core::db::google_calendar::set_error(pool.inner(),Some("google_calendar_create_pending"),None)
@@ -58,6 +70,21 @@ pub async fn google_calendar_connect(app:AppHandle)->Result<GoogleConnectionStat
     nimble_core::db::google_calendar::set_calendar(pool.inner(),calendar_id,&timezone).await.map_err(|_|"google_status_failed")?;
     nimble_core::db::google_calendar::set_error(pool.inner(),None,None).await.map_err(|_|"google_status_failed")?;
     google_calendar_status(app).await
+}
+
+fn should_reuse_session(has_calendar:bool,has_credential:bool,error:Option<&str>)->bool {
+    has_calendar && has_credential && !matches!(error,Some("google_reconnect_required"|"google_permission_denied"|"google_calendar_create_pending"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn reconnect_pause_requires_new_authorization() {
+        assert!(!should_reuse_session(true,true,Some("google_reconnect_required")));
+        assert!(!should_reuse_session(true,false,None));
+        assert!(should_reuse_session(true,true,None));
+    }
 }
 
 #[tauri::command]
