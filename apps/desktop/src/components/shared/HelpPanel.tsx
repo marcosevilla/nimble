@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { HelpCircle, X, Keyboard, Map } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -14,17 +14,19 @@ import { useHelpPanelStore } from '@/stores/helpPanelStore'
 
 export function HelpPanel() {
   const open = useHelpPanelStore((s) => s.open)
+  const closing = useHelpPanelStore((s) => s.closing)
   const setOpen = useHelpPanelStore((s) => s.setOpen)
-  const [closing, setClosing] = useState(false)
+  const closePanel = useHelpPanelStore((s) => s.requestClose)
+  const finishClose = useHelpPanelStore((s) => s.finishClose)
   const panelRef = useRef<HTMLDivElement>(null)
 
-  const closePanel = useCallback(() => {
-    setClosing(true)
-    setTimeout(() => {
-      setOpen(false)
-      setClosing(false)
-    }, 150)
-  }, [setOpen])
+  // Every close path (button, click-outside, Escape, the `?` toggle) sets
+  // `closing` on the store; the panel unmounts after the exit transition.
+  useEffect(() => {
+    if (!closing) return
+    const t = setTimeout(finishClose, 150)
+    return () => clearTimeout(t)
+  }, [closing, finishClose])
 
   // Click outside to close
   useEffect(() => {
@@ -39,11 +41,22 @@ export function HelpPanel() {
   }, [open, closePanel])
 
   // Escape closes the panel. Capture phase so the Dashboard's own Escape
-  // (clear selection / close detail) doesn't also fire for this keypress.
+  // (clear selection / close detail) doesn't also fire for this keypress —
+  // but only when the panel is the topmost layer: an open dialog, menu,
+  // select or popover, or a focused text field (the command bar's input),
+  // owns Escape first.
   useEffect(() => {
     if (!open) return
     function handleKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return
+      const target = e.target as HTMLElement | null
+      const inEditable =
+        !!target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      const overlayAbove = document.querySelector(
+        '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-slot="popover-content"]',
+      )
+      if (inEditable || overlayAbove) return
       e.preventDefault()
       e.stopPropagation()
       closePanel()
