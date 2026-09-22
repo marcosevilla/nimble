@@ -5,9 +5,12 @@ function getAudioContext(): AudioContext {
   return audioCtx
 }
 
-/** Play a short, satisfying two-tone chime on task completion */
+/** Play a short, satisfying two-tone chime on task completion.
+ *  Silent under prefers-reduced-motion — the OS-level "keep it calm" signal
+ *  is the closest thing to a sound setting until one exists (session P1-1). */
 export function playCompletionSound() {
   try {
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const ctx = getAudioContext()
     const now = ctx.currentTime
 

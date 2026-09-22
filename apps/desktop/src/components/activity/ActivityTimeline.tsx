@@ -3,6 +3,7 @@ import { useDataProvider } from '@/services/provider-context'
 import type { ActivityEntry, ActivitySummary } from '@nimble/types'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
 import { Zap } from 'lucide-react'
 import { ACTION_META, ACTIVITY_COLORS } from '@/lib/activityMeta'
 
@@ -108,6 +109,7 @@ export function ActivityTimeline() {
   const [entries, setEntries] = useState<ActivityEntry[]>([])
   const [summaries, setSummaries] = useState<ActivitySummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
   const [showNoise, setShowNoise] = useState(false)
 
   const today = new Date().toISOString().slice(0, 10)
@@ -120,8 +122,10 @@ export function ActivityTimeline() {
       ])
       setEntries(log)
       setSummaries(summary)
+      setFailed(false)
     } catch {
-      // Silently fail
+      // A failed load must not masquerade as an empty day (session P2-4).
+      setFailed(true)
     } finally {
       setLoading(false)
     }
@@ -144,6 +148,17 @@ export function ActivityTimeline() {
 
   const filtered = showNoise ? entries : entries.filter((e) => !NOISE_ACTIONS.has(e.action_type))
 
+  if (failed) {
+    return (
+      <div className="flex items-center gap-3" role="status">
+        <p className="text-body text-muted-foreground">Couldn't load today's activity.</p>
+        <Button variant="ghost" size="xs" onClick={() => { setLoading(true); refresh() }}>
+          Try again
+        </Button>
+      </div>
+    )
+  }
+
   if (entries.length === 0) {
     return (
       <p className="text-body text-muted-foreground">
@@ -162,12 +177,15 @@ export function ActivityTimeline() {
         <h3 className="text-label text-muted-foreground">
           Timeline
         </h3>
-        <button
+        <Button
+          variant="ghost"
+          size="xs"
+          aria-pressed={showNoise}
           onClick={() => setShowNoise(!showNoise)}
-          className="text-label text-muted-foreground hover:text-foreground transition-colors"
+          className="text-muted-foreground"
         >
           {showNoise ? 'Hide noise' : 'Show all'}
-        </button>
+        </Button>
       </div>
 
       {/* Timeline */}

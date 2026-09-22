@@ -34,38 +34,42 @@ export function FocusCelebration() {
   const task = useFocusStore((s) => s.task)
   const nextTask = useFocusStore((s) => s.nextTask)
   const dismissCelebration = useFocusStore((s) => s.dismissCelebration)
+  const endCelebration = useFocusStore((s) => s.endCelebration)
+  const parkCelebration = useFocusStore((s) => s.parkCelebration)
 
   // Play sound on mount
   useEffect(() => {
     playCompletionSound()
   }, [])
 
-  // Auto-dismiss after 2.5 seconds
+  // Auto-dismiss after 2.5 seconds: the next task lands in the banner,
+  // paused — surfaced, never started unattended (session P1-2, §2.4).
   useEffect(() => {
-    const timeout = setTimeout(dismissCelebration, 2500)
+    const timeout = setTimeout(parkCelebration, 2500)
     return () => clearTimeout(timeout)
-  }, [dismissCelebration])
+  }, [parkCelebration])
 
-  // Click or keypress to dismiss early
-  const handleDismiss = useCallback(() => {
-    dismissCelebration()
-  }, [dismissCelebration])
+  // Escape and a stray click end the session; only Enter commits to the
+  // next task. Space follows Enter (it is "confirm" everywhere else here).
+  const handleEnd = useCallback(() => { endCelebration() }, [endCelebration])
+  const handleNext = useCallback(() => { dismissCelebration() }, [dismissCelebration])
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
-        e.preventDefault()
-        handleDismiss()
-      }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); handleEnd() }
+      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleNext() }
     }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [handleDismiss])
+    window.addEventListener('keydown', handleKey, true)
+    return () => window.removeEventListener('keydown', handleKey, true)
+  }, [handleEnd, handleNext])
 
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-label="Session complete"
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-in fade-in duration-200"
-      onClick={handleDismiss}
+      onClick={handleEnd}
     >
       <div className="relative text-center space-y-4">
         {/* Confetti particles */}
@@ -113,10 +117,18 @@ export function FocusCelebration() {
           </p>
         )}
 
-        {/* Next task preview */}
-        {nextTask && (
+        {/* Next task preview — shown, not started */}
+        {nextTask ? (
           <p className="text-meta text-muted-foreground animate-in fade-in duration-700">
-            Next: {nextTask.content}
+            Next: <span className="text-foreground">{nextTask.content}</span>
+            {' — '}
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label">Enter</kbd> to start,{' '}
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label">Esc</kbd> to stop here
+          </p>
+        ) : (
+          <p className="text-meta text-muted-foreground animate-in fade-in duration-700">
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label">Enter</kbd> or{' '}
+            <kbd className="rounded bg-muted/60 px-1 font-mono text-label">Esc</kbd> to close
           </p>
         )}
       </div>

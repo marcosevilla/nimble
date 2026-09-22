@@ -96,6 +96,14 @@ export function Dashboard() {
   useLayoutEffect(() => {
     useSelectionStore.getState().clear()
 
+    // Changing page while a session is expanded collapses it to the banner
+    // instead of leaving the timer over a page the nav says has changed
+    // (session P2-1, §2.4 "doesn't lock navigation").
+    const focus = useFocusStore.getState()
+    if (focus.isActive && !focus.isCompact && previousPageRef.current !== currentPage) {
+      focus.setCompact(true)
+    }
+
     if (scrollRef.current && previousPageRef.current !== currentPage) {
       scrollPositions.current[previousPageRef.current] = scrollRef.current.scrollTop
     }
