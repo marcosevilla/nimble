@@ -1,5 +1,5 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
+import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, CircleDashedIcon } from "lucide-react"
 
 const Toaster = ({ ...props }: ToasterProps) => {
   // Resolve theme from the <html> class (managed by useTheme hook)
@@ -26,7 +26,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           <OctagonXIcon className="size-4" />
         ),
         loading: (
-          <Loader2Icon className="size-4 animate-spin" />
+          <CircleDashedIcon className="size-4" />
         ),
       }}
       style={
