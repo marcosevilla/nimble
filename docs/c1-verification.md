@@ -38,3 +38,9 @@ Built with `tauri build --debug --bundles app` plus a temporary configuration ov
 Marco requested “update my app.” Built the release from `e196d1c` with the existing `Marco Task App Dev` signing identity; signing required an unsandboxed retry. Signature verification passed. Quit Nimble, preserved its app-data directory, old app bundle and WebKit cache in the private rollback folder `~/Library/Application Support/Nimble Rollbacks/20260921-194254-c1`, installed the verified bundle in `/Applications/Nimble.app`, and reopened it. The installed executable hash matches the release artifact. Existing local task/project counts match the saved pre-update copy. Persisted local backup success: `2026-09-22T02:42:59.935462+00:00`. No private remote was configured or uploaded.
 
 An initial pre-swap verification used the wrong `tasks` table name and stopped safely; it left an additional app-data copy at `20260921-194229-c1`. The corrected check uses `local_tasks` and `projects`. Both rollback directories are retained. Git branch integration remains separate and unperformed.
+
+## Main merge and online activation — 2026-09-21
+
+Marco authorized both follow-ups. Preserved the original untracked planning copies outside the repository, fast-forwarded main to the tested feature branch, fetched origin/main to verify ancestry, and reran the full Rust workspace suite on main: 279 passed, zero failures.
+
+Created `marcosevilla/nimble-backups` explicitly private and connected it through the installed app's Settings. Invoked Back up now. The app recorded acknowledged upload `f696a7884a0c922738f9fbc786ecc3c29d7974b3` at `2026-09-22T02:47:41.204809+00:00`, with no stage error. GitHub privacy was independently confirmed as PRIVATE. Credentials and full snapshots remain outside the archive. Live restoration/reconnection is still a separate procedure.
