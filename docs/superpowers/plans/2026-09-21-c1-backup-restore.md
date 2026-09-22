@@ -1,6 +1,6 @@
 # C1 Backup and Restore Implementation Plan
 
-**Execution status (2026-09-21):** Tasks 1–7 implemented and reviewed. Task 8 automated checks and isolated recovery passed; native Settings smoke and real offsite activation remain open. See [verification record](../../c1-verification.md) for evidence and implementation deviations. Original step checkboxes below are retained as the planning checklist, not the current completion ledger.
+**Execution status (2026-09-21):** Tasks 1–7 implemented and reviewed. Task 8 automated checks and isolated recovery passed; native Settings smoke also passed in the standalone test bundle; real offsite activation remains open. See [verification record](../../c1-verification.md) for evidence and implementation deviations. Original step checkboxes below are retained as the planning checklist, not the current completion ledger.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

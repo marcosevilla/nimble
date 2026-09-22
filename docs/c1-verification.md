@@ -1,6 +1,6 @@
 # C1 verification â€” 2026-09-21
 
-Implementation lives on `codex/c1-backup-restore`, based on `2b0421a`. Tasks 1â€“7 are implemented. Task 8 automated checks passed; native Settings button smoke remains open. No installed production app update, production database access, real archive configuration, or production upload was performed.
+Implementation lives on `codex/c1-backup-restore`, based on `2b0421a`. Tasks 1â€“7 are implemented. Task 8 automated checks and native Settings button smoke passed. No installed production app update, production database access, real archive configuration, or production upload was performed.
 
 ## Evidence
 
@@ -15,7 +15,7 @@ Implementation lives on `codex/c1-backup-restore`, based on `2b0421a`. Tasks 1â€
 
 ## Remaining acceptance and activation
 
-1. Native Settings smoke: in a marked synthetic temporary profile, click Back up now, Open backup folder, and Verify latest backup; confirm native command results. macOS automation could not attach to the development window, so this is explicitly unverified.
+1. Native Settings smoke completed in the standalone debug bundle. Back up now changed the timestamp to 7:26:19 PM; Verify latest backup displayed successful isolated recovery; Open backup folder opened Finder at the exact synthetic backups path. The earlier unbundled-window attachment limitation is resolved.
 2. Integrate/release the branch, then select an existing private GitHub repository and verify the first acknowledged real upload. No repository is created or chosen automatically.
 3. Production restore/reconnection remains a separate reviewed procedure. Keep Todoist operational until the broader cutover gates pass.
 
@@ -28,3 +28,7 @@ Implementation lives on `codex/c1-backup-restore`, based on `2b0421a`. Tasks 1â€
 - Nightly scheduling requires the app to be running; launch catch-up handles missed runs. No background LaunchAgent was installed.
 
 See [recovery runbook](backup-recovery.md) for the offline commands and activation boundaries, and [NEXT.md](../NEXT.md) for open work.
+
+## Standalone test app follow-up
+
+Built with `tauri build --debug --bundles app` plus a temporary configuration override. Bundle: `target/debug/bundle/macos/Nimble Backup Test.app`; distinct identifier `com.marcosevilla.nimble-backup-test`. Build and code-signature verification passed. Its Info.plist pins `NIMBLE_BACKUP_TEST_ROOT` to `/private/tmp/nimble-backup-test-owylwbx_`, a marked empty synthetic profile. All three native backup controls were exercised successfully. No production installation or upload occurred. The app remains open for Marco to inspect.

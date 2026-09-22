@@ -4,7 +4,8 @@ Updated 2026-09-21 from the current checkout and committed planning documents.
 
 ## Start here
 
-- [ ] Finish the native Settings smoke check in the synthetic test profile, then integrate `codex/c1-backup-restore` into main. The installed production app has not been updated.
+- [ ] Integrate `codex/c1-backup-restore` into main and release. The installed production app has not been updated.
+- [x] Build and open standalone Nimble Backup Test; native Back up now, Verify latest backup, and Open backup folder all passed using an isolated empty test profile.
 - [x] Implement C1 tasks 1–7: local snapshots, portable export, isolated recovery, conservative pruning, private Git publication, scheduling, and Settings controls.
 - [x] Verify 279 Rust tests, desktop/web builds, targeted frontend lint, snapshot recovery and export recovery after local Git retrieval. Independent integration review approved with no remaining blockers. See [verification record](docs/c1-verification.md).
 - [ ] Select and configure an existing private GitHub archive after release; real offsite activation has not been tested or enabled.
@@ -13,7 +14,7 @@ Updated 2026-09-21 from the current checkout and committed planning documents.
 
 ## Code track — agreed order
 
-- [ ] **C1: Safety net activation.** Implementation and isolated recovery checks passed. Native button smoke, integration/release and real private-repository activation remain.
+- [ ] **C1: Safety net activation.** Implementation and isolated recovery checks passed. Integration/release and real private-repository activation remain.
 - [ ] **C2: Reminders.** Persistent desktop reminders, catch-up after sleep, Google Calendar OAuth for phone alerts; schema v20 also introduces label groups.
 - [ ] **C3: Agent access.** Local `dt` CLI over `nimble-core` CRUD, JSON output, instant running-app refresh, then adapt agent workflows with Todoist as fallback during the trial period.
 - [ ] **C4: Labels and search.** Restore ENERGY / TIME / TYPE / CREATIVE grouping; indexed task-title and description search including completed tasks.
