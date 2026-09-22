@@ -64,7 +64,7 @@ Full recipe (deep-link `?page=`, `&review=open`, `openTask('task-01')`, Cmd+K) i
 One commit per task (or per tight cluster of same-shape fixes), message `fix(<theme>): <what> (§x.y)`, body naming the finding IDs, ending with the line:
 
 ```
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
 ```
 
 Commit screenshots with the task they verify.
