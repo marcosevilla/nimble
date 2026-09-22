@@ -1,55 +1,16 @@
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { ChevronRight, Check, Square } from 'lucide-react'
+import { parseBrief, isOpenByDefault, type BriefSection } from '@/lib/briefParser'
 
 interface BriefDisplayProps {
   markdown: string
 }
 
-// ── Parse sections from markdown ──
-
-interface BriefSection {
-  title: string
-  content: string
-}
-
-function parseBrief(markdown: string): { title: string; sections: BriefSection[] } {
-  // Strip YAML frontmatter
-  const fmMatch = markdown.match(/^---\n[\s\S]*?\n---\n/)
-  const body = fmMatch ? markdown.slice(fmMatch[0].length) : markdown
-
-  // Extract h1 title
-  const h1Match = body.match(/^# (.+)$/m)
-  const title = h1Match ? h1Match[1] : ''
-
-  // Split by ## headings
-  const sections: BriefSection[] = []
-  const parts = body.split(/^## /m).slice(1) // skip content before first ##
-
-  for (const part of parts) {
-    const newlineIdx = part.indexOf('\n')
-    if (newlineIdx === -1) continue
-    const sectionTitle = part.slice(0, newlineIdx).trim()
-    const content = part.slice(newlineIdx + 1).trim()
-    if (sectionTitle) sections.push({ title: sectionTitle, content })
-  }
-
-  return { title, sections }
-}
-
-// Key sections that should be open by default
-const DEFAULT_OPEN = new Set([
-  'Before You Start',
-  'Core Habits',
-  "Today's Shape",
-  'Work',
-  'Personal',
-])
-
 // ── Section component ──
 
 function Section({ section }: { section: BriefSection }) {
-  const [expanded, setExpanded] = useState(DEFAULT_OPEN.has(section.title))
+  const [expanded, setExpanded] = useState(isOpenByDefault(section.title))
 
   return (
     <div className="border-b border-border/20 last:border-0">
