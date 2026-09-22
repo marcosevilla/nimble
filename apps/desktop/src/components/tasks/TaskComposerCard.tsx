@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/shared/IconButton'
 import { MetadataChips, type ChipValues } from '@/components/tasks/MetadataChips'
+import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import type { LocalTask, Section, Label } from '@nimble/types'
 
 const EMPTY_DUE: ChipValues['due'] = { dueDate: null, dueTime: null, durationMinutes: null, recurrenceRule: null }
@@ -39,26 +40,6 @@ function buildInitialChipValues(defaults?: TaskComposerDefaults): ChipValues {
   }
 }
 
-function sameLabelSet(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false
-  const bSet = new Set(b)
-  return a.every((id) => bSet.has(id))
-}
-
-function chipValuesEqual(a: ChipValues, b: ChipValues): boolean {
-  return (
-    a.priority === b.priority &&
-    a.due.dueDate === b.due.dueDate &&
-    a.due.dueTime === b.due.dueTime &&
-    a.due.durationMinutes === b.due.durationMinutes &&
-    a.due.recurrenceRule === b.due.recurrenceRule &&
-    (a.projectId ?? null) === (b.projectId ?? null) &&
-    (a.sectionId ?? null) === (b.sectionId ?? null) &&
-    (a.linkedDocId ?? null) === (b.linkedDocId ?? null) &&
-    sameLabelSet(a.labelIds, b.labelIds)
-  )
-}
-
 /**
  * Unified create-task card — replaces both the old inline task editor and
  * `QuickCreateDialog`'s form body. Create-only: editing an existing task
@@ -84,8 +65,10 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
   // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately mount-only, see comment above
   const initialChipValues = useMemo(() => buildInitialChipValues(defaults), [])
 
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
+  // A draft left behind by a dirty close comes back on the next open —
+  // nothing typed is ever lost, so no confirm is needed (P1-6).
+  const [title, setTitle] = useState(() => useQuickCreateStore.getState().draft?.title ?? '')
+  const [description, setDescription] = useState(() => useQuickCreateStore.getState().draft?.description ?? '')
   const [chipValues, setChipValues] = useState<ChipValues>(initialChipValues)
   const [sections, setSections] = useState<Section[]>([])
   const [labels, setLabels] = useState<Label[]>([])
@@ -107,9 +90,6 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
     dp.sections.list(chipValues.projectId).then(setSections).catch(() => setSections([]))
   }, [dp, chipValues.projectId, sectionVersion])
 
-  const dirty =
-    title.trim() !== '' || description.trim() !== '' || !chipValuesEqual(chipValues, initialChipValues)
-
   const canSave = title.trim() !== ''
 
   const handleSave = useCallback(async () => {
@@ -130,6 +110,7 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
         labelIds: chipValues.labelIds.length ? chipValues.labelIds : undefined,
       })
       emitTasksChanged()
+      useQuickCreateStore.getState().setDraft(null)
       taskToast('Task created', created.id)
       onCreated?.(created)
       onClose()
@@ -140,25 +121,25 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
     }
   }, [canSave, saving, dp, title, description, chipValues, defaults?.parentId, onCreated, onClose])
 
+  // Every close path (Escape, Cancel, ✕, backdrop via Dialog) stashes what
+  // was typed instead of interrupting with a confirm (tasks audit P1-6,
+  // §3.2). An empty draft clears the stash.
+  const handleClose = useCallback(() => {
+    const text = { title: title.trim(), description: description.trim() }
+    useQuickCreateStore.getState().setDraft(text.title || text.description ? { title, description } : null)
+    onClose()
+  }, [title, description, onClose])
+
   const handleCardKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
         // Modal mount (QuickCreateDialog): this card sits inside the Dialog
         // Popup, and Base UI's useDismiss/closeOnEscapeKeyDown doesn't check
-        // defaultPrevented — only stopping propagation keeps the Dialog from
-        // unconditionally closing itself (losing a dirty draft even when the
-        // user clicks Cancel on the confirm below). Stop it on both branches:
-        // the non-dirty branch already closes via our own onClose(), so
-        // letting the Dialog *also* handle the same Escape would just be a
-        // harmless double-close today, but stays correct if onClose ever
-        // stops being synchronous-with-unmount.
+        // defaultPrevented — stop propagation so the Dialog doesn't also
+        // close itself past our draft stash.
         e.stopPropagation()
-        if (dirty) {
-          if (window.confirm('Discard this task?')) onClose()
-        } else {
-          onClose()
-        }
+        handleClose()
         return
       }
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -166,7 +147,7 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
         if (canSave) handleSave()
       }
     },
-    [dirty, onClose, canSave, handleSave],
+    [handleClose, canSave, handleSave],
   )
 
   // Plain Enter in the title just advances focus — it never submits or
@@ -188,7 +169,7 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
         {/* Header */}
         <div className="flex items-center justify-between">
           <span className="text-body-strong">New task</span>
-          <IconButton size="md" onClick={onClose} aria-label="Close">
+          <IconButton size="md" onClick={handleClose} aria-label="Close">
             <X className="size-[17px]" />
           </IconButton>
         </div>
@@ -201,9 +182,8 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
           placeholder="Task title"
           autoFocus
           className={cn(
-            'h-auto border-none bg-transparent px-0 py-0 shadow-none outline-none',
+            'h-auto border-none bg-transparent px-0 py-0 shadow-none',
             'text-display placeholder:text-foreground/25',
-            'focus-visible:ring-0 focus-visible:border-none',
           )}
         />
 
@@ -215,9 +195,8 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
           placeholder="Description"
           rows={1}
           className={cn(
-            'min-h-0 resize-none border-none bg-transparent px-0 py-0 shadow-none outline-none',
+            'min-h-0 resize-none border-none bg-transparent px-0 py-0 shadow-none',
             'text-body placeholder:text-foreground/25',
-            'focus-visible:ring-0 focus-visible:border-none',
           )}
         />
 
@@ -234,7 +213,7 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
 
       {/* Footer */}
       <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" className="h-8 rounded-lg px-3.5 text-body" onClick={onClose}>
+        <Button variant="ghost" className="h-8 rounded-lg px-3.5 text-body" onClick={handleClose}>
           Cancel
         </Button>
         <Button

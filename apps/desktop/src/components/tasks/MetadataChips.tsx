@@ -60,10 +60,10 @@ const EXTRA_FIELD_LABELS: Record<ExtraField, string> = {
 const EMPTY_DUE: DueValue = { dueDate: null, dueTime: null, durationMinutes: null, recurrenceRule: null }
 
 const CHIP_EMPTY =
-  'h-6 rounded-md border border-border px-2.5 text-body text-muted-foreground hover:bg-accent transition-colors inline-flex items-center outline-none'
+  'h-6 rounded-md border border-border px-2.5 text-body text-muted-foreground hover:bg-accent transition-colors inline-flex items-center'
 const CHIP_FILLED = 'h-6 rounded-md bg-secondary border border-input pl-2.5 pr-1 text-body text-foreground flex items-center gap-[5px]'
 const CHIP_PLUS =
-  'h-6 rounded-md border border-dashed border-input px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors inline-flex items-center justify-center outline-none'
+  'h-6 rounded-md border border-dashed border-input px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors inline-flex items-center justify-center'
 
 /** Relative due label, mirroring DueDateBadge's logic (TaskItem.tsx) — same
  * Today/Tomorrow/`MMM d` convention, kept in one place per that badge's own
@@ -87,7 +87,7 @@ function ClearButton({ onClear, label }: { onClear: () => void; label: string })
         e.stopPropagation()
         onClear()
       }}
-      className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/chip:opacity-100 hover:text-foreground"
+      className="relative flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/chip:opacity-100 focus-visible:opacity-100 hover:text-foreground after:absolute after:-inset-2 after:content-['']"
     >
       <X className="size-3" />
     </button>
@@ -123,7 +123,7 @@ function PriorityChip({ value, onChange }: { value: number; onChange: (p: number
   return (
     <div className={cn(CHIP_FILLED, 'group/chip')}>
       <DropdownMenu>
-        <DropdownMenuTrigger className="flex items-center gap-[5px] outline-none">
+        <DropdownMenuTrigger className="flex items-center gap-[5px]">
           <PriorityBars priority={value} />
           {opt?.label}
         </DropdownMenuTrigger>
@@ -158,7 +158,7 @@ function DueChip({ value, onChange }: { value: DueValue; onChange: (v: DueValue)
   return (
     <div className={cn(CHIP_FILLED, 'group/chip')}>
       <DueDatePopover value={value} onChange={onChange}>
-        <button type="button" className="flex items-center gap-[5px] outline-none">
+        <button type="button" className="flex items-center gap-[5px]">
           <Calendar className="size-3" />
           Due {formatDueLabel(value.dueDate)}
         </button>
@@ -228,7 +228,7 @@ function LabelsChips({
         ) : (
           selected.map((label) => (
             <div key={label.id} className={cn(CHIP_FILLED, 'group/chip')}>
-              <button type="button" className="flex items-center gap-[5px] outline-none">
+              <button type="button" className="flex items-center gap-[5px]">
                 <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: labelColor(label.color) }} />
                 {label.name}
               </button>
@@ -289,7 +289,7 @@ function EntityChip<T extends { id: string; name: string }>({
   return (
     <div className={cn(CHIP_FILLED, 'group/chip')}>
       <DropdownMenu open={open} onOpenChange={onOpenChange}>
-        <DropdownMenuTrigger className="outline-none">{entity.name}</DropdownMenuTrigger>
+        <DropdownMenuTrigger className="">{entity.name}</DropdownMenuTrigger>
         {menu}
       </DropdownMenu>
       <ClearButton onClear={onClear} label={clearLabel} />
@@ -350,7 +350,7 @@ function LinkedDocChip({
   // Real <button>s, not <div>s — see the Due chip's comment: display:contents
   // trigger wrappers drop non-button children from the tab order entirely.
   const trigger = linkedDocId ? (
-    <button type="button" className="flex items-center gap-[5px] outline-none">
+    <button type="button" className="flex items-center gap-[5px]">
       {title ?? 'Untitled'}
     </button>
   ) : (
@@ -365,7 +365,7 @@ function LinkedDocChip({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search docs..."
-        className="w-full border-b border-border/20 bg-transparent py-1 text-body outline-none placeholder:text-muted-foreground"
+        className="w-full border-b border-border/20 bg-transparent py-1 text-body placeholder:text-muted-foreground"
         autoFocus
       />
       <div className="max-h-48 space-y-0.5 overflow-y-auto">

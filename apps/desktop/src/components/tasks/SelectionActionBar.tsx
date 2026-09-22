@@ -5,6 +5,8 @@ import { useSelectionStore } from '@/stores/selectionStore'
 import { useDataProvider } from '@/services/provider-context'
 import { useProjects, emitTasksChanged } from '@/hooks/useLocalTasks'
 import { cn } from '@/lib/utils'
+import { deleteTasksWithUndo } from '@/lib/taskUndo'
+import type { LocalTask } from '@nimble/types'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import {
   DropdownMenu,
@@ -23,8 +25,10 @@ const PRIORITY_OPTIONS = [
   { value: 4, label: 'Urgent' },
 ]
 
+// No `outline-none`: the global :focus-visible ring (index.css) is the
+// focus state (tasks audit P1-4).
 const ACTION_BUTTON =
-  'h-7 rounded-md px-2 text-body text-foreground hover:bg-accent transition-colors inline-flex items-center outline-none'
+  'h-7 rounded-md px-2 text-body text-foreground hover:bg-accent transition-colors inline-flex items-center'
 
 const s = (n: number) => (n !== 1 ? 's' : '')
 
@@ -125,23 +129,18 @@ export function SelectionActionBar() {
     [selectedIds, dp, clear],
   )
 
+  // No confirm: the rows leave now and the toast's Undo re-creates them
+  // from a snapshot (tasks audit P1-6; see lib/taskUndo for the id caveat).
   const handleDelete = useCallback(async () => {
-    const ids = Array.from(selectedIds)
-    if (!window.confirm(`Delete ${ids.length} task${s(ids.length)}? This can't be undone.`)) {
+    const ids = new Set(selectedIds)
+    clear()
+    const all = await dp.tasks.list({ includeCompleted: true }).catch(() => [] as LocalTask[])
+    const snapshot = all.filter((t) => ids.has(t.id))
+    if (snapshot.length === 0) {
+      emitTasksChanged()
       return
     }
-    let successCount = 0
-    for (const id of ids) {
-      try {
-        await dp.tasks.delete(id)
-        successCount++
-      } catch {
-        /* counted as failed below */
-      }
-    }
-    emitTasksChanged()
-    clear()
-    reportBatch(successCount, ids.length, (n) => `Deleted ${n} task${s(n)}`)
+    await deleteTasksWithUndo(dp, snapshot)
   }, [selectedIds, dp, clear])
 
   if (selectionType !== 'task' || count === 0) return null

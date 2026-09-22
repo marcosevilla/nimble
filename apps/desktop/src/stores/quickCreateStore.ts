@@ -10,11 +10,21 @@ import type { TaskComposerDefaults } from '@/components/tasks/TaskComposerCard'
 // parent + project). The "Q" global shortcut calls `openCreate()` with no
 // args, which falls back to Inbox — matching the dialog's prior hardcoded
 // default.
+export interface QuickCreateDraft {
+  title: string
+  description: string
+}
+
 interface QuickCreateState {
   open: boolean
   defaults: TaskComposerDefaults
+  /** Text left in the composer when it was closed dirty — restored on the
+   * next open instead of asking "Discard this task?" (tasks audit P1-6).
+   * Cleared when a task is saved. */
+  draft: QuickCreateDraft | null
   openCreate: (defaults?: TaskComposerDefaults) => void
   close: () => void
+  setDraft: (draft: QuickCreateDraft | null) => void
 }
 
 const INBOX_DEFAULTS: TaskComposerDefaults = { projectId: 'inbox' }
@@ -22,6 +32,8 @@ const INBOX_DEFAULTS: TaskComposerDefaults = { projectId: 'inbox' }
 export const useQuickCreateStore = create<QuickCreateState>((set) => ({
   open: false,
   defaults: INBOX_DEFAULTS,
+  draft: null,
   openCreate: (defaults) => set({ open: true, defaults: defaults ?? INBOX_DEFAULTS }),
   close: () => set({ open: false }),
+  setDraft: (draft) => set({ draft }),
 }))

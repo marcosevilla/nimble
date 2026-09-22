@@ -27,7 +27,7 @@ export function LabelChip({
   selected?: boolean
 }) {
   const classes = cn(
-    'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs transition-colors',
+    'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-meta transition-colors',
     selected
       ? 'border-transparent bg-secondary text-secondary-foreground'
       : 'border-border/60 text-muted-foreground',
@@ -140,7 +140,7 @@ export function LabelPicker({ value, onChange }: LabelPickerProps) {
 
       <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setQuery('') }}>
         <PopoverTrigger
-          className="inline-flex items-center gap-1 rounded-full border border-dashed border-border/60 px-2 py-0.5 text-xs text-muted-foreground hover:border-border hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1 rounded-full border border-dashed border-border/60 px-2 py-0.5 text-meta text-muted-foreground hover:border-border hover:text-foreground transition-colors"
           aria-label="Add label"
         >
           <Plus className="size-3" />

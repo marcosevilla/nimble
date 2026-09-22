@@ -14,6 +14,7 @@ import { StatusDropdown } from '@/components/tasks/StatusDropdown'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Sparkles, Plus, Settings, ChevronLeft } from 'lucide-react'
 import { taskToast } from '@/lib/taskToast'
+import { deleteTasksWithUndo } from '@/lib/taskUndo'
 import { predictReschedule } from '@/lib/recurrence'
 import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { InlineTitle } from './InlineTitle'
@@ -353,17 +354,12 @@ export function TaskDetailPage() {
     toast.success('Task ID copied')
   }, [task])
 
-  const handleDeleteTask = useCallback(async () => {
+  // Optimistic: leave the page first, then delete; the toast's Undo brings
+  // the task back (tasks audit P1-6 — see lib/taskUndo for the new-id caveat).
+  const handleDeleteTask = useCallback(() => {
     if (!task) return
-    if (!window.confirm('Delete this task?')) return
-    try {
-      await dp.tasks.delete(task.id)
-      emitTasksChanged()
-      toast.success('Task deleted')
-      close()
-    } catch (e) {
-      toast.error(`Failed to delete: ${e}`)
-    }
+    close()
+    void deleteTasksWithUndo(dp, [task])
   }, [task, dp, close])
 
   // Recurring tasks reschedule instead of completing (Task 8) — the row's
@@ -518,14 +514,13 @@ export function TaskDetailPage() {
               placeholder="Description"
               rows={1}
               className={cn(
-                'min-h-0 resize-none border-none bg-transparent py-0 shadow-none outline-none',
+                'min-h-0 resize-none border-none bg-transparent py-0 shadow-none',
                 // -mx-1 px-1 nets to the same visual left edge as the display
                 // state's px-0 (net offset 0), but gives the caret/first
                 // glyph interior room so it isn't clipped by the page's
                 // overflow-x-hidden scroll container (Dashboard.tsx).
                 '-mx-1 px-1',
                 'text-body placeholder:text-foreground/25',
-                'focus-visible:ring-0 focus-visible:border-none',
               )}
             />
           ) : task.description ? (
