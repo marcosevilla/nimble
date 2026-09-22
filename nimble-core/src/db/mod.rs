@@ -17,3 +17,5 @@ pub mod sync;
 pub mod tasks;
 pub mod backup;
 pub mod backup_storage;
+
+pub mod recovery;
