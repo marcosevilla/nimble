@@ -115,6 +115,15 @@
        dark on the background (shell audit P2-4). */
     @apply border-border outline-ring;
     }
+  /* Every focusable element gets the same 2px ring on keyboard focus —
+     nav rail, icon buttons, calendar chevrons, kbd chips alike. Primitives
+     that still carry `outline-none` + their own ring-3 recipe override this
+     (utilities layer wins); `.focus-ring` below is the explicit opt-in for
+     anything that wants the recipe by class. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    }
   html, body {
     /* Lock the root on both axes — kills the native macOS webview
        rubber-band / elastic overscroll at the window level. Inner

@@ -75,7 +75,7 @@
   --accent-foreground: oklch(0.93 0.005 75);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 22%); /* border role; 1.89:1 on background — reported, see A1 */
+  --input: oklch(1 0 0 / 35%); /* border role: 3.12:1 on --background (22% was 1.89:1, 12% was 1.32:1) */
   --ring: oklch(0.65 0.01 60); /* 6.14:1 on background (was 0.55 → 2.55:1 at /50) */
   --accent-blue: oklch(0.65 0.15 250);
   --success: oklch(0.70 0.16 150);
