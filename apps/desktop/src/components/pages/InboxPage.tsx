@@ -256,11 +256,11 @@ export function InboxPage() {
           disabled={submitting}
           className="flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
         />
+        {/* LabelChipPill recipe (inbox P2-8): the user's route color is a dot,
+            the text stays on a theme token so contrast never depends on data. */}
         {parsedRoute.route && parsedRoute.content && (
-          <span
-            className="flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-label text-white"
-            style={{ backgroundColor: parsedRoute.route.color }}
-          >
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-secondary px-2 py-0.5 text-label text-muted-foreground">
+            <span className="size-1.5 rounded-full" style={{ backgroundColor: parsedRoute.route.color }} />
             <RouteIcon name={parsedRoute.route.icon} className="size-3" />
             {parsedRoute.route.label}
           </span>

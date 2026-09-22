@@ -283,7 +283,7 @@ export function NavSidebar() {
           <Tooltip>
             <TooltipTrigger
               className={cn(
-                'flex items-center gap-1.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 transition-colors hover:bg-amber-500/25',
+                'flex items-center gap-1.5 rounded-full bg-warning/15 text-warning transition-colors hover:bg-warning/25',
                 expanded ? 'px-2.5 py-1 text-label' : 'size-6 justify-center',
               )}
               onClick={() => setCurrentPage('settings')}
