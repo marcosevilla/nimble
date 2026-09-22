@@ -2,20 +2,24 @@
 
 Canonical reference for the Nimble type system. For design rationale, research, and migration history, see `docs/superpowers/specs/2026-04-18-typography-system-design.md`.
 
-## The 10 tokens
+**CSS is the source of truth.** The scale is the `@theme` block in `apps/desktop/src/index.css` (size + line-height) plus the `.text-<name>` rules in its `@layer components` (family, weight, tracking). `lib/typography-tokens.ts` mirrors those values for the TypographyTuner and `components/shared/typography.tsx` wraps them as React primitives. When this table and `index.css` disagree, `index.css` wins and this file is wrong — fix the doc. (Reconciled 2026-09-22, facelift A4: an earlier version of this page described a 10-token scale with `caption`, `heading-sm`, `heading` and `display-xl`; those never shipped. `grep -rE "text-heading|text-caption|display-xl" apps/desktop/src | wc -l` → `0`.)
 
-| Token | Size | Weight | Line-height | Tracking | Family | Primary use |
-|---|---|---|---|---|---|---|
-| `text-caption` | 10px | 500 | 1.2 | 0 | sans | Micro-badges, overflow counts, tiny pills |
-| `text-label` | 11px | 500 | 1.15 | 0 | sans | Section labels, chips, sidebar groups |
-| `text-meta` | 12px | 400 | 1.35 | 0 | sans | Timestamps, due dates, secondary text |
-| `text-body` | 14px | 400 | 1.43 | -0.006em | sans | Primary body, task titles, list rows |
-| `text-body-strong` | 14px | 500 | 1.43 | -0.006em | sans | Emphasis — form labels, panel titles, selected rows |
-| `text-heading-sm` | 15px | 550 | 1.3 | -0.015em | heading | Page titles, dialogs, editor H3 |
-| `text-heading` | 16px | 550 | 1.25 | -0.018em | heading | Greeting, section emphasis, editor H2 |
-| `text-display` | 20px | 550 | 1.15 | -0.022em | heading | Editor H1, moderate celebrations |
-| `text-display-xl` | 26px | 550 | 1.05 | -0.028em | heading | Focus celebrations |
-| `text-timer` | 48px | 500 | 1.0 | -0.02em | mono | FocusView timer |
+## The 8 tokens
+
+Five sizes (11 / 12 / 13 / 15 / 20) plus the 48px timer, weights 400 / 500 / 600. `body` (13) and `meta` (12) are told apart by colour (foreground vs muted-foreground), never by size alone. Tailwind v4 generates `text-<name>` from the `--text-<name>` pairs; the `.text-<name>` component rule adds the rest behind `--typo-<name>-*` variables so the tuner can override at runtime.
+
+| Token | Size | Line-height | Weight | Tracking | Family | Primary use | Usages |
+|---|---|---|---|---|---|---|---|
+| `text-label` | 11px (`0.6875rem`) | 1.3 | 500 | 0 | sans | Badges, kbd hints, section labels, counts | 112 |
+| `text-meta` | 12px (`0.75rem`) | 1.4 | 400 | 0 | sans | Timestamps, due dates, secondary text | 151 |
+| `text-meta-strong` | 12px (`0.75rem`) | 1.4 | 500 | 0 | sans | Emphasised meta (day pill, active segment) | 10 |
+| `text-body` | 13px (`0.8125rem`) | 1.45 | 400 | -0.005em | sans | Primary body, rows, task titles | 209 |
+| `text-body-strong` | 13px (`0.8125rem`) | 1.45 | 500 | -0.005em | sans | Emphasis (replaces `font-medium` stacks); editor H3 | 51 |
+| `text-title` | 15px (`0.9375rem`) | 1.3 | 600 | -0.01em | heading | Page titles, dialog titles, greeting; editor H2 | 28 |
+| `text-display` | 20px (`1.25rem`) | 1.2 | 600 | -0.015em | heading | Editor H1, celebration moments | 12 |
+| `text-timer` | 48px (`3rem`) | 1 | 500 | -0.02em | mono, tabular | FocusView timer | 6 |
+
+Usage counts are `grep -rhoE "\btext-<name>\b" apps/desktop/src | wc -l` on 2026-09-22 (includes the CSS and primitive definitions themselves).
 
 ## Family defaults
 
@@ -43,19 +47,25 @@ If you need emphasis, use `text-body-strong` instead of `text-body font-medium`.
 
 ## React primitives (`components/shared/typography.tsx`)
 
-- `<Caption>` — `text-caption` + tone (muted / default / faint)
-- `<Label>` — `text-label` + tone (muted / default)
-- `<Meta>` — `text-meta` + tone (muted / default / faint)
-- `<BodyStrong>` — `text-body-strong` + tone (muted / default)
-- `<FieldLabel>` — `<label>` element with `text-body`
-- `<SectionTitle>` — `<h3>` with `text-heading-sm`
-- `<PageTitle>` — `<h1>` with `text-heading-sm` + `truncate`
+Each primitive renders exactly one token class plus an optional `tone`; none stack `font-*`, `tracking-*` or `uppercase` on top, so the tuner's overrides still win.
+
+| Primitive | Renders | Element | Tones |
+|---|---|---|---|
+| `<Label>` | `text-label` (+ `inline-flex items-center gap-1.5`) | `span` (`as`: div / p / h2 / h3 / h4) | muted (default), default |
+| `<Meta>` | `text-meta` | `span` (`as`: div / p / time) | muted (default), default, faint\* |
+| `<Caption>` | `text-label` — there is no separate caption size | `span` (`as`: div / p) | muted (default), default, faint\* |
+| `<BodyStrong>` | `text-body-strong` | `span` (`as`: div / p / h2 / h3 / h4) | default, muted |
+| `<FieldLabel>` | `text-body text-foreground` | `label` | — |
+| `<SectionTitle>` | `text-title text-foreground` | `h3` (`as`: h2 / h4) | — |
+| `<PageTitle>` | `text-title truncate` | `h1` | — |
+
+\* `faint` currently resolves to the same `text-muted-foreground` as `muted`. The `--muted-foreground-subtle` token added in facelift A1 is the intended home for that role; wiring `faint` to it is Stage B work.
 
 Use these when you're rendering a semantic element; use the raw class when composing with other layout.
 
 ## Tiptap editor
 
-`.tiptap-editor h1/h2/h3` in `index.css` reference `--typo-display-*`, `--typo-heading-*`, `--typo-heading-sm-*` — all three tokens exist and the fallback defaults are kept in sync with the component-layer defaults. Editor headings move in lockstep with the design system.
+`.tiptap-editor h1 / h2 / h3` in `index.css` map onto **display / title / body-strong** — size and line-height from the `--text-*` pair, family / weight / tracking from the same `--typo-*` variables as the token classes — so editor headings move in lockstep with the tuner. (There are no `--typo-heading-*` variables.)
 
 ## TypographyTuner
 
@@ -74,7 +84,7 @@ Toggle the tuner panel in DEV builds with `⌘⇧Y` — it shows live sliders pe
 
 ## Out-of-scope carve-outs
 
-- **shadcn UI primitives** (`components/ui/*.tsx`) — may use raw `text-sm` / `text-xs`. A future pass can retokenize; this round intentionally left them for stability.
+- **shadcn UI primitives** (`components/ui/*.tsx`) — a few still carry raw `text-[0.8rem]` / `text-base` (shell audit P2-9); retokenising them is queued for the facelift, not a rule change.
 - **Mobile app** (`apps/mobile`) — different stack (React Native StyleSheet). Mirror when mobile type gets its own pass.
 
 ## Forbidden patterns (grep check list)
@@ -88,8 +98,8 @@ grep -rn "text-\[.*px\]" apps/desktop/src --exclude-dir=components/ui
 # Raw Tailwind text sizes
 grep -rnE "text-(xs|sm|base|lg|xl|2xl|3xl|4xl|5xl)(\b|[^a-zA-Z-])" apps/desktop/src --exclude-dir=components/ui
 
-# Removed tokens
-grep -rn "text-heading-xs" apps/desktop/src
+# Tokens that never shipped (the old 10-token doc listed them)
+grep -rnE "text-heading|text-caption|display-xl" apps/desktop/src
 
 # Emphasis shortcuts
 grep -rn "text-body font-medium" apps/desktop/src
