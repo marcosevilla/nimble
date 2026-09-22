@@ -1456,17 +1456,7 @@ pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
             let remote_device_id = match get_text(6) { Some(v) => v, None => continue };
 
             // LWW check: skip if local has a newer sync_log entry for the same (table_name, row_id)
-            let local_newer: Option<(String,)> = sqlx::query_as(
-                "SELECT timestamp FROM sync_log WHERE table_name = ? AND row_id = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT 1"
-            )
-            .bind(&table_name)
-            .bind(&row_id)
-            .bind(&timestamp)
-            .fetch_optional(pool)
-            .await
-            .unwrap_or(None);
-
-            if local_newer.is_some() {
+            if has_newer_local_change(pool, &table_name, &row_id, &timestamp).await.unwrap_or(false) {
                 log::info!("Skipping remote change {} — local has newer entry for {}/{}", entry_id, table_name, row_id);
                 // Still record the entry so we don't pull it again
                 let _ = sqlx::query(
@@ -2678,4 +2668,94 @@ mod v19_sync_tests {
         ).bind(&tl_row_id).fetch_one(&pool).await.unwrap();
         assert_eq!(tl_count, 1);
     }
+}
+
+#[cfg(test)]
+mod backup_prune_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn prune_keeps_lww_tombstones_ties_pending_and_unbacked_rows() {
+        let pool = crate::test_util::test_pool().await;
+        let rows = [
+            ("old", "task", "UPDATE", "2026-01-01T00:00:00Z", Some(1)),
+            ("max", "task", "DELETE", "2026-02-01T00:00:00Z", Some(1)),
+            ("tie", "task", "UPDATE", "2026-02-01T00:00:00Z", Some(1)),
+            ("pending", "task", "UPDATE", "2026-01-01T00:00:00Z", Some(0)),
+            ("unknown", "task", "UPDATE", "2026-01-01T00:00:00Z", None),
+            ("unbacked", "task", "UPDATE", "2026-01-01T00:00:00Z", Some(1)),
+            ("bad", "task", "UPDATE", "not-a-time", Some(1)),
+            ("only", "other", "DELETE", "2026-01-01T00:00:00Z", Some(1)),
+        ];
+        for (id, row, operation, at, synced) in rows {
+            sqlx::query("INSERT INTO sync_log(id,table_name,row_id,operation,device_id,timestamp,synced) VALUES (?, 'local_tasks', ?, ?, 'test', ?, ?)")
+                .bind(id).bind(row).bind(operation).bind(at).bind(synced).execute(&pool).await.unwrap();
+        }
+        let ids = ["old", "max", "tie", "pending", "unknown", "bad", "only"].into_iter().map(String::from).collect();
+        let now = chrono::DateTime::parse_from_rfc3339("2026-09-21T00:00:00Z").unwrap().with_timezone(&Utc);
+        assert_eq!(prune_log_ids(&pool, &ids, now).await.unwrap(), 1);
+        let left: Vec<String> = sqlx::query_scalar("SELECT id FROM sync_log ORDER BY id").fetch_all(&pool).await.unwrap();
+        assert_eq!(left, ["bad", "max", "only", "pending", "tie", "unbacked", "unknown"]);
+        assert!(has_newer_local_change(&pool, "local_tasks", "task", "2026-01-15T00:00:00Z").await.unwrap());
+        assert!(has_newer_local_change(&pool, "local_tasks", "other", "2025-12-31T00:00:00Z").await.unwrap());
+    }
+}
+
+
+// This is the existing LWW predicate, shared with pruning regression tests.
+async fn has_newer_local_change(pool: &SqlitePool, table: &str, row: &str, timestamp: &str) -> crate::Result<bool> {
+    let value: Option<String> = sqlx::query_scalar(
+        "SELECT timestamp FROM sync_log WHERE table_name = ? AND row_id = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT 1"
+    ).bind(table).bind(row).bind(timestamp).fetch_optional(pool).await?;
+    Ok(value.is_some())
+}
+
+fn parse_log_time(value: &str) -> Option<chrono::DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value).map(|v| v.with_timezone(&Utc)).ok()
+        .or_else(|| chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f").ok().map(|v| v.and_utc()))
+}
+
+async fn prune_log_ids(pool: &SqlitePool, backed_up: &std::collections::HashSet<String>, now: chrono::DateTime<Utc>) -> crate::Result<u64> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let rows: Vec<(String,String,String,String,Option<i64>)> = sqlx::query_as(
+        "SELECT id,table_name,row_id,timestamp,synced FROM sync_log"
+    ).fetch_all(&mut *tx).await?;
+    let mut newest = std::collections::HashMap::<(&str,&str), &str>::new();
+    // Invalid timestamps are retained, but never used to justify removing valid history.
+    for (_, table, row, stamp, _) in &rows {
+        if parse_log_time(stamp).is_some() {
+            newest.entry((table.as_str(),row.as_str())).and_modify(|v| { if stamp.as_str() > *v { *v = stamp; } }).or_insert(stamp);
+        }
+    }
+    let cutoff = now - chrono::Duration::days(30);
+    let mut removed = 0;
+    for (id, table, row, stamp, synced) in &rows {
+        if *synced != Some(1) || !backed_up.contains(id) { continue; }
+        let Some(time) = parse_log_time(stamp) else { continue; };
+        if time >= cutoff { continue; }
+        let Some(max) = newest.get(&(table.as_str(),row.as_str())) else { continue; };
+        if stamp.as_str() >= *max { continue; }
+        removed += sqlx::query("DELETE FROM sync_log WHERE id = ? AND synced = 1 AND EXISTS (SELECT 1 FROM sync_log AS newer WHERE newer.table_name = sync_log.table_name AND newer.row_id = sync_log.row_id AND newer.timestamp = ? AND newer.timestamp > sync_log.timestamp)")
+            .bind(id).bind(max).execute(&mut *tx).await?.rows_affected();
+    }
+    tx.commit().await?;
+    Ok(removed)
+}
+
+/// Remove only redundant local history whose IDs are in this verified snapshot.
+/// Caller holds the root's backup job lock. This never prunes remote history.
+pub async fn prune_backed_up_log(
+    pool: &SqlitePool,
+    generation: &crate::db::backup::VerifiedGeneration,
+    now: chrono::DateTime<Utc>,
+) -> crate::Result<u64> {
+    let checked = crate::db::backup::verify_generation(generation.directory()).await?;
+    let snapshot = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new().filename(checked.directory().join("snapshot.db"))
+            .read_only(true).create_if_missing(false)
+    ).await?;
+    let result = sqlx::query_scalar::<_, String>("SELECT id FROM sync_log").fetch_all(&snapshot).await;
+    snapshot.close().await;
+    let ids = result?.into_iter().collect();
+    prune_log_ids(pool, &ids, now).await
 }
