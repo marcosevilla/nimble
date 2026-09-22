@@ -59,11 +59,39 @@ test('Inbox section lists capture and row keys', () => {
   }
 })
 
-test('Inbox is appended as the last section, existing order untouched', () => {
-  assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox'])
+test('Inbox is appended after General (then B3b sections), existing order untouched', () => {
+  assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox', 'Docs', 'Goals', 'Session'])
 })
 
 test('Space is not a Tasks row key — it stays Focus pause/resume (review I2)', () => {
   assert.ok(!keysIn('Tasks').some((k) => k.includes('Space')))
   assert.ok(keysIn('Focus').includes('Space'))
+})
+
+// ── Stage B3b: Docs / Goals / Session sections ──
+
+test('registry lists the Docs, Goals and Session sections after the Stage A ones', () => {
+  const order = [...new Set(SHORTCUTS.map((s) => s.section))]
+  const idx = (name) => order.indexOf(name)
+  assert.ok(idx('Docs') > idx('General'), 'Docs appended after General')
+  assert.ok(idx('Goals') > idx('Docs'), 'Goals after Docs')
+  assert.ok(idx('Session') > idx('Goals'), 'Session after Goals')
+})
+
+test('Docs section carries the tree keys, N and /', () => {
+  const keys = SHORTCUTS.filter((s) => s.section === 'Docs').map((s) => s.keys)
+  for (const k of ['↑ / ↓', '← / →', 'Enter', 'N', '/']) assert.ok(keys.includes(k), `missing Docs ${k}`)
+})
+
+test('Goals section carries the habit toggle and timeline today', () => {
+  const keys = SHORTCUTS.filter((s) => s.section === 'Goals').map((s) => s.keys)
+  for (const k of ['Enter / Space', 'T']) assert.ok(keys.includes(k), `missing Goals ${k}`)
+})
+
+test('Session section carries complete, minimize, stop and the celebration keys', () => {
+  const keys = SHORTCUTS.filter((s) => s.section === 'Session').map((s) => s.keys)
+  for (const k of ['Enter', 'Escape', 's']) assert.ok(keys.includes(k), `missing Session ${k}`)
+  const labels = SHORTCUTS.filter((s) => s.section === 'Session').map((s) => s.label.toLowerCase())
+  assert.ok(labels.some((l) => l.includes('next')), 'celebration Enter → next')
+  assert.ok(labels.some((l) => l.includes('end')), 'celebration Escape → end')
 })
