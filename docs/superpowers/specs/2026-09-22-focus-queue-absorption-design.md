@@ -2,7 +2,7 @@
 
 Date: 2026-09-22
 
-Status: architecture approved in voice; written specification awaiting Marco's review.
+Status: written specification approved by Marco on 2026-09-22, including §2 defaults and §4 UI mapping. Implementation authorized after the plan is complete.
 
 Scope: design only. No implementation, installation, live import, external mutation, routing change or retirement is authorized by this document.
 
