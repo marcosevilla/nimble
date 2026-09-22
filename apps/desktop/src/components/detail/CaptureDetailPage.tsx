@@ -1,3 +1,4 @@
+import { subscribeDataChanges } from '@/lib/dataChanges'
 import { useState, useCallback, useEffect } from 'react'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataProvider } from '@/services/provider-context'
@@ -38,6 +39,8 @@ export function CaptureDetailPage() {
     setLoading(true)
     refresh()
   }, [refresh])
+
+  useEffect(() => subscribeDataChanges('captures', () => { void refresh() }), [refresh])
 
   const handleConvert = useCallback(async () => {
     if (!capture) return

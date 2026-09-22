@@ -2,7 +2,7 @@
 use super::{
     backup, backup_storage as fs,
     export::{compare_snapshot_tables, export_portable},
-    export_policy::TABLES,
+    export_policy::tables_for_version,
 };
 use serde_json::Value;
 use sqlx::{
@@ -151,9 +151,12 @@ pub async fn restore_export(source: &Path, dest: &Path) -> crate::Result<Recover
     fs::checked_path(source)?;
     let data = fs::read(&source.join("data.json"))?;
     let format = fs::read(&source.join("format.json"))?;
+    let format_value: Value = serde_json::from_slice(&format).map_err(|_| invalid("format"))?;
+    let version = format_value["schema_version"].as_i64().ok_or_else(|| invalid("format_version"))?;
+    let tables_policy = tables_for_version(version).ok_or_else(|| invalid("format_version"))?;
     let parsed: Value = serde_json::from_slice(&data).map_err(|_| invalid("json"))?;
     let tables = parsed.as_object().ok_or_else(|| invalid("tables"))?;
-    let expected: BTreeSet<&str> = TABLES
+    let expected: BTreeSet<&str> = tables_policy
         .iter()
         .filter(|p| !p.included.is_empty())
         .map(|p| p.name)
@@ -166,15 +169,15 @@ pub async fn restore_export(source: &Path, dest: &Path) -> crate::Result<Recover
     fs::write_new(&path, &[])?;
     let pool = open(&path, false).await?;
     let result = async {
-        super::migrations::run_migrations(&pool).await?;
+        super::migrations::run_migrations_to_version(&pool, version).await?;
         if export_portable(&pool).await?.format != format { return Err(invalid("format")); }
         let mut tx = pool.begin().await?;
         sqlx::query("PRAGMA defer_foreign_keys=ON").execute(&mut *tx).await?;
         // No observers or CRUD functions: this connection belongs only to the isolated importer.
-        for policy in TABLES.iter().rev().filter(|p| p.name != "schema_version") {
+        for policy in tables_policy.iter().rev().filter(|p| p.name != "schema_version") {
             sqlx::query(&format!("DELETE FROM \"{}\"", policy.name)).execute(&mut *tx).await?;
         }
-        for policy in TABLES.iter().filter(|p| !p.included.is_empty()) {
+        for policy in tables_policy.iter().filter(|p| !p.included.is_empty()) {
             let rows = tables[policy.name].as_array().ok_or_else(|| invalid("rows"))?;
             let schema = sqlx::query(&format!("PRAGMA table_info(\"{}\")", policy.name)).fetch_all(&mut *tx).await?;
             let keys: BTreeSet<&str> = policy.included.iter().copied().collect();

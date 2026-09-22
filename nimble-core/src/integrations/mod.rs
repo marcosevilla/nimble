@@ -1,3 +1,4 @@
+pub mod google_calendar;
 use sqlx::SqlitePool;
 
 pub mod todoist;

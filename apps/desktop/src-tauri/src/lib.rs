@@ -1,3 +1,8 @@
+mod agent_server;
+mod reminder_runner;
+mod google_oauth;
+mod google_credentials;
+mod google_calendar_runner;
 mod backup_runner;
 mod backup_git;
 mod backup_state;
@@ -16,7 +21,7 @@ use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    Emitter, Manager, WindowEvent,
+    Emitter, Listener, Manager, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -177,6 +182,7 @@ pub fn run() {
                 })
                 .build(),
         )
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let test_root = crate::backup_runner::test_root()?;
             let isolated_test = test_root.is_some();
@@ -295,10 +301,13 @@ pub fn run() {
                     .await
                     .expect("failed to connect to database");
 
+                let schema_lock = nimble_core::agent_protocol::SchemaLock::acquire(&db_path, true)
+                    .expect("another process is using the database during upgrade");
                 // Run migrations from core crate
                 nimble_core::db::migrations::run_migrations(&pool)
                     .await
                     .expect("failed to run migrations");
+                drop(schema_lock);
 
                 if demo_mode {
                     log::info!("DEMO MODE — database initialized at {:?}", db_path);
@@ -307,8 +316,38 @@ pub fn run() {
                 }
 
                 // Store pool in app state
-                app_handle.manage(crate::backup_runner::BackupRuntime::new(app_dir, db_path, demo_mode, isolated_test));
+                app_handle.manage(crate::backup_runner::BackupRuntime::new(app_dir.clone(), db_path.clone(), demo_mode, isolated_test));
                 app_handle.manage(pool);
+                if !demo_mode {
+                    match nimble_core::agent_protocol::AgentProfile::from_database(&db_path, isolated_test)
+                        .map_err(|_| "agent_profile_failed".to_string())
+                        .and_then(|profile| crate::agent_server::start(&app_handle, profile)) {
+                        Ok(guard) => { app_handle.manage(guard); }
+                        Err(_) => log::warn!("Local assistant access could not start"),
+                    }
+                }
+            });
+
+            // Persistent reminders and calendar reconciliation share one startup path.
+            let lifecycle_app = app.handle().clone();
+            let lifecycle_handle = lifecycle_app.clone();
+            lifecycle_app.listen("nimble-data-changed", move |_| {
+                let handle = lifecycle_handle.clone();
+                tauri::async_runtime::spawn(async move { let _ = crate::reminder_runner::tick(&handle).await; });
+            });
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut timer = tokio::time::interval(std::time::Duration::from_secs(60));
+                timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    timer.tick().await;
+                    let _ = crate::reminder_runner::tick(&handle).await;
+                    if let Ok(result) = crate::google_calendar_runner::tick(&handle).await {
+                        if !result.changed_task_ids.is_empty() {
+                            let _ = handle.emit("nimble-data-changed", serde_json::json!({"version":1,"domains":["tasks"],"ids":result.changed_task_ids}));
+                        }
+                    }
+                }
             });
 
             // --- Obsidian vault: launch scan, then debounced watch ---
@@ -387,6 +426,8 @@ pub fn run() {
                 // coming back to the Mac, rather than on the next 5-minute tick.
                 WindowEvent::Focused(true) => {
                     let app = window.app_handle().clone();
+                    let reminder_app = app.clone();
+                    tauri::async_runtime::spawn(async move { let _ = crate::reminder_runner::tick(&reminder_app).await; });
                     if app.try_state::<crate::backup_runner::BackupRuntime>().is_some_and(|r|r.is_test_profile()) { return; }
                     tauri::async_runtime::spawn(async move {
                         crate::sync_runner::run_if_due_and_emit(&app, 60).await;
@@ -397,6 +438,16 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::reminders::reminder_get_status,
+            commands::reminders::reminder_request_permission,
+            commands::reminders::reminder_list_catch_up,
+            commands::reminders::reminder_acknowledge,
+            commands::google_calendar::google_calendar_connect,
+            commands::google_calendar::google_calendar_disconnect,
+            commands::google_calendar::google_calendar_status,
+            commands::google_calendar::google_calendar_sync_now,
+            commands::google_calendar::google_calendar_list_conflicts,
+            commands::google_calendar::google_calendar_resolve_conflict,
             commands::backup::backup_get_status,
             commands::backup::backup_run_now,
             commands::backup::backup_verify_latest,

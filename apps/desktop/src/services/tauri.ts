@@ -296,6 +296,8 @@ export async function createLocalTask(opts: {
   priority?: number
   dueDate?: string
   dueTime?: string
+  reminderOffsetMinutes?: number
+  googleCalendarEnabled?: boolean
   durationMinutes?: number
   recurrenceRule?: string
   sectionId?: string
@@ -309,6 +311,8 @@ export async function createLocalTask(opts: {
     priority: opts.priority,
     dueDate: opts.dueDate,
     dueTime: opts.dueTime,
+    reminderOffsetMinutes: opts.reminderOffsetMinutes,
+    googleCalendarEnabled: opts.googleCalendarEnabled,
     durationMinutes: opts.durationMinutes,
     recurrenceRule: opts.recurrenceRule,
     sectionId: opts.sectionId,
@@ -326,11 +330,14 @@ export async function updateLocalTask(opts: {
   clearDueDate?: boolean
   linkedDocId?: string | null
   dueTime?: string
+  reminderOffsetMinutes?: number
+  googleCalendarEnabled?: boolean
   durationMinutes?: number
   recurrenceRule?: string
   sectionId?: string
   labelIds?: string[]
   clearDueTime?: boolean
+  clearReminder?: boolean
   clearRecurrence?: boolean
   clearSection?: boolean
   clearDuration?: boolean
@@ -910,3 +917,14 @@ export const backupVerifyLatest = () => invoke<{ verified: boolean }>('backup_ve
 export const backupOpenFolder = () => invoke<void>('backup_open_folder')
 export const backupConfigureRemote = (ownerRepo: string) =>
   invoke<BackupStatus>('backup_configure_remote', { ownerRepo })
+
+export const reminderGetStatus = () => invoke<import('@nimble/types').ReminderStatus>('reminder_get_status')
+export const reminderRequestPermission = () => invoke<import('@nimble/types').ReminderStatus>('reminder_request_permission')
+export const reminderListCatchUp = () => invoke<import('@nimble/types').ReminderCatchUpItem[]>('reminder_list_catch_up')
+export const reminderAcknowledge = (occurrenceKey: string) => invoke<void>('reminder_acknowledge', { occurrenceKey })
+export const googleCalendarStatus = () => invoke<import('@nimble/types').GoogleConnectionStatus>('google_calendar_status')
+export const googleCalendarConnect = () => invoke<import('@nimble/types').GoogleConnectionStatus>('google_calendar_connect')
+export const googleCalendarDisconnect = () => invoke<import('@nimble/types').GoogleConnectionStatus>('google_calendar_disconnect')
+export const googleCalendarSyncNow = () => invoke<{ changedTaskIds: string[]; errorCode: string | null }>('google_calendar_sync_now')
+export const googleCalendarListConflicts = () => invoke<import('@nimble/types').GoogleCalendarConflict[]>('google_calendar_list_conflicts')
+export const googleCalendarResolveConflict = (taskId: string, resolution: 'keep_nimble' | 'use_calendar') => invoke<void>('google_calendar_resolve_conflict', { taskId, resolution })

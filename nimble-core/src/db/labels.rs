@@ -7,7 +7,19 @@ use crate::db::sync;
 use crate::db::tasks::SELECT_COLS;
 use crate::types::{Label, LocalTask};
 
-const LABEL_COLS: &str = "id, name, color, position, created_at";
+const LABEL_COLS: &str = "id, name, color, position, created_at, \"group\"";
+
+/// Set the optional taxonomy group without affecting the existing name/color API.
+pub async fn set_label_group(pool: &SqlitePool, id: &str, group: Option<&str>) -> crate::Result<Label> {
+    sqlx::query("UPDATE labels SET \"group\" = ? WHERE id = ?")
+        .bind(group).bind(id).execute(pool).await?;
+    let label: Label = sqlx::query_as(&format!("SELECT {LABEL_COLS} FROM labels WHERE id = ?"))
+        .bind(id).fetch_one(pool).await?;
+    let changed = serde_json::json!(["group"]).to_string();
+    let snapshot = serde_json::to_string(&label).map_err(|e| crate::Error::Other(e.to_string()))?;
+    sync::append_sync_log(pool, "labels", id, "UPDATE", Some(&changed), Some(&snapshot)).await?;
+    Ok(label)
+}
 
 pub async fn list_labels(pool: &SqlitePool) -> crate::Result<Vec<Label>> {
     let rows: Vec<Label> = sqlx::query_as::<_, Label>(&format!(

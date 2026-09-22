@@ -1,3 +1,4 @@
+import { subscribeDataChanges } from '@/lib/dataChanges'
 import { useEffect, useCallback, useMemo, useState, useRef } from 'react'
 // Window-to-window event bus, not data access — the web build aliases
 // '@tauri-apps/api/event' to a no-op stub (src/platform/), so this stays
@@ -91,6 +92,8 @@ export function InboxPage() {
   }, [dp])
 
   useEffect(() => { refreshCaptures() }, [refreshCaptures])
+
+  useEffect(() => subscribeDataChanges('captures', () => { void refreshCaptures() }), [refreshCaptures])
 
   // Listen for task changes to also refresh captures
   useEffect(() => {

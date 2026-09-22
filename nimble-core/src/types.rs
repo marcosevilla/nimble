@@ -46,6 +46,10 @@ pub struct LocalTask {
     pub recurrence_rule: Option<String>, // human string, e.g. "every 2 weeks @ 09:00"
     pub section_id: Option<String>,
     #[serde(default)]
+    pub reminder_offset_minutes: Option<i64>,
+    #[serde(default)]
+    pub google_calendar_enabled: bool,
+    #[serde(default)]
     pub labels: Vec<String>,             // label ids; loaded separately, not a table column
     pub completed: bool,
     pub completed_at: Option<String>,
@@ -75,6 +79,8 @@ pub struct CreateTaskInput {
     pub recurrence_rule: Option<String>,
     pub section_id: Option<String>,
     pub label_ids: Option<Vec<String>>,
+    pub reminder_offset_minutes: Option<i64>,
+    pub google_calendar_enabled: Option<bool>,
 }
 
 /// Input for `db::tasks::update_local_task`. Struct form lets later tasks add
@@ -97,6 +103,9 @@ pub struct UpdateTaskInput {
     pub clear_recurrence: bool,
     pub clear_section: bool,
     pub clear_duration: bool,
+    pub reminder_offset_minutes: Option<i64>,
+    pub google_calendar_enabled: Option<bool>,
+    pub clear_reminder: bool,
 }
 
 // ── Labels ──
@@ -107,6 +116,8 @@ pub struct Label {
     pub name: String,
     pub color: String,
     pub position: i64,
+    #[serde(default)]
+    pub group: Option<String>,
     pub created_at: String,
 }
 

@@ -1,3 +1,4 @@
+import { useDataVersion } from '@/hooks/useDataVersion'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { useDataProvider } from '@/services/provider-context'
@@ -72,6 +73,8 @@ function chipValuesEqual(a: ChipValues, b: ChipValues): boolean {
  * to support were removed by explicit design decision.
  */
 export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerCardProps) {
+  const referenceVersion = useDataVersion('labels')
+  const sectionVersion = useDataVersion('sections')
   const dp = useDataProvider()
   const { projects } = useProjects()
 
@@ -92,7 +95,7 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
 
   useEffect(() => {
     dp.labels.list().then(setLabels).catch(() => setLabels([]))
-  }, [dp])
+  }, [dp, referenceVersion])
 
   // Sections are scoped to whichever project is currently selected in the
   // chip row, not just the mount point's default — reload on every change.
@@ -102,7 +105,7 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
       return
     }
     dp.sections.list(chipValues.projectId).then(setSections).catch(() => setSections([]))
-  }, [dp, chipValues.projectId])
+  }, [dp, chipValues.projectId, sectionVersion])
 
   const dirty =
     title.trim() !== '' || description.trim() !== '' || !chipValuesEqual(chipValues, initialChipValues)

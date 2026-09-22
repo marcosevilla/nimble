@@ -1,3 +1,4 @@
+import { useDataVersion } from '@/hooks/useDataVersion'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
@@ -123,6 +124,7 @@ function AllTasksView({
 // ── Tasks Page ──
 
 export function TasksPage() {
+  const referenceVersion = useDataVersion('labels')
   const dp = useDataProvider()
   const { projects, loading: projectsLoading, addProject, renameProject, updateProjectColor, removeProject } = useProjects()
   const { tasks, loading: tasksLoading, addTask, remove, refresh } = useLocalTasks()
@@ -156,7 +158,7 @@ export function TasksPage() {
 
   useEffect(() => {
     dp.labels.list().then(setLabels).catch(() => {})
-  }, [dp])
+  }, [dp, referenceVersion])
 
   // Only surface labels that are actually applied to something — an empty
   // label taxonomy in the filter menu is just noise.

@@ -1,0 +1,382 @@
+{
+  "activity_log": [
+    {
+      "id": "activity-a",
+      "action_type": "created",
+      "target_id": null,
+      "metadata": null,
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "capture_routes": [
+    {
+      "id": "route-a",
+      "prefix": "!",
+      "target_type": "task",
+      "doc_id": null,
+      "label": "Task",
+      "color": "#f59e0b",
+      "icon": "FileText",
+      "position": 0,
+      "created_at": "2026-09-21 20:23:04"
+    },
+    {
+      "id": "route-ideas",
+      "prefix": "/i",
+      "target_type": "doc",
+      "doc_id": null,
+      "label": "Ideas",
+      "color": "#f59e0b",
+      "icon": "Lightbulb",
+      "position": 0,
+      "created_at": "2026-09-21 20:23:04"
+    },
+    {
+      "id": "route-quotes",
+      "prefix": "/q",
+      "target_type": "doc",
+      "doc_id": null,
+      "label": "Quotes",
+      "color": "#3b82f6",
+      "icon": "Quote",
+      "position": 1,
+      "created_at": "2026-09-21 20:23:04"
+    },
+    {
+      "id": "route-task",
+      "prefix": "/t",
+      "target_type": "task",
+      "doc_id": null,
+      "label": "Task",
+      "color": "#22c55e",
+      "icon": "CheckSquare",
+      "position": 2,
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "captures": [
+    {
+      "id": "capture-a",
+      "content": "Idea",
+      "source": "manual",
+      "converted_to_task_id": null,
+      "created_at": "2026-09-21 20:23:04",
+      "routed_to": null,
+      "context": null
+    }
+  ],
+  "daily_state": [
+    {
+      "date": "2026-09-21",
+      "energy_level": "3",
+      "top_priorities": null,
+      "first_opened_at": null,
+      "last_saved_at": null,
+      "focus_task_id": null,
+      "focus_started_at": null,
+      "focus_paused_at": null
+    }
+  ],
+  "doc_folders": [
+    {
+      "id": "ideas",
+      "name": "Ideas",
+      "position": 0,
+      "created_at": "2026-09-21 20:23:04"
+    },
+    {
+      "id": "personal",
+      "name": "Personal",
+      "position": 2,
+      "created_at": "2026-09-21 20:23:04"
+    },
+    {
+      "id": "work",
+      "name": "Work",
+      "position": 1,
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "doc_notes": [],
+  "documents": [
+    {
+      "id": "doc-a",
+      "title": "Document",
+      "content": "Body",
+      "folder_id": null,
+      "position": 0,
+      "created_at": "2026-09-21 20:23:04",
+      "updated_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "goals": [
+    {
+      "id": "goal-a",
+      "name": "Make work",
+      "description": null,
+      "status": "active",
+      "life_area_id": "area-a",
+      "start_date": null,
+      "target_date": null,
+      "color": null,
+      "position": 0,
+      "created_at": "2026-09-21 20:23:04",
+      "updated_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "habit_logs": [
+    {
+      "id": "log-a",
+      "habit_id": "habit-a",
+      "date": "2026-09-21",
+      "intensity": 5,
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "habits": [
+    {
+      "id": "habit-a",
+      "name": "Walk",
+      "category": null,
+      "icon": "Circle",
+      "color": "#f59e0b",
+      "active": 1,
+      "position": 0,
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "labels": [
+    {
+      "id": "label-a",
+      "name": "Focus",
+      "color": "gray",
+      "position": 0,
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "life_areas": [
+    {
+      "id": "area-a",
+      "name": "Creative",
+      "color": "#abc123",
+      "icon": "Target",
+      "position": 0,
+      "created_at": "2026-09-21 20:23:04"
+    },
+    {
+      "id": "area-career",
+      "name": "Career",
+      "color": "#3b82f6",
+      "icon": "Briefcase",
+      "position": 0,
+      "created_at": "2026-09-21 20:23:04"
+    },
+    {
+      "id": "area-creative",
+      "name": "Creative",
+      "color": "#f59e0b",
+      "icon": "Palette",
+      "position": 2,
+      "created_at": "2026-09-21 20:23:04"
+    },
+    {
+      "id": "area-financial",
+      "name": "Financial",
+      "color": "#8b5cf6",
+      "icon": "DollarSign",
+      "position": 3,
+      "created_at": "2026-09-21 20:23:04"
+    },
+    {
+      "id": "area-health",
+      "name": "Health",
+      "color": "#22c55e",
+      "icon": "Heart",
+      "position": 1,
+      "created_at": "2026-09-21 20:23:04"
+    },
+    {
+      "id": "area-learning",
+      "name": "Learning",
+      "color": "#06b6d4",
+      "icon": "GraduationCap",
+      "position": 5,
+      "created_at": "2026-09-21 20:23:04"
+    },
+    {
+      "id": "area-personal",
+      "name": "Personal",
+      "color": "#ec4899",
+      "icon": "User",
+      "position": 4,
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "local_tasks": [
+    {
+      "id": "done-a",
+      "parent_id": null,
+      "content": "Done",
+      "description": null,
+      "project_id": "inbox",
+      "priority": 1,
+      "due_date": null,
+      "completed": 1,
+      "completed_at": null,
+      "position": 0,
+      "created_at": "2026-09-22 03:23:04",
+      "updated_at": "2026-09-22 03:23:04",
+      "status": "complete",
+      "linked_doc_id": null,
+      "external_id": null,
+      "external_source": null,
+      "due_time": null,
+      "duration_minutes": null,
+      "recurrence_rule": null,
+      "section_id": null
+    },
+    {
+      "id": "sub-a",
+      "parent_id": "task-a",
+      "content": "Subtask ∞",
+      "description": "Non-ASCII café",
+      "project_id": "nested",
+      "priority": 1,
+      "due_date": null,
+      "completed": 0,
+      "completed_at": null,
+      "position": 0,
+      "created_at": "2026-09-22 03:23:04",
+      "updated_at": "2026-09-22 03:23:04",
+      "status": "blocked",
+      "linked_doc_id": null,
+      "external_id": null,
+      "external_source": null,
+      "due_time": null,
+      "duration_minutes": null,
+      "recurrence_rule": null,
+      "section_id": null
+    },
+    {
+      "id": "task-a",
+      "parent_id": null,
+      "content": "Recurring task",
+      "description": null,
+      "project_id": "inbox",
+      "priority": 2,
+      "due_date": "2026-09-21",
+      "completed": 0,
+      "completed_at": null,
+      "position": 0,
+      "created_at": "2026-09-21 00:00:00",
+      "updated_at": "2026-09-21 00:00:00",
+      "status": "todo",
+      "linked_doc_id": null,
+      "external_id": null,
+      "external_source": null,
+      "due_time": "09:00",
+      "duration_minutes": 30,
+      "recurrence_rule": "every 2 weeks",
+      "section_id": null
+    }
+  ],
+  "milestones": [
+    {
+      "id": "mile-a",
+      "goal_id": "goal-a",
+      "name": "First",
+      "target_date": null,
+      "completed": 0,
+      "completed_at": null,
+      "position": 0,
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "progress_snapshots": [
+    {
+      "id": 77,
+      "energy_level": "2.5",
+      "tasks_completed": null,
+      "tasks_open": null,
+      "tasks_deferred": null,
+      "priorities": null,
+      "notes": null,
+      "created_at": "2026-09-22 03:23:04"
+    }
+  ],
+  "projects": [
+    {
+      "id": "inbox",
+      "name": "Inbox",
+      "color": "#6366f1",
+      "position": 0,
+      "created_at": "2026-09-22 03:23:04",
+      "goal_id": null,
+      "milestone_id": null,
+      "external_id": null,
+      "external_source": null,
+      "parent_id": null
+    },
+    {
+      "id": "nested",
+      "name": "Nested",
+      "color": "#6366f1",
+      "position": 0,
+      "created_at": "2026-09-22 03:23:04",
+      "goal_id": null,
+      "milestone_id": null,
+      "external_id": null,
+      "external_source": null,
+      "parent_id": "inbox"
+    }
+  ],
+  "sections": [
+    {
+      "id": "section-a",
+      "project_id": "nested",
+      "name": "Today",
+      "position": 0,
+      "external_id": null,
+      "external_source": null,
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "task_labels": [
+    {
+      "task_id": "task-a",
+      "label_id": "label-a",
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "vault_links": [
+    {
+      "id": "link-a",
+      "from_note_id": "note-a",
+      "to_path": "Other.md",
+      "link_type": "wikilink",
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ],
+  "vault_notes": [
+    {
+      "id": "note-a",
+      "path": "Notes/a.md",
+      "title": "A",
+      "content": "Note body",
+      "frontmatter_json": null,
+      "mtime": null,
+      "size": 0,
+      "hash": "testhash",
+      "updated_at": "2026-09-21 20:23:04",
+      "deleted_at": null
+    }
+  ],
+  "vault_tags": [
+    {
+      "id": "tag-a",
+      "note_id": "note-a",
+      "tag": "focus",
+      "created_at": "2026-09-21 20:23:04"
+    }
+  ]
+}

@@ -1,3 +1,5 @@
+pub mod agent_protocol;
+pub mod reminders;
 pub mod api;
 pub mod db;
 pub mod integrations;

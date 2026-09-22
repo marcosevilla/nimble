@@ -500,9 +500,54 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             CREATE INDEX IF NOT EXISTS idx_local_tasks_section ON local_tasks(section_id)
         ",
     },
+    Migration {
+        version: 20,
+        description: "Reminders, calendar intent, and device-local delivery state",
+        sql: "
+            ALTER TABLE local_tasks ADD COLUMN reminder_offset_minutes INTEGER;
+            ALTER TABLE local_tasks ADD COLUMN google_calendar_enabled INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE labels ADD COLUMN \"group\" TEXT;
+            CREATE TABLE reminder_deliveries (
+                occurrence_key TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+                scheduled_at TEXT NOT NULL, state TEXT NOT NULL,
+                last_fired_at TEXT, acknowledged_at TEXT, error_code TEXT
+            );
+            CREATE INDEX reminder_deliveries_task ON reminder_deliveries(task_id);
+            CREATE TABLE google_calendar_state (
+                id INTEGER PRIMARY KEY CHECK(id = 1), calendar_id TEXT,
+                timezone TEXT NOT NULL, sync_token TEXT, last_synced_at TEXT,
+                retry_after TEXT, error_code TEXT
+            );
+            CREATE TABLE google_calendar_links (
+                task_id TEXT PRIMARY KEY, event_id TEXT NOT NULL UNIQUE,
+                etag TEXT, base_json TEXT, operation_id TEXT NOT NULL,
+                desired_json TEXT, state TEXT NOT NULL, retry_after TEXT
+            );
+            CREATE TABLE google_calendar_conflicts (
+                task_id TEXT PRIMARY KEY, reason TEXT NOT NULL,
+                local_json TEXT NOT NULL, remote_json TEXT, created_at TEXT NOT NULL
+            )
+        ",
+    },
 ];
 
+pub const CURRENT_SCHEMA_VERSION: i64 = 20;
+
+pub async fn current_schema_version(pool: &SqlitePool) -> crate::Result<i64> {
+    let version = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM schema_version")
+        .fetch_one(pool).await?;
+    Ok(version)
+}
+
 pub async fn run_migrations(pool: &SqlitePool) -> crate::Result<()> {
+    run_migrations_to_version(pool, CURRENT_SCHEMA_VERSION).await
+}
+
+/// Build only through a reviewed version, for isolated historical recovery.
+pub async fn run_migrations_to_version(pool: &SqlitePool, target: i64) -> crate::Result<()> {
+    if !(19..=CURRENT_SCHEMA_VERSION).contains(&target) {
+        return Err(crate::Error::Other("unsupported_schema_target".into()));
+    }
     // 1. Create schema_version table if not exists
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS schema_version (
@@ -519,10 +564,13 @@ pub async fn run_migrations(pool: &SqlitePool) -> crate::Result<()> {
         sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM schema_version")
             .fetch_one(pool)
             .await?;
+    if current > target {
+        return Err(crate::Error::Other("unsupported_schema_version".into()));
+    }
 
     // 3. Run pending migrations
     for migration in MIGRATIONS {
-        if migration.version > current {
+        if migration.version > current && migration.version <= target {
             log::info!(
                 "Running migration {}: {}",
                 migration.version,

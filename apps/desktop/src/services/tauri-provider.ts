@@ -10,6 +10,13 @@ import * as tauri from './tauri'
 
 export function createTauriProvider(): DataProvider {
   return {
+    reminders: {
+      supported: true, getStatus: tauri.reminderGetStatus, requestPermission: tauri.reminderRequestPermission,
+      listCatchUp: tauri.reminderListCatchUp, acknowledge: tauri.reminderAcknowledge,
+    },
+    googleCalendar: {
+      supported: true, getStatus: tauri.googleCalendarStatus, connect: tauri.googleCalendarConnect, disconnect: tauri.googleCalendarDisconnect, syncNow: tauri.googleCalendarSyncNow, listConflicts: tauri.googleCalendarListConflicts, resolveConflict: tauri.googleCalendarResolveConflict,
+    },
     backup: {
       supported: true,
       status: tauri.backupGetStatus,

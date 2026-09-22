@@ -29,6 +29,19 @@ async fn section_belongs_to_project(
     Ok(row.is_some())
 }
 
+fn validate_reminder(offset: Option<i64>, google_enabled: bool, due_date: Option<&str>, due_time: Option<&str>) -> crate::Result<()> {
+    if offset.is_some_and(|value| !(0..=40320).contains(&value)) {
+        return Err(crate::Error::Other("reminder offset must be 0–40320 minutes".into()));
+    }
+    if (offset.is_some() || google_enabled) && (due_date.is_none() || due_time.is_none()) {
+        return Err(crate::Error::Other("a reminder requires a due date and time".into()));
+    }
+    if google_enabled && offset.is_none() {
+        return Err(crate::Error::Other("a phone alert requires a reminder offset".into()));
+    }
+    Ok(())
+}
+
 impl FromRow<'_, SqliteRow> for LocalTask {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
         Ok(LocalTask {
@@ -43,6 +56,8 @@ impl FromRow<'_, SqliteRow> for LocalTask {
             duration_minutes: row.try_get("duration_minutes")?,
             recurrence_rule: row.try_get("recurrence_rule")?,
             section_id: row.try_get("section_id")?,
+            reminder_offset_minutes: row.try_get("reminder_offset_minutes")?,
+            google_calendar_enabled: row.try_get::<i64, _>("google_calendar_enabled")? != 0,
             labels: Vec::new(),
             completed: row.try_get::<i64, _>("completed")? != 0,
             completed_at: row.try_get("completed_at")?,
@@ -59,7 +74,7 @@ impl FromRow<'_, SqliteRow> for LocalTask {
     }
 }
 
-pub(crate) const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot";
+pub(crate) const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, reminder_offset_minutes, google_calendar_enabled, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot";
 
 /// Snapshot a task row and append its sync_log entry, warning on failure —
 /// sync_log IS the retry mechanism, so a silently swallowed append can leave
@@ -206,6 +221,8 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
         recurrence_rule,
         section_id,
         label_ids,
+        reminder_offset_minutes,
+        google_calendar_enabled,
     } = input;
     let content = content.as_str();
     let project_id = project_id.as_deref();
@@ -216,6 +233,7 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
     let recurrence_rule = recurrence_rule.as_deref();
     let section_id = section_id.as_deref();
 
+    validate_reminder(reminder_offset_minutes, google_calendar_enabled.unwrap_or(false), due_date, due_time)?;
     let id = Uuid::new_v4().to_string();
     let project_id = project_id.unwrap_or("inbox");
     let priority = priority.unwrap_or(1);
@@ -246,8 +264,8 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
     };
 
     sqlx::query(
-        "INSERT INTO local_tasks (id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, position)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO local_tasks (id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, reminder_offset_minutes, google_calendar_enabled, position)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(parent_id)
@@ -260,6 +278,8 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
     .bind(duration_minutes)
     .bind(recurrence_rule)
     .bind(section_id)
+    .bind(reminder_offset_minutes)
+    .bind(google_calendar_enabled.unwrap_or(false))
     .bind(max_pos + 1)
     .execute(pool)
     .await?;
@@ -305,7 +325,11 @@ pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> cra
     Ok(task)
 }
 
-pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInput) -> crate::Result<LocalTask> {
+pub async fn update_local_task(
+    pool: &SqlitePool,
+    id: &str,
+    input: UpdateTaskInput,
+) -> crate::Result<LocalTask> {
     let UpdateTaskInput {
         content,
         description,
@@ -323,6 +347,9 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
         clear_recurrence,
         clear_section,
         clear_duration,
+        reminder_offset_minutes,
+        google_calendar_enabled,
+        clear_reminder,
     } = input;
     let content = content.as_deref();
     let description = description.as_deref();
@@ -333,149 +360,157 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
     let recurrence_rule = recurrence_rule.as_deref();
     let section_id = section_id.as_deref();
 
-    // No FK on local_tasks.section_id — validate app-side that the section
-    // belongs to this task's *final* project (the one supplied in this same
-    // call, if any, else the task's current one) before writing it.
-    if let Some(sec_id) = section_id {
-        let target_project_id: String = match project_id {
-            Some(pid) => pid.to_string(),
-            None => sqlx::query_scalar("SELECT project_id FROM local_tasks WHERE id = ?")
-                .bind(id)
-                .fetch_optional(pool)
-                .await?
-                .ok_or_else(|| crate::Error::Other(format!("update_local_task: no such task '{id}'")))?,
-        };
-        if !section_belongs_to_project(pool, sec_id, &target_project_id).await? {
+    // Serialize the read, validation, and write across app/CLI connections.
+    // `BEGIN IMMEDIATE` obtains SQLite's writer lock before the read; the
+    // sqlx Transaction rolls back if this future is cancelled or any query fails.
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut next: LocalTask = sqlx::query_as(&format!(
+        "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
+    ))
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let implicit_section_clear = project_id.is_some_and(|target| target != next.project_id.as_str())
+        && section_id.is_none()
+        && next.section_id.is_some();
+    if let Some(value) = content {
+        next.content = value.to_owned();
+    }
+    if let Some(value) = description {
+        next.description = Some(value.to_owned());
+    }
+    if let Some(value) = project_id {
+        next.project_id = value.to_owned();
+    }
+    if implicit_section_clear {
+        next.section_id = None;
+    }
+    if let Some(value) = priority {
+        next.priority = value;
+    }
+    if let Some(value) = linked_doc_id {
+        next.linked_doc_id = Some(value.to_owned());
+    }
+    if let Some(value) = due_date {
+        next.due_date = Some(value.to_owned());
+    }
+    if let Some(value) = due_time {
+        next.due_time = Some(value.to_owned());
+    }
+    if let Some(value) = duration_minutes {
+        next.duration_minutes = Some(value);
+    }
+    if let Some(value) = recurrence_rule {
+        next.recurrence_rule = Some(value.to_owned());
+    }
+    if let Some(value) = section_id {
+        next.section_id = Some(value.to_owned());
+    }
+    if let Some(value) = reminder_offset_minutes {
+        next.reminder_offset_minutes = Some(value);
+    }
+    if let Some(value) = google_calendar_enabled {
+        next.google_calendar_enabled = value;
+    }
+    // Clears win over sets, matching the existing task input contract.
+    if clear_due_date {
+        next.due_date = None;
+    }
+    if clear_due_time {
+        next.due_time = None;
+        next.duration_minutes = None;
+    }
+    if clear_duration {
+        next.duration_minutes = None;
+    }
+    if clear_recurrence {
+        next.recurrence_rule = None;
+    }
+    if clear_section {
+        next.section_id = None;
+    }
+    if clear_reminder || clear_due_date || clear_due_time {
+        next.reminder_offset_minutes = None;
+        next.google_calendar_enabled = false;
+    }
+    if let Some(sec_id) = next.section_id.as_deref() {
+        let exists: Option<String> =
+            sqlx::query_scalar("SELECT id FROM sections WHERE id = ? AND project_id = ?")
+                .bind(sec_id)
+                .bind(&next.project_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if exists.is_none() {
             return Err(crate::Error::Other(format!(
-                "update_local_task: section '{sec_id}' does not belong to project '{target_project_id}'"
+                "update_local_task: section '{sec_id}' does not belong to project '{}'",
+                next.project_id
             )));
         }
     }
-
-    if let Some(content) = content {
-        sqlx::query("UPDATE local_tasks SET content = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(content)
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(desc) = description {
-        sqlx::query("UPDATE local_tasks SET description = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(desc)
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(pid) = project_id {
-        sqlx::query("UPDATE local_tasks SET project_id = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(pid)
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(pri) = priority {
-        sqlx::query("UPDATE local_tasks SET priority = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(pri)
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(date) = due_date {
-        sqlx::query("UPDATE local_tasks SET due_date = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(date)
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    if clear_due_date {
-        sqlx::query("UPDATE local_tasks SET due_date = NULL, updated_at = datetime('now') WHERE id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(doc_id) = linked_doc_id {
-        sqlx::query("UPDATE local_tasks SET linked_doc_id = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(doc_id)
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(time) = due_time {
-        sqlx::query("UPDATE local_tasks SET due_time = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(time)
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(minutes) = duration_minutes {
-        sqlx::query("UPDATE local_tasks SET duration_minutes = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(minutes)
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(rule) = recurrence_rule {
-        sqlx::query("UPDATE local_tasks SET recurrence_rule = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(rule)
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(sec_id) = section_id {
-        sqlx::query("UPDATE local_tasks SET section_id = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(sec_id)
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    // `clear_due_time` also nulls `duration_minutes`: a block length with no
-    // start time is meaningless, so the two clear together rather than
-    // leaving a dangling duration on an all-day task.
-    if clear_due_time {
-        sqlx::query(
-            "UPDATE local_tasks SET due_time = NULL, duration_minutes = NULL, updated_at = datetime('now') WHERE id = ?",
-        )
-        .bind(id)
-        .execute(pool)
-        .await?;
-    }
-    if clear_recurrence {
-        sqlx::query("UPDATE local_tasks SET recurrence_rule = NULL, updated_at = datetime('now') WHERE id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    if clear_section {
-        sqlx::query("UPDATE local_tasks SET section_id = NULL, updated_at = datetime('now') WHERE id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
-    // Independent of `clear_due_time` (which also nulls duration_minutes,
-    // see above) — this is the "duration only" clear path, e.g. the
-    // TaskEditor's duration select "clear" action on a task that keeps its
-    // due time.
-    if clear_duration {
-        sqlx::query("UPDATE local_tasks SET duration_minutes = NULL, updated_at = datetime('now') WHERE id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
+    validate_reminder(
+        next.reminder_offset_minutes,
+        next.google_calendar_enabled,
+        next.due_date.as_deref(),
+        next.due_time.as_deref(),
+    )?;
+    sqlx::query("UPDATE local_tasks SET content=?,description=?,project_id=?,priority=?,due_date=?,due_time=?,duration_minutes=?,recurrence_rule=?,section_id=?,linked_doc_id=?,reminder_offset_minutes=?,google_calendar_enabled=?,updated_at=datetime('now') WHERE id=?")
+        .bind(&next.content).bind(&next.description).bind(&next.project_id).bind(next.priority)
+        .bind(&next.due_date).bind(&next.due_time).bind(next.duration_minutes)
+        .bind(&next.recurrence_rule).bind(&next.section_id).bind(&next.linked_doc_id)
+        .bind(next.reminder_offset_minutes).bind(next.google_calendar_enabled).bind(id)
+        .execute(&mut *tx).await?;
+    let mut task: LocalTask = sqlx::query_as(&format!(
+        "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
+    ))
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
 
     // Log activity with changed fields
     let mut fields_changed = Vec::new();
-    if content.is_some() { fields_changed.push("content"); }
-    if description.is_some() { fields_changed.push("description"); }
-    if project_id.is_some() { fields_changed.push("project_id"); }
-    if priority.is_some() { fields_changed.push("priority"); }
-    if linked_doc_id.is_some() { fields_changed.push("linked_doc_id"); }
-    if due_date.is_some() || clear_due_date { fields_changed.push("due_date"); }
-    if due_time.is_some() || clear_due_time { fields_changed.push("due_time"); }
-    if duration_minutes.is_some() || clear_due_time || clear_duration { fields_changed.push("duration_minutes"); }
-    if recurrence_rule.is_some() || clear_recurrence { fields_changed.push("recurrence_rule"); }
-    if section_id.is_some() || clear_section { fields_changed.push("section_id"); }
+    if content.is_some() {
+        fields_changed.push("content");
+    }
+    if description.is_some() {
+        fields_changed.push("description");
+    }
+    if project_id.is_some() {
+        fields_changed.push("project_id");
+    }
+    if priority.is_some() {
+        fields_changed.push("priority");
+    }
+    if linked_doc_id.is_some() {
+        fields_changed.push("linked_doc_id");
+    }
+    if due_date.is_some() || clear_due_date {
+        fields_changed.push("due_date");
+    }
+    if due_time.is_some() || clear_due_time {
+        fields_changed.push("due_time");
+    }
+    if duration_minutes.is_some() || clear_due_time || clear_duration {
+        fields_changed.push("duration_minutes");
+    }
+    if recurrence_rule.is_some() || clear_recurrence {
+        fields_changed.push("recurrence_rule");
+    }
+    if section_id.is_some() || clear_section || implicit_section_clear {
+        fields_changed.push("section_id");
+    }
+    if reminder_offset_minutes.is_some() || clear_reminder || clear_due_date || clear_due_time {
+        fields_changed.push("reminder_offset_minutes");
+    }
+    if google_calendar_enabled.is_some() || clear_reminder || clear_due_date || clear_due_time {
+        fields_changed.push("google_calendar_enabled");
+    }
     if !fields_changed.is_empty() {
-        let action = if fields_changed == vec!["project_id"] { "task_moved" } else { "task_updated" };
+        let action = if fields_changed == vec!["project_id"] {
+            "task_moved"
+        } else {
+            "task_updated"
+        };
         activity::log_activity(
             pool,
             action,
@@ -485,10 +520,6 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
         .await;
     }
 
-    let mut task: LocalTask = sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
-        .bind(id)
-        .fetch_one(pool)
-        .await?;
     // Every task-returning fn carries `labels` — populate it here even when
     // this update didn't touch them, so a plain content/date edit doesn't
     // silently report the task as label-less.
@@ -498,10 +529,20 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
     if !fields_changed.is_empty() {
         let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
         let snapshot = sync::task_sync_snapshot(&task);
-        sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
+        sync::append_sync_log(
+            pool,
+            "local_tasks",
+            id,
+            "UPDATE",
+            Some(&changed),
+            Some(&snapshot),
+        )
+        .await
+        .ok();
 
         // Todoist mutation observer: best-effort
-        let fields_changed_owned: Vec<String> = fields_changed.iter().map(|f| f.to_string()).collect();
+        let fields_changed_owned: Vec<String> =
+            fields_changed.iter().map(|f| f.to_string()).collect();
         crate::integrations::todoist::observer::on_task_mutation(
             pool,
             crate::integrations::todoist::observer::TaskMutation::Updated {
@@ -521,6 +562,110 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
     }
 
     Ok(task)
+}
+
+/// Apply a Google-originated edit only if the complete persisted task row still
+/// matches the row fetched before the network request. SQLite's write lock is
+/// acquired before comparison, so a concurrent CLI edit cannot be overwritten.
+/// `None` means the caller must re-fetch and reconcile instead of retrying.
+pub async fn update_local_task_if_unchanged(
+    pool: &SqlitePool,
+    id: &str,
+    expected: &LocalTask,
+    input: UpdateTaskInput,
+) -> crate::Result<Option<LocalTask>> {
+    if input.project_id.is_some()
+        || input.priority.is_some()
+        || input.linked_doc_id.is_some()
+        || input.recurrence_rule.is_some()
+        || input.section_id.is_some()
+        || input.label_ids.is_some()
+        || input.clear_recurrence
+        || input.clear_section
+    {
+        return Err(crate::Error::Other(
+            "calendar update contains unsupported fields".into(),
+        ));
+    }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let current: Option<LocalTask> = sqlx::query_as(&format!(
+        "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
+    ))
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(current) = current else {
+        return Ok(None);
+    };
+    if sync::task_sync_snapshot(&current) != sync::task_sync_snapshot(expected) {
+        return Ok(None);
+    }
+    let due_date = if input.clear_due_date {
+        None
+    } else {
+        input.due_date.as_deref().or(current.due_date.as_deref())
+    };
+    let due_time = if input.clear_due_time {
+        None
+    } else {
+        input.due_time.as_deref().or(current.due_time.as_deref())
+    };
+    let duration = if input.clear_duration || input.clear_due_time {
+        None
+    } else {
+        input.duration_minutes.or(current.duration_minutes)
+    };
+    let offset = if input.clear_reminder || input.clear_due_date || input.clear_due_time {
+        None
+    } else {
+        input
+            .reminder_offset_minutes
+            .or(current.reminder_offset_minutes)
+    };
+    let calendar = !(input.clear_reminder || input.clear_due_date || input.clear_due_time)
+        && input
+            .google_calendar_enabled
+            .unwrap_or(current.google_calendar_enabled);
+    validate_reminder(offset, calendar, due_date, due_time)?;
+    sqlx::query("UPDATE local_tasks SET content=?,description=?,due_date=?,due_time=?,duration_minutes=?,reminder_offset_minutes=?,google_calendar_enabled=?,updated_at=datetime('now') WHERE id=?")
+            .bind(input.content.as_deref().unwrap_or(&current.content))
+            .bind(input.description.as_deref().or(current.description.as_deref()))
+            .bind(due_date).bind(due_time).bind(duration).bind(offset).bind(calendar).bind(id)
+            .execute(&mut *tx).await?;
+    let mut updated: LocalTask = sqlx::query_as(&format!(
+        "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
+    ))
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    updated.labels = labels::labels_for_task(pool, id).await.unwrap_or_default();
+    activity::log_activity(
+        pool,
+        "task_updated",
+        Some(id),
+        Some(serde_json::json!({"source":"google_calendar"})),
+    )
+    .await;
+    let snapshot = sync::task_sync_snapshot(&updated);
+    sync::append_sync_log(pool, "local_tasks", id, "UPDATE", None, Some(&snapshot))
+        .await
+        .ok();
+    crate::integrations::todoist::observer::on_task_mutation(
+        pool,
+        crate::integrations::todoist::observer::TaskMutation::Updated {
+            task: &updated,
+            fields_changed: &[
+                "content".into(),
+                "description".into(),
+                "due_date".into(),
+                "due_time".into(),
+                "duration_minutes".into(),
+            ],
+        },
+    )
+    .await;
+    Ok(Some(updated))
 }
 
 /// Update task status (backlog, todo, in_progress, blocked, complete).

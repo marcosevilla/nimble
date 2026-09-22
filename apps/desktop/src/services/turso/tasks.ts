@@ -1,3 +1,5 @@
+import { applyReminderIntent } from '@/lib/reminderIntent'
+import type { DataProvider } from '@nimble/types'
 /**
  * Task reads for the web build.
  *
@@ -33,7 +35,7 @@ const SELECT_COLS =
   'id, parent_id, content, description, project_id, priority, due_date, due_time, ' +
   'duration_minutes, recurrence_rule, section_id, completed, completed_at, status, ' +
   'linked_doc_id, position, created_at, updated_at, external_id, external_source, ' +
-  'remote_updated_at, synced_snapshot'
+  'remote_updated_at, synced_snapshot, reminder_offset_minutes, google_calendar_enabled'
 
 export interface ListTasksOptions {
   projectId?: string
@@ -78,6 +80,8 @@ function buildTaskQuery(opts: ListTasksOptions): { sql: string; args: TursoArg[]
 /** Decode one `local_tasks` row. `labels` is filled in by the caller. */
 function toTask(row: Row, labels: string[]): LocalTask {
   return {
+    reminder_offset_minutes: numOrNull(row, 'reminder_offset_minutes'),
+    google_calendar_enabled: bool(row, 'google_calendar_enabled'),
     id: str(row, 'id'),
     parent_id: strOrNull(row, 'parent_id'),
     content: str(row, 'content'),
@@ -208,6 +212,8 @@ export async function createTask(opts: CreateTaskOptions): Promise<LocalTask> {
 
   const now = rowTimestampUtc()
   const task: LocalTask = {
+    reminder_offset_minutes: null,
+    google_calendar_enabled: false,
     id: newId(),
     parent_id: parentId,
     content: opts.content,
@@ -441,4 +447,19 @@ export async function setTaskStatus(id: string, status: TaskStatus): Promise<voi
   }
 
   await commit(dataStatements, syncEntries)
+}
+
+/** Only reminder intent is added to web editing here; other field editors retain their existing unsupported boundary. */
+export async function updateReminderIntent(opts: Parameters<DataProvider['tasks']['update']>[0]): Promise<LocalTask> {
+  const supported = new Set(['id', 'reminderOffsetMinutes', 'googleCalendarEnabled', 'clearReminder'])
+  if (Object.entries(opts).some(([key, value]) => value !== undefined && !supported.has(key))) {
+    throw new TursoError('This task field is edited in the desktop app')
+  }
+  const task = await fetchTask(opts.id)
+  const updated = { ...applyReminderIntent(task, opts), updated_at: rowTimestamp() }
+  await commit([{
+    sql: 'UPDATE local_tasks SET reminder_offset_minutes = ?, google_calendar_enabled = ?, updated_at = ? WHERE id = ?',
+    args: [updated.reminder_offset_minutes === null ? textOrNull(null) : integer(updated.reminder_offset_minutes), integer(updated.google_calendar_enabled ? 1 : 0), text(updated.updated_at), text(task.id)],
+  }], [{ table: 'local_tasks', rowId: task.id, operation: 'UPDATE', snapshot: updated, changedColumns: ['reminder_offset_minutes', 'google_calendar_enabled'] }])
+  return updated
 }

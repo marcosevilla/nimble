@@ -21,7 +21,12 @@ pub async fn run_and_emit(
 /// the next trigger to retry (the outbox and sync_token make this safe).
 pub async fn run_if_due_and_emit(app: &AppHandle, min_interval_secs: i64) {
     let pool = app.state::<SqlitePool>();
-    match nimble_core::integrations::todoist::sync_loop::run_sync_if_due(pool.inner(), min_interval_secs).await {
+    match nimble_core::integrations::todoist::sync_loop::run_sync_if_due(
+        pool.inner(),
+        min_interval_secs,
+    )
+    .await
+    {
         Ok(report) if report.changed_anything() => {
             let _ = app.emit("todoist-sync-applied", ());
         }
@@ -37,67 +42,159 @@ pub async fn run_if_due_and_emit(app: &AppHandle, min_interval_secs: i64) {
 /// how much gets pushed next time.
 const TURSO_LAST_SYNC_KEY: &str = "turso_last_sync_at";
 
-/// Device sync with Turso — push local changes, then pull remote ones.
-///
-/// This exists because until it did, `sync::push`/`sync::pull` had exactly one
-/// caller each in the whole app: the button on the Settings page. Nothing ran
-/// them on a schedule, so a capture made on the Mac reached the cloud only if you
-/// happened to open Settings and click, and changes made anywhere else never came
-/// back at all. The Todoist sync has had a background loop the whole time, which
-/// is what made the gap easy to miss.
-///
-/// Gated the same way the Todoist loop is, because the callers (a 5-minute
-/// interval and every window focus) fire far more often than a sync is needed.
-///
-/// Never propagates an error. Push and pull are independent — a failing push must
-/// not prevent the pull, or a single bad local entry would also cut off everything
-/// arriving from other devices. Both retry on the next trigger, which is safe:
-/// push only sends entries still marked unsynced, and pull is driven by a
-/// watermark it advances per chunk.
+/// All desktop Turso pipelines (background, Settings and agent) share this lock.
+static TURSO_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[derive(Debug, serde::Serialize)]
+pub struct TursoRunReport {
+    pub state: &'static str,
+    pub pushed: Option<u64>,
+    pub pulled: Option<u64>,
+    pub push_error: Option<&'static str>,
+    pub pull_error: Option<&'static str>,
+}
+impl TursoRunReport {
+    fn skipped(state: &'static str) -> Self {
+        Self {
+            state,
+            pushed: None,
+            pulled: None,
+            push_error: None,
+            pull_error: None,
+        }
+    }
+}
+
 pub async fn run_turso_sync_if_due(app: &AppHandle, min_interval_secs: i64) {
+    let report = run_turso_report(app, min_interval_secs).await;
+    if report.push_error.is_some() || report.pull_error.is_some() {
+        log::warn!("Turso sync incomplete; next scheduled run will retry");
+    }
+}
+async fn turso_credentials(pool: &SqlitePool) -> nimble_core::Result<Option<(String, String)>> {
+    let url = nimble_core::db::settings::get_setting(pool, "turso_url").await?;
+    let token = nimble_core::db::settings::get_setting(pool, "turso_token").await?;
+    Ok(match (url, token) {
+        (Some(u), Some(t)) if !u.is_empty() && !t.is_empty() => Some((u, t)),
+        _ => None,
+    })
+}
+async fn run_turso_report(app: &AppHandle, min_interval_secs: i64) -> TursoRunReport {
+    let Ok(_guard) = TURSO_LOCK.try_lock() else {
+        return TursoRunReport::skipped("already_running");
+    };
     let state = app.state::<SqlitePool>();
     let pool = state.inner();
-
-    // Turso being unconfigured is the normal state before setup, not a fault —
-    // log nothing, or every 5 minutes produces a warning forever.
-    let url = match nimble_core::db::settings::get_setting(pool, "turso_url").await {
+    let (url, token) = match turso_credentials(pool).await {
         Ok(Some(v)) => v,
-        _ => return,
+        Ok(None) => return TursoRunReport::skipped("not_configured"),
+        Err(_) => return TursoRunReport::skipped("configuration_unavailable"),
     };
-    let token = match nimble_core::db::settings::get_setting(pool, "turso_token").await {
-        Ok(Some(v)) => v,
-        _ => return,
-    };
-
-    if let Ok(Some(last)) = nimble_core::db::settings::get_setting(pool, TURSO_LAST_SYNC_KEY).await {
-        if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&last) {
-            let age = chrono::Utc::now() - parsed.with_timezone(&chrono::Utc);
-            if age.num_seconds() < min_interval_secs {
-                return;
+    if min_interval_secs > 0 {
+        if let Ok(Some(last)) =
+            nimble_core::db::settings::get_setting(pool, TURSO_LAST_SYNC_KEY).await
+        {
+            if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&last) {
+                if (chrono::Utc::now() - parsed.with_timezone(&chrono::Utc)).num_seconds()
+                    < min_interval_secs
+                {
+                    return TursoRunReport::skipped("recently_synced");
+                }
             }
         }
     }
-
-    // Stamped before the work rather than after. If a sync fails, the next window
-    // focus would otherwise retry immediately and keep retrying — turning a Turso
-    // outage into a request loop. Waiting out the interval is the correct response
-    // to failure here.
-    let now = chrono::Utc::now().to_rfc3339();
-    let _ = nimble_core::db::settings::set_setting(pool, TURSO_LAST_SYNC_KEY, &now).await;
-
-    match nimble_core::db::sync::push(pool, &url, &token).await {
-        Ok(count) if count > 0 => log::info!("Turso push: {count} entries pushed"),
-        Ok(_) => {}
-        Err(e) => log::warn!("Turso push failed (will retry on next trigger): {e}"),
+    let _ = nimble_core::db::settings::set_setting(
+        pool,
+        TURSO_LAST_SYNC_KEY,
+        &chrono::Utc::now().to_rfc3339(),
+    )
+    .await;
+    // Independent outcomes preserve the existing rule: failed push must not suppress pull.
+    let pushed = nimble_core::db::sync::push(pool, &url, &token).await;
+    let pulled = nimble_core::db::sync::pull(pool, &url, &token).await;
+    if pulled.as_ref().is_ok_and(|n| *n > 0) {
+        let _ = app.emit("remote-sync-applied", ());
     }
-
-    match nimble_core::db::sync::pull(pool, &url, &token).await {
-        Ok(count) if count > 0 => {
-            log::info!("Turso pull: {count} remote changes applied");
-            // Rows changed underneath the UI, so the frontend has to re-read.
-            let _ = app.emit("remote-sync-applied", ());
+    turso_outcomes(pushed, pulled)
+}
+fn turso_outcomes(
+    pushed: nimble_core::Result<u64>,
+    pulled: nimble_core::Result<u64>,
+) -> TursoRunReport {
+    TursoRunReport {
+        state: if pushed.is_ok() && pulled.is_ok() {
+            "completed"
+        } else {
+            "incomplete"
+        },
+        push_error: pushed.as_ref().err().map(|_| "push_failed"),
+        pull_error: pulled.as_ref().err().map(|_| "pull_failed"),
+        pushed: pushed.ok(),
+        pulled: pulled.ok(),
+    }
+}
+/// Settings' individual push and pull use the same serialization gate.
+pub async fn push_turso(app: &AppHandle) -> Result<u64, String> {
+    let _guard = TURSO_LOCK
+        .try_lock()
+        .map_err(|_| "Sync already running".to_owned())?;
+    let pool = app.state::<SqlitePool>();
+    let (url, token) = turso_credentials(pool.inner())
+        .await
+        .map_err(|_| "Cannot read sync configuration")?
+        .ok_or("Turso is not configured")?;
+    nimble_core::db::sync::push(pool.inner(), &url, &token)
+        .await
+        .map_err(|_| "Turso push failed".into())
+}
+pub async fn pull_turso(app: &AppHandle) -> Result<u64, String> {
+    let _guard = TURSO_LOCK
+        .try_lock()
+        .map_err(|_| "Sync already running".to_owned())?;
+    let pool = app.state::<SqlitePool>();
+    let (url, token) = turso_credentials(pool.inner())
+        .await
+        .map_err(|_| "Cannot read sync configuration")?
+        .ok_or("Turso is not configured")?;
+    let count = nimble_core::db::sync::pull(pool.inner(), &url, &token)
+        .await
+        .map_err(|_| "Turso pull failed")?;
+    if count > 0 {
+        let _ = app.emit("remote-sync-applied", ());
+    }
+    Ok(count)
+}
+pub async fn run_agent_sync(app: &AppHandle) -> Result<serde_json::Value, String> {
+    let todoist = match run_and_emit(app).await {
+        Ok(report) => {
+            serde_json::json!({"state": if report.skipped.is_some() { "skipped" } else { "completed" }, "report": report})
         }
-        Ok(_) => {}
-        Err(e) => log::warn!("Turso pull failed (will retry on next trigger): {e}"),
+        Err(_) => serde_json::json!({"state":"failed","error":"todoist_sync_failed"}),
+    };
+    let turso = run_turso_report(app, 0).await;
+    Ok(serde_json::json!({"todoist":todoist,"turso":turso}))
+}
+
+#[cfg(test)]
+mod agent_tests {
+    use super::*;
+    #[test]
+    fn outcome_reports_partial_failure_without_sensitive_error_text() {
+        let report = turso_outcomes(
+            Err(nimble_core::Error::Api("secret-url-and-token".into())),
+            Ok(4),
+        );
+        let json = serde_json::to_value(report).unwrap();
+        assert_eq!(json["state"], "incomplete");
+        assert_eq!(json["pulled"], 4);
+        assert_eq!(json["push_error"], "push_failed");
+        assert!(!json.to_string().contains("secret"));
+    }
+    #[tokio::test]
+    async fn competing_turso_pipeline_cannot_acquire_gate() {
+        let held = TURSO_LOCK.lock().await;
+        assert!(TURSO_LOCK.try_lock().is_err());
+        drop(held);
+        assert!(TURSO_LOCK.try_lock().is_ok());
     }
 }

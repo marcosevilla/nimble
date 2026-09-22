@@ -1,3 +1,4 @@
+import { useDataVersion } from '@/hooks/useDataVersion'
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { Search } from 'lucide-react'
@@ -44,6 +45,7 @@ function inferDefaultIndex(query: string, matchCount: number): number {
 }
 
 export function CommandBar() {
+  const captureVersion = useDataVersion('captures')
   const dp = useDataProvider()
   const [open, setOpen] = useState(false)
   const [closing, setClosing] = useState(false)
@@ -96,7 +98,7 @@ export function CommandBar() {
         .catch(() => setCaptureResults([]))
     }, 200)
     return () => clearTimeout(timeout)
-  }, [query, mode, dp])
+  }, [query, mode, dp, captureVersion])
 
   // Result index layout: tasks, docs, captures, then the two create actions
   const docStartIndex = filteredTasks.length

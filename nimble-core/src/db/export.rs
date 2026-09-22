@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Number, Value};
 use sqlx::{Column, Row, Sqlite, SqlitePool, Transaction, TypeInfo, ValueRef};
 
-use super::export_policy::{TablePolicy, FTS_TABLES, TABLES};
+use super::export_policy::{tables_for_version, TablePolicy, FTS_TABLES};
 
 pub struct PortableExport {
     pub data: Vec<u8>,
@@ -38,13 +38,12 @@ async fn columns(
         .collect::<std::result::Result<_, sqlx::Error>>()?)
 }
 
-async fn validate(tx: &mut Transaction<'_, Sqlite>) -> crate::Result<()> {
+async fn validate(tx: &mut Transaction<'_, Sqlite>) -> crate::Result<i64> {
     let version: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
         .fetch_one(&mut **tx)
         .await?;
-    if version != Some(19) {
-        return Err(invalid("unsupported_schema"));
-    }
+    let version = version.ok_or_else(|| invalid("unsupported_schema"))?;
+    let tables = tables_for_version(version).ok_or_else(|| invalid("unsupported_schema"))?;
     let rows = sqlx::query("SELECT name FROM sqlite_master WHERE type IN ('table','view')")
         .fetch_all(&mut **tx)
         .await?;
@@ -55,7 +54,7 @@ async fn validate(tx: &mut Transaction<'_, Sqlite>) -> crate::Result<()> {
         .into_iter()
         .filter(|name| !name.starts_with("sqlite_"))
         .collect();
-    let expected: BTreeSet<String> = TABLES
+    let expected: BTreeSet<String> = tables
         .iter()
         .map(|p| p.name.to_owned())
         .chain(FTS_TABLES.iter().map(|(name, _)| (*name).to_owned()))
@@ -63,7 +62,7 @@ async fn validate(tx: &mut Transaction<'_, Sqlite>) -> crate::Result<()> {
     if actual != expected {
         return Err(invalid("table_drift"));
     }
-    for policy in TABLES {
+    for policy in &tables {
         let discovered = columns(tx, policy.name).await?;
         let found: BTreeSet<String> = discovered.iter().map(|(name, _)| name.clone()).collect();
         let reviewed: BTreeSet<String> = policy.columns.iter().map(|s| (*s).to_owned()).collect();
@@ -101,12 +100,12 @@ async fn validate(tx: &mut Transaction<'_, Sqlite>) -> crate::Result<()> {
             return Err(invalid("fts_drift"));
         }
     }
-    Ok(())
+    Ok(version)
 }
 
 pub async fn validate_schema(pool: &SqlitePool) -> crate::Result<()> {
     let mut tx = pool.begin().await?;
-    validate(&mut tx).await
+    validate(&mut tx).await.map(|_| ())
 }
 
 fn cell(
@@ -185,11 +184,12 @@ async fn records(
 
 pub async fn export_portable(pool: &SqlitePool) -> crate::Result<PortableExport> {
     let mut tx = pool.begin().await?;
-    validate(&mut tx).await?;
+    let version = validate(&mut tx).await?;
+    let tables = tables_for_version(version).ok_or_else(|| invalid("unsupported_schema"))?;
     let mut data = BTreeMap::<String, Vec<Value>>::new();
     let mut included = BTreeMap::<String, Vec<&str>>::new();
     let mut excluded = BTreeMap::<String, Vec<&str>>::new();
-    for policy in TABLES {
+    for policy in &tables {
         if policy.included.is_empty() {
             let mut names = policy.columns.to_vec();
             names.sort_unstable();
@@ -221,7 +221,7 @@ pub async fn export_portable(pool: &SqlitePool) -> crate::Result<PortableExport>
     }
     let format = serde_json::json!({
         "export_version": 1,
-        "schema_version": 19,
+        "schema_version": version,
         "included": included,
         "excluded": excluded,
     });
@@ -236,9 +236,10 @@ pub async fn export_portable(pool: &SqlitePool) -> crate::Result<PortableExport>
 pub async fn compare_snapshot_tables(a: &SqlitePool, b: &SqlitePool) -> crate::Result<bool> {
     let mut left = a.begin().await?;
     let mut right = b.begin().await?;
-    validate(&mut left).await?;
-    validate(&mut right).await?;
-    for policy in TABLES {
+    let version = validate(&mut left).await?;
+    if validate(&mut right).await? != version { return Ok(false); }
+    let tables = tables_for_version(version).ok_or_else(|| invalid("unsupported_schema"))?;
+    for policy in &tables {
         if records(&mut left, policy, false).await? != records(&mut right, policy, false).await? {
             return Ok(false);
         }

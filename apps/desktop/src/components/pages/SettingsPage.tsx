@@ -1,3 +1,5 @@
+import { GoogleCalendarSection } from '@/components/settings/GoogleCalendarSection'
+import { ReminderSection } from '@/components/settings/ReminderSection'
 import { useCallback, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -1340,6 +1342,12 @@ export function SettingsPage() {
               Sync
             </a>
           </li>
+          {dp.reminders.supported && <li>
+            <a href="#reminders" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">Reminders</a>
+          </li>}
+          {dp.googleCalendar.supported && <li>
+            <a href="#google-calendar" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">Phone alerts</a>
+          </li>}
           <li>
             <a href="#demo" className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-colors">
               Demo Mode
@@ -1616,6 +1624,8 @@ export function SettingsPage() {
       {/* Sync */}
       <SyncSection />
       <BackupSection />
+      <ReminderSection />
+      <GoogleCalendarSection />
 
       <Separator />
 
