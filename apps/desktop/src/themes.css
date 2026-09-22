@@ -23,6 +23,11 @@
      3.65:1 on card — the floor for the 12 `text-muted-foreground/NN` alpha
      hacks it replaces (facelift A1). */
   --muted-foreground-subtle: oklch(0.62 0.01 60);
+  /* Hover / command-bar-selected fill. A translucent foreground mix so it
+     scales with whatever surface it sits on and inherits into every accent
+     theme. 8% measures 1.18-1.19:1 on background, card, popover and sidebar
+     (--muted was 1.06-1.11:1, below the 1.15 visibility floor). */
+  --hover: color-mix(in oklch, var(--foreground) 8%, transparent);
   --accent: oklch(0.96 0.005 75);
   --accent-foreground: oklch(0.205 0.01 60);
   --destructive: oklch(0.577 0.245 27.325);
@@ -77,6 +82,7 @@
   --muted: oklch(0.22 0.008 60);
   --muted-foreground: oklch(0.66 0.01 60); /* 6.39:1 on background, 5.93:1 on card (was 0.58 → 4.64 / 4.30) */
   --muted-foreground-subtle: oklch(0.54 0.01 60); /* 3.93:1 on background, 3.64:1 on card */
+  --hover: color-mix(in oklch, var(--foreground) 9%, transparent); /* 1.18:1 on background, 1.23:1 on card/popover/sidebar */
   --accent: oklch(0.22 0.008 60);
   --accent-foreground: oklch(0.93 0.005 75);
   --destructive: oklch(0.577 0.245 27.325);

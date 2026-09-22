@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { HelpCircle, X, Keyboard, Map } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -14,17 +14,19 @@ import { useHelpPanelStore } from '@/stores/helpPanelStore'
 
 export function HelpPanel() {
   const open = useHelpPanelStore((s) => s.open)
-  const setOpen = useHelpPanelStore((s) => s.setOpen)
-  const [closing, setClosing] = useState(false)
+  const closing = useHelpPanelStore((s) => s.closing)
+  const toggle = useHelpPanelStore((s) => s.toggle)
+  const closePanel = useHelpPanelStore((s) => s.requestClose)
+  const finishClose = useHelpPanelStore((s) => s.finishClose)
   const panelRef = useRef<HTMLDivElement>(null)
 
-  const closePanel = useCallback(() => {
-    setClosing(true)
-    setTimeout(() => {
-      setOpen(false)
-      setClosing(false)
-    }, 150)
-  }, [setOpen])
+  // Every close path (button, click-outside, Escape, the `?` toggle) sets
+  // `closing` on the store; the panel unmounts after the exit transition.
+  useEffect(() => {
+    if (!closing) return
+    const t = setTimeout(finishClose, 150)
+    return () => clearTimeout(t)
+  }, [closing, finishClose])
 
   // Click outside to close
   useEffect(() => {
@@ -39,11 +41,18 @@ export function HelpPanel() {
   }, [open, closePanel])
 
   // Escape closes the panel. Capture phase so the Dashboard's own Escape
-  // (clear selection / close detail) doesn't also fire for this keypress.
+  // (clear selection / close detail) doesn't also fire for this keypress —
+  // but only when the panel is the topmost layer: an open dialog (the
+  // command bar is role=dialog), menu, select or popover owns Escape first.
+  // A focused page text field (inbox capture, etc.) does not block it.
   useEffect(() => {
     if (!open) return
     function handleKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return
+      const overlayAbove = document.querySelector(
+        '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-slot="popover-content"]',
+      )
+      if (overlayAbove) return
       e.preventDefault()
       e.stopPropagation()
       closePanel()
@@ -58,10 +67,7 @@ export function HelpPanel() {
       <button
         aria-label="Keyboard shortcuts (?)"
         aria-expanded={open}
-        onClick={() => {
-          if (open) closePanel()
-          else setOpen(true)
-        }}
+        onClick={toggle}
         className={cn(
           'fixed bottom-4 right-4 z-30 flex size-9 items-center justify-center rounded-full transition-all duration-200',
           'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-muted-foreground hover:shadow-md',

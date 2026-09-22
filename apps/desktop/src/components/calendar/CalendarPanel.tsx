@@ -7,6 +7,7 @@ import { useDataProvider } from '@/services/provider-context'
 import type { DataProvider } from '@/services/data-provider'
 import type { CalendarEvent } from '@nimble/types'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { Icon } from '@/components/shared/Icon'
 
 // ── Helpers ──
 
@@ -55,6 +56,12 @@ function isDatePast(dateStr: string): boolean {
 
 // ── Sub-Components ──
 
+// 24px day chevrons: --hover fill (accent/30 measured 1.02:1) and a 28×40
+// hit target via `after:` — 2px wider each side, half the gap-1 to the date
+// button, so targets never overlap (shell P2-9, P3-4).
+const DAY_CHEVRON_CLASS =
+  'relative flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground after:absolute after:-inset-x-0.5 after:-inset-y-2'
+
 function DayNavigationHeader({
   selectedDate,
   isToday,
@@ -76,11 +83,13 @@ function DayNavigationHeader({
 
       <div className="flex items-center gap-1">
         <button
+          type="button"
           onClick={onPrev}
-          className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors"
+          className={DAY_CHEVRON_CLASS}
           title="Previous day"
+          aria-label="Previous day"
         >
-          <ChevronLeft className="size-3.5" />
+          <Icon icon={ChevronLeft} />
         </button>
 
         <button
@@ -95,11 +104,13 @@ function DayNavigationHeader({
         </button>
 
         <button
+          type="button"
           onClick={onNext}
-          className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors"
+          className={DAY_CHEVRON_CLASS}
           title="Next day"
+          aria-label="Next day"
         >
-          <ChevronRight className="size-3.5" />
+          <Icon icon={ChevronRight} />
         </button>
       </div>
     </div>
@@ -457,24 +468,6 @@ export function CalendarPanel() {
   const allDayEvents = events.filter((e) => e.all_day)
   const timedEvents = events.filter((e) => !e.all_day)
 
-  if (loading) {
-    return (
-      <div className="space-y-2">
-        <div className="flex items-center justify-between px-1 mb-2">
-          <Skeleton className="h-4 w-4" />
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="h-4 w-4" />
-        </div>
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="flex items-center gap-3 px-2 py-2">
-            <Skeleton className="h-3 w-8" />
-            <Skeleton className="h-10 flex-1 rounded-md" />
-          </div>
-        ))}
-      </div>
-    )
-  }
-
   return (
     <div
       ref={panelRef}
@@ -490,7 +483,19 @@ export function CalendarPanel() {
         onGoToday={goToToday}
       />
 
-      {error && (
+      {/* The day header stays mounted while a date loads so the chevron you
+          just clicked never vanishes under the cursor; only the grid is
+          skeletoned (shell P2-6). */}
+      {loading ? (
+        <div className="space-y-2" role="status" aria-label="Loading calendar">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-3 px-2 py-2">
+              <Skeleton className="h-3 w-8" />
+              <Skeleton className="h-10 flex-1 rounded-md" />
+            </div>
+          ))}
+        </div>
+      ) : error ? (
         <div className="flex items-center gap-2 mb-2 text-meta text-muted-foreground">
           <span>Calendar offline.</span>
           <Button
@@ -502,9 +507,7 @@ export function CalendarPanel() {
             Retry
           </Button>
         </div>
-      )}
-
-      {!error && (
+      ) : (
         <>
           <AllDayStrip events={allDayEvents} />
 

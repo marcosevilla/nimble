@@ -12,7 +12,7 @@ import { RightSidebar } from './RightSidebar'
 import { CommandBar } from '@/components/shared/CommandBar'
 import { HelpPanel } from '@/components/shared/HelpPanel'
 import { useHelpPanelStore } from '@/stores/helpPanelStore'
-import { G_PREFIX_PAGES, G_PREFIX_TIMEOUT_MS } from '@/lib/shortcuts'
+import { G_PREFIX_PAGES, G_PREFIX_TIMEOUT_MS, isModifierOnlyKey } from '@/lib/shortcuts'
 import { BulkActionBar } from '@/components/shared/BulkActionBar'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { QuickCreateDialog } from '@/components/tasks/QuickCreateDialog'
@@ -218,6 +218,8 @@ export function Dashboard() {
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
       if (isInput || e.metaKey || e.ctrlKey || e.altKey) return
+      // Reaching for Shift (or any modifier) must not cancel a pending `g`.
+      if (isModifierOnlyKey(e.key)) return
 
       const pending = pendingGRef.current
       if (pending !== null) {

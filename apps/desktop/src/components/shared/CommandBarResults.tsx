@@ -1,6 +1,8 @@
 import { cn } from '@/lib/utils'
 import { PRIORITY_COLORS } from '@/lib/priorities'
-import { Check, Plus, PenLine, FolderInput, Sparkles, FileText, X, Loader2 } from 'lucide-react'
+import { Check, Plus, PenLine, FolderInput, Sparkles, FileText, X } from 'lucide-react'
+import { Icon } from '@/components/shared/Icon'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { FocusPlayMenu } from '@/components/focus/FocusPlayMenu'
 import {
@@ -12,6 +14,13 @@ import {
 import type { LocalTask, Project, Document, Capture } from '@nimble/types'
 
 export type BarMode = 'search' | 'task' | 'capture' | 'breakdown' | 'doc'
+
+// 24px icon actions in the selected row. Hit target is 24×36 via `after:` —
+// exactly the row's height, so it never reaches into the rows above/below
+// (`inset-x-0` gives the pseudo a width; horizontal stays 24px so the
+// gap-0.5 siblings never overlap).
+const ACTION_BUTTON_CLASS =
+  'relative flex size-6 items-center justify-center rounded-md transition-colors duration-(--transition-fast) hover:bg-hover after:absolute after:inset-x-0 after:-inset-y-1.5'
 
 interface CommandBarResultsProps {
   query: string
@@ -81,14 +90,25 @@ export function CommandBarResults({
               <span className="text-label text-muted-foreground">
                 Breaking down: <span className="text-foreground">{breakdownTask.content}</span>
               </span>
-              <button onClick={onBreakdownCancel} className="text-muted-foreground hover:text-foreground">
-                <X className="size-3.5" />
+              <button
+                type="button"
+                onClick={onBreakdownCancel}
+                aria-label="Cancel breakdown"
+                className="relative -m-1.5 rounded-md p-1.5 text-muted-foreground transition-colors duration-(--transition-fast) hover:text-foreground after:absolute after:-inset-2"
+              >
+                <Icon icon={X} />
               </button>
             </div>
+            {/* Loading: three skeleton rows shaped like the subtask inputs
+                below — no spinner (§1.6, shell P1-4). */}
             {breakdownLoading ? (
-              <div className="flex items-center gap-2 py-4 justify-center text-body text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                Thinking...
+              <div className="space-y-1" role="status" aria-label="Breaking down task">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <Skeleton className="h-3 w-4 shrink-0" />
+                    <Skeleton className="h-7 flex-1 rounded-md" />
+                  </div>
+                ))}
               </div>
             ) : (
               <>
@@ -103,10 +123,12 @@ export function CommandBarResults({
                         className="flex-1 bg-muted/30 rounded-md px-2 py-1 text-body outline-none focus:ring-1 focus:ring-accent-blue/40"
                       />
                       <button
+                        type="button"
                         onClick={() => onBreakdownRemove(i)}
-                        className="text-muted-foreground hover:text-destructive shrink-0"
+                        aria-label={`Remove step ${i + 1}`}
+                        className="relative -m-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors duration-(--transition-fast) hover:text-destructive after:absolute after:-inset-2.5"
                       >
-                        <X className="size-3" />
+                        <Icon icon={X} className="size-3" />
                       </button>
                     </div>
                   ))}
@@ -114,7 +136,7 @@ export function CommandBarResults({
                 <div className="flex justify-end gap-2 pt-1">
                   <button
                     onClick={onBreakdownCancel}
-                    className="rounded-md px-2.5 py-1 text-meta text-muted-foreground hover:bg-accent/20"
+                    className="rounded-md px-2.5 py-1 text-meta text-muted-foreground hover:bg-hover"
                   >
                     Cancel
                   </button>
@@ -183,7 +205,7 @@ export function CommandBarResults({
                   key={doc.id}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                    selectedIndex === idx ? 'bg-accent/40' : 'hover:bg-accent/20',
+                    selectedIndex === idx && 'bg-hover',
                   )}
                   onMouseEnter={() => onSelect(idx)}
                   onClick={() => onOpenDoc(doc.id)}
@@ -212,7 +234,7 @@ export function CommandBarResults({
                   key={capture.id}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                    selectedIndex === idx ? 'bg-accent/40' : 'hover:bg-accent/20',
+                    selectedIndex === idx && 'bg-hover',
                   )}
                   onMouseEnter={() => onSelect(idx)}
                   onClick={() => onOpenCapture(capture.id)}
@@ -236,7 +258,7 @@ export function CommandBarResults({
             <button
               className={cn(
                 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                selectedIndex === createIndex ? 'bg-accent/40' : 'hover:bg-accent/20',
+                selectedIndex === createIndex && 'bg-hover',
               )}
               onMouseEnter={() => onSelect(createIndex)}
               onClick={onCreateTask}
@@ -245,7 +267,7 @@ export function CommandBarResults({
               <span className="text-muted-foreground">Create task</span>
               <span className="flex-1 min-w-0 truncate font-medium">"{query}"</span>
               {selectedIndex === createIndex && (
-                <kbd className="rounded bg-muted px-1 py-0.5 text-label text-muted-foreground">Enter</kbd>
+                <kbd className="rounded-sm bg-muted px-1 py-0.5 text-label text-muted-foreground">Enter</kbd>
               )}
             </button>
           )}
@@ -253,7 +275,7 @@ export function CommandBarResults({
             <button
               className={cn(
                 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors',
-                selectedIndex === captureIndex ? 'bg-accent/40' : 'hover:bg-accent/20',
+                selectedIndex === captureIndex && 'bg-hover',
               )}
               onMouseEnter={() => onSelect(captureIndex)}
               onClick={onCapture}
@@ -294,7 +316,7 @@ function TaskResultRow({
     <div
       className={cn(
         'group/result relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors',
-        isSelected ? 'bg-accent/40' : 'hover:bg-accent/20',
+        isSelected && 'bg-hover',
       )}
       onMouseEnter={onSelect}
     >
@@ -323,16 +345,25 @@ function TaskResultRow({
           <FocusPlayMenu task={task} />
           <ActionButton icon={Sparkles} hint="⌥B" title="Break down" onClick={onBreakDown} className="text-ai/70 hover:text-ai" />
           <DropdownMenu>
-            <DropdownMenuTrigger data-move-trigger className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-accent/30 text-muted-foreground hover:text-foreground">
-              <Tooltip>
-                <TooltipTrigger className="flex size-6 items-center justify-center">
-                  <FolderInput className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipContent side="top" className="text-meta">
-                  Move to project <kbd className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-label">⌥M</kbd>
-                </TooltipContent>
-              </Tooltip>
-            </DropdownMenuTrigger>
+            {/* One element, two roles: the tooltip trigger renders the menu
+                trigger through Base UI's `render` prop — never two stacked
+                <button>s (shell P1-3, §3.3). */}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <DropdownMenuTrigger
+                    data-move-trigger
+                    aria-label="Move to project"
+                    className={cn(ACTION_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')}
+                  />
+                }
+              >
+                <Icon icon={FolderInput} />
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-meta">
+                Move to project <kbd className="ml-1 rounded-sm bg-muted px-1 py-0.5 font-mono text-label">⌥M</kbd>
+              </TooltipContent>
+            </Tooltip>
             <DropdownMenuContent side="top" sideOffset={4} align="end" className="w-36">
               {projects
                 .filter((p) => p.id !== task.project_id)
@@ -355,7 +386,7 @@ function TaskResultRow({
 }
 
 function ActionButton({
-  icon: Icon,
+  icon: Glyph,
   hint,
   title,
   onClick,
@@ -371,15 +402,13 @@ function ActionButton({
     <Tooltip>
       <TooltipTrigger
         onClick={(e) => { e.stopPropagation(); onClick() }}
-        className={cn(
-          'flex size-6 items-center justify-center rounded-md transition-colors hover:bg-accent/30',
-          className,
-        )}
+        aria-label={title}
+        className={cn(ACTION_BUTTON_CLASS, className)}
       >
-        <Icon className="size-3.5" />
+        <Icon icon={Glyph} />
       </TooltipTrigger>
       <TooltipContent side="top" className="text-meta">
-        {title} <kbd className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-label">{hint}</kbd>
+        {title} <kbd className="ml-1 rounded-sm bg-muted px-1 py-0.5 font-mono text-label">{hint}</kbd>
       </TooltipContent>
     </Tooltip>
   )

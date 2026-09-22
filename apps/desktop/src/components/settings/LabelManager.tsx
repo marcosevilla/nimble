@@ -196,7 +196,7 @@ function LabelRow({
   }
 
   return (
-    <div className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/10 transition-colors">
+    <div className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-hover transition-colors">
       <Popover>
         <PopoverTrigger
           className="flex size-5 shrink-0 items-center justify-center rounded-full hover:ring-2 hover:ring-border/60 transition-all"

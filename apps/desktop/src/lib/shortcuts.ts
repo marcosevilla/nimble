@@ -91,6 +91,9 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'General', keys: '⌘⇧T', label: 'Show / hide window' },
   { section: 'General', keys: '⌥⌘Space', label: 'Quick-capture strip (anywhere on the Mac)' },
   { section: 'General', keys: 'Escape', label: 'Close detail view / help panel' },
+
+  // ── Appended by Stage B4 (shell): later rows go below, never reorder above ──
+  { section: 'Navigation', keys: '⌥Enter', label: 'Reorder sidebar page (then arrows, Enter)' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [
@@ -108,4 +111,13 @@ export function shortcutsBySection(): { title: ShortcutSection; rows: Shortcut[]
     title,
     rows: SHORTCUTS.filter((s) => s.section === title),
   })).filter((g) => g.rows.length > 0)
+}
+
+/* Keydowns that carry no character. A pending `g` chord ignores them so
+   reaching for Shift (or Caps Lock) between `g` and the letter does not
+   cancel the chord (Stage A reviewer minor). */
+const MODIFIER_ONLY_KEYS = new Set(['Shift', 'Alt', 'Meta', 'Control', 'CapsLock', 'Fn', 'AltGraph'])
+
+export function isModifierOnlyKey(key: string): boolean {
+  return MODIFIER_ONLY_KEYS.has(key)
 }

@@ -141,7 +141,7 @@ export function TaskItem({ task, onOpen, allIds, focused, className, dragHandleP
     <div
       onClick={onOpen}
       className={cn(
-        'group relative flex h-10 items-center min-w-0 transition-colors hover:bg-accent/20 cursor-default',
+        'group relative flex h-10 items-center min-w-0 transition-colors hover:bg-hover cursor-default',
         focused && 'bg-accent/10',
         isSelected && 'bg-accent-blue/10',
         isCompleting && 'animate-task-complete',

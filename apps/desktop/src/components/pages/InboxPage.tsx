@@ -235,7 +235,7 @@ export function InboxPage() {
           <button
             onClick={handleImport}
             disabled={importing}
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-meta text-muted-foreground transition-colors hover:bg-accent/20 hover:text-foreground disabled:opacity-50"
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-meta text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:opacity-50"
             title="Import from Obsidian"
           >
             <Download className="size-3" />
@@ -349,7 +349,7 @@ function InboxTaskRow({
 
   return (
     <div className={cn(
-      'group flex items-center gap-2 h-9 min-w-0 px-2 rounded-md transition-all duration-150 hover:bg-accent/30',
+      'group flex items-center gap-2 h-9 min-w-0 px-2 rounded-md transition-all duration-150 hover:bg-hover',
       isSelected && 'bg-accent-blue/10',
     )}>
       <SelectionCheckbox id={task.id} type="task" />
@@ -387,7 +387,7 @@ function InboxNoteRow({
 
   return (
     <div className={cn(
-      'group flex items-center gap-2 h-9 min-w-0 px-2 rounded-md transition-all duration-150 hover:bg-accent/30',
+      'group flex items-center gap-2 h-9 min-w-0 px-2 rounded-md transition-all duration-150 hover:bg-hover',
       isSelected && 'bg-accent-blue/10',
     )}>
       <SelectionCheckbox id={capture.id} type="capture" />
@@ -421,14 +421,14 @@ function InboxNoteRow({
       <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
         <button
           onClick={() => onMoveToDoc(capture)}
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-label text-muted-foreground hover:text-foreground hover:bg-accent/20"
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-label text-muted-foreground hover:text-foreground hover:bg-hover"
         >
           <FileText className="size-3" />
           Move to doc
         </button>
         <button
           onClick={onConvert}
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-label text-muted-foreground hover:text-foreground hover:bg-accent/20"
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-label text-muted-foreground hover:text-foreground hover:bg-hover"
         >
           <ArrowRight className="size-3" />
           Convert to task
@@ -489,7 +489,7 @@ function MoveToDocPicker({
         <div className="flex items-center gap-1 mb-2 flex-wrap">
           <button
             onClick={() => setSelectedFolderId(null)}
-            className={cn('rounded-md px-2 py-0.5 text-label transition-colors', !selectedFolderId ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent/20')}
+            className={cn('rounded-md px-2 py-0.5 text-label transition-colors', !selectedFolderId ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-hover')}
           >
             All
           </button>
@@ -497,7 +497,7 @@ function MoveToDocPicker({
             <button
               key={f.id}
               onClick={() => setSelectedFolderId(f.id)}
-              className={cn('rounded-md px-2 py-0.5 text-label transition-colors', selectedFolderId === f.id ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent/20')}
+              className={cn('rounded-md px-2 py-0.5 text-label transition-colors', selectedFolderId === f.id ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-hover')}
             >
               {f.name}
             </button>
@@ -515,7 +515,7 @@ function MoveToDocPicker({
               <button
                 key={doc.id}
                 onClick={() => handleSelect(doc.id)}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent/20 transition-colors"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-hover transition-colors"
               >
                 <FileText className="size-3 shrink-0 text-muted-foreground" />
                 <span className="truncate">{doc.title || 'Untitled'}</span>

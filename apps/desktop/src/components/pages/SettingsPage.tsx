@@ -182,8 +182,7 @@ function SettingFieldRow({
             <button
               type="button"
               onClick={() => setVisible(!visible)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-meta text-muted-foreground hover:text-foreground transition-colors"
-              tabIndex={-1}
+              className="absolute right-1 top-1/2 -translate-y-1/2 rounded-sm px-1 py-0.5 text-meta text-muted-foreground transition-colors duration-(--transition-fast) hover:text-foreground"
             >
               {visible ? 'Hide' : 'Show'}
             </button>
@@ -497,11 +496,14 @@ function CalendarsSection() {
           </div>
           <div className="space-y-1.5">
             <Label className="text-body-strong">Color</Label>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" role="radiogroup" aria-label="Calendar color">
               {FEED_COLORS.map((color) => (
                 <button
                   key={color}
                   type="button"
+                  role="radio"
+                  aria-checked={newColor === color}
+                  aria-label={`Color ${color}`}
                   className={`h-6 w-6 rounded-full border-2 transition-all ${
                     newColor === color
                       ? 'border-foreground scale-110'
@@ -873,7 +875,7 @@ function CaptureRoutesSection() {
             <div className="space-y-1.5">
               <Label className="text-body-strong">Linked doc</Label>
               <DropdownMenu>
-                <DropdownMenuTrigger className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-body hover:bg-accent/10 transition-colors">
+                <DropdownMenuTrigger className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-body hover:bg-hover transition-colors">
                   <span className={cn(formDocId ? 'text-foreground' : 'text-muted-foreground')}>
                     {formDocId ? docs.find((d) => d.id === formDocId)?.title ?? 'Unknown' : 'Auto-create on first use'}
                   </span>
@@ -896,11 +898,14 @@ function CaptureRoutesSection() {
 
           <div className="space-y-1.5">
             <Label className="text-body-strong">Color</Label>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" role="radiogroup" aria-label="Route color">
               {ROUTE_COLORS.map((color) => (
                 <button
                   key={color}
                   type="button"
+                  role="radio"
+                  aria-checked={formColor === color}
+                  aria-label={`Color ${color}`}
                   className={cn(
                     'h-6 w-6 rounded-full border-2 transition-all',
                     formColor === color ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',
@@ -914,13 +919,16 @@ function CaptureRoutesSection() {
 
           <div className="space-y-1.5">
             <Label className="text-body-strong">Icon</Label>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" role="radiogroup" aria-label="Route icon">
               {ROUTE_ICON_OPTIONS.map((iconName) => {
                 const Icon = ROUTE_ICON_MAP[iconName] ?? FileText
                 return (
                   <button
                     key={iconName}
                     type="button"
+                    role="radio"
+                    aria-checked={formIcon === iconName}
+                    aria-label={iconName}
                     className={cn(
                       'flex size-8 items-center justify-center rounded-md border transition-all',
                       formIcon === iconName ? 'border-foreground bg-accent' : 'border-border/30 hover:border-muted-foreground/50',
@@ -1791,7 +1799,7 @@ export function SettingsPage() {
           className="group rounded-lg border"
           onToggle={(e) => setMaintenanceOpen(e.currentTarget.open)}
         >
-          <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg px-4 py-2 text-body transition-colors duration-(--transition-fast) hover:bg-muted [&::-webkit-details-marker]:hidden">
+          <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg px-4 py-2 text-body transition-colors duration-(--transition-fast) hover:bg-hover [&::-webkit-details-marker]:hidden">
             Maintenance tools
             <ChevronDown className="size-3 text-muted-foreground transition-transform duration-(--transition-fast) group-open:rotate-180" />
           </summary>
@@ -1854,7 +1862,7 @@ export function SettingsPage() {
                   aria-current={isActive ? 'true' : undefined}
                   onClick={() => selectSection(s.id)}
                   className={cn(
-                    'block rounded-md px-2 py-1 transition-colors duration-(--transition-fast) hover:bg-muted hover:text-foreground',
+                    'block rounded-md px-2 py-1 transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground',
                     isActive ? 'text-foreground' : 'text-muted-foreground',
                   )}
                 >
