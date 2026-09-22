@@ -1,4 +1,4 @@
-use sqlx::{SqlitePool, Column, Row};
+use sqlx::{SqlitePool, SqliteConnection, Column, Row};
 use uuid::Uuid;
 use chrono::Utc;
 
@@ -68,6 +68,33 @@ pub async fn append_sync_log(
     .execute(pool)
     .await?;
 
+    Ok(())
+}
+
+pub async fn append_sync_log_tx(
+    conn: &mut SqliteConnection,
+    table_name: &str,
+    row_id: &str,
+    operation: &str,
+    changed_columns: Option<&str>,
+    snapshot: Option<&str>,
+) -> crate::Result<()> {
+    let device_id: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'device_id'")
+        .fetch_optional(&mut *conn).await?;
+    let device_id = match device_id {
+        Some(id) => id,
+        None => {
+            let id = Uuid::new_v4().to_string();
+            sqlx::query("INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES ('device_id', ?, datetime('now'))")
+                .bind(&id).execute(&mut *conn).await?;
+            id
+        }
+    };
+    sqlx::query("INSERT INTO sync_log (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)")
+        .bind(Uuid::new_v4().to_string()).bind(table_name).bind(row_id)
+        .bind(operation).bind(changed_columns).bind(snapshot).bind(device_id)
+        .bind(Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+        .execute(&mut *conn).await?;
     Ok(())
 }
 
@@ -1511,6 +1538,10 @@ pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
             } else {
                 None
             };
+            let pre_delete_sync_policy: Option<String> = if operation == "DELETE" && table_name == "local_tasks" {
+                sqlx::query_scalar("SELECT sync_policy FROM local_tasks WHERE id = ?")
+                    .bind(&row_id).fetch_optional(pool).await.ok().flatten()
+            } else { None };
 
             // Apply the change locally
             if let Err(e) = apply_remote_change(pool, &table_name, &row_id, &operation, snapshot.as_deref()).await {
@@ -1524,6 +1555,7 @@ pub async fn pull(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
                 &table_name,
                 &row_id,
                 pre_delete_external_id,
+                pre_delete_sync_policy,
                 operation == "DELETE",
             )
             .await;

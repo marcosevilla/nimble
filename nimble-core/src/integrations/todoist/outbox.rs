@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::{SqlitePool, SqliteConnection};
 
 #[derive(Debug, Clone)]
 pub struct OutboxRow {
@@ -18,29 +18,39 @@ pub async fn enqueue(
     op: &str,
     payload: serde_json::Value,
 ) -> crate::Result<()> {
+    let mut tx = pool.begin().await?;
+    enqueue_tx(&mut tx, object_type, local_id, op, payload).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn enqueue_tx(
+    conn: &mut SqliteConnection,
+    object_type: &str,
+    local_id: &str,
+    op: &str,
+    payload: serde_json::Value,
+) -> crate::Result<()> {
     if op == "delete" {
-        let mut tx = pool.begin().await?;
         let had_create: Option<(String,)> = sqlx::query_as(
             "SELECT id FROM todoist_outbox WHERE local_id = ? AND status = 'pending' AND op = 'create'",
         )
         .bind(local_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut *conn)
         .await?;
         sqlx::query("DELETE FROM todoist_outbox WHERE local_id = ? AND status = 'pending'")
             .bind(local_id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await?;
-        tx.commit().await?;
         if had_create.is_some() {
             return Ok(()); // row never existed remotely — nothing to delete there
         }
     } else if op == "update" {
-        let mut tx = pool.begin().await?;
         let existing: Option<(String, String)> = sqlx::query_as(
             "SELECT id, payload_json FROM todoist_outbox WHERE local_id = ? AND status = 'pending' AND op IN ('create','update') ORDER BY rowid DESC LIMIT 1",
         )
         .bind(local_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut *conn)
         .await?;
         if let Some((row_id, payload_json)) = existing {
             let mut merged: serde_json::Value =
@@ -53,12 +63,10 @@ pub async fn enqueue(
             sqlx::query("UPDATE todoist_outbox SET payload_json = ?, updated_at = datetime('now','localtime') WHERE id = ?")
                 .bind(merged.to_string())
                 .bind(row_id)
-                .execute(&mut *tx)
+                .execute(&mut *conn)
                 .await?;
-            tx.commit().await?;
             return Ok(());
         }
-        tx.commit().await?;
     }
     let temp_id = if op == "create" { Some(uuid::Uuid::new_v4().to_string()) } else { None };
     sqlx::query(
@@ -71,7 +79,7 @@ pub async fn enqueue(
     .bind(payload.to_string())
     .bind(uuid::Uuid::new_v4().to_string())
     .bind(temp_id)
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
     Ok(())
 }
