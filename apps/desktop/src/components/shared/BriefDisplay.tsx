@@ -100,7 +100,7 @@ function MarkdownContent({ content }: { content: string }) {
       elements.push(
         <div key={key++} className="flex items-center gap-2 py-0.5">
           {checked ? (
-            <Check className="size-3.5 shrink-0 text-green-500" />
+            <Check className="size-3.5 shrink-0 text-success" />
           ) : (
             <Square className="size-3.5 shrink-0 text-muted-foreground" />
           )}
@@ -119,7 +119,7 @@ function MarkdownContent({ content }: { content: string }) {
       elements.push(
         <div key={key++} className="flex items-center gap-2 py-0.5">
           {checked ? (
-            <Check className="size-3.5 shrink-0 text-green-500" />
+            <Check className="size-3.5 shrink-0 text-success" />
           ) : (
             <Square className="size-3.5 shrink-0 text-muted-foreground" />
           )}
