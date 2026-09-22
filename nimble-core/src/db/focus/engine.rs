@@ -672,26 +672,8 @@ impl FocusService {
                 note: _,
                 expected_due_date,
             } => {
-                if status == "complete" {
-                    let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-                        "SELECT due_date,recurrence_rule FROM local_tasks WHERE id=?",
-                    )
-                    .bind(&id)
-                    .fetch_optional(&mut *tx)
+                task_tx::ensure_expected_due_tx(&mut tx, &id, &status, expected_due_date.as_deref())
                     .await?;
-                    let Some((due, rule)) = row else {
-                        return Err(err("not_found", "task missing"));
-                    };
-                    if due.is_some()
-                        && rule
-                            .as_deref()
-                            .and_then(crate::recurrence::parse_rule)
-                            .is_some()
-                        && expected_due_date.as_ref() != due.as_ref()
-                    {
-                        return Err(err("stale_occurrence", "recurring due identity changed"));
-                    }
-                }
                 let effects = task_tx::set_status_tx(
                     &mut tx,
                     &id,
@@ -1555,6 +1537,7 @@ async fn reconcile_task_effects_inner_tx(
         .chain(effects.deleted.iter())
         .map(|t| t.id.as_str())
         .collect();
+    let mut touched = !remove.is_empty();
     if selected.as_ref().is_some_and(|oid| {
         remove.contains(oid)
             || (pause_affected_live
@@ -1563,6 +1546,7 @@ async fn reconcile_task_effects_inner_tx(
                     .any(|e| &e.occurrence_id == oid && affected.contains(e.task_id.as_str())))
     }) {
         pause_live_tx(conn, "task_changed", &stamp).await?;
+        touched = true;
     }
     for oid in &remove {
         let state = if deleted.iter().any(|tid| {
@@ -1584,13 +1568,21 @@ async fn reconcile_task_effects_inner_tx(
         selected = entries.first().map(|e| e.occurrence_id.clone());
     }
     for task in &effects.changed {
-        sqlx::query("UPDATE focus_occurrences SET title_snapshot=?,project_snapshot=? WHERE task_id=? AND state='open'")
-            .bind(&task.content).bind(&task.project_id).bind(&task.id).execute(&mut *conn).await?;
+        let snapshots = sqlx::query("UPDATE focus_occurrences SET title_snapshot=?,project_snapshot=? WHERE task_id=? AND state='open' AND (title_snapshot IS NOT ? OR project_snapshot IS NOT ?)")
+            .bind(&task.content).bind(&task.project_id).bind(&task.id)
+            .bind(&task.content).bind(&task.project_id).execute(&mut *conn).await?;
+        touched |= snapshots.rows_affected() > 0;
     }
+    // Queued/open tasks also count when nothing visible changed, so a focused
+    // task's edit still invalidates its surfaces; unrelated tasks never do.
+    touched |= entries.iter().any(|e| affected.contains(e.task_id.as_str()));
     if !remove.is_empty() {
         save_queue_tx(conn, &entries, selected.as_deref(), &stamp).await?;
     }
-    if !remove.is_empty() || !effects.changed.is_empty() || !effects.deleted.is_empty() {
+    // Only a change to focused work advances the engine revision (and hence
+    // a replica publication); unrelated task writes must not invalidate
+    // in-flight focus commands or re-publish the whole ledger.
+    if touched {
         sqlx::query("UPDATE focus_runtime SET engine_revision=engine_revision+1 WHERE id=1")
             .execute(&mut *conn)
             .await?;

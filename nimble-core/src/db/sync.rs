@@ -1528,6 +1528,7 @@ pub async fn pull_with_focus(
         // which is the failure mode this fix exists to remove.
         let mut chunk_cursor: Option<PullCursor> = None;
 
+        let mut parsed: Vec<RemoteRow> = Vec::with_capacity(rows.len());
         for row in &rows {
             let cols = match row.as_array() {
                 Some(c) => c,
@@ -1555,89 +1556,22 @@ pub async fn pull_with_focus(
             let table_name = match get_text(1) { Some(v) => v, None => continue };
             let row_id = match get_text(2) { Some(v) => v, None => continue };
             let operation = match get_text(3) { Some(v) => v, None => continue };
-            let changed_columns = get_text(4);
-            let snapshot = get_text(5);
             let remote_device_id = match get_text(6) { Some(v) => v, None => continue };
-
-            // LWW check: skip if local has a newer sync_log entry for the same (table_name, row_id)
-            if table_name != "focus_replica" && has_newer_local_change(pool, &table_name, &row_id, &timestamp).await.unwrap_or(false) {
-                log::info!("Skipping remote change {} — local has newer entry for {}/{}", entry_id, table_name, row_id);
-                // Still record the entry so we don't pull it again
-                let _ = sqlx::query(
-                    "INSERT OR IGNORE INTO sync_log (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp, synced)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)"
-                )
-                .bind(&entry_id)
-                .bind(&table_name)
-                .bind(&row_id)
-                .bind(&operation)
-                .bind(&changed_columns)
-                .bind(&snapshot)
-                .bind(&remote_device_id)
-                .bind(&timestamp)
-                .execute(pool)
-                .await;
-
-                continue;
-            }
-
-            // For local_tasks deletes, capture external_id BEFORE the row dies so the
-            // observer can still enqueue a Todoist delete op referencing it.
-            let pre_delete_external_id: Option<String> = if operation == "DELETE" && table_name == "local_tasks" {
-                sqlx::query_scalar("SELECT external_id FROM local_tasks WHERE id = ?")
-                    .bind(&row_id)
-                    .fetch_optional(pool)
-                    .await
-                    .ok()
-                    .flatten()
-            } else {
-                None
-            };
-            let pre_delete_sync_policy: Option<String> = if operation == "DELETE" && table_name == "local_tasks" {
-                sqlx::query_scalar("SELECT sync_policy FROM local_tasks WHERE id = ?")
-                    .bind(&row_id).fetch_optional(pool).await.ok().flatten()
-            } else { None };
-
-            // Apply the change locally
-            if let Err(e) = apply_remote_change_with_focus(pool, focus, &table_name, &row_id, &operation, snapshot.as_deref()).await {
-                log::warn!("Failed to apply remote change {}: {}", entry_id, e);
-                continue;
-            }
-
-            // Todoist mutation observer: best-effort, mirrors phone-originated changes
-            crate::integrations::todoist::observer::on_turso_row_applied(
-                pool,
-                &table_name,
-                &row_id,
-                pre_delete_external_id,
-                pre_delete_sync_policy,
-                operation == "DELETE",
-            )
-            .await;
-
-            // Vault: a note row applied from another device needs its device-local
-            // FTS entry refreshed (links/tags are re-derived when the Mac re-parses
-            // the file).
-            crate::vault::index::on_turso_row_applied(pool, &table_name, &row_id).await;
-
-            // Record entry in local sync_log as already synced (so we don't push it back)
-            let _ = sqlx::query(
-                "INSERT OR IGNORE INTO sync_log (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp, synced)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)"
-            )
-            .bind(&entry_id)
-            .bind(&table_name)
-            .bind(&row_id)
-            .bind(&operation)
-            .bind(&changed_columns)
-            .bind(&snapshot)
-            .bind(&remote_device_id)
-            .bind(&timestamp)
-            .execute(pool)
-            .await;
-
-            applied += 1;
+            parsed.push(RemoteRow {
+                entry_id,
+                table_name,
+                row_id,
+                operation,
+                changed_columns: get_text(4),
+                snapshot: get_text(5),
+                device_id: remote_device_id,
+                timestamp,
+            });
         }
+
+        // The whole fetched chunk applies in one local transaction (under the
+        // focus guard when live), after the fetch and before the next one.
+        applied += apply_remote_rows_with_focus(pool, focus, &parsed).await?;
 
         match chunk_cursor {
             Some(next) => {
@@ -1672,51 +1606,207 @@ pub async fn pull_with_focus(
     Ok(applied)
 }
 
-/// Apply one pulled row. `local_tasks` rows go through the focus task-write
-/// boundary (service guard when live, headless reconcile otherwise) so a
-/// remote completion, delete or edit updates the queue and ledger in the same
-/// transaction. Other tables apply as before.
-pub async fn apply_remote_change_with_focus(
+/// One row read from the remote sync_log.
+#[derive(Debug, Clone)]
+pub struct RemoteRow {
+    pub entry_id: String,
+    pub table_name: String,
+    pub row_id: String,
+    pub operation: String,
+    pub changed_columns: Option<String>,
+    pub snapshot: Option<String>,
+    pub device_id: String,
+    pub timestamp: String,
+}
+
+async fn record_pulled_entry(pool: &SqlitePool, row: &RemoteRow) {
+    let _ = sqlx::query(
+        "INSERT OR IGNORE INTO sync_log (id, table_name, row_id, operation, changed_columns, snapshot, device_id, timestamp, synced)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)"
+    )
+    .bind(&row.entry_id)
+    .bind(&row.table_name)
+    .bind(&row.row_id)
+    .bind(&row.operation)
+    .bind(&row.changed_columns)
+    .bind(&row.snapshot)
+    .bind(&row.device_id)
+    .bind(&row.timestamp)
+    .execute(pool)
+    .await;
+}
+
+/// Apply one fetched chunk of pulled rows, in order, inside ONE local
+/// transaction: the live focus guard when `focus` is given, otherwise a
+/// headless transaction. Task effects from every `local_tasks` row
+/// (including whole deleted subtrees, which parent_id cascades) are merged
+/// and reconciled once, so a chunk causes at most one focus revision and one
+/// replica publication — and none when it touches no focused task.
+///
+/// A row that fails to apply rolls back to its own savepoint and is skipped
+/// (the cursor still advances past it), as before. Post-apply observers and
+/// the local sync_log record run after the commit. Returns rows applied.
+pub async fn apply_remote_rows_with_focus(
     pool: &SqlitePool,
     focus: Option<&crate::db::focus::engine::FocusService>,
+    rows: &[RemoteRow],
+) -> crate::Result<u64> {
+    // Last-write-wins and pre-delete lookups read the pool, so they run
+    // before the transaction opens. Earlier rows of a chunk carry older
+    // timestamps, so evaluating LWW up front matches the old per-row order.
+    struct Planned<'r> {
+        row: &'r RemoteRow,
+        pre_delete_external_id: Option<String>,
+        pre_delete_sync_policy: Option<String>,
+    }
+    let mut planned: Vec<Planned> = Vec::with_capacity(rows.len());
+    for row in rows {
+        if row.table_name != "focus_replica"
+            && has_newer_local_change(pool, &row.table_name, &row.row_id, &row.timestamp).await.unwrap_or(false)
+        {
+            log::info!("Skipping remote change {} — local has newer entry for {}/{}", row.entry_id, row.table_name, row.row_id);
+            // Still record the entry so we don't pull it again
+            record_pulled_entry(pool, row).await;
+            continue;
+        }
+        // For local_tasks deletes, capture external_id BEFORE the row dies so the
+        // observer can still enqueue a Todoist delete op referencing it.
+        let deleting_task = row.operation == "DELETE" && row.table_name == "local_tasks";
+        let (pre_delete_external_id, pre_delete_sync_policy) = if deleting_task {
+            let found: Option<(Option<String>, Option<String>)> =
+                sqlx::query_as("SELECT external_id, sync_policy FROM local_tasks WHERE id = ?")
+                    .bind(&row.row_id)
+                    .fetch_optional(pool)
+                    .await
+                    .ok()
+                    .flatten();
+            found.unwrap_or((None, None))
+        } else {
+            (None, None)
+        };
+        planned.push(Planned { row, pre_delete_external_id, pre_delete_sync_policy });
+    }
+    if planned.is_empty() {
+        return Ok(0);
+    }
+
+    let has_tasks = planned.iter().any(|p| p.row.table_name == "local_tasks");
+    let select = format!("SELECT {} FROM local_tasks WHERE id = ?", crate::db::tasks::SELECT_COLS);
+    let mut write = crate::db::focus::task_write::TaskWrite::begin(pool, if has_tasks { focus } else { None }).await?;
+    let mut applied_rows: Vec<&Planned> = Vec::new();
+    let mut deleted: Vec<LocalTask> = Vec::new();
+    let mut changed_ids: Vec<String> = Vec::new();
+    let result: crate::Result<()> = async {
+        for plan in &planned {
+            let row = plan.row;
+            let conn = write.conn();
+            sqlx::query("SAVEPOINT pulled_row").execute(&mut *conn).await?;
+            let outcome: crate::Result<Vec<LocalTask>> = async {
+                let mut removed = Vec::new();
+                if row.table_name == "local_tasks" && row.operation == "DELETE" {
+                    removed = crate::db::task_tx::collect_subtree_tx(&mut *conn, &row.row_id).await?;
+                }
+                apply_row_conn(&mut *conn, &row.table_name, &row.row_id, &row.operation, row.snapshot.as_deref()).await?;
+                Ok(removed)
+            }
+            .await;
+            match outcome {
+                Ok(removed) => {
+                    sqlx::query("RELEASE pulled_row").execute(&mut *conn).await?;
+                    if row.table_name == "local_tasks" {
+                        if row.operation == "DELETE" {
+                            deleted.extend(removed);
+                        } else {
+                            changed_ids.push(row.row_id.clone());
+                        }
+                    }
+                    applied_rows.push(plan);
+                }
+                Err(e) => {
+                    log::warn!("Failed to apply remote change {}: {}", row.entry_id, e);
+                    sqlx::query("ROLLBACK TO pulled_row").execute(&mut *conn).await?;
+                    sqlx::query("RELEASE pulled_row").execute(&mut *conn).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(e) = result {
+        write.abandon().await?;
+        return Err(e);
+    }
+
+    // Merge effects against the final chunk state: a row that still exists
+    // is a change; one gone by the end of the chunk is a deletion.
+    let mut effects = crate::db::task_tx::TaskEffects::default();
+    let mut seen = std::collections::HashSet::new();
+    let conn = write.conn();
+    for id in &changed_ids {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        if let Some(task) = sqlx::query_as::<_, LocalTask>(&select).bind(id).fetch_optional(&mut *conn).await? {
+            effects.changed.push(task);
+        }
+    }
+    let mut deleted_seen = std::collections::HashSet::new();
+    for task in deleted {
+        if seen.contains(&task.id) {
+            let still_there: Option<String> = sqlx::query_scalar("SELECT id FROM local_tasks WHERE id = ?")
+                .bind(&task.id).fetch_optional(&mut *conn).await?;
+            if still_there.is_some() {
+                continue;
+            }
+        }
+        if deleted_seen.insert(task.id.clone()) {
+            effects.deleted.push(task);
+        }
+    }
+    effects.changed.retain(|t| !deleted_seen.contains(&t.id));
+    write.commit(&effects).await?;
+
+    for plan in &applied_rows {
+        let row = plan.row;
+        // Todoist mutation observer: best-effort, mirrors phone-originated changes
+        crate::integrations::todoist::observer::on_turso_row_applied(
+            pool,
+            &row.table_name,
+            &row.row_id,
+            plan.pre_delete_external_id.clone(),
+            plan.pre_delete_sync_policy.clone(),
+            row.operation == "DELETE",
+        )
+        .await;
+        // Vault: a note row applied from another device needs its device-local
+        // FTS entry refreshed (links/tags are re-derived when the Mac re-parses
+        // the file).
+        crate::vault::index::on_turso_row_applied(pool, &row.table_name, &row.row_id).await;
+        // Record entry in local sync_log as already synced (so we don't push it back)
+        record_pulled_entry(pool, row).await;
+    }
+    Ok(applied_rows.len() as u64)
+}
+
+/// Apply a single remote change to the local database (unit-test helper;
+/// production pulls go through `apply_remote_rows_with_focus`).
+/// Uses last-write-wins: the snapshot contains the full row state.
+#[cfg(test)]
+async fn apply_remote_change(
+    pool: &SqlitePool,
     table_name: &str,
     row_id: &str,
     operation: &str,
     snapshot: Option<&str>,
 ) -> crate::Result<()> {
-    if table_name != "local_tasks" {
-        return apply_remote_change(pool, table_name, row_id, operation, snapshot).await;
-    }
-    let select = format!("SELECT {} FROM local_tasks WHERE id = ?", crate::db::tasks::SELECT_COLS);
-    let mut write = crate::db::focus::task_write::TaskWrite::begin(pool, focus).await?;
-    let applied = async {
-        let conn = write.conn();
-        let before: Option<LocalTask> = sqlx::query_as(&select).bind(row_id).fetch_optional(&mut *conn).await?;
-        apply_row_conn(conn, table_name, row_id, operation, snapshot).await?;
-        let after: Option<LocalTask> = sqlx::query_as(&select).bind(row_id).fetch_optional(&mut *conn).await?;
-        let mut effects = crate::db::task_tx::TaskEffects::default();
-        match (after, before) {
-            (Some(task), _) => effects.changed.push(task),
-            (None, Some(task)) => effects.deleted.push(task),
-            (None, None) => {}
-        }
-        Ok::<_, crate::Error>(effects)
-    }
-    .await;
-    match applied {
-        Ok(effects) => write.commit(&effects).await,
-        Err(e) => {
-            // A poison row is skipped by the caller; it must not freeze the clock.
-            write.abandon().await?;
-            Err(e)
-        }
-    }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    apply_row_conn(&mut tx, table_name, row_id, operation, snapshot).await?;
+    tx.commit().await?;
+    Ok(())
 }
 
-/// Apply a single remote change to the local database.
-/// Uses last-write-wins: the snapshot contains the full row state.
-async fn apply_remote_change(
-    pool: &SqlitePool,
+async fn apply_row_conn(
+    conn: &mut sqlx::SqliteConnection,
     table_name: &str,
     row_id: &str,
     operation: &str,
@@ -1730,22 +1820,9 @@ async fn apply_remote_change(
         let payload: crate::db::focus::replica::FocusReplica = serde_json::from_str(
             row["payload_json"].as_str().ok_or_else(|| crate::Error::Other("missing focus payload".into()))?)
             .map_err(|_| crate::Error::Other("invalid focus payload".into()))?;
-        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-        crate::db::focus::replica::apply_focus_replica_tx(&mut tx, payload).await?;
-        tx.commit().await?;
+        crate::db::focus::replica::apply_focus_replica_tx(conn, payload).await?;
         return Ok(());
     }
-    let mut conn = pool.acquire().await?;
-    apply_row_conn(&mut conn, table_name, row_id, operation, snapshot).await
-}
-
-async fn apply_row_conn(
-    conn: &mut sqlx::SqliteConnection,
-    table_name: &str,
-    row_id: &str,
-    operation: &str,
-    snapshot: Option<&str>,
-) -> crate::Result<()> {
     match operation {
         "DELETE" => {
             let table = sanitize_table_name(table_name)?;

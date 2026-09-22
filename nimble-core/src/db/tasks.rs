@@ -327,7 +327,36 @@ pub async fn update_task_status_at(
     note: Option<&str>,
     today: chrono::NaiveDate,
 ) -> crate::Result<()> {
+    update_task_status_inner(pool, id, status, note, today, None).await
+}
+
+/// `update_task_status` that first enforces the recurring occurrence identity
+/// (`task_tx::ensure_expected_due_tx`) in the same transaction. Used where no
+/// focus service owns the write: the desktop headless path and `dt` with the
+/// app closed.
+pub async fn update_task_status_expected(
+    pool: &SqlitePool,
+    id: &str,
+    status: &str,
+    note: Option<&str>,
+    expected_due_date: Option<&str>,
+) -> crate::Result<()> {
+    update_task_status_inner(pool, id, status, note, chrono::Local::now().date_naive(),
+        Some(expected_due_date)).await
+}
+
+async fn update_task_status_inner(
+    pool: &SqlitePool,
+    id: &str,
+    status: &str,
+    note: Option<&str>,
+    today: chrono::NaiveDate,
+    expected_due_date: Option<Option<&str>>,
+) -> crate::Result<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    if let Some(expected) = expected_due_date {
+        crate::db::task_tx::ensure_expected_due_tx(&mut tx, id, status, expected).await?;
+    }
     let effects = crate::db::task_tx::set_status_tx(&mut tx, id, status, today, crate::db::task_tx::MutationPolicy::User).await?;
     crate::db::focus::engine::reconcile_task_effects_tx(&mut tx, &effects).await?;
     tx.commit().await?;

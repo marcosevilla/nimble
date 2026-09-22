@@ -517,3 +517,28 @@ async fn retry_without_the_app_is_refused_instead_of_written_directly() {
     assert_eq!(got["data"]["completed"], false);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn direct_complete_with_app_closed_refuses_an_already_advanced_occurrence() {
+    let root = fixture().await;
+    let (_, t) = run(&root, &["task", "create", "Recurring", "--due", "2030-01-01", "--recurrence", "every day"]);
+    let id = t["data"]["id"].as_str().unwrap().to_owned();
+    // First completion (app closed) advances the occurrence.
+    let (c, v) = run(&root, &["task", "complete", &id, "--expected-due", "2030-01-01"]);
+    assert_eq!(c, 0, "{v}");
+    assert_eq!(v["refresh"], "app_not_running");
+    let advanced = v["data"]["due_date"].as_str().unwrap().to_owned();
+    assert_ne!(advanced, "2030-01-01");
+    // A second completion naming the old occurrence must not advance again.
+    for args in [
+        vec!["task", "complete", id.as_str(), "--expected-due", "2030-01-01"],
+        vec!["task", "status", id.as_str(), "complete", "--expected-due", "2030-01-01"],
+    ] {
+        let (c, v) = run(&root, &args);
+        assert_eq!(c, 1, "{v}");
+        assert_eq!(v["error"]["code"], "stale_occurrence");
+    }
+    let (_, got) = run(&root, &["task", "get", &id]);
+    assert_eq!(got["data"]["due_date"], advanced.as_str());
+    std::fs::remove_dir_all(root).unwrap();
+}

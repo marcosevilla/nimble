@@ -152,22 +152,31 @@ export async function readFocusHistory(opts?: { cursor?: string; task_id?: strin
     const oid = row.occurrence_id
     if (typeof oid === 'string') imported.set(oid, (imported.get(oid) ?? 0) + row.duration_ms)
   }
-  const sortKey = (o: SettledFocusReplica['occurrences'][number]) =>
-    String(o.completed_at ?? o.created_at ?? '')
-  const rows = s.occurrences
-    .filter((o) => !opts?.task_id || o.original_task_id === opts.task_id)
-    .sort((a, b) => {
-      const ka = sortKey(a), kb = sortKey(b)
-      if (ka !== kb) return ka < kb ? 1 : -1
-      return a.id < b.id ? 1 : a.id > b.id ? -1 : 0
-    })
-  let start = 0
-  if (opts?.cursor) {
-    const at = rows.findIndex((o) => o.id === opts.cursor)
-    if (at < 0) throw new FocusRequestError('invalid', 'History cursor missing')
-    start = at + 1
+  // Mirrors FocusService::history (nimble-core db/focus/engine.rs): ORDER BY
+  // COALESCE(completed_at,created_at) DESC, id DESC; the cursor is an
+  // occurrence id looked up WITHOUT the task filter, and the next page is
+  // every row strictly after its (key, id) position. Both sides compare the
+  // RFC 3339/UUID ASCII strings bytewise.
+  type Occurrence = SettledFocusReplica['occurrences'][number]
+  const sortKey = (o: Occurrence) => String(o.completed_at ?? o.created_at ?? '')
+  const after = (o: Occurrence, key: string, id: string) => {
+    const k = sortKey(o)
+    return k < key || (k === key && o.id < id)
   }
-  const page = rows.slice(start, start + PAGE)
+  let rows = s.occurrences
+    .filter((o) => !opts?.task_id || o.original_task_id === opts.task_id)
+  if (opts?.cursor) {
+    const at = s.occurrences.find((o) => o.id === opts.cursor)
+    if (!at) throw new FocusRequestError('invalid', 'history cursor missing')
+    const key = sortKey(at)
+    rows = rows.filter((o) => after(o, key, at.id))
+  }
+  rows.sort((a, b) => {
+    const ka = sortKey(a), kb = sortKey(b)
+    if (ka !== kb) return ka < kb ? 1 : -1
+    return a.id < b.id ? 1 : a.id > b.id ? -1 : 0
+  })
+  const page = rows.slice(0, PAGE)
   return {
     rows: page.map((o) => {
       const total = s.totals[o.id] ?? 0
@@ -183,6 +192,6 @@ export async function readFocusHistory(opts?: { cursor?: string; task_id?: strin
         archived: Number(o.archived ?? 0) !== 0,
       }
     }),
-    next_cursor: rows.length > start + PAGE ? page[page.length - 1].id : null,
+    next_cursor: rows.length > PAGE ? page[page.length - 1].id : null,
   }
 }

@@ -145,6 +145,25 @@ fn expected_due(
         }
     }
 }
+/// Direct (app closed) status write with the same recurring occurrence
+/// identity check the app's focus service applies.
+async fn checked_status(
+    pool: &SqlitePool,
+    id: &str,
+    status: &str,
+    note: Option<&str>,
+    expected_due_date: Option<&str>,
+) -> Result<(), CliError> {
+    db::tasks::update_task_status_expected(pool, id, status, note, expected_due_date)
+        .await
+        .map_err(|e| match &e {
+            nimble_core::Error::Other(m) if m.starts_with("stale_occurrence") => CliError::new(
+                "stale_occurrence",
+                "The task's due date changed since it was read. Inspect it before completing again.",
+            ),
+            _ => e.into(),
+        })
+}
 fn due_flag(value: &Option<String>) -> String {
     format!(" --expected-due {}", value.as_deref().unwrap_or("none"))
 }
@@ -358,9 +377,10 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
                     task_domains(),
                 )
             }
-            Task::Complete { id, .. } => {
-                task(pool, &id).await?;
-                db::tasks::update_task_status(pool, &id, "complete", None).await?;
+            Task::Complete { id, expected_due: flag } => {
+                let current = task(pool, &id).await?;
+                let due = expected_due(&flag, &current)?;
+                checked_status(pool, &id, "complete", None, due.as_deref()).await?;
                 result(task(pool, &id).await?, task_domains())
             }
             Task::Reopen { id } => {
@@ -368,9 +388,10 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
                 db::tasks::update_task_status(pool, &id, "todo", None).await?;
                 result(task(pool, &id).await?, task_domains())
             }
-            Task::Status { id, status, reason, .. } => {
-                task(pool, &id).await?;
-                db::tasks::update_task_status(pool, &id, &status, reason.as_deref()).await?;
+            Task::Status { id, status, reason, expected_due: flag } => {
+                let current = task(pool, &id).await?;
+                let due = if status == "complete" { expected_due(&flag, &current)? } else { None };
+                checked_status(pool, &id, &status, reason.as_deref(), due.as_deref()).await?;
                 result(task(pool, &id).await?, task_domains())
             }
             Task::Delete { id } => {

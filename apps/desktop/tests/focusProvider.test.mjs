@@ -191,6 +191,40 @@ test('web snapshot and history are real settled replica reads', async () => {
   assert.deepEqual(filtered.rows.map((r) => r.title), ['Done before'])
 })
 
+test('web history pages exactly like FocusService::history', async () => {
+  // 52 occurrences: pairs share a timestamp so the id tie-break matters.
+  const occurrences = []
+  for (let n = 0; n < 52; n++) {
+    const stamp = `2026-09-${String(10 + Math.floor(n / 2)).padStart(2, '0')}T00:00:00Z`
+    occurrences.push({ id: `occ-${String(n).padStart(2, '0')}`, task_id: null,
+      original_task_id: n % 2 ? 'odd' : 'even', title_snapshot: `T${n}`, generation: 1,
+      state: 'completed', created_at: stamp, completed_at: n === 51 ? null : stamp, archived: 0 })
+  }
+  const big = { ...replica, queue: [], selected_occurrence_id: null, occurrences, sessions: [],
+    import_totals: [], totals: {} }
+  globalThis.fetch = async (_url, init) => {
+    const sql = JSON.parse(init.body).requests[0].stmt.sql
+    return pipelineReply(sql.includes('focus_replica') ? [[{ payload_json: JSON.stringify(big) }]] : [[]])
+  }
+  const web = harness.createTursoProvider()
+  // SQL: ORDER BY COALESCE(completed_at,created_at) DESC, id DESC LIMIT 51.
+  const expected = [...occurrences].sort((a, b) => {
+    const ka = a.completed_at ?? a.created_at, kb = b.completed_at ?? b.created_at
+    return ka === kb ? (a.id < b.id ? 1 : -1) : (ka < kb ? 1 : -1)
+  }).map((o) => o.id)
+  const first = await web.focus.history()
+  assert.deepEqual(first.rows.map((r) => r.occurrence_id), expected.slice(0, 50))
+  assert.equal(first.next_cursor, expected[49])
+  const second = await web.focus.history({ cursor: first.next_cursor })
+  assert.deepEqual(second.rows.map((r) => r.occurrence_id), expected.slice(50))
+  assert.equal(second.next_cursor, null)
+  // Cursor is positional, looked up without the task filter (as in SQL).
+  const odd = await web.focus.history({ task_id: 'odd', cursor: 'occ-40' })
+  assert.deepEqual(odd.rows.map((r) => r.occurrence_id),
+    expected.slice(expected.indexOf('occ-40') + 1).filter((id) => Number(id.slice(4)) % 2 === 1))
+  await assert.rejects(web.focus.history({ cursor: 'missing' }), (e) => e.code === 'invalid')
+})
+
 test('web snapshot without a synced replica is a typed not_found, not an empty queue', async () => {
   globalThis.fetch = async () => pipelineReply([[]])
   const web = harness.createTursoProvider()

@@ -489,39 +489,91 @@ pub async fn set_status_tx(
     Ok(effects)
 }
 
+/// Completing a recurring occurrence must name the due date the caller saw
+/// (`None` = no date). If a parseable-rule task's due date has since moved —
+/// e.g. another device already advanced it — completion is refused as
+/// `stale_occurrence` instead of advancing it twice. Other statuses pass.
+/// Shared by the focus service, the desktop headless path and `dt`.
+pub async fn ensure_expected_due_tx(
+    conn: &mut SqliteConnection,
+    id: &str,
+    status: &str,
+    expected_due_date: Option<&str>,
+) -> crate::Result<()> {
+    if status != "complete" {
+        return Ok(());
+    }
+    let row: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT due_date,recurrence_rule FROM local_tasks WHERE id=?")
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    let Some((due, rule)) = row else {
+        return Err(crate::Error::Other("not_found: task missing".into()));
+    };
+    if due.is_some()
+        && rule.as_deref().and_then(crate::recurrence::parse_rule).is_some()
+        && expected_due_date != due.as_deref()
+    {
+        return Err(crate::Error::Other(
+            "stale_occurrence: recurring due identity changed".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// A task and every descendant (parent_id cascades), deepest first and the
+/// root last, with labels loaded. Deleting the root cascades through all of
+/// them, so every caller that deletes must report this whole set as deleted
+/// focus effects; reversed, it is a valid parent-before-child restore order.
+pub async fn collect_subtree_tx(
+    conn: &mut SqliteConnection,
+    id: &str,
+) -> crate::Result<Vec<LocalTask>> {
+    let mut top_down: Vec<LocalTask> =
+        sqlx::query_as(&format!("SELECT {SELECT_COLS} FROM local_tasks WHERE id=?"))
+            .bind(id)
+            .fetch_all(&mut *conn)
+            .await?;
+    let mut next = 0;
+    while next < top_down.len() {
+        let parent = top_down[next].id.clone();
+        let children: Vec<LocalTask> = sqlx::query_as(&format!(
+            "SELECT {SELECT_COLS} FROM local_tasks WHERE parent_id=? ORDER BY rowid"
+        ))
+        .bind(&parent)
+        .fetch_all(&mut *conn)
+        .await?;
+        for child in children {
+            // Guard against a corrupt parent cycle.
+            if !top_down.iter().any(|t| t.id == child.id) {
+                top_down.push(child);
+            }
+        }
+        next += 1;
+    }
+    for task in &mut top_down {
+        task.labels = sqlx::query_scalar("SELECT label_id FROM task_labels WHERE task_id=?")
+            .bind(&task.id).fetch_all(&mut *conn).await?;
+    }
+    top_down.reverse();
+    Ok(top_down)
+}
+
 pub async fn delete_task_tx(
     conn: &mut SqliteConnection,
     id: &str,
     policy: MutationPolicy,
 ) -> crate::Result<TaskEffects> {
     let mut effects = TaskEffects::default();
-    let parent: Option<LocalTask> =
-        sqlx::query_as(&format!("SELECT {SELECT_COLS} FROM local_tasks WHERE id=?"))
-            .bind(id)
-            .fetch_optional(&mut *conn)
+    effects.deleted = collect_subtree_tx(conn, id).await?;
+    // Deepest first, so no row is removed by cascade before it is accounted for.
+    for task in &effects.deleted {
+        sqlx::query("DELETE FROM local_tasks WHERE id=?")
+            .bind(&task.id)
+            .execute(&mut *conn)
             .await?;
-    let children: Vec<LocalTask> = sqlx::query_as(&format!(
-        "SELECT {SELECT_COLS} FROM local_tasks WHERE parent_id=?"
-    ))
-    .bind(id)
-    .fetch_all(&mut *conn)
-    .await?;
-    effects.deleted.extend(children);
-    if let Some(parent) = parent {
-        effects.deleted.push(parent);
     }
-    for task in &mut effects.deleted {
-        task.labels = sqlx::query_scalar("SELECT label_id FROM task_labels WHERE task_id=?")
-            .bind(&task.id).fetch_all(&mut *conn).await?;
-    }
-    sqlx::query("DELETE FROM local_tasks WHERE parent_id=?")
-        .bind(id)
-        .execute(&mut *conn)
-        .await?;
-    sqlx::query("DELETE FROM local_tasks WHERE id=?")
-        .bind(id)
-        .execute(&mut *conn)
-        .await?;
     if policy != MutationPolicy::Remote {
         for task in &effects.deleted {
             sync::append_sync_log_tx(conn, "local_tasks", &task.id, "DELETE", None, None).await?;

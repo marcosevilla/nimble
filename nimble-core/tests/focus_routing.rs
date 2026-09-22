@@ -34,6 +34,50 @@ async fn history_total(h: &fixture::Harness, occurrence: &str) -> u64 {
         .total_ms
 }
 
+fn remote_row(table: &str, row_id: &str, op: &str, snapshot: Option<String>) -> nimble_core::db::sync::RemoteRow {
+    nimble_core::db::sync::RemoteRow {
+        entry_id: uuid::Uuid::new_v4().to_string(),
+        table_name: table.into(),
+        row_id: row_id.into(),
+        operation: op.into(),
+        changed_columns: None,
+        snapshot,
+        device_id: "remote-device".into(),
+        timestamp: "2099-01-01T00:00:00Z".into(),
+    }
+}
+
+async fn task_row(h: &fixture::Harness, id: &str) -> serde_json::Value {
+    let task = nimble_core::db::tasks::get_local_tasks(&h.pool, None, None, true)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.id == id)
+        .unwrap();
+    serde_json::from_str(&nimble_core::db::sync::task_sync_snapshot(&task)).unwrap()
+}
+
+async fn replica_rows(h: &fixture::Harness) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM sync_log WHERE table_name='focus_replica'")
+        .fetch_one(&h.pool)
+        .await
+        .unwrap()
+}
+
+async fn subtask(h: &fixture::Harness, title: &str, parent: &str) -> String {
+    nimble_core::db::tasks::create_local_task(
+        &h.pool,
+        nimble_core::types::CreateTaskInput {
+            content: title.into(),
+            parent_id: Some(parent.into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap()
+    .id
+}
+
 async fn mark_todoist(h: &fixture::Harness, task_id: &str, external: &str) {
     sqlx::query("UPDATE local_tasks SET external_source='todoist', external_id=? WHERE id=?")
         .bind(external)
@@ -117,13 +161,10 @@ async fn turso_remote_task_edit_keeps_owned_session_running() {
     let mut row: serde_json::Value =
         serde_json::from_str(&nimble_core::db::sync::task_sync_snapshot(&task)).unwrap();
     row["content"] = json!("New title");
-    nimble_core::db::sync::apply_remote_change_with_focus(
+    nimble_core::db::sync::apply_remote_rows_with_focus(
         &h.pool,
         Some(&h.service),
-        "local_tasks",
-        &task_id,
-        "UPDATE",
-        Some(&row.to_string()),
+        &[remote_row("local_tasks", &task_id, "UPDATE", Some(row.to_string()))],
     )
     .await
     .unwrap();
@@ -153,13 +194,10 @@ async fn turso_remote_completion_removes_queue_entry_under_guard() {
         serde_json::from_str(&nimble_core::db::sync::task_sync_snapshot(&task)).unwrap();
     row["completed"] = json!(1);
     row["status"] = json!("complete");
-    nimble_core::db::sync::apply_remote_change_with_focus(
+    nimble_core::db::sync::apply_remote_rows_with_focus(
         &h.pool,
         Some(&h.service),
-        "local_tasks",
-        &task_id,
-        "UPDATE",
-        Some(&row.to_string()),
+        &[remote_row("local_tasks", &task_id, "UPDATE", Some(row.to_string()))],
     )
     .await
     .unwrap();
@@ -220,16 +258,14 @@ async fn failed_incoming_row_rolls_back_without_freezing_the_live_clock() {
     let occurrence = start_running(&h, &task_id).await;
     h.clock.advance(6_000);
     let poison = json!({"id": task_id, "no_such_column": 1}).to_string();
-    let result = nimble_core::db::sync::apply_remote_change_with_focus(
+    let result = nimble_core::db::sync::apply_remote_rows_with_focus(
         &h.pool,
         Some(&h.service),
-        "local_tasks",
-        &task_id,
-        "UPDATE",
-        Some(&poison),
+        &[remote_row("local_tasks", &task_id, "UPDATE", Some(poison))],
     )
     .await;
-    assert!(result.is_err());
+    // A poison row is skipped (logged), exactly as before batching.
+    assert_eq!(result.unwrap(), 0);
     // The row failed, the settle survived: still running, 6s credited, and
     // the next command commits without a recovery pause.
     let after = h.snapshot().await;
@@ -238,4 +274,142 @@ async fn failed_incoming_row_rolls_back_without_freezing_the_live_clock() {
     assert!(after.recovery_reason.is_none());
     h.send(FocusAction::Pause).await.unwrap();
     assert_eq!(h.snapshot().await.totals[&occurrence], 6_000);
+}
+
+#[tokio::test]
+async fn pulled_chunk_of_unrelated_rows_neither_bumps_nor_publishes() {
+    let h = fixture::Harness::new().await;
+    let focused = h.task("Focused").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![focused.clone()],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let mut rows = vec![];
+    for n in 0..5 {
+        let id = h.task(&format!("Other {n}")).await;
+        let mut row = task_row(&h, &id).await;
+        row["content"] = json!(format!("Other {n} edited"));
+        rows.push(remote_row("local_tasks", &id, "UPDATE", Some(row.to_string())));
+    }
+    let (revision, published) = (h.snapshot().await.engine_revision, replica_rows(&h).await);
+    let applied = nimble_core::db::sync::apply_remote_rows_with_focus(&h.pool, Some(&h.service), &rows)
+        .await
+        .unwrap();
+    assert_eq!(applied, 5);
+    assert_eq!(h.snapshot().await.engine_revision, revision);
+    assert_eq!(replica_rows(&h).await, published);
+    // The same holds for a Todoist pull touching only unfocused tasks.
+    let other = h.task("Todoist other").await;
+    mark_todoist(&h, &other, "R9").await;
+    let resp: nimble_core::integrations::todoist::client::SyncResponse =
+        serde_json::from_value(json!({"sync_token": "T9", "items": [
+            {"id": "R9", "content": "Todoist other", "checked": false, "is_deleted": true}
+        ]}))
+        .unwrap();
+    nimble_core::integrations::todoist::sync_loop::apply_pull_with_focus(&h.pool, &resp, Some(&h.service))
+        .await
+        .unwrap();
+    assert_eq!(h.snapshot().await.engine_revision, revision);
+    assert_eq!(replica_rows(&h).await, published);
+}
+
+#[tokio::test]
+async fn pulled_chunk_touching_focus_advances_once_and_publishes_once() {
+    let h = fixture::Harness::new().await;
+    let focused = h.task("Focused").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![focused.clone()],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let mut rows = vec![];
+    for n in 0..3 {
+        let id = h.task(&format!("Other {n}")).await;
+        let mut row = task_row(&h, &id).await;
+        row["priority"] = json!(3);
+        rows.push(remote_row("local_tasks", &id, "UPDATE", Some(row.to_string())));
+    }
+    for title in ["Renamed once", "Renamed twice"] {
+        let mut row = task_row(&h, &focused).await;
+        row["content"] = json!(title);
+        rows.push(remote_row("local_tasks", &focused, "UPDATE", Some(row.to_string())));
+    }
+    let (revision, published) = (h.snapshot().await.engine_revision, replica_rows(&h).await);
+    nimble_core::db::sync::apply_remote_rows_with_focus(&h.pool, Some(&h.service), &rows)
+        .await
+        .unwrap();
+    assert_eq!(h.snapshot().await.engine_revision, revision + 1);
+    assert_eq!(replica_rows(&h).await, published + 1);
+    let title: String = sqlx::query_scalar("SELECT title_snapshot FROM focus_occurrences WHERE task_id=?")
+        .bind(&focused)
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+    assert_eq!(title, "Renamed twice");
+}
+
+async fn live_grandchild(h: &fixture::Harness) -> (String, String, String, String) {
+    let grandparent = h.task("Grandparent").await;
+    let parent = subtask(h, "Parent", &grandparent).await;
+    let child = subtask(h, "Child", &parent).await;
+    let occurrence = start_running(h, &child).await;
+    (grandparent, parent, child, occurrence)
+}
+
+async fn assert_subtree_left_focus(h: &fixture::Harness, occurrence: &str) {
+    let after = h.snapshot().await;
+    assert!(after.queue.is_empty(), "cascaded subtask leaves the queue");
+    assert!(after.session.is_none(), "live session on the subtask ends");
+    let state: String = sqlx::query_scalar("SELECT state FROM focus_occurrences WHERE id=?")
+        .bind(occurrence)
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+    assert_eq!(state, "removed");
+}
+
+#[tokio::test]
+async fn turso_delete_of_ancestor_reconciles_the_cascaded_live_subtask() {
+    for depth in ["parent", "grandparent"] {
+        let h = fixture::Harness::new().await;
+        let (grandparent, parent, _child, occurrence) = live_grandchild(&h).await;
+        let target = if depth == "parent" { parent } else { grandparent };
+        nimble_core::db::sync::apply_remote_rows_with_focus(
+            &h.pool,
+            Some(&h.service),
+            &[remote_row("local_tasks", &target, "DELETE", None)],
+        )
+        .await
+        .unwrap();
+        assert_subtree_left_focus(&h, &occurrence).await;
+    }
+}
+
+#[tokio::test]
+async fn todoist_delete_of_ancestor_reconciles_the_cascaded_live_subtask() {
+    for depth in ["parent", "grandparent"] {
+        let h = fixture::Harness::new().await;
+        let (grandparent, parent, _child, occurrence) = live_grandchild(&h).await;
+        let target = if depth == "parent" { parent } else { grandparent };
+        mark_todoist(&h, &target, "RD").await;
+        let resp: nimble_core::integrations::todoist::client::SyncResponse =
+            serde_json::from_value(json!({"sync_token": "TD", "items": [
+                {"id": "RD", "content": "x", "checked": false, "is_deleted": true}
+            ]}))
+            .unwrap();
+        let report = nimble_core::integrations::todoist::sync_loop::apply_pull_with_focus(
+            &h.pool,
+            &resp,
+            Some(&h.service),
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.deleted, if depth == "parent" { 2 } else { 3 });
+        assert_subtree_left_focus(&h, &occurrence).await;
+    }
 }

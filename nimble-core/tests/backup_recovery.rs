@@ -138,9 +138,21 @@ async fn both_routes_round_trip_without_changing_source() {
             actual.format,
             std::fs::read(generation.directory().join("export/format.json")).unwrap()
         );
+        // Both routes leave the restored copy inert: the v21 activation
+        // marker (Task 4) is the only reason settings is non-empty on export.
+        let marker: Vec<(String, String)> =
+            sqlx::query_as("SELECT key,value FROM settings WHERE key='restored_activation_required'")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(marker, vec![("restored_activation_required".to_string(), "1".to_string())], "{route}");
         if route == "export" {
+            let settings: Vec<(String, String)> = sqlx::query_as("SELECT key,value FROM settings")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+            assert_eq!(settings, marker, "portable export restores no other settings");
             for table in [
-                "settings",
                 "todoist_outbox",
                 "integration_sync_state",
                 "sync_log",

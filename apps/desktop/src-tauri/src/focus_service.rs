@@ -267,28 +267,15 @@ async fn execute_headless(
             Some(nimble_core::db::tasks::update_local_task(pool, &id, input).await.map_err(map)?)
         }
         NativeTaskAction::SetStatus { id, status, note, expected_due_date } => {
-            if status == "complete" {
-                // Same occurrence identity rule as the service, best effort
-                // without its lock (no live timing exists on this path).
-                let row: Option<(Option<String>, Option<String>)> =
-                    sqlx::query_as("SELECT due_date,recurrence_rule FROM local_tasks WHERE id=?")
-                        .bind(&id)
-                        .fetch_optional(pool)
-                        .await
-                        .map_err(|e| map(e.into()))?;
-                let Some((due, rule)) = row else {
-                    return Err(error(FocusErrorCode::NotFound, "task missing"));
-                };
-                if due.is_some()
-                    && rule.as_deref().and_then(nimble_core::recurrence::parse_rule).is_some()
-                    && expected_due_date != due
-                {
-                    return Err(stale_due());
-                }
-            }
-            nimble_core::db::tasks::update_task_status(pool, &id, &status, note.as_deref())
-                .await
-                .map_err(map)?;
+            // Same occurrence identity rule as the service, in one transaction.
+            nimble_core::db::tasks::update_task_status_expected(
+                pool, &id, &status, note.as_deref(), expected_due_date.as_deref(),
+            )
+            .await
+            .map_err(|e| {
+                let e = map(e);
+                if matches!(e.code, FocusErrorCode::StaleOccurrence) { stale_due() } else { e }
+            })?;
             None
         }
         NativeTaskAction::Delete { id } => {

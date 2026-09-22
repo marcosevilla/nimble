@@ -624,23 +624,15 @@ async fn apply_pull_tx(
                 // per-item deletes for descendants too, but if that
                 // assumption is ever violated, don't leave local children
                 // orphaned with a parent_id pointing at a now-deleted row.
-                let children: Vec<crate::types::LocalTask> = sqlx::query_as(&format!(
-                    "SELECT {} FROM local_tasks WHERE parent_id = ?",
-                    crate::db::tasks::SELECT_COLS
-                ))
-                .bind(&t.id)
-                .fetch_all(&mut *tx)
-                .await?;
-                for child in children {
-                    sqlx::query("DELETE FROM local_tasks WHERE id = ?").bind(&child.id).execute(&mut *tx).await?;
-                    logged.push((child.id.clone(), "DELETE"));
-                    deleted_tasks.push(child);
+                // The whole subtree: parent_id cascades, so grandchildren
+                // vanish too and must reach focus reconciliation.
+                let subtree = crate::db::task_tx::collect_subtree_tx(&mut *tx, &t.id).await?;
+                for task in subtree {
+                    sqlx::query("DELETE FROM local_tasks WHERE id = ?").bind(&task.id).execute(&mut *tx).await?;
+                    logged.push((task.id.clone(), "DELETE"));
+                    deleted_tasks.push(task);
                     report.deleted += 1;
                 }
-                sqlx::query("DELETE FROM local_tasks WHERE id = ?").bind(&t.id).execute(&mut *tx).await?;
-                logged.push((t.id.clone(), "DELETE"));
-                deleted_tasks.push(t);
-                report.deleted += 1;
             }
             continue;
         }
