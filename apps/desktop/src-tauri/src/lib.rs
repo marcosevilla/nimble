@@ -442,6 +442,7 @@ pub fn run() {
             commands::reminders::reminder_request_permission,
             commands::reminders::reminder_list_catch_up,
             commands::reminders::reminder_acknowledge,
+            commands::google_calendar::google_calendar_configure,
             commands::google_calendar::google_calendar_connect,
             commands::google_calendar::google_calendar_disconnect,
             commands::google_calendar::google_calendar_status,

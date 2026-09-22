@@ -39,7 +39,7 @@ export function ReminderSection() {
     <form className="space-y-2" onSubmit={e => { e.preventDefault(); void saveTimezone() }}>
       <label htmlFor="reminder-zone" className="text-body">Reminder timezone</label>
       <div className="flex gap-2"><Input id="reminder-zone" value={timezone} onChange={e => setTimezone(e.target.value)} placeholder="America/Los_Angeles" disabled={busy} />
-        <Button size="sm" variant="outline" disabled={busy || !timezone}>Save timezone</Button></div>
+        <Button type="submit" size="sm" variant="outline" disabled={busy || !timezone}>Save timezone</Button></div>
       <Meta as="p">Kept when you travel. Changing this timezone changes when your timed reminders fire.</Meta>
     </form>
   </section>
