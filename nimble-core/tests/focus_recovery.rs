@@ -814,3 +814,63 @@ async fn abandoned_task_write_guard_freezes_uncommitted_time() {
     assert_eq!(recovered.totals[&oid], 10_000);
     assert_eq!(recovered.session.unwrap().status, FocusStatus::Paused);
 }
+
+#[tokio::test]
+async fn interrupt_after_abandoned_task_write_keeps_last_checkpoint() {
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![a],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    h.advance(10_000).await;
+    h.clock.advance(5_000);
+    drop(h.service.begin_task_write().await.unwrap());
+    let recovered = h.service.interrupt("sleep").await.unwrap();
+    assert_eq!(recovered.totals[&oid], 10_000);
+    assert_eq!(recovered.session.unwrap().status, FocusStatus::Paused);
+}
+
+#[tokio::test]
+async fn failed_task_write_open_recovers_without_crediting_sample() {
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![a],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    h.advance(10_000).await;
+    h.clock.advance(5_000);
+    sqlx::query("CREATE TRIGGER fail_task_write_settle BEFORE UPDATE OF work_ms ON focus_sessions BEGIN SELECT RAISE(ABORT, 'synthetic task write disk error'); END")
+        .execute(&h.pool)
+        .await
+        .unwrap();
+    assert!(h.service.begin_task_write().await.is_err());
+    let recovered = h.snapshot().await;
+    assert_eq!(recovered.totals[&oid], 10_000);
+    assert_eq!(recovered.session.unwrap().status, FocusStatus::Paused);
+    assert!(recovered
+        .recovery_reason
+        .unwrap()
+        .contains("storage failure"));
+    h.advance(20_000).await;
+    assert_eq!(h.snapshot().await.totals[&oid], 10_000);
+}

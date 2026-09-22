@@ -6,6 +6,7 @@ use sqlx::SqlitePool;
 pub struct Harness {
     pub pool: SqlitePool,
     pub service: FocusService,
+    #[allow(dead_code)] // Some focused test binaries do not drive the manual clock.
     pub clock: std::sync::Arc<ManualClock>,
 }
 

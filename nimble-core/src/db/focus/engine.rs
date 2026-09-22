@@ -272,19 +272,35 @@ impl FocusService {
     pub async fn begin_task_write(&self) -> crate::Result<FocusTaskWriteGuard<'_>> {
         let mut anchor = self.lock.lock().await;
         if anchor.frozen {
-            return Err(err("storage", "focus clock frozen after storage failure"));
+            self.recover_storage_failure(&mut anchor).await;
+            return Err(err(
+                "storage",
+                "focus clock recovered at checkpoint; refresh before task write",
+            ));
         }
         let sampled_ms = self.clock.elapsed_ms();
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        ensure_process_tx(&mut tx, anchor.process_generation).await?;
-        if let Err(e) = settle_tx(
-            &mut tx,
-            sampled_ms.saturating_sub(anchor.sampled_ms),
-            &now(),
-        )
-        .await
-        {
-            anchor.frozen = true;
+        let mut tx = match self.pool.begin_with("BEGIN IMMEDIATE").await {
+            Ok(tx) => tx,
+            Err(e) => {
+                self.recover_storage_failure(&mut anchor).await;
+                return Err(e.into());
+            }
+        };
+        let result = async {
+            ensure_process_tx(&mut tx, anchor.process_generation).await?;
+            settle_tx(
+                &mut tx,
+                sampled_ms.saturating_sub(anchor.sampled_ms),
+                &now(),
+            )
+            .await
+        }
+        .await;
+        if let Err(e) = result {
+            drop(tx);
+            if is_storage_error(&e) {
+                self.recover_storage_failure(&mut anchor).await;
+            }
             return Err(e);
         }
         Ok(FocusTaskWriteGuard {
@@ -491,6 +507,14 @@ impl FocusService {
         guard: &mut Anchor,
         reason: &str,
     ) -> crate::Result<FocusSnapshot> {
+        if guard.frozen {
+            self.recover_storage_failure(guard).await;
+            if guard.frozen {
+                return Err(err("storage", "focus recovery persistence unavailable"));
+            }
+            let mut conn = self.pool.acquire().await?;
+            return snapshot_tx(&mut conn).await;
+        }
         let sampled = self.clock.elapsed_ms();
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         ensure_process_tx(&mut tx, guard.process_generation).await?;
