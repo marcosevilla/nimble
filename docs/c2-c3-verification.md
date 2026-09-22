@@ -107,3 +107,7 @@ Regression evidence: transport, client/profile storage isolation, public-ID-only
 Live acceptance still requires entering the existing Desktop client's secret into the installed app, reconnecting Google, verifying the dedicated Nimble calendar and testing a phone alert. The existing Google project/client must be reused. Never paste the secret into chat or documentation.
 
 Handoff: Google Cloud client details > Information and summary shows that viewing/downloading existing secrets is no longer available. The existing Nimble Mac client remains intact. Its Add client secret control and Nimble’s new masked field are open for Marco; user must create/copy the secret because credential changes require browser handoff. No new secret was created or copied.
+
+## Google live connection verified — 2026-09-21
+
+Marco completed the credential/consent handoff. Native Settings reports Connected to Nimble and the credential saved in Keychain. Invoked Google Sync now; status remained connected with no error. Read-only SQLite confirms calendar configured, timezone America/Los_Angeles, sync cursor initialized, last_synced_at 2026-09-22T05:31:58.782931+00:00, null error_code and retry_after. Calendar links are empty, so this verifies account/calendar connection and initial sync, not phone notifications or two-way task edits. No secret/token values were read or logged.
