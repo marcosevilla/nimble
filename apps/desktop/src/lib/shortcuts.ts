@@ -117,6 +117,7 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Docs', keys: '↑ / ↓', label: 'Move through the tree' },
   { section: 'Docs', keys: '← / →', label: 'Collapse / expand a folder' },
   { section: 'Docs', keys: 'Enter', label: 'Open the focused document or note' },
+  { section: 'Docs', keys: '⌫', label: 'Delete the focused document or folder (asks first)' },
   { section: 'Docs', keys: 'N', label: 'New document' },
   { section: 'Docs', keys: '/', label: 'Search docs and vault (⌘K /doc searches native docs only)' },
 

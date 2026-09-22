@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useDocsStore } from '@/stores/docsStore'
 import { useDataProvider } from '@/services/provider-context'
 import { TiptapEditor } from './TiptapEditor'
 import { Button } from '@/components/ui/button'
 import { Meta } from '@/components/shared/typography'
-import { ExternalLink } from 'lucide-react'
+import { splitFrontmatter } from '@/lib/frontmatter'
+import { ExternalLink, Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import type { VaultNoteSummary } from '@nimble/types'
 
@@ -23,6 +24,9 @@ import type { VaultNoteSummary } from '@nimble/types'
  * handler at all. Creating a *new* note (an unresolved wikilink) is still
  * fine — `vault_create_note` writes a file that does not exist yet, so there
  * is no round trip and nothing to corrupt.
+ *
+ * Frontmatter is split off before the body reaches the editor and shown as
+ * a chip row under the path, so metadata is never the boldest line (P2-2).
  */
 export function VaultNoteEditor() {
   const dp = useDataProvider()
@@ -31,6 +35,7 @@ export function VaultNoteEditor() {
   const refresh = useDocsStore((s) => s.refresh)
 
   const [backlinks, setBacklinks] = useState<VaultNoteSummary[]>([])
+  const { fields, body } = useMemo(() => splitFrontmatter(note?.content ?? ''), [note?.content])
 
   useEffect(() => {
     if (note?.path) {
@@ -96,21 +101,38 @@ export function VaultNoteEditor() {
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
-      <div className="flex items-center justify-between gap-3 px-8 pt-6">
-        <Meta as="p" className="truncate" title={note.path}>{note.path}</Meta>
-        <div className="flex shrink-0 items-center gap-3">
-          <Meta as="span">Notes are edited in Obsidian</Meta>
-          <Button variant="secondary" size="sm" onClick={openInObsidian}>
-            <ExternalLink className="size-3" />
-            Open in Obsidian
-          </Button>
+      <div className="flex items-start justify-between gap-3 px-8 pt-6">
+        <div className="min-w-0 space-y-1">
+          <Meta as="p" className="truncate" title={note.path}>{note.path}</Meta>
+          {/* Read-only cue sits with the path, not in the dimmest corner (P2-1). */}
+          <p className="flex items-center gap-1 text-label text-muted-foreground">
+            <Lock className="size-3 shrink-0" aria-hidden="true" />
+            Read-only · edited in Obsidian
+          </p>
+          {fields.length > 0 && (
+            <ul className="flex flex-wrap gap-1 pt-1" aria-label="Note properties">
+              {fields.map((f) => (
+                <li
+                  key={f.key}
+                  className="inline-flex max-w-full items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-label"
+                >
+                  <span className="text-muted-foreground">{f.key}</span>
+                  {f.value && <span className="truncate text-foreground">{f.value}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
+        <Button variant="secondary" size="sm" onClick={openInObsidian} className="shrink-0">
+          <ExternalLink className="size-3" />
+          Open in Obsidian
+        </Button>
       </div>
 
-      <div className="px-8 py-4">
+      <div className="px-8 py-4 cursor-default select-text [&_.ProseMirror]:cursor-default" aria-readonly="true">
         <TiptapEditor
           key={note.id}
-          content={note.content}
+          content={body}
           format="markdown"
           onWikilinkClick={handleWikilink}
         />
@@ -123,8 +145,9 @@ export function VaultNoteEditor() {
             {backlinks.map((b) => (
               <button
                 key={b.id}
+                type="button"
                 onClick={() => selectVaultNote(b.path)}
-                className="block w-full truncate text-left text-meta text-muted-foreground hover:text-foreground transition-colors"
+                className="block w-full truncate rounded text-left text-meta text-muted-foreground hover:text-foreground transition-colors duration-(--transition-fast)"
               >
                 {b.title || b.path}
               </button>

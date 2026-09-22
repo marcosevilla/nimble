@@ -23,6 +23,8 @@ interface DocsStore {
   selectFolder: (id: string | null) => void
   selectDoc: (id: string | null) => Promise<void>
   selectVaultNote: (path: string | null) => Promise<void>
+  /** Create "Untitled" (optionally inside a folder), refresh, and open it. Rejects on failure so the caller can toast. */
+  createDocument: (folderId?: string) => Promise<void>
   setVaultExpanded: (v: boolean) => void
   setFolderTreeCollapsed: (v: boolean) => void
   setFolderTreeWidth: (w: number) => void
@@ -104,6 +106,13 @@ export const useDocsStore = create<DocsStore>((set, get) => ({
     } catch {
       set({ currentVaultNote: null })
     }
+  },
+
+  createDocument: async (folderId) => {
+    const dp = getDataProvider()
+    const doc = await dp.docs.createDocument('Untitled', folderId)
+    await get().refresh()
+    await get().selectDoc(doc.id)
   },
 
   setVaultExpanded: (v) => set({ vaultExpanded: v }),
