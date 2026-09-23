@@ -2,6 +2,18 @@
 
 Updated 2026-09-23 (agentation-1 merged + installed at `0ad4bd5`). Before that 2026-09-22 (Focus Queue: all 12 plan tasks implemented, Task 12 verification recorded; awaiting final whole-branch review + Marco's 30-min human checklist; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
 
+## Task cleanup — reconcile with Todoist (2026-09-23, approved)
+
+Proposal: [docs/2026-09-23-task-cleanup-proposal.md](docs/2026-09-23-task-cleanup-proposal.md). Marco approved plan B. Decisions: stale tasks **close** (match Todoist: completed → completed, deleted → deleted, backup first); new Nimble tasks **keep pushing to Todoist** until cutover; the 2 real queued tasks were moved out of the TEST project.
+
+- [x] Root causes measured: token 401 since 2026-08-31 (silent); sections flattened into fake projects; no parent nesting; no immutable origin field.
+- [x] New Todoist token saved in Settings, sync **toggled off** (verified HTTP 200, nothing synced). Keep it off until phase 2 lands, because the old mapper would add more fake section projects.
+- [x] Outbox cleaned: dropped 3 test-task ops, the TEST project create and a stale Portola due-date update. 2 real creates remain (Queen Out figma adjustments → 👑 Queen Out — Website; Annotate changes → Inbox). TEST project deleted. `dt` rebuilt from main (the old binary refused schema v21); backup at `~/.local/bin/dt.bak-20260921`.
+- [ ] Phase 1: sync health chip + banner (last success > 1h or `last_error` set).
+- [ ] Phase 2: schema v22 (`origin`, sections from fake projects, `parent_id`, `archived_at`, one inbox) + mapper fix + full re-sync as dry-run report → approve → snapshot → apply.
+- [ ] Phase 3: Todoist-shaped sidebar (projects only, nested, sections as in-page headings), Nimble-origin mark + filter.
+- [ ] Marco (optional, before phase 2 apply): clear dead Todoist projects ("⭐️ TODAY - September 9", "‼️ Complete Today (Sep 22)").
+
 ## Focus Queue absorption — 2026-09-22 (implementation complete; verification + live gates open)
 
 - [x] Marco approved the architecture: native tasks, deliberately ordered durable queue, one authoritative durable timer/session engine across main and companion windows, full shipped Focus Queue capability coverage, optional Nimble Pomodoro, previewed import and reversible daily trial. Follow-up: preserve Focus Queue layout, interaction and information hierarchy as much as practical within Nimble's current design system.
