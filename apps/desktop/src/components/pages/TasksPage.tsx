@@ -16,6 +16,7 @@ import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataProvider } from '@/services/provider-context'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView, type GroupBy } from '@/lib/task-view'
+import { matchesLabelFilter } from '@/lib/labelFilter'
 import type { LocalTask, Label, Project } from '@nimble/types'
 
 // Section/manual grouping don't have a coherent cross-project meaning here —
@@ -46,6 +47,7 @@ function AllTasksView({
   refresh: () => void
 }) {
   const [viewState, setViewState] = useState(() => loadTaskView('all', 'status', ALL_TASKS_GROUP_BY))
+  const labelFilter = useTasksNavStore((s) => s.labelFilter)
 
   useEffect(() => {
     saveTaskView('all', viewState)
@@ -58,7 +60,10 @@ function AllTasksView({
     setViewState((v) => ({ ...v, filter }))
   }, [])
 
-  const filteredTasks = useMemo(() => filterTasks(tasks, viewState.filter), [tasks, viewState.filter])
+  const filteredTasks = useMemo(
+    () => filterTasks(tasks, viewState.filter).filter((t) => matchesLabelFilter(t.labels, labelFilter)),
+    [tasks, viewState.filter, labelFilter],
+  )
   const groups = useMemo(
     // `sections` is always [] — groupBy here is restricted to
     // status/priority/due (ALL_TASKS_GROUP_BY), none of which consult it.
@@ -158,7 +163,7 @@ function AllTasksView({
 export function TasksPage() {
   const referenceVersion = useDataVersion('labels')
   const dp = useDataProvider()
-  const { projects, loading: projectsLoading } = useProjects()
+  const { allProjects, loading: projectsLoading } = useProjects()
   const { tasks, loading: tasksLoading, addTask, remove, refresh } = useLocalTasks()
   const selectedProjectId = useTasksNavStore((s) => s.selectedProjectId)
   const setSelectedProjectId = useTasksNavStore((s) => s.selectProject)
@@ -212,11 +217,13 @@ export function TasksPage() {
     [showingDetail, closeDetail, setSelectedProjectId],
   )
 
-  // Find the selected project object
+  // Find the selected project object — looked up in `allProjects` (not the
+  // active-only `projects`) so a breadcrumb back to an archived parent
+  // still resolves instead of silently bouncing to All Tasks.
   const selectedProject = useMemo(() => {
     if (!selectedProjectId) return null
-    return projects.find((p) => p.id === selectedProjectId) ?? null
-  }, [selectedProjectId, projects])
+    return allProjects.find((p) => p.id === selectedProjectId) ?? null
+  }, [selectedProjectId, allProjects])
 
   if (loading) {
     return (
@@ -251,7 +258,7 @@ export function TasksPage() {
           key={selectedProject.id}
           project={selectedProject}
           tasks={tasks}
-          allProjects={projects}
+          allProjects={allProjects}
           onSelectProject={handleSelectProject}
           onDeleteTask={remove}
           onAddSubtask={handleAddSubtask}
@@ -260,7 +267,7 @@ export function TasksPage() {
       ) : (
         <AllTasksView
           tasks={tasks}
-          projects={projects}
+          projects={allProjects}
           visibleLabels={visibleLabels}
           onDelete={remove}
           onAddSubtask={handleAddSubtask}

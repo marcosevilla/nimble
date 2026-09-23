@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { Plus, List, Pencil, Trash2, Check, X, ChevronRight } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -6,6 +6,13 @@ import { Button } from '@/components/ui/button'
 import { ProjectEditDialog } from './ProjectEditDialog'
 import type { Project, LocalTask } from '@nimble/types'
 import { PROJECT_COLORS } from '@/lib/projectColors'
+import { buildProjectTree } from '@/lib/projectTree'
+
+// A parent past this many children opens collapsed by default (e.g. 🏡
+// Personal (12)) — big lists like that read as noise on first paint;
+// disclosure state itself stays manual after that (toggling one doesn't
+// re-derive from this threshold).
+const AUTO_COLLAPSE_THRESHOLD = 5
 
 interface ProjectSidebarProps {
   projects: Project[]
@@ -38,6 +45,11 @@ export function ProjectSidebar({
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
+  // Archived projects never render here, and a child whose parent is
+  // archived (or missing) surfaces as a root instead of disappearing —
+  // see projectTree.ts.
+  const { roots: rootProjects, childrenByParent } = useMemo(() => buildProjectTree(projects), [projects])
+
   // Nesting: one level deep — child projects (parent_id set) render
   // indented under their parent, collapsible via a disclosure chevron.
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set())
@@ -50,14 +62,26 @@ export function ProjectSidebar({
     })
   }, [])
 
-  const rootProjects = projects.filter((p) => !p.parent_id)
-  const childrenByParent: Record<string, Project[]> = {}
-  for (const p of projects) {
-    if (p.parent_id) {
-      if (!childrenByParent[p.parent_id]) childrenByParent[p.parent_id] = []
-      childrenByParent[p.parent_id].push(p)
-    }
-  }
+  // Big parents (e.g. 🏡 Personal (12)) open collapsed by default so the
+  // tree doesn't read as noise on first paint. `projects` loads async
+  // (starts empty, refetches after mount), so this can't be a plain
+  // `useState` lazy initializer — it runs once more per newly-discovered
+  // big parent instead, tracked in a ref so a user's manual expand isn't
+  // re-collapsed the next time `projects` changes.
+  const autoCollapsedRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const newlyBig = Object.entries(childrenByParent)
+      .filter(([, children]) => children.length > AUTO_COLLAPSE_THRESHOLD)
+      .map(([id]) => id)
+      .filter((id) => !autoCollapsedRef.current.has(id))
+    if (newlyBig.length === 0) return
+    for (const id of newlyBig) autoCollapsedRef.current.add(id)
+    setCollapsedParents((prev) => {
+      const next = new Set(prev)
+      for (const id of newlyBig) next.add(id)
+      return next
+    })
+  }, [childrenByParent])
 
   // Count non-completed tasks per project
   const taskCountByProject: Record<string, number> = {}

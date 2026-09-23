@@ -1,7 +1,7 @@
 import { subscribeDataChanges } from '@/lib/dataChanges'
 import { ownsTodoistPush } from '@/lib/windowSignals'
 import { displayedDueDate, rememberDisplayedTasks } from '@/lib/displayedTasks'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useDataProvider, getDataProvider } from '@/services/provider-context'
 import type { LocalTask, Project } from '@nimble/types'
 import { toast } from 'sonner'
@@ -150,13 +150,13 @@ export function useLocalTasks(opts?: { projectId?: string; dueDate?: string; inc
 
 export function useProjects() {
   const dp = useDataProvider()
-  const [projects, setProjects] = useState<Project[]>([])
+  const [allProjects, setAllProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
     try {
       const data = await dp.projects.list()
-      setProjects(data)
+      setAllProjects(data)
     } catch {
       // Silently fail — table may not exist on first run before migration
     } finally {
@@ -173,7 +173,7 @@ export function useProjects() {
   const addProject = useCallback(async (name: string, color: string) => {
     try {
       const project = await dp.projects.create(name, color)
-      setProjects((prev) => [...prev, project])
+      setAllProjects((prev) => [...prev, project])
       return project
     } catch (e) {
       toast.error(`Failed to create project: ${e}`)
@@ -184,7 +184,7 @@ export function useProjects() {
   const renameProject = useCallback(async (id: string, name: string) => {
     try {
       await dp.projects.update(id, name)
-      setProjects((prev) => prev.map((p) => p.id === id ? { ...p, name } : p))
+      setAllProjects((prev) => prev.map((p) => p.id === id ? { ...p, name } : p))
     } catch (e) {
       toast.error(`Failed to rename project: ${e}`)
     }
@@ -193,7 +193,7 @@ export function useProjects() {
   const updateProjectColor = useCallback(async (id: string, color: string) => {
     try {
       await dp.projects.update(id, undefined, color)
-      setProjects((prev) => prev.map((p) => p.id === id ? { ...p, color } : p))
+      setAllProjects((prev) => prev.map((p) => p.id === id ? { ...p, color } : p))
     } catch (e) {
       toast.error(`Failed to update color: ${e}`)
     }
@@ -202,11 +202,18 @@ export function useProjects() {
   const removeProject = useCallback(async (id: string) => {
     try {
       await dp.projects.delete(id)
-      setProjects((prev) => prev.filter((p) => p.id !== id))
+      setAllProjects((prev) => prev.filter((p) => p.id !== id))
     } catch (e) {
       toast.error(`Failed to delete project: ${e}`)
     }
   }, [dp])
 
-  return { projects, loading, refresh, addProject, renameProject, updateProjectColor, removeProject }
+  // Active-only view for pickers/sidebars (move-to-project, new task
+  // project, the project tree) — archived projects should never be a
+  // choosable target. `allProjects` keeps every project, including
+  // archived ones, so a task that still belongs to one can resolve its
+  // name/color for display.
+  const projects = useMemo(() => allProjects.filter((p) => !p.archived_at), [allProjects])
+
+  return { projects, allProjects, loading, refresh, addProject, renameProject, updateProjectColor, removeProject }
 }
