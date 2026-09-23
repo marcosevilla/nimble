@@ -40,10 +40,22 @@ export function dueLabel(task: LocalTask, today: string): string | null {
   return time ? `${day} ${time}` : day
 }
 
+/** Tasks that live only in Nimble (never pushed to Todoist). */
+export const NIMBLE_ONLY = 'Nimble only'
+
 export function sourceLabel(source: FocusSource, projects: Project[]): string {
   if (source.kind === 'today') return 'Today'
-  if (source.kind === 'local') return 'Local only'
+  if (source.kind === 'local') return NIMBLE_ONLY
   return projects.find((p) => p.id === source.project_id)?.name ?? 'Project'
+}
+
+/**
+ * Footer add button copy. `newCount` = source tasks not yet queued;
+ * `sourceCount` = all tasks the source offers. Plain, no guilt.
+ */
+export function addToQueueLabel(newCount: number, sourceCount: number): string {
+  if (newCount > 0) return `Add ${newCount} to queue`
+  return sourceCount > 0 ? 'All added' : 'Nothing to add'
 }
 
 // ── Timer control ──

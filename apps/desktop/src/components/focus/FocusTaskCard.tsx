@@ -18,6 +18,7 @@ import {
   controlBlockedReason,
   dueLabel,
   isLocalOnly,
+  NIMBLE_ONLY,
   queueBlockedReason,
   taskMenuItems,
   timerControl,
@@ -270,7 +271,7 @@ export function FocusTaskCard({
   const timing = cardTiming(snapshot, entry, displayExtra)
   const running = control.label === 'Pause' || control.label === 'End break'
   const due = dueLabel(task, today)
-  const meta = [projectName, isLocalOnly(task) ? 'Local only' : null, due].filter(Boolean).join(' · ')
+  const meta = [projectName, isLocalOnly(task) ? NIMBLE_ONLY : null, due].filter(Boolean).join(' · ')
 
   return (
     <section aria-label="Focused task" className="border-b border-border px-4 pt-4 pb-3">

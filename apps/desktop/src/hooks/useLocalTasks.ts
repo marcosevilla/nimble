@@ -1,4 +1,5 @@
 import { subscribeDataChanges } from '@/lib/dataChanges'
+import { ownsTodoistPush } from '@/lib/windowSignals'
 import { displayedDueDate, rememberDisplayedTasks } from '@/lib/displayedTasks'
 import { useCallback, useEffect, useState } from 'react'
 import { useDataProvider, getDataProvider } from '@/services/provider-context'
@@ -12,8 +13,11 @@ const TASKS_CHANGED = 'tasks-changed'
 // (e.g. typing, bulk reorders) into a single sync instead of one per
 // keystroke. Quiet by design on failure — the outbox persists the pending
 // ops, so the next trigger (interval/focus/another mutation) retries.
+// Main window only: task writes from any window reach it as
+// `nimble-data-changed` (provider-events), so one window pushes per edit.
 let todoistSyncTimer: ReturnType<typeof setTimeout> | null = null
 function scheduleTodoistPush() {
+  if (!ownsTodoistPush(window.location.search)) return
   if (todoistSyncTimer) clearTimeout(todoistSyncTimer)
   todoistSyncTimer = setTimeout(() => {
     todoistSyncTimer = null

@@ -2,6 +2,8 @@ use nimble_core::db::focus::engine::NativeTaskAction;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
+use crate::data_events::{after_commit, TASKS};
+
 pub use nimble_core::types::LocalTask;
 
 /// Task writes go through the one focus service (`focus_service::execute_task`)
@@ -24,9 +26,10 @@ fn returned(outcome: crate::focus_service::TaskWriteOutcome) -> Result<LocalTask
 #[tauri::command]
 pub async fn reorder_local_tasks(app: AppHandle, task_ids: Vec<String>) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    nimble_core::db::tasks::reorder_local_tasks(pool.inner(), &task_ids)
+    let result = nimble_core::db::tasks::reorder_local_tasks(pool.inner(), &task_ids)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    after_commit(&app, result, TASKS, |_| task_ids.clone())
 }
 
 #[tauri::command]
@@ -88,7 +91,8 @@ pub async fn create_local_task(
             label_ids,
         },
     };
-    returned(write(&app, action, command_id).await?)
+    let result = write(&app, action, command_id).await.and_then(returned);
+    after_commit(&app, result, TASKS, |task| vec![task.id.clone()])
 }
 
 #[tauri::command]
@@ -142,7 +146,8 @@ pub async fn update_local_task(
             clear_duration: clear_duration.unwrap_or(false),
         },
     };
-    returned(write(&app, action, command_id).await?)
+    let result = write(&app, action, command_id).await.and_then(returned);
+    after_commit(&app, result, TASKS, |task| vec![task.id.clone()])
 }
 
 /// `expected_due_date` is the due date the UI displayed (None = no date). A
@@ -156,8 +161,10 @@ pub async fn update_task_status(
     expected_due_date: Option<String>,
     command_id: Option<String>,
 ) -> Result<(), String> {
+    let ids = vec![id.clone()];
     let action = NativeTaskAction::SetStatus { id, status, note, expected_due_date };
-    write(&app, action, command_id).await.map(|_| ())
+    let result = write(&app, action, command_id).await.map(|_| ());
+    after_commit(&app, result, TASKS, |_| ids)
 }
 
 #[tauri::command]
@@ -193,8 +200,11 @@ pub async fn delete_local_task(
     id: String,
     command_id: Option<String>,
 ) -> Result<DeleteTaskResult, String> {
-    let outcome = write(&app, NativeTaskAction::Delete { id }, command_id).await?;
-    Ok(DeleteTaskResult { undo_token: outcome.undo_token })
+    let ids = vec![id.clone()];
+    let result = write(&app, NativeTaskAction::Delete { id }, command_id)
+        .await
+        .map(|outcome| DeleteTaskResult { undo_token: outcome.undo_token });
+    after_commit(&app, result, TASKS, |_| ids)
 }
 
 #[tauri::command]
@@ -215,10 +225,11 @@ pub async fn migrate_tasks_to_markdown(
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let backup = app_dir.join(format!("nimble-backup-pre-task-markdown-{stamp}.db"));
-    nimble_core::db::tasks::migrate_tasks_to_markdown(
+    let result = nimble_core::db::tasks::migrate_tasks_to_markdown(
         pool.inner(),
         backup.to_str().ok_or("backup path not utf-8")?,
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string());
+    after_commit(&app, result, TASKS, |_| Vec::new())
 }

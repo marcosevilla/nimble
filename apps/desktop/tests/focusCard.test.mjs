@@ -68,7 +68,7 @@ test('running session shows Pause; phases color by semantic tokens with overtime
 
 test('compact card-only mode unmounts queue, add, tray, drawer and footer tab stops', () => {
   const html = rendered.renderCompactFocus()
-  for (const gone of ['Drag to reorder', 'Add task', '1 done', 'Still open', 'Focus candidates', 'Queue these']) {
+  for (const gone of ['Drag to reorder', 'Add task', '1 done', 'Still open', 'Add tasks from', 'to queue', 'All added', 'Nothing to add']) {
     assert.ok(!html.includes(gone), `${gone} is unmounted`)
   }
   assert.match(html, /Complete Outline sections/) // inline subtasks stay completable

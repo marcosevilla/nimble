@@ -7,6 +7,7 @@ mod backup_runner;
 mod backup_git;
 mod backup_state;
 mod commands;
+mod data_events;
 mod focus_service;
 mod focus_sound;
 mod focus_window;

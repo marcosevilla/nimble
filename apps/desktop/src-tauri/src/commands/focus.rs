@@ -36,9 +36,15 @@ pub async fn focus_execute(app: AppHandle, command: FocusCommand) -> Result<Focu
     // heartbeat/lifecycle that settles it is wired in this process.
     rt.check_live_timing(&command.action)?;
     let command_id = command.command_id.clone();
+    // Start/complete/restore also change native task rows: every window's
+    // task lists must re-read, not just the one that sent the action.
+    let touches_tasks = crate::data_events::focus_action_touches_tasks(&command.action);
     match service.execute(command).await {
         Ok(reply) => {
             committed(&app, &reply.snapshot, Some(command_id)).await;
+            if touches_tasks {
+                crate::data_events::broadcast(&app, crate::data_events::TASKS, Vec::new());
+            }
             Ok(reply)
         }
         Err(e) => {

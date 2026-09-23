@@ -95,7 +95,7 @@ function FocusQuickAdd({
   }, [editing])
 
   const placeholder =
-    source.kind === 'today' ? 'Add task to Today' : source.kind === 'local' ? 'Add a local-only task' : `Add task to ${sourceLabel(source, projects)}`
+    source.kind === 'today' ? 'Add task to Today' : source.kind === 'local' ? 'Add a Nimble-only task' : `Add task to ${sourceLabel(source, projects)}`
 
   const submit = async () => {
     if (busy) return
@@ -246,6 +246,7 @@ export function FocusQueueTray({
 
   const sourceSections = source.kind === 'project' ? sections.filter((s) => s.project_id === source.project_id) : []
   const queueThese = queueTheseAction(tasks, source, today, snapshot, { sections: sourceSections })
+  const sourceCount = candidateIds(tasks, source, today, sourceSections).ids.length
   const queuedTaskIds = new Set(snapshot.queue.map((e) => e.task_id))
   const stillOpen =
     source.kind === 'today'
@@ -467,6 +468,7 @@ export function FocusQueueTray({
             projects={projects}
             onSourceChange={setSource}
             newCount={queueThese?.task_ids.length ?? 0}
+            sourceCount={sourceCount}
             onQueueThese={() => {
               if (queueThese) void run(queueThese)
             }}

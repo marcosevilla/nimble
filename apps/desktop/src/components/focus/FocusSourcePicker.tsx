@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { IconButton } from '@/components/shared/IconButton'
 import { Caption, Meta } from '@/components/shared/typography'
-import { dueLabel, sourceLabel } from '@/lib/focusQueueIntents'
+import { addToQueueLabel, dueLabel, NIMBLE_ONLY, sourceLabel } from '@/lib/focusQueueIntents'
 import type { FocusSource, LocalTask, Project } from '@nimble/types'
 
 const LOCAL = 'local'
@@ -31,8 +31,10 @@ interface FocusSourcePickerProps {
   source: FocusSource
   projects: Project[]
   onSourceChange: (source: FocusSource) => void
-  /** Candidates in this source not already queued. */
+  /** Tasks in this source not already queued. */
   newCount: number
+  /** All tasks this source offers (queued or not). */
+  sourceCount: number
   onQueueThese: () => void
   /** Why queue writes are unavailable (button stays visible, disabled). */
   blockedReason: string | null
@@ -44,15 +46,16 @@ interface FocusSourcePickerProps {
 }
 
 /**
- * Bottom-anchored footer: the source selector browses candidates only — it
- * never replaces or reorders the shared queue. "Queue these" is the explicit
- * append. Completion count and sync state sit on the right.
+ * Bottom-anchored footer: the source selector only picks where tasks are
+ * added from — it never replaces or reorders the shared queue. "Add N to
+ * queue" is the explicit append. Completion count and sync state sit on the right.
  */
 export function FocusSourcePicker({
   source,
   projects,
   onSourceChange,
   newCount,
+  sourceCount,
   onQueueThese,
   blockedReason,
   doneCount,
@@ -60,23 +63,29 @@ export function FocusSourcePicker({
   trailing,
 }: FocusSourcePickerProps) {
   const label = sourceLabel(source, projects)
+  const addLabel = addToQueueLabel(newCount, sourceCount)
   return (
     <footer className="flex min-w-0 items-center justify-between gap-2 border-t border-border px-4 py-1.5">
       <div className="flex min-w-0 items-center gap-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger
-            aria-label={`Focus candidates: ${label}`}
+            aria-label={`Add tasks from: ${label}`}
             className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-meta-strong text-muted-foreground transition-colors duration-(--transition-fast) hover:text-foreground focus-ring"
           >
-            <span className="max-w-36 truncate">{label}</span>
+            <span className="max-w-36 truncate">{`From: ${label}`}</span>
             <ChevronDown className="size-3 shrink-0" aria-hidden />
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="start" className="max-h-64 w-52">
             <DropdownMenuGroup>
-              <DropdownMenuLabel>Browse candidates</DropdownMenuLabel>
+              <DropdownMenuLabel>Add tasks from</DropdownMenuLabel>
               <DropdownMenuRadioGroup value={sourceKey(source)} onValueChange={(key) => onSourceChange(sourceFromKey(String(key)))}>
                 <DropdownMenuRadioItem value={TODAY}>Today</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value={LOCAL}>Local only</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value={LOCAL}>
+                  <span className="flex min-w-0 flex-col">
+                    <span>{NIMBLE_ONLY}</span>
+                    <Meta>Not synced to Todoist</Meta>
+                  </span>
+                </DropdownMenuRadioItem>
                 {projects.length > 0 && <DropdownMenuSeparator />}
                 {projects.map((project) => (
                   <DropdownMenuRadioItem key={project.id} value={`project:${project.id}`}>
@@ -91,10 +100,10 @@ export function FocusSourcePicker({
           size="xs"
           variant="ghost"
           disabled={blockedReason != null || newCount === 0}
-          title={blockedReason ?? (newCount === 0 ? 'Everything here is already queued' : 'Append these to the end of the queue')}
+          title={blockedReason ?? (newCount === 0 ? undefined : 'Adds to the end of the queue')}
           onClick={onQueueThese}
         >
-          {`Queue these (${newCount})`}
+          {addLabel}
         </Button>
       </div>
       <div className="flex shrink-0 items-center gap-2">

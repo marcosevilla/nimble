@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import { useDataProvider } from '@/services/provider-context'
 import { emitTasksChanged, useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { useDataVersion } from '@/hooks/useDataVersion'
+import { onWindowReturn } from '@/lib/windowSignals'
 import { useDetailStore } from '@/stores/detailStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import { sendFocusAction, useFocusCache } from '@/stores/focusStore'
@@ -43,7 +44,7 @@ export interface FocusTrayData {
  */
 export function useFocusTrayData(options: FocusTrayOptions = {}): FocusTrayData {
   const dp = useDataProvider()
-  const { tasks } = useLocalTasks()
+  const { tasks, refresh: refreshTasks } = useLocalTasks()
   const { projects } = useProjects()
   const sectionVersion = useDataVersion('sections')
   const [sections, setSections] = useState<Section[]>([])
@@ -52,6 +53,13 @@ export function useFocusTrayData(options: FocusTrayOptions = {}): FocusTrayData 
   const [soundMuted, setMuted] = useState(false)
   const queueRevision = useFocusCache((s) => s.snapshot?.queue_revision ?? -1)
   const today = format(new Date(), 'yyyy-MM-dd')
+
+  // Backstop for the cross-window event: the companion mounts hidden at
+  // launch, so re-read tasks whenever it is shown or focused again.
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    return onWindowReturn(document, window, () => { void refreshTasks() })
+  }, [refreshTasks])
 
   useEffect(() => {
     let live = true

@@ -12,6 +12,7 @@ import {
   timerControl, controlBlockedReason, reorderAfterDrag, moveEntryAction, timeboxConfig,
   pomodoroConfig, parseCustomMinutes, planQuickAdd, runQuickAdd, taskMenuItems, failureControl,
   focusTaskOps, duplicateInput, dueLabel, localFailureMessage, visibleFailure, menuFocusAction, undoDeleteAction, stillOpenAction,
+  addToQueueLabel, sourceLabel,
 } from '../src/lib/focusQueueIntents.ts'
 
 let output, rendered
@@ -233,7 +234,7 @@ const ascending = (xs) => xs.every((x, i) => x >= 0 && (i === 0 || x > xs[i - 1]
 test('expanded tray keeps Focus Queue hierarchy: card, Up next, Add, completed, still open, footer', () => {
   const html = rendered.renderQueueTray()
   const order = labelsIn(html, ['Example task', 'Focus timer', 'Up next', 'Second task', 'Third task',
-    'Add task', 'Shipped notes', 'Still open', 'Focus candidates'])
+    'Add task', 'Shipped notes', 'Still open', 'Add tasks from'])
   assert.ok(ascending(order), `order ${order}`)
 })
 
@@ -268,11 +269,24 @@ test('completed tray shows struck title with spent time and Show/Hide/Clear', ()
   assert.match(tray, />Clear</)
 })
 
-test('footer labels the source as candidate browsing with an explicit Queue these', () => {
+test('footer names where tasks come from and says exactly what the add button adds', () => {
   const html = rendered.renderQueueTray()
-  assert.match(html, /aria-label="Focus candidates: Today"/)
-  assert.match(html, />Queue these \(1\)</)
-  assert.doesNotMatch(html, /overdue/i)
+  assert.match(html, /aria-label="Add tasks from: Today"/)
+  assert.match(html, />From: Today</)
+  assert.match(html, />Add 1 to queue</)
+  assert.doesNotMatch(html, /candidate|Queue these|overdue/i)
+})
+
+test('add button copy: count, singular, all added, nothing to add', () => {
+  assert.equal(addToQueueLabel(3, 5), 'Add 3 to queue')
+  assert.equal(addToQueueLabel(1, 1), 'Add 1 to queue')
+  assert.equal(addToQueueLabel(0, 4), 'All added')
+  assert.equal(addToQueueLabel(0, 0), 'Nothing to add')
+})
+
+test('local-only source reads as Nimble only', () => {
+  assert.equal(sourceLabel({ kind: 'local' }, []), 'Nimble only')
+  assert.equal(sourceLabel({ kind: 'today' }, []), 'Today')
 })
 
 test('read-only capability renders disabled controls with the reason, not hidden ones', () => {
@@ -281,7 +295,7 @@ test('read-only capability renders disabled controls with the reason, not hidden
   assert.ok(start, 'Start is rendered')
   assert.match(start, /disabled=""/)
   assert.match(html, /Replica is read-only/)
-  assert.match(html.match(/<button\b[^>]*>Queue these \(1\)<\/button>/)?.[0] ?? '', /disabled=""/)
+  assert.match(html.match(/<button\b[^>]*>Add 1 to queue<\/button>/)?.[0] ?? '', /disabled=""/)
 })
 
 test('uncertain failure stays visible with Try again, beside any completion acknowledgement', () => {
