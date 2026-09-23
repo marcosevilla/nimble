@@ -279,6 +279,9 @@ export function FocusQueueTray({
     const ok = (await run({ kind: 'remove', occurrence_id: entry.occurrence_id })) != null
     const title = byId.get(entry.task_id)?.content
     if (ok && title && index > 0) setUndo({ kind: 'remove', title, entry, index })
+    // Removing the last Up next row leaves no row to refocus; land on the card
+    // so a following Enter isn't read as "focus nowhere" and complete the task.
+    if (ok && index > 0 && rows.length <= 1) focusCard()
     return ok
   }
   const undoRemove = async (entry: FocusEntry, index: number) => {
