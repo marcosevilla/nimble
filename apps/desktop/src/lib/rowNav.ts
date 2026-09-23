@@ -68,6 +68,11 @@ export const FIELD_SELECTOR = 'input, textarea, select, [contenteditable]:not([c
 export const OVERLAY_SELECTOR =
   '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-slot="popover-content"]'
 
+/** A roving tree (the nav's Docs and project trees) owns every key typed
+ * in it: its arrows move tree focus, its letters are not row actions
+ * (re-score docs N-P1-1). */
+export const TREE_SELECTOR = '[role="tree"]'
+
 export interface RowKeyDecision {
   /** False: leave the event alone (no preventDefault, no row action). */
   handle: boolean
@@ -86,7 +91,7 @@ interface ElementLike {
 const SKIP: RowKeyDecision = { handle: false, rowId: null }
 
 /** Decide whether the window-level row handler takes `key` from `target`:
- * - open overlay (popover, menu, dialog) or a field → skip every key;
+ * - open overlay (popover, menu, dialog), a tree, or a field → skip every key;
  * - a nested control (status button, "Convert to task") → skip Enter and
  *   Space so the control activates; other keys act on its row;
  * - a row, the page, or plain content → handle. */
@@ -95,7 +100,7 @@ export function decideRowKey(target: unknown, key: string): RowKeyDecision {
   if (!el || typeof el.closest !== 'function' || typeof el.matches !== 'function') {
     return { handle: true, rowId: null }
   }
-  if (el.closest(OVERLAY_SELECTOR)) return SKIP
+  if (el.closest(OVERLAY_SELECTOR) || el.closest(TREE_SELECTOR)) return SKIP
   if (el.isContentEditable || el.matches(FIELD_SELECTOR)) return SKIP
   const row = el.closest(NAV_ROW_SELECTOR)
   const rowId = row?.getAttribute?.('data-nav-row') ?? null

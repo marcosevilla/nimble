@@ -126,3 +126,11 @@ test('fields and open overlays keep every key', () => {
     assert.equal(handled(popoverButton, key), false)
   }
 })
+
+test('keys typed inside a nav tree never reach the row list (docs N-P1-1)', () => {
+  const tree = el(['[role="tree"]'], body)
+  const treeRow = el(['button', '[role="treeitem"]'], tree)
+  for (const key of ['ArrowDown', 'ArrowUp', 'j', 'k', 'Enter', 'd', 't', 'x', 'Escape']) {
+    assert.deepEqual(decideRowKey(treeRow, key), { handle: false, rowId: null }, key)
+  }
+})

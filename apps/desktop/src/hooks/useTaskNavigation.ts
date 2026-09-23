@@ -19,12 +19,15 @@ import {
    was remembered (review I3) while nothing else holds focus. A list
    mutation never pulls focus out of the capture field.
 
-   Key targets (review C2, fix round 2 N1 — `decideRowKey`): fields and
-   open menus/popovers keep every key; a control nested in a row keeps
-   Enter/Space and passes the other list keys to its row. Space is not a list key at all (review I2): a row
+   Key targets (review C2, fix round 2 N1, re-score docs N-P1-1 —
+   `decideRowKey`): fields, open menus/popovers, and a nav tree keep every
+   key; a control nested in a row keeps Enter/Space and passes the other
+   list keys to its row. Space is not a list key at all (review I2): a row
    opens on Space like any `role="button"` (TaskItem / InboxNoteRow), and
    Dashboard's Space-pauses-focus wins while a session runs. Rows carry
-   `data-nav-row="<id>"` so the hook can find them. */
+   `data-nav-row="<id>"` so the hook can find them. A key another handler
+   already took (`e.defaultPrevented`) is also left alone before any of
+   this runs. */
 
 export type RowKeyHandler = (id: string) => void
 
@@ -82,6 +85,9 @@ export function useRowNavigation(ids: string[], onOpen: RowKeyHandler, options: 
 
     function handleKeyDown(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return
+      // A key another handler already took (the calendar's `t`, a tree's
+      // arrows) must not also act on the row list.
+      if (e.defaultPrevented) return
       const decision = decideRowKey(e.target, e.key)
       if (!decision.handle) return
 
@@ -108,8 +114,9 @@ export function useRowNavigation(ids: string[], onOpen: RowKeyHandler, options: 
           return
         }
         case 'Enter':
-          // A row's own handler already opened it when it had focus.
-          if (focusedId && !e.defaultPrevented) {
+          // A row's own handler already opened it when it had focus (the
+          // top-of-handler defaultPrevented check already skips that case).
+          if (focusedId) {
             e.preventDefault()
             onOpenRef.current(focusedId)
           }
