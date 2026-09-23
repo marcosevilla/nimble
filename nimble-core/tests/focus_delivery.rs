@@ -812,3 +812,25 @@ async fn http_transport_refused_connection_was_not_sent() {
     let cmd = [json!({"type": "note_add", "uuid": "u-1", "args": {}})];
     assert!(matches!(transport(port).send_commands(&cmd).await.unwrap_err(), TransportError::NotSent(_)));
 }
+
+#[tokio::test]
+async fn review_never_drops_an_unresolved_row_behind_resolved_history() {
+    let h = Harness::new().await;
+    // One old uncertain comment, one old auth-paused retry, then 250 newer acknowledged rows.
+    for (id, state, created) in [("old-uncertain", "uncertain", "2020-01-01T00:00:00.000Z"),
+                                 ("old-retry", "retryable-error", "2020-01-02T00:00:00.000Z")] {
+        sqlx::query("INSERT INTO focus_delivery(id,purpose,native_task_id,external_id,payload_json,idempotency_key,temp_id,state,created_at) VALUES(?,'time_comment',NULL,'R1','{}','k','t',?,?)")
+            .bind(id).bind(state).bind(created).execute(&h.pool).await.unwrap();
+    }
+    for n in 0..250 {
+        sqlx::query("INSERT INTO focus_delivery(id,purpose,external_id,payload_json,state,created_at) VALUES(?,'time_comment','R1','{}','acknowledged',?)")
+            .bind(format!("ack-{n:03}")).bind(format!("2026-09-22T00:{:02}:{:02}.000Z", n / 60, n % 60))
+            .execute(&h.pool).await.unwrap();
+    }
+    let items = delivery::review(&h.pool).await.unwrap();
+    let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
+    assert!(ids.contains(&"old-uncertain"), "an uncertain send stays visible");
+    assert!(ids.contains(&"old-retry"), "an auth-paused retry stays visible");
+    // Resolved history is still bounded.
+    assert_eq!(items.iter().filter(|i| i.state == DeliveryState::Acknowledged).count(), 200);
+}

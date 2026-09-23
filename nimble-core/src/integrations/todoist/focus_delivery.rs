@@ -28,6 +28,7 @@ pub const MAX_BACKOFF_SECS: u64 = 3_600;
 /// Upper bound on a server-requested wait, so a bad header can't park a row forever.
 const MAX_RETRY_AFTER_SECS: u64 = 86_400;
 const BATCH: usize = 50;
+/// Cap on resolved (acknowledged/archived) history in the review; unresolved rows are never capped.
 const REVIEW_LIMIT: i64 = 200;
 
 pub const TIME_COMMENT: &str = "time_comment";
@@ -395,7 +396,7 @@ const LEGACY_SQL: &str = "SELECT r.id,r.raw_evidence_json FROM focus_import_reco
       AND NOT EXISTS (SELECT 1 FROM focus_delivery d WHERE d.import_record_id=r.id)";
 
 /// Everything a person may need to see: unresolved legacy evidence first,
-/// then every Nimble/adopted send (newest first) with its own state.
+/// then every unresolved Nimble/adopted send, then the newest resolved ones.
 pub async fn review(pool: &SqlitePool) -> crate::Result<Vec<FocusDeliveryReviewItem>> {
     let mut conn = pool.acquire().await?;
     let mut items = Vec::new();
@@ -405,8 +406,15 @@ pub async fn review(pool: &SqlitePool) -> crate::Result<Vec<FocusDeliveryReviewI
         let evidence = evidence.and_then(|e| serde_json::from_str(&e).ok()).unwrap_or(Value::Null);
         items.push(legacy_item(&mut conn, &id, evidence).await?);
     }
-    let rows = sqlx::query(&format!("{ROW_SQL} ORDER BY d.created_at DESC,d.id LIMIT ?"))
-        .bind(REVIEW_LIMIT).fetch_all(&mut *conn).await?;
+    // Every unresolved send is always returned, however old; only resolved
+    // history (acknowledged/archived) is bounded, so it can never push an
+    // uncertain or needs-review row out of the only place it can be resolved.
+    let mut rows = sqlx::query(&format!(
+        "{ROW_SQL} WHERE d.state NOT IN ('acknowledged','archived') ORDER BY d.created_at DESC,d.id"))
+        .fetch_all(&mut *conn).await?;
+    rows.extend(sqlx::query(&format!(
+        "{ROW_SQL} WHERE d.state IN ('acknowledged','archived') ORDER BY d.created_at DESC,d.id LIMIT ?"))
+        .bind(REVIEW_LIMIT).fetch_all(&mut *conn).await?);
     for row in &rows {
         items.push(item_from_row(&mut conn, row).await?);
     }
