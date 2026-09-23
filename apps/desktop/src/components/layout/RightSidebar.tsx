@@ -1,24 +1,38 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { CalendarPanel } from '@/components/calendar/CalendarPanel'
-import { useLayoutStore } from '@/stores/layoutStore'
+import { RIGHT_TABS, useLayoutStore, type RightTab } from '@/stores/layoutStore'
 import { IconButton } from '@/components/shared/IconButton'
-import { PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { Activity, CalendarDays, PanelRightClose, PanelRightOpen, Sparkles, Timer, type LucideIcon } from 'lucide-react'
 import { Icon } from '@/components/shared/Icon'
 import { cn } from '@/lib/utils'
-import { useAppStore } from '@/stores/appStore'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { HabitsSection } from '@/components/goals/HabitsSection'
+import { ActivityPanel } from '@/components/activity/ActivityPanel'
+import { FocusRailPanel } from '@/components/focus/FocusRailPanel'
 
 const MIN_WIDTH = 200
 const MAX_WIDTH = 480
+
+const TAB_META: Record<RightTab, { label: string; icon: LucideIcon }> = {
+  calendar: { label: 'Calendar', icon: CalendarDays },
+  habits: { label: 'Habits', icon: Sparkles },
+  activity: { label: 'Activity', icon: Activity },
+  focus: { label: 'Focus queue', icon: Timer },
+}
+
+/** Scrolling body shared by the non-calendar tabs. */
+const PANEL_CLASS = 'flex-1 min-h-0 overflow-y-auto p-4 pt-3 [scrollbar-gutter:stable]'
 
 export function RightSidebar() {
   const collapsed = useLayoutStore((s) => s.rightCollapsed)
   const setCollapsed = useLayoutStore((s) => s.setRightCollapsed)
   const width = useLayoutStore((s) => s.rightWidth)
   const setRightWidth = useLayoutStore((s) => s.setRightWidth)
-  // Habits moved out of Today's primary lane into the rail (today P2-1,
-  // §2.1 "habits + calendar live in collapsible sidebars").
-  const showHabits = useAppStore((s) => s.currentPage === 'today')
+  // One tabbed column on every page that has it (Agentation pass 1):
+  // Calendar, Habits, Activity and the Focus queue.
+  const tab = useLayoutStore((s) => s.rightTab)
+  const setTab = useLayoutStore((s) => s.setRightTab)
+  const openTab = useLayoutStore((s) => s.openRightTab)
 
   const [dragging, setDragging] = useState(false)
   const startX = useRef(0)
@@ -60,9 +74,9 @@ export function RightSidebar() {
       className="relative flex flex-col border-l border-secondary bg-background overflow-hidden transition-[width] duration-(--transition-slow) ease-(--ease-entrance)"
       style={{ width: collapsed ? 36 : width }}
     >
-      {/* Collapsed state — expand button */}
+      {/* Collapsed state — expand button, then one button per tab */}
       {collapsed && (
-        <div className="flex flex-col items-center py-3">
+        <div className="flex flex-col items-center gap-1 py-3">
           <IconButton
             onClick={() => setCollapsed(false)}
             size="lg"
@@ -70,6 +84,19 @@ export function RightSidebar() {
           >
             <Icon icon={PanelRightOpen} size="nav" />
           </IconButton>
+          <div className="my-1 h-px w-5 bg-border/40" aria-hidden />
+          {RIGHT_TABS.map((id) => (
+            <IconButton
+              key={id}
+              onClick={() => openTab(id)}
+              size="lg"
+              className={cn(id === tab && 'bg-hover text-foreground')}
+              title={TAB_META[id].label}
+              aria-label={`Open ${TAB_META[id].label}`}
+            >
+              <Icon icon={TAB_META[id].icon} size="nav" />
+            </IconButton>
+          ))}
         </div>
       )}
 
@@ -85,32 +112,52 @@ export function RightSidebar() {
             )}
           />
 
-          {/* Collapse button */}
-          <div className="flex justify-end px-2 pt-2">
-            <IconButton
-              onClick={() => setCollapsed(true)}
-              tone="subtle"
-              title="Collapse sidebar"
-            >
-              <Icon icon={PanelRightClose} size="nav" />
-            </IconButton>
-          </div>
+          <Tabs
+            value={tab}
+            onValueChange={(value) => setTab(value as RightTab)}
+            className="flex-1 min-h-0 gap-0"
+          >
+            {/* Tabs, then the collapse button on the right. The active tab
+                shows its label; the others are icons with a tooltip. */}
+            <div className="flex items-center gap-2 px-3 pt-2">
+              <TabsList aria-label="Sidebar views">
+                {RIGHT_TABS.map((id) => (
+                  <TabsTrigger
+                    key={id}
+                    value={id}
+                    title={TAB_META[id].label}
+                    className="flex-none px-2 text-meta"
+                  >
+                    <Icon icon={TAB_META[id].icon} />
+                    <span className={cn(id === tab ? 'inline' : 'sr-only')}>{TAB_META[id].label}</span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              <IconButton
+                onClick={() => setCollapsed(true)}
+                tone="subtle"
+                title="Collapse sidebar"
+                className="ml-auto"
+              >
+                <Icon icon={PanelRightClose} size="nav" />
+              </IconButton>
+            </div>
+
+            <TabsContent value="calendar" className="flex flex-1 min-h-0 flex-col p-4 pt-3">
+              <CalendarPanel />
+            </TabsContent>
+            <TabsContent value="habits" className={PANEL_CLASS}>
+              <HabitsSection />
+            </TabsContent>
+            <TabsContent value="activity" className={PANEL_CLASS}>
+              <ActivityPanel />
+            </TabsContent>
+            <TabsContent value="focus" className={PANEL_CLASS}>
+              <FocusRailPanel />
+            </TabsContent>
+          </Tabs>
         </>
       )}
-
-      {!collapsed && <div className="flex-1 overflow-y-auto flex flex-col min-h-0 [scrollbar-gutter:stable]">
-        <div className="flex flex-col flex-1 min-h-0">
-          {/* Schedule section */}
-          <div className="p-4 pt-2 flex flex-col flex-1 min-h-0">
-            <CalendarPanel />
-          </div>
-          {showHabits && (
-            <div className="shrink-0 border-t border-border/30 p-4 min-w-0">
-              <HabitsSection />
-            </div>
-          )}
-        </div>
-      </div>}
     </aside>
   )
 }

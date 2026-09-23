@@ -29,6 +29,7 @@ import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { connectFocusCache, focusSpaceAction, isDroppedRepeat, sendFocusAction, useFocusCache } from '@/stores/focusStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import { isFocusTrayShortcut } from '@/lib/focusFlows'
+import { pageHidesRightRail, toggleFocusQueue } from '@/lib/rightRail'
 import { FocusView } from '@/components/focus/FocusView'
 import { FocusBanner } from '@/components/focus/FocusBanner'
 import { FocusResumeDialog } from '@/components/focus/FocusResumeDialog'
@@ -185,10 +186,11 @@ export function Dashboard() {
         return
       }
 
-      // ⇧F — open/close the focus tray (presentation only; works with an empty queue)
+      // ⇧F — open/close the focus queue in the right column (presentation
+      // only; works with an empty queue)
       if (!isInput && isFocusTrayShortcut(e)) {
         e.preventDefault()
-        useFocusSurface.getState().toggleExpanded()
+        toggleFocusQueue()
         return
       }
 
@@ -274,7 +276,7 @@ export function Dashboard() {
     return () => window.removeEventListener('keydown', handleChord, true)
   }, [setCurrentPage])
 
-  const hideSidebar = currentPage === 'settings' || currentPage === 'session'
+  const hideSidebar = pageHidesRightRail(currentPage)
   const contentMaxW = hideSidebar ? 'max-w-3xl' : 'max-w-2xl'
   const pageOwnsScroll = currentPage === 'tasks' || currentPage === 'docs'
 

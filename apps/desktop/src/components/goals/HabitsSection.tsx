@@ -1,9 +1,8 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { useGoalsStore } from '@/stores/goalsStore'
 import { useDataProvider } from '@/services/provider-context'
-import type { HabitHeatmapEntry, HabitWithStats } from '@nimble/types'
-import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
+import type { HabitWithStats } from '@nimble/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SectionTitle } from '@/components/shared/typography'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -226,181 +225,27 @@ function HabitCircle({
   )
 }
 
-// ── Heatmap ──
-
-const CELL_SIZE = 12
-const CELL_GAP = 2
-const WEEKS = 52
-const DAYS = 7
-const AMBER_LEVELS = [
-  'transparent',
-  'oklch(0.85 0.12 85 / 0.25)',   // intensity 1
-  'oklch(0.78 0.14 80 / 0.45)',   // intensity 2
-  'oklch(0.72 0.16 75 / 0.65)',   // intensity 3
-  'oklch(0.65 0.17 70 / 0.85)',   // intensity 4+
-]
-
-function getHeatmapColor(intensity: number): string {
-  if (intensity <= 0) return AMBER_LEVELS[0]
-  if (intensity >= 4) return AMBER_LEVELS[4]
-  return AMBER_LEVELS[intensity]
-}
-
-function formatCellDate(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
-function HabitHeatmap({ data }: { data: HabitHeatmapEntry[] }) {
-  const grid = useMemo(() => {
-    // Build a map from date string to intensity
-    const intensityMap: Record<string, number> = {}
-    for (const entry of data) {
-      intensityMap[entry.date] = (intensityMap[entry.date] || 0) + entry.intensity
-    }
-
-    // Build grid: 52 weeks x 7 days, ending today
-    const today = new Date()
-    const cells: { date: string; intensity: number; col: number; row: number }[] = []
-
-    for (let w = WEEKS - 1; w >= 0; w--) {
-      for (let d = 0; d < DAYS; d++) {
-        const daysAgo = w * 7 + (6 - d) // Sunday = 0
-        const cellDate = new Date(today)
-        cellDate.setDate(today.getDate() - daysAgo + (today.getDay() - 6))
-        const dateStr = cellDate.toISOString().slice(0, 10)
-        cells.push({
-          date: dateStr,
-          intensity: intensityMap[dateStr] || 0,
-          col: WEEKS - 1 - w,
-          row: d,
-        })
-      }
-    }
-
-    return cells
-  }, [data])
-
-  // Month labels
-  const monthLabels = useMemo(() => {
-    const labels: { label: string; col: number }[] = []
-    let lastMonth = -1
-    for (const cell of grid) {
-      if (cell.row !== 0) continue
-      const month = new Date(cell.date).getMonth()
-      if (month !== lastMonth) {
-        lastMonth = month
-        labels.push({
-          label: new Date(cell.date).toLocaleString('default', { month: 'short' }),
-          col: cell.col,
-        })
-      }
-    }
-    return labels
-  }, [grid])
-
-  // One tab stop for the whole year; arrows move a cursor cell (goals P2-8).
-  const [cursor, setCursor] = useState(grid.length - 1)
-  const [gridFocused, setGridFocused] = useState(false)
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    const step: Record<string, number> = { ArrowRight: DAYS, ArrowLeft: -DAYS, ArrowDown: 1, ArrowUp: -1 }
-    if (e.key in step) {
-      e.preventDefault()
-      setCursor((c) => Math.max(0, Math.min(grid.length - 1, c + step[e.key])))
-    } else if (e.key === 'Home') { e.preventDefault(); setCursor(0) }
-    else if (e.key === 'End') { e.preventDefault(); setCursor(grid.length - 1) }
-  }
-  const focused = grid[cursor]
-  const cellLabel = (c: { date: string; intensity: number }) =>
-    `${formatCellDate(c.date)} · ${c.intensity === 0 ? 'no check-ins' : c.intensity === 1 ? '1 check-in' : `${c.intensity} check-ins`}`
-
-  const gridWidth = WEEKS * (CELL_SIZE + CELL_GAP)
-  const gridHeight = DAYS * (CELL_SIZE + CELL_GAP)
-
-  return (
-    <div className="overflow-x-auto">
-      <div style={{ width: gridWidth, minWidth: gridWidth }}>
-        {/* Month labels — `relative` so the absolute spans anchor here, not the page (P2-4) */}
-        <div className="relative flex mb-1" style={{ height: 14 }}>
-          {monthLabels.map((m, i) => (
-            <span
-              key={i}
-              className="text-label text-muted-foreground absolute"
-              style={{ left: m.col * (CELL_SIZE + CELL_GAP) }}
-            >
-              {m.label}
-            </span>
-          ))}
-        </div>
-
-        {/* Grid */}
-        <div
-          role="group"
-          aria-label="Habit activity, last 52 weeks. Use the arrow keys to move between days."
-          tabIndex={0}
-          onKeyDown={handleKeyDown}
-          onFocus={() => setGridFocused(true)}
-          onBlur={() => setGridFocused(false)}
-          className="relative rounded-sm"
-          style={{ width: gridWidth, height: gridHeight }}
-        >
-          {grid.map((cell, i) => (
-            <div
-              key={i}
-              title={cellLabel(cell)}
-              data-focused={gridFocused && i === cursor ? 'true' : undefined}
-              className={cn('absolute rounded-xs', gridFocused && i === cursor && 'outline-2 outline-ring outline-offset-1')}
-              style={{
-                width: CELL_SIZE,
-                height: CELL_SIZE,
-                left: cell.col * (CELL_SIZE + CELL_GAP),
-                top: cell.row * (CELL_SIZE + CELL_GAP),
-                backgroundColor: getHeatmapColor(cell.intensity),
-                border: cell.intensity === 0 ? '1px solid oklch(from var(--border) l c h / 0.15)' : 'none',
-              }}
-            />
-          ))}
-        </div>
-
-        {/* Static cue for the cursor cell — also what assistive tech hears */}
-        <p className="mt-1.5 text-label text-muted-foreground tabular-nums" aria-live="polite">
-          {focused ? cellLabel(focused) : ''}
-        </p>
-      </div>
-    </div>
-  )
-}
-
 // ── Habits Section ──
 
 export function HabitsSection() {
-  const dp = useDataProvider()
   const habits = useGoalsStore((s) => s.habits)
   const habitsLoading = useGoalsStore((s) => s.habitsLoading)
   const loadHabits = useGoalsStore((s) => s.loadHabits)
   const toggleHabit = useGoalsStore((s) => s.toggleHabit)
 
-  const [heatmapData, setHeatmapData] = useState<HabitHeatmapEntry[]>([])
-  const [heatmapLoading, setHeatmapLoading] = useState(true)
-
   useEffect(() => {
     loadHabits()
-    dp.habits.getHeatmap(undefined, 365)
-      .then(setHeatmapData)
-      .catch(() => {})
-      .finally(() => setHeatmapLoading(false))
-  }, [loadHabits, dp])
+  }, [loadHabits])
 
   // Optimistic: the store flips today_completed before the call and rolls
-  // back on failure; we only surface the error and refresh the heatmap.
+  // back on failure; we only surface the error.
   const handleToggle = useCallback(async (habitId: string) => {
     try {
       await toggleHabit(habitId)
-      dp.habits.getHeatmap(undefined, 365).then(setHeatmapData).catch(() => {})
     } catch (e) {
       toast.error(`Couldn't save that check-off — ${e}`)
     }
-  }, [toggleHabit, dp])
+  }, [toggleHabit])
 
   const activeHabits = habits.filter((h) => h.active)
   const completedCount = activeHabits.filter((h) => h.today_completed).length
@@ -483,15 +328,6 @@ export function HabitsSection() {
           <Plus className="size-4" />
         </AddHabitPopover>
       </div>
-
-      {/* Heatmap (collapsible) */}
-      <CollapsibleSection title="Activity" defaultOpen={false} className="-mt-3!">
-        {heatmapLoading ? (
-          <Skeleton className="h-24 w-full" />
-        ) : (
-          <HabitHeatmap data={heatmapData} />
-        )}
-      </CollapsibleSection>
     </div>
   )
 }

@@ -11,6 +11,21 @@ const RIGHT_DEFAULT_WIDTH = 288 // w-72
 export const DEFAULT_NAV_ORDER = ['today', 'tasks', 'inbox', 'docs', 'goals', 'session'] as const
 export type NavPageId = (typeof DEFAULT_NAV_ORDER)[number]
 
+// Right column tabs, in display order
+export const RIGHT_TABS = ['calendar', 'habits', 'activity', 'focus'] as const
+export type RightTab = (typeof RIGHT_TABS)[number]
+const RIGHT_TAB_KEY = 'nimble.rightTab'
+
+function loadRightTab(): RightTab {
+  try {
+    const saved = localStorage.getItem(RIGHT_TAB_KEY)
+    if (saved && (RIGHT_TABS as readonly string[]).includes(saved)) return saved as RightTab
+  } catch {
+    // Storage unavailable — fall back to the calendar
+  }
+  return 'calendar'
+}
+
 interface LayoutState {
   // Left nav sidebar
   navWidth: number
@@ -29,6 +44,10 @@ interface LayoutState {
   rightCollapsed: boolean
   setRightWidth: (w: number) => void
   setRightCollapsed: (v: boolean) => void
+  rightTab: RightTab
+  setRightTab: (tab: RightTab) => void
+  /** Show a tab, expanding the column if it is collapsed. */
+  openRightTab: (tab: RightTab) => void
 
   // Tasks project sidebar
   tasksProjectSidebarWidth: number
@@ -78,6 +97,19 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   rightCollapsed: false,
   setRightWidth: (w) => set({ rightWidth: w }),
   setRightCollapsed: (v) => set({ rightCollapsed: v }),
+  rightTab: loadRightTab(),
+  setRightTab: (tab) => {
+    set({ rightTab: tab })
+    try {
+      localStorage.setItem(RIGHT_TAB_KEY, tab)
+    } catch {
+      // Remembered for this session only
+    }
+  },
+  openRightTab: (tab) => {
+    useLayoutStore.getState().setRightTab(tab)
+    set({ rightCollapsed: false })
+  },
 
   tasksProjectSidebarWidth: 200,
   tasksProjectSidebarCollapsed: false,

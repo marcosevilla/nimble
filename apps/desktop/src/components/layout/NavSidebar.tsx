@@ -4,8 +4,7 @@ import { useLayoutStore } from '@/stores/layoutStore'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataProvider } from '@/services/provider-context'
 import { cn } from '@/lib/utils'
-import { Sun, CheckSquare, Inbox, FileText, Target, BookOpen, Settings, Command, Timer } from 'lucide-react'
-import { useFocusSurface } from '@/stores/focusSurfaceStore'
+import { Sun, CheckSquare, Inbox, FileText, Target, BookOpen, Settings, Command } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Icon } from '@/components/shared/Icon'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -191,8 +190,6 @@ function SortableNavItem({
 }
 
 export function NavSidebar() {
-  const focusOpen = useFocusSurface((s) => s.expanded)
-  const toggleFocus = useFocusSurface((s) => s.toggleExpanded)
   const currentPage = useAppStore((s) => s.currentPage)
   const setCurrentPage = useAppStore((s) => s.setCurrentPage)
 
@@ -340,15 +337,6 @@ export function NavSidebar() {
 
       {/* Bottom items — pinned, not sortable */}
       <div className={cn('mt-auto flex flex-col gap-1', expanded ? 'px-2' : 'items-center')}>
-        {/* Focus queue — always reachable, even with nothing queued. Opening
-            it is presentation only; it never starts timing. */}
-        <NavButton
-          label="Focus queue"
-          icon={Timer}
-          isActive={focusOpen}
-          expanded={expanded}
-          onClick={toggleFocus}
-        />
         <NavButton
           label="Command"
           icon={Command}

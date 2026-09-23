@@ -10,7 +10,7 @@ import {
   sendFocusAction,
   useFocusCache,
 } from '@/stores/focusStore'
-import { useFocusSurface } from '@/stores/focusSurfaceStore'
+import { openFocusQueue } from '@/lib/rightRail'
 import type { FocusSource, LocalTask } from '@nimble/types'
 
 /**
@@ -21,7 +21,7 @@ import type { FocusSource, LocalTask } from '@nimble/types'
 export type FocusEntryTask = Pick<LocalTask, 'id' | 'content' | 'sync_policy' | 'due_date' | 'project_id' | 'completed' | 'status'>
 
 const reportError = (error: unknown) => reportFocusError(error)
-const openQueue = () => useFocusSurface.getState().setExpanded(true)
+const openQueue = openFocusQueue
 
 /** Live controls for a task plus its handlers (toggle queue, Focus now, open the tray). */
 export function useFocusTaskEntry(task: FocusEntryTask) {
