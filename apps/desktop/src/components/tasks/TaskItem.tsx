@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { StatusDropdown } from './StatusDropdown'
 import { useSelectionStore } from '@/stores/selectionStore'
@@ -137,9 +138,12 @@ interface TaskItemProps {
    * dead end only escapable via Escape. Defaults to true so list-page call
    * sites keep selecting. */
   selectable?: boolean
+  /** Trailing row actions (focus-queue icon + overflow menu) rendered after
+   * the metadata. Interactive children must stop click propagation. */
+  actions?: ReactNode
 }
 
-export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, className, dragHandleProps, showGrip = true, selectable = true }: TaskItemProps) {
+export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, className, dragHandleProps, showGrip = true, selectable = true, actions }: TaskItemProps) {
   const isSelected = useSelectionStore((s) => s.selectedIds.has(task.id))
   const isCompleting = useSelectionStore((s) => s.completingTaskIds.has(task.id))
 
@@ -249,6 +253,7 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
             </span>
           )}
           {task.dueDate && <DueDateBadge date={task.dueDate} />}
+          {actions}
         </div>
       </div>
     </div>

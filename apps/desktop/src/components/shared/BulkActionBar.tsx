@@ -227,13 +227,9 @@ export function BulkActionBar() {
             {/* Focus — shared across single + bulk. The default appends the
                 selection to the queue; Focus now is the explicit Start. */}
             <DropdownMenu>
-              <DropdownMenuTrigger>
-                <ActionButton
-                  icon={Play}
-                  label="Focus"
-                  onClick={() => {}}
-                  className="text-accent-blue/80 hover:text-accent-blue"
-                />
+              <DropdownMenuTrigger className={cn(ACTION_CLASS, 'text-accent-blue/80 hover:text-accent-blue')}>
+                <Play className="size-3.5" />
+                Focus
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" sideOffset={8} className="w-52">
                 <DropdownMenuItem className="gap-2" disabled={focusBusy} onClick={() => void handleEnqueue()}>
@@ -267,12 +263,9 @@ export function BulkActionBar() {
 
             {/* Status — works for any number */}
             <DropdownMenu>
-              <DropdownMenuTrigger>
-                <ActionButton
-                  icon={STATUSES[1].icon}
-                  label="Status"
-                  onClick={() => {}}
-                />
+              <DropdownMenuTrigger className={ACTION_CLASS}>
+                <StatusIcon className="size-3.5" />
+                Status
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" sideOffset={8} className="w-40">
                 {STATUSES.map((s) => {
@@ -293,12 +286,9 @@ export function BulkActionBar() {
 
             {/* Move to project */}
             <DropdownMenu>
-              <DropdownMenuTrigger>
-                <ActionButton
-                  icon={FolderInput}
-                  label="Move"
-                  onClick={() => {}}
-                />
+              <DropdownMenuTrigger className={ACTION_CLASS}>
+                <FolderInput className="size-3.5" />
+                Move
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" sideOffset={8} className="w-36">
                 {projects.map((p) => (
@@ -346,6 +336,13 @@ export function BulkActionBar() {
   )
 }
 
+/* Shared by ActionButton and the menu triggers: a DropdownMenuTrigger IS
+   the button (never wrap an ActionButton in one — nested <button>s). */
+const ACTION_CLASS =
+  'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-body text-muted-foreground hover:text-foreground hover:bg-hover transition-colors'
+
+const StatusIcon = STATUSES[1].icon
+
 function ActionButton({
   icon: Icon,
   label,
@@ -360,10 +357,7 @@ function ActionButton({
   return (
     <button
       onClick={onClick}
-      className={cn(
-        'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-body text-muted-foreground hover:text-foreground hover:bg-hover transition-colors',
-        className,
-      )}
+      className={cn(ACTION_CLASS, className)}
     >
       <Icon className="size-3.5" />
       {label}

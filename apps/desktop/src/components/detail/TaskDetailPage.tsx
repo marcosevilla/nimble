@@ -26,6 +26,7 @@ import { labelColor } from '@/lib/labelColors'
 import { DetailBreadcrumbs } from './DetailBreadcrumbs'
 import { TaskActivityLog } from './TaskActivityLog'
 import { FocusTaskHistory } from '@/components/focus/FocusTaskHistory'
+import { TaskFocusControls } from '@/components/focus/FocusTaskEntry'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -415,8 +416,8 @@ export function TaskDetailPage() {
     <>
     {deleteDialog}
     <div className="mx-auto w-full max-w-[600px] pt-[30px] flex flex-col gap-6">
-      {/* Top row: breadcrumb (left) + gear trigger (right) — no paperclip
-          (Decision 13), no other actions in the right cluster. */}
+      {/* Top row: breadcrumb (left) + Focus control and gear trigger
+          (right) — no paperclip (Decision 13). */}
       <div className="flex items-center justify-between gap-2 min-h-6">
         {breadcrumbSegments.length > 0 ? (
           <div className="flex min-w-0 items-center gap-1">
@@ -438,6 +439,8 @@ export function TaskDetailPage() {
           <div />
         )}
 
+        <div className="flex shrink-0 items-center gap-2">
+        <TaskFocusControls task={task} />
         <DropdownMenu>
           <DropdownMenuTrigger
             aria-label="Task actions"
@@ -470,6 +473,7 @@ export function TaskDetailPage() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
 
       {/* Status + Title — status icon matches the row size (StatusDropdown's

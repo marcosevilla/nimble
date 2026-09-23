@@ -29,6 +29,8 @@ interface SortableTaskItemProps {
   onAddSubtask: (parentId: string, content: string) => void
   focused?: boolean
   onFocusRow?: () => void
+  /** See LocalTaskRow `focusShortcut`. */
+  focusShortcut?: boolean
 }
 
 // Exported so SectionedTaskList (Task 14's section-lane view) can reuse the
@@ -42,6 +44,7 @@ export function SortableTaskItem({
   onAddSubtask,
   focused,
   onFocusRow,
+  focusShortcut,
 }: SortableTaskItemProps) {
   const {
     attributes,
@@ -81,6 +84,7 @@ export function SortableTaskItem({
         onAddSubtask={onAddSubtask}
         focused={focused}
         onFocusRow={onFocusRow}
+        focusShortcut={focusShortcut}
         dragHandleProps={{ ...attributes, ...listeners }}
       />
     </div>
