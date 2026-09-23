@@ -13,6 +13,7 @@ import {
   pomodoroConfig, parseCustomMinutes, planQuickAdd, runQuickAdd, taskMenuItems, failureControl,
   focusTaskOps, duplicateInput, dueLabel, localFailureMessage, visibleFailure, menuFocusAction, undoDeleteAction, stillOpenAction,
   addToQueueLabel, sourceLabel, queueRowKeyIntent, queueRowClickIntent, queueTabStop, reenqueueAction, restoreEntryAction,
+  taskPlaceLabel, descriptionOverflows,
 } from '../src/lib/focusQueueIntents.ts'
 
 let output, rendered
@@ -444,4 +445,23 @@ test('undo remove: the re-queued entry returns to its prior index, never onto th
   assert.equal(restoreEntryAction(after, 't3', 9), null, 'past the end clamps to the end, where it already is')
   assert.equal(restoreEntryAction(after, 'tx', 1), null, 'not re-queued: nothing to move')
   assert.equal(restoreEntryAction(q(['e9', 't3']), 't3', 1), null, 'alone in the queue: it is the card')
+})
+
+test('place label: project, or project / section; nothing when the project is unknown', () => {
+  const projects = [{ id: 'inbox', name: 'Inbox' }, { id: 'p1', name: 'Deep work' }]
+  const sections = [{ id: 'sec1', project_id: 'p1', name: 'Writing' }, { id: 'sec2', project_id: 'p9', name: 'Elsewhere' }]
+  const t = (over) => ({ id: 't', project_id: 'inbox', section_id: null, ...over })
+  assert.equal(taskPlaceLabel(t({}), projects, sections), 'Inbox')
+  assert.equal(taskPlaceLabel(t({ project_id: 'p1', section_id: 'sec1' }), projects, sections), 'Deep work / Writing')
+  assert.equal(taskPlaceLabel(t({ project_id: 'p1', section_id: 'missing' }), projects, sections), 'Deep work')
+  assert.equal(taskPlaceLabel(t({ project_id: 'p1', section_id: 'sec2' }), projects, sections), 'Deep work', 'section of another project is ignored')
+  assert.equal(taskPlaceLabel(t({ project_id: 'gone' }), projects, sections), null)
+  assert.equal(taskPlaceLabel(t({ project_id: '' }), projects, sections), null)
+})
+
+test('description overflows one line only when the clamped box is smaller than its content', () => {
+  assert.equal(descriptionOverflows({ scrollHeight: 17, clientHeight: 17, scrollWidth: 300, clientWidth: 300 }), false)
+  assert.equal(descriptionOverflows({ scrollHeight: 34, clientHeight: 17, scrollWidth: 300, clientWidth: 300 }), true)
+  assert.equal(descriptionOverflows({ scrollHeight: 17, clientHeight: 17, scrollWidth: 420, clientWidth: 300 }), true)
+  assert.equal(descriptionOverflows({ scrollHeight: 17.6, clientHeight: 17, scrollWidth: 300.4, clientWidth: 300 }), false, 'sub-pixel noise is not overflow')
 })

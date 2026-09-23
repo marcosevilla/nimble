@@ -21,6 +21,7 @@ import {
   runQuickAdd,
   sourceLabel,
   stillOpenAction,
+  taskPlaceLabel,
   undoDeleteAction,
   reenqueueAction,
   restoreEntryAction,
@@ -373,7 +374,7 @@ export function FocusQueueTray({
           entry={first ?? null}
           task={firstTask}
           subtasks={firstTask ? childrenOf(firstTask.id).filter(isOpen) : []}
-          projectName={firstTask ? projectName(firstTask.project_id) : undefined}
+          placeLabel={firstTask ? taskPlaceLabel(firstTask, projects, sections) : null}
           today={today}
           compact={compact}
           onToggleCompact={() => {

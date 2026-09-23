@@ -29,11 +29,11 @@ test('task identity precedes prominent timer and compact retains controls', () =
   assert.doesNotMatch(html, /Up next/)
 })
 
-test('card order: completion, title, controls, metadata, inline subtask, timer left, Start right', () => {
+test('card order: completion, place label, title, controls, description, due metadata, inline subtask, timer left, Start right', () => {
   const html = rendered.renderFocusCard()
-  const order = ['Complete Example task', 'Example task', 'Copy assistant context for Example task',
-    'More actions for Example task', 'Hide queue',
-    'Deep work', 'Complete Outline sections', 'Outline sections', 'Focus timer', 'aria-label="Start"']
+  const order = ['Complete Example task', 'Deep work / Writing', '>Example task</h2>', 'Copy assistant context for Example task',
+    'More actions for Example task', 'Hide queue', 'Draft the outline',
+    '2:00 PM', 'Complete Outline sections', 'Outline sections', 'Focus timer', 'aria-label="Start"']
     .map((label) => html.indexOf(label))
   assert.ok(order.every((x, i) => x >= 0 && (i === 0 || x >= order[i - 1])), `order ${order}`)
 })
@@ -89,4 +89,41 @@ test('a queued task missing from storage keeps Remove, Skip and Show queue inste
   assert.match(html, /<button\b[^>]*>Skip<\/button>/)
   assert.match(html, /aria-label="Hide queue"/)
   assert.doesNotMatch(html, /Focus timer/)
+})
+
+// ── Checklist H1 design asks (2026-09-23): place label above the title, one-line description ──
+
+test('project / section label sits above the title as a small muted label', () => {
+  const html = rendered.renderFocusCard()
+  const label = html.match(/<p\b[^>]*data-slot="focus-place"[^>]*>[^<]*<\/p>/)?.[0] ?? ''
+  assert.match(label, />Deep work \/ Writing</)
+  assert.match(label, /text-label/)
+  assert.match(label, /text-muted-foreground/)
+  assert.ok(html.indexOf('data-slot="focus-place"') < html.indexOf('>Example task</h2>'))
+  // The label replaces the project in the metadata line (no duplicate).
+  assert.equal(html.split('Deep work').length - 1, 1)
+})
+
+test('no place label and no description row when the task has neither', () => {
+  const html = rendered.renderFocusCard({ plain: true })
+  assert.doesNotMatch(html, /data-slot="focus-place"/)
+  assert.doesNotMatch(html, /data-slot="focus-description"/)
+  assert.doesNotMatch(html, /See more/)
+})
+
+test('description renders below the title as escaped plain text clamped to one line, no toggle until it overflows', () => {
+  const html = rendered.renderFocusCard()
+  const desc = html.match(/<p\b[^>]*data-slot="focus-description"[^>]*>[^<]*<\/p>/)?.[0] ?? ''
+  assert.ok(desc, 'description rendered')
+  assert.match(desc, /line-clamp-1/)
+  assert.match(desc, /&lt;b&gt;first&lt;\/b&gt;/, 'markup is text, never HTML')
+  assert.match(desc, /\[notes\]\(https:\/\/example\.com\)/, 'markdown stays plain text')
+  assert.ok(html.indexOf('>Example task</h2>') < html.indexOf('data-slot="focus-description"'))
+  assert.doesNotMatch(html, /See more/, 'no button until measured overflowing')
+})
+
+test('compact companion card keeps the place label and one-line description', () => {
+  const html = rendered.renderCompactFocus()
+  assert.match(html, /data-slot="focus-place"[^>]*>Deep work \/ Writing</)
+  assert.match(html, /data-slot="focus-description"/)
 })

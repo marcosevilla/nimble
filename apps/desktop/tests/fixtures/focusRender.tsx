@@ -16,6 +16,7 @@ import type {
   FocusSnapshot,
   LocalTask,
   Project,
+  Section,
 } from '@nimble/types'
 
 const TODAY = '2026-09-22'
@@ -34,7 +35,8 @@ const task = (over: Partial<LocalTask>): LocalTask => ({
 })
 
 const tasks: LocalTask[] = [
-  task({ id: 't1', content: 'Example task', project_id: 'p1', priority: 3, due_date: TODAY, due_time: '14:00', position: 2 }),
+  task({ id: 't1', content: 'Example task', project_id: 'p1', section_id: 'sec1', priority: 3, due_date: TODAY, due_time: '14:00', position: 2,
+    description: 'Draft the outline <b>first</b>, then\nlink [notes](https://example.com).' }),
   task({ id: 's1', parent_id: 't1', content: 'Outline sections', project_id: 'p1' }),
   task({ id: 't2', content: 'Second task', project_id: 'p1', due_date: TODAY, position: 1 }),
   task({ id: 't3', content: 'Third task', project_id: 'p1', due_date: TODAY, position: 0 }),
@@ -42,6 +44,7 @@ const tasks: LocalTask[] = [
   task({ id: 't5', content: 'Earlier thing', due_date: '2026-09-20' }),
 ]
 const projects = [{ id: 'inbox', name: 'Inbox' }, { id: 'p1', name: 'Deep work' }] as Project[]
+const sections = [{ id: 'sec1', project_id: 'p1', name: 'Writing', position: 0, external_id: null, external_source: null }] as Section[]
 
 const entry = (n: number, config: FocusConfig = countUp): FocusEntry => ({
   id: `e${n}`, task_id: `t${n}`, occurrence_id: `o${n}`, added_at: '2026-09-22T08:00:00Z',
@@ -82,7 +85,7 @@ const taskOps: FocusTaskOps = {
 }
 const noop = () => {}
 
-export function renderFocusCard(opts: { missingTask?: boolean; live?: boolean; running?: boolean; resumable?: boolean; overtimeMs?: number; countUpMs?: number } = {}): string {
+export function renderFocusCard(opts: { missingTask?: boolean; live?: boolean; running?: boolean; resumable?: boolean; overtimeMs?: number; countUpMs?: number; plain?: boolean } = {}): string {
   const snap = opts.countUpMs != null
     ? snapshot({ config: countUp, totalMs: opts.countUpMs })
     : snapshot({ totalMs: opts.overtimeMs != null ? 25 * MIN + opts.overtimeMs : undefined,
@@ -92,9 +95,9 @@ export function renderFocusCard(opts: { missingTask?: boolean; live?: boolean; r
       snapshot={snap}
       capabilities={caps({ live_timing: opts.live ?? true })}
       entry={snap.queue[0]}
-      task={opts.missingTask ? null : tasks[0]}
+      task={opts.missingTask ? null : opts.plain ? { ...tasks[0], description: null } : tasks[0]}
       subtasks={opts.missingTask ? [] : [tasks[1]]}
-      projectName="Deep work"
+      placeLabel={opts.plain ? undefined : 'Deep work / Writing'}
       today={TODAY}
       compact={false}
       onToggleCompact={noop}
@@ -112,7 +115,7 @@ function tray(opts: { compact?: boolean; empty?: boolean; source?: 'project'; re
       capabilities={opts.readOnly ? caps({ queue_write: false, live_timing: false, reason: 'Replica is read-only' }) : caps({ live_timing: opts.live ?? true })}
       tasks={tasks}
       projects={projects}
-      sections={[]}
+      sections={sections}
       completed={completed}
       today={TODAY}
       onAction={never}
