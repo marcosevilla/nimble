@@ -42,7 +42,7 @@ interface PageFrameProps extends React.ComponentProps<typeof PageHeader> {
 export function PageFrame({ width, bodyClassName, children, ...header }: PageFrameProps) {
   return (
     <>
-      <PageHeader {...header} />
+      <PageHeader width={width ?? 'default'} {...header} />
       <PageColumn width={width} className={bodyClassName}>
         {children}
       </PageColumn>

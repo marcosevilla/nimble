@@ -167,8 +167,8 @@
 
 /* Three surface tiers (facelift C1, cross-cutting move 2). Padding stays
    with the caller (`surface-panel p-4` is the Today card recipe).
-   - panel:   a card that holds content (brief, priorities, review step)
-   - inset:   a recessed strip with no edge (reminders, capture field)
+   - panel:   a card that holds content (brief, priorities, reminders, review step)
+   - inset:   a recessed strip with no edge (capture field)
    - popover: floats above the page with the one overlay shadow */
 @utility surface-panel {
   @apply rounded-xl border border-border/30 bg-card;

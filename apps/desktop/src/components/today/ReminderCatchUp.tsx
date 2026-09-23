@@ -84,7 +84,7 @@ export function ReminderCatchUp() {
   }
 
   return (
-    <section aria-labelledby="reminders-heading" className="surface-inset px-3 py-2">
+    <section aria-labelledby="reminders-heading" className="surface-panel px-4 py-2">
       <SectionTitle
         as="h2"
         id="reminders-heading"

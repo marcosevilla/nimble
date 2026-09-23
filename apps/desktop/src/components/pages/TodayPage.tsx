@@ -42,8 +42,8 @@ function greetingMeta(remaining: number | null): string {
 function ProgressBar({ completed, total }: { completed: number; total: number }) {
   const pct = total === 0 ? 0 : Math.round((completed / total) * 100)
   return (
-    <div className="flex items-center gap-3 mb-4 animate-progress-enter">
-      <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
+    <div className="flex items-center gap-2 animate-progress-enter" title={`${completed} of ${total} done today`}>
+      <div className="w-20 h-1 rounded-full bg-muted overflow-hidden">
         <div
           className={cn(
             'h-full rounded-full transition-[width] duration-(--transition-slow)',
@@ -351,14 +351,17 @@ function DashboardMode({
   // Primary lane: Priorities → Tasks → collapsed Brief (today P2-1). Habits
   // live in the right rail under the calendar (RightSidebar).
   return (
-    <PageFrame title="Today" meta={greetingMeta(total > 0 ? remaining : null)} bodyClassName="space-y-4">
+    <PageFrame
+      title="Today"
+      meta={greetingMeta(total > 0 ? remaining : null)}
+      actions={completed > 0 ? <ProgressBar completed={completed} total={total} /> : undefined}
+      bodyClassName="space-y-4"
+    >
       <ReminderCatchUp />
 
       {cachedPriorities && cachedPriorities.length > 0 && (
         <PrioritiesSection initialPriorities={cachedPriorities} initialEnergy={cachedEnergy} />
       )}
-
-      {completed > 0 && <ProgressBar completed={completed} total={total} />}
 
       {!localLoading && topLevelLocal.length > 0 && (
         <CollapsibleSection
