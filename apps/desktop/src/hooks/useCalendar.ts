@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/stores/appStore'
 import { useDataProvider } from '@/services/provider-context'
 import type { CalendarEvent } from '@nimble/types'
 import { friendlyError } from '@/lib/errors'
+import { loadCalendarDay } from '@/lib/calendarLoad'
 
 function todayString(): string {
   const d = new Date()
@@ -25,39 +26,30 @@ export function useCalendar() {
 
   const isToday = selectedDate === todayString()
 
+  // Latest requested date, so a slow revalidation can't overwrite a newer day.
+  const latestDate = useRef(selectedDate)
+
   const loadEventsForDate = useCallback(async (date: string, forceRefresh = false) => {
-    try {
-      setError(null)
-      setLoading(true)
-
-      let data: CalendarEvent[]
-
-      if (!forceRefresh) {
-        // Try cache first for fast navigation
-        data = await dp.calendar.getCachedEvents(date)
-        if (data.length > 0) {
-          setEvents(data)
-          setLoading(false)
-          // If this is today, also update the app store
-          if (date === todayString()) {
-            setCalendarEvents(data)
-          }
-          return
-        }
-      }
-
-      // Fall back to network fetch (which caches a 7-day window)
-      data = await dp.calendar.fetchEvents(date)
+    latestDate.current = date
+    const show = (data: CalendarEvent[]) => {
+      if (latestDate.current !== date) return
       setEvents(data)
+      setLoading(false)
+      // If this is today, also update the app store
       if (date === todayString()) {
         setCalendarEvents(data)
       }
+    }
+    try {
+      setError(null)
+      setLoading(true)
+      await loadCalendarDay(dp.calendar, date, forceRefresh, show)
     } catch (e) {
       // Inline "Calendar offline. / Retry" in the panel is the one channel;
       // a toast here fired on every day change (shell P2-6, §3.2).
-      setError(friendlyError(e))
+      if (latestDate.current === date) setError(friendlyError(e))
     } finally {
-      setLoading(false)
+      if (latestDate.current === date) setLoading(false)
     }
   }, [dp, setCalendarEvents])
 
