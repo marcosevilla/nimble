@@ -13,13 +13,14 @@ import type { FocusRequestError } from '@/services/focus-events'
 import { buildFocusPrompt, copyFocusPrompt } from '@/lib/focusPrompt'
 import { candidateIds, queueTheseAction } from '@/lib/focusSources'
 import {
-  failureControl,
+  localFailureMessage,
   menuFocusAction,
   queueBlockedReason,
   runQuickAdd,
   sourceLabel,
   stillOpenAction,
   undoDeleteAction,
+  visibleFailure,
   type FocusTaskOps,
   type TaskMenuId,
 } from '@/lib/focusQueueIntents'
@@ -42,7 +43,6 @@ import type {
 const UNDO_MS = 10_000
 const ACK_MS = 2_500
 
-const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 const isOpen = (task: LocalTask) => !task.completed && task.status !== 'complete'
 
 export interface FocusQueueTrayProps {
@@ -223,7 +223,7 @@ export function FocusQueueTray({
         }
         return reply
       } catch (error) {
-        setLocalError(messageOf(error))
+        setLocalError(localFailureMessage(error))
         return null
       }
     },
@@ -256,7 +256,7 @@ export function FocusQueueTray({
       setRenamingEntryId(null)
       return true
     } catch (error) {
-      setLocalError(messageOf(error))
+      setLocalError(localFailureMessage(error))
       return false
     }
   }
@@ -301,7 +301,7 @@ export function FocusQueueTray({
         }
       }
     } catch (error) {
-      setLocalError(messageOf(error))
+      setLocalError(localFailureMessage(error))
     }
   }
 
@@ -310,11 +310,11 @@ export function FocusQueueTray({
     try {
       await taskOps.complete(sub)
     } catch (error) {
-      setLocalError(messageOf(error))
+      setLocalError(localFailureMessage(error))
     }
   }
 
-  const failure = failureControl(cacheError) ?? (localError ? { message: localError, retry: null } : null)
+  const failure = visibleFailure(cacheError, localError)
   const syncNote = snapshot.replica ? `Last synced ${format(parseISO(snapshot.as_of), 'h:mm a')}` : null
 
   return (

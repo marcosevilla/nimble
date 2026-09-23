@@ -31,7 +31,8 @@ test('task identity precedes prominent timer and compact retains controls', () =
 
 test('card order: completion, title, controls, metadata, inline subtask, timer left, Start right', () => {
   const html = rendered.renderFocusCard()
-  const order = ['Complete Example task', 'Example task', 'More actions for Example task', 'Hide queue',
+  const order = ['Complete Example task', 'Example task', 'Copy assistant context for Example task',
+    'More actions for Example task', 'Hide queue',
     'Deep work', 'Complete Outline sections', 'Outline sections', 'Focus timer', 'aria-label="Start"']
     .map((label) => html.indexOf(label))
   assert.ok(order.every((x, i) => x >= 0 && (i === 0 || x >= order[i - 1])), `order ${order}`)
@@ -71,4 +72,21 @@ test('compact card-only mode unmounts queue, add, tray, drawer and footer tab st
     assert.ok(!html.includes(gone), `${gone} is unmounted`)
   }
   assert.match(html, /Complete Outline sections/) // inline subtasks stay completable
+})
+
+test('assistant context is a visible secondary control on the card, not only in the menu', () => {
+  const html = rendered.renderFocusCard()
+  const button = html.match(/<button\b[^>]*aria-label="Copy assistant context for Example task"[^>]*>/)?.[0]
+  assert.ok(button, 'copy control rendered')
+  assert.doesNotMatch(button, /disabled=""/)
+})
+
+test('a queued task missing from storage keeps Remove, Skip and Show queue instead of an empty card', () => {
+  const html = rendered.renderFocusCard({ missingTask: true })
+  assert.match(html, /Task no longer available/)
+  assert.doesNotMatch(html, /Queue is clear/)
+  assert.match(html, /<button\b[^>]*>Remove from queue<\/button>/)
+  assert.match(html, /<button\b[^>]*>Skip<\/button>/)
+  assert.match(html, /aria-label="Hide queue"/)
+  assert.doesNotMatch(html, /Focus timer/)
 })

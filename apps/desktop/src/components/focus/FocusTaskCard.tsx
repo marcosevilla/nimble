@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type Ref } from 'react'
-import { Check, ChevronDown, ChevronUp, MoreHorizontal, Pause, Play } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, ClipboardCopy, MoreHorizontal, Pause, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -218,6 +218,38 @@ export function FocusTaskCard({
     </IconButton>
   )
 
+  const writeBlocked = queueBlockedReason(capabilities)
+
+  if (entry && !task) {
+    // The queued task left native storage (deleted/moved elsewhere). Keep an
+    // escape: remove or skip the orphan entry; its recorded time is kept.
+    return (
+      <section aria-label="Focused task" className="border-b border-border px-4 pt-4 pb-3">
+        <div className="flex items-start gap-2.5">
+          <h2 ref={headingRef} tabIndex={-1} className="min-w-0 flex-1 text-title text-muted-foreground outline-none">
+            Task no longer available
+          </h2>
+          {toggle}
+        </div>
+        <Meta as="p" className="mt-1">It may have been deleted elsewhere. Its recorded time is kept.</Meta>
+        <div className="mt-3 flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={writeBlocked != null}
+            title={writeBlocked ?? undefined}
+            onClick={() => void onAction({ kind: 'remove', occurrence_id: entry.occurrence_id })}
+          >
+            Remove from queue
+          </Button>
+          <Button size="sm" variant="ghost" disabled={writeBlocked != null} title={writeBlocked ?? undefined} onClick={() => void onAction({ kind: 'skip' })}>
+            Skip
+          </Button>
+        </div>
+      </section>
+    )
+  }
+
   if (!entry || !task) {
     return (
       <section aria-label="Focused task" className="relative flex min-h-32 flex-col items-center justify-center gap-1 border-b border-border px-8 py-6 text-center">
@@ -230,7 +262,6 @@ export function FocusTaskCard({
 
   const control = timerControl(snapshot, entry)
   const blocked = controlBlockedReason(control, capabilities)
-  const writeBlocked = queueBlockedReason(capabilities)
   const timing = cardTiming(snapshot, entry)
   const running = control.label === 'Pause' || control.label === 'End break'
   const due = dueLabel(task, today)
@@ -258,6 +289,15 @@ export function FocusTaskCard({
               </h2>
             )}
             <div className="flex shrink-0 items-center gap-0.5">
+              <IconButton
+                size="lg"
+                aria-label={`Copy assistant context for ${task.content}`}
+                title="Copy assistant context"
+                onClick={() => onMenu('copy_context', task, entry)}
+                className="focus-ring"
+              >
+                <ClipboardCopy className="size-3.5" aria-hidden />
+              </IconButton>
               <FocusTaskMenu task={task} place="card" onSelect={(id) => onMenu(id, task, entry)} />
               {toggle}
             </div>

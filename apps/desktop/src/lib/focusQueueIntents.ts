@@ -265,6 +265,25 @@ export function failureControl(error: { code: string; message: string; command?:
   return { message: error.message, retry }
 }
 
+/**
+ * Message a surface should keep for a failed write, or null when the error
+ * is a typed focus failure: `sendFocusAction` already put it in the focus
+ * cache, which clears it after a successful retry. Duplicating it locally
+ * would leave a stale alert behind a command that did commit.
+ */
+export function localFailureMessage(error: unknown): string | null {
+  if (error && typeof error === 'object' && 'code' in error) return null
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** What the tray shows: the cache's focus failure first, else a local one. */
+export function visibleFailure(
+  cacheError: { code: string; message: string; command?: unknown } | null,
+  localError: string | null,
+): FailureControl | null {
+  return failureControl(cacheError) ?? (localError ? { message: localError, retry: null } : null)
+}
+
 // ── Quick add ──
 
 export interface QuickAddRequest {

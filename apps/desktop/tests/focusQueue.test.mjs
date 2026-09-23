@@ -11,7 +11,7 @@ import react from '@vitejs/plugin-react'
 import {
   timerControl, controlBlockedReason, reorderAfterDrag, moveEntryAction, timeboxConfig,
   pomodoroConfig, parseCustomMinutes, planQuickAdd, runQuickAdd, taskMenuItems, failureControl,
-  focusTaskOps, duplicateInput, dueLabel, menuFocusAction, undoDeleteAction, stillOpenAction,
+  focusTaskOps, duplicateInput, dueLabel, localFailureMessage, visibleFailure, menuFocusAction, undoDeleteAction, stillOpenAction,
 } from '../src/lib/focusQueueIntents.ts'
 
 let output, rendered
@@ -183,6 +183,20 @@ test('uncertain failures offer Try again with the SAME command; certain ones onl
   assert.equal(failureControl(null), null)
 })
 
+test('typed focus failures live only in the cache, so a successful retry leaves no stale alert', () => {
+  const command = { command_id: 'c-1', action: { kind: 'skip' } }
+  const storage = Object.assign(new Error('Disk was busy'), { code: 'storage', command })
+  // The rejected action is not copied into local state...
+  assert.equal(localFailureMessage(storage), null)
+  // ...while it is uncertain the cache shows it with Try again...
+  assert.deepEqual(visibleFailure(storage, localFailureMessage(storage)), { message: 'Disk was busy', retry: command })
+  // ...and once retryFocusCommand succeeds (cache cleared) nothing remains.
+  assert.equal(visibleFailure(null, localFailureMessage(storage)), null)
+  // Untyped failures (native task writes) are kept locally.
+  assert.equal(localFailureMessage(new Error('disk full')), 'disk full')
+  assert.deepEqual(visibleFailure(null, 'disk full'), { message: 'disk full', retry: null })
+})
+
 test('task ops pass the displayed due date on completion and duplicate as fresh unbound work', async () => {
   const calls = []
   const dp = { tasks: {
@@ -239,6 +253,9 @@ test('queue rows expose separate handle, completion, promote and menu stops', ()
   assert.match(upNext, /aria-label="Focus Second task now"/)
   assert.match(upNext, /aria-label="More actions for Second task"/)
   assert.match(upNext, /aria-keyshortcuts="Alt\+ArrowUp Alt\+ArrowDown"/)
+  // Keyboard moves refocus this same control by entry id after the reorder commits.
+  const title = upNext.match(/<button\b[^>]*aria-label="Focus Second task now"[^>]*>/)?.[0] ?? ''
+  assert.match(title, /data-focus-entry="e2"/)
 })
 
 test('completed tray shows struck title with spent time and Show/Hide/Clear', () => {

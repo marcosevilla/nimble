@@ -14,6 +14,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { useEffect, useRef } from 'react'
 import { GripVertical } from 'lucide-react'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { Label, Meta } from '@/components/shared/typography'
@@ -114,6 +115,7 @@ function QueueRowItem({
           type="button"
           aria-label={task ? `Focus ${title} now` : title}
           aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+          data-focus-entry={entry.id}
           disabled={blocked != null || !task}
           onClick={(e) => {
             e.stopPropagation()
@@ -178,6 +180,26 @@ export function FocusQueueList({
   const submit = (action: FocusAction | null) => {
     if (action) void onAction(action)
   }
+  // Keyboard move keeps focus on the moved row: the reorder commits async
+  // and React moves the focused node (WebKit blurs it), so refocus the same
+  // entry's title once the new snapshot has rendered.
+  const listRef = useRef<HTMLUListElement>(null)
+  const refocusEntryId = useRef<string | null>(null)
+  useEffect(() => {
+    const id = refocusEntryId.current
+    if (!id) return
+    const target = Array.from(listRef.current?.querySelectorAll<HTMLElement>('[data-focus-entry]') ?? []).find(
+      (el) => el.dataset.focusEntry === id,
+    )
+    if (target && document.activeElement !== target) target.focus()
+    if (target) refocusEntryId.current = null
+  }, [snapshot.queue_revision])
+  const move = (entryId: string, direction: 'up' | 'down') => {
+    const action = moveEntryAction(snapshot.queue, entryId, direction)
+    if (!action) return
+    refocusEntryId.current = entryId
+    void onAction(action)
+  }
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     if (over) submit(reorderAfterDrag(snapshot.queue, String(active.id), String(over.id)))
   }
@@ -191,7 +213,7 @@ export function FocusQueueList({
       </Label>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={rows.map((r) => r.entry.id)} strategy={verticalListSortingStrategy}>
-          <ul aria-label="Up next">
+          <ul ref={listRef} aria-label="Up next">
             {rows.map((row) => (
               <QueueRowItem
                 key={row.entry.id}
@@ -200,7 +222,7 @@ export function FocusQueueList({
                 blocked={blocked}
                 onComplete={() => submit({ kind: 'complete', occurrence_id: row.entry.occurrence_id })}
                 onPromote={() => onPromote(row.entry)}
-                onMove={(direction) => submit(moveEntryAction(snapshot.queue, row.entry.id, direction))}
+                onMove={(direction) => move(row.entry.id, direction)}
                 onMenu={(id, task) => onMenu(id, task, row.entry)}
                 onRemove={() => submit({ kind: 'remove', occurrence_id: row.entry.occurrence_id })}
                 renaming={renamingEntryId === row.entry.id}
