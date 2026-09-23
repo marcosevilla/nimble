@@ -275,3 +275,27 @@ async fn no_boundary_wake_while_a_sleep_gap_awaits_its_notice() {
     h.clock.advance(25 * MIN);
     assert_eq!(h.service.ms_until_boundary().await.unwrap(), None, "wake decides the credit");
 }
+
+#[tokio::test]
+async fn an_uncapped_sleep_that_crosses_a_timebox_chimes_on_wake() {
+    // Marco's decision 2026-09-23: a credited sleep (≤ 30 min) that crosses
+    // a boundary plays that boundary's chime when the Mac wakes.
+    let h = fixture::Harness::new().await;
+    let t = h.task("Boxed").await;
+    h.send(FocusAction::Enqueue { task_ids: vec![t], source: FocusSource::Today, explicit_still_open: false })
+        .await
+        .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Configure {
+        occurrence_id: oid.clone(),
+        config: FocusConfig { mode: FocusMode::Timebox, budget_ms: Some(20 * MIN), work_ms: 25 * MIN, break_ms: 5 * MIN, rounds: 4 },
+    })
+    .await
+    .unwrap();
+    h.send(FocusAction::Start { occurrence_id: oid.clone() }).await.unwrap();
+    h.service.sleep_began().await.unwrap();
+    h.clock.advance(25 * MIN);
+    let woke = h.service.woke().await.unwrap();
+    assert_eq!(woke.totals[&oid], 25 * MIN);
+    assert!(h.service.claim_sound().await.unwrap().is_some(), "the crossed boundary chimes on wake");
+}
