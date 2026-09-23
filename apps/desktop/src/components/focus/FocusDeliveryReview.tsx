@@ -16,6 +16,7 @@ import {
   DELIVERY_STATE_LABEL,
   RESOLUTION_LABEL,
   availableResolutions,
+  canCompleteNatively,
   canResolve,
   needsAttention,
   purposeLabel,
@@ -35,9 +36,10 @@ function when(iso: string | null): string | null {
  * Review optional Todoist time comments and old Focus Queue pending sends.
  * Each shows its own state, target task/occurrence and raw evidence. A
  * decision is explicit and recorded with what was checked: "It arrived"
- * and "Archive" never send; "Send it" re-arms only an operation verified as
- * undelivered (the backend refuses an old close on a repeating task). This
- * view performs no sends itself; adopted sends go out with the next sync.
+ * and "Archive" never send; "Send it" re-arms only a comment verified as
+ * undelivered. An old close is never replayed: "Complete in Nimble" uses the
+ * normal native completion (never on a repeating task). This view performs
+ * no sends itself; adopted comments go out with the next sync.
  */
 export function FocusDeliveryReview({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const dp = useDataProvider()
@@ -81,6 +83,21 @@ export function FocusDeliveryReview({ open, onOpenChange }: { open: boolean; onO
     } catch (e) {
       setError(FocusRequestError.from(e).message)
       void load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** The normal native completion path; it creates no delivery of its own. */
+  async function completeNatively(item: FocusDeliveryReviewItem) {
+    if (!item.native_task_id) return
+    setBusy(true)
+    setError(null)
+    try {
+      await dp.tasks.complete(item.native_task_id, null)
+      await load()
+    } catch (e) {
+      setError(FocusRequestError.from(e).message)
     } finally {
       setBusy(false)
     }
@@ -162,7 +179,13 @@ export function FocusDeliveryReview({ open, onOpenChange }: { open: boolean; onO
                 </details>
 
                 {actions.length > 0 && !isOpen && (
-                  <div>
+                  <div className="flex flex-wrap gap-1">
+                    {canCompleteNatively(item) && (
+                      <Button size="sm" variant="outline" disabled={busy} onClick={() => void completeNatively(item)}
+                        title="Complete this task in Nimble; its normal sync sends the close. Then acknowledge this old one.">
+                        Complete in Nimble
+                      </Button>
+                    )}
                     <Button variant="outline" size="sm" onClick={() => choose(item.id)}>Resolve…</Button>
                   </div>
                 )}

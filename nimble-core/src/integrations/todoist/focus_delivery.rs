@@ -3,10 +3,10 @@
 //!
 //! - The bridge is OFF unless the `focus_time_delivery_enabled` setting is
 //!   exactly "1"; while off it neither persists new intents nor sends anything.
-//! - An intent is only a comment (Sync `note_add`); native completion keeps its
-//!   own close or recurring due update through the task outbox. The one
-//!   exception is a legacy close the user explicitly adopts after verifying it
-//!   never arrived — refused for repeating tasks.
+//! - An intent is only ever a comment (Sync `note_add`). This module never
+//!   builds a close: native completion keeps its own close or recurring due
+//!   update through the task outbox, and an old legacy close is resolved by
+//!   acknowledging, archiving, or completing the task natively in Nimble.
 //! - Each operation keeps one stable command `uuid` (+ `temp_id`), which the
 //!   Todoist Sync API deduplicates on. A possible-success failure (timeout
 //!   after send, unreadable success, gateway error, crash mid-send) becomes
@@ -33,6 +33,7 @@ const REVIEW_LIMIT: i64 = 200;
 pub const TIME_COMMENT: &str = "time_comment";
 pub const LEGACY_CLOSE: &str = "legacy_close";
 pub const LEGACY_COMMENT: &str = "legacy_comment";
+const CLOSE_NEVER_REPLAYED: &str = "An old close is never replayed.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -107,6 +108,9 @@ pub struct FocusDeliveryReviewItem {
     pub created_at: String,
     pub resolution: Option<Value>,
     pub recurring_task: bool,
+    /// Whether the target Nimble task is already complete (for the
+    /// "complete in Nimble" path of an old close).
+    pub task_completed: bool,
     pub adoptable: bool,
     pub adopt_blocked_reason: Option<String>,
 }
@@ -282,6 +286,7 @@ fn adopt_blocker(purpose: &str, state: DeliveryState, target: &Result<TaskInfo, 
     }
     let task = match target {
         Ok(task) => task,
+        Err(reason) if purpose == LEGACY_CLOSE => return Some(format!("{CLOSE_NEVER_REPLAYED} {reason}")),
         Err(reason) => return Some(reason.clone()),
     };
     if task.local_only {
@@ -290,9 +295,9 @@ fn adopt_blocker(purpose: &str, state: DeliveryState, target: &Result<TaskInfo, 
     match purpose {
         TIME_COMMENT | LEGACY_COMMENT if content.is_none_or(|c| c.trim().is_empty()) => Some("There is no comment text to send.".into()),
         TIME_COMMENT | LEGACY_COMMENT => None,
-        LEGACY_CLOSE if task.recurring => Some("This task repeats; an old close could complete a later occurrence.".into()),
-        LEGACY_CLOSE if task.completed => Some("Already completed in Nimble; acknowledge it instead.".into()),
-        LEGACY_CLOSE => None,
+        LEGACY_CLOSE if task.recurring => Some(format!("{CLOSE_NEVER_REPLAYED} This task repeats; completing it now would close a later occurrence.")),
+        LEGACY_CLOSE if task.completed => Some(format!("{CLOSE_NEVER_REPLAYED} It is already completed in Nimble; acknowledge it.")),
+        LEGACY_CLOSE => Some(format!("{CLOSE_NEVER_REPLAYED} Complete the task in Nimble to send its normal close, then acknowledge this.")),
         _ => Some("Unknown operation kind; keep it as evidence.".into()),
     }
 }
@@ -345,6 +350,7 @@ async fn item_from_row(conn: &mut SqliteConnection, row: &sqlx::sqlite::SqliteRo
         created_at: row.get("created_at"),
         resolution: row.get::<Option<String>, _>("resolution_json").and_then(|r| serde_json::from_str(&r).ok()),
         recurring_task: recurring,
+        task_completed: target.as_ref().is_ok_and(|t| t.completed),
         adoptable: blocker.is_none(),
         adopt_blocked_reason: blocker,
     })
@@ -377,6 +383,7 @@ async fn legacy_item(conn: &mut SqliteConnection, id: &str, evidence: Value) -> 
         evidence,
         resolution: None,
         recurring_task: target.as_ref().is_ok_and(|t| t.recurring),
+        task_completed: target.as_ref().is_ok_and(|t| t.completed),
         adoptable: blocker.is_none(),
         adopt_blocked_reason: blocker,
     })
@@ -417,8 +424,9 @@ async fn load_item(conn: &mut SqliteConnection, id: &str) -> crate::Result<Optio
 
 /// Explicit, durable decision on one send. Acknowledge (verified delivered)
 /// and archive (reason recorded) never send; adopt re-arms a verified
-/// undelivered operation with its existing keys (or, for a legacy operation
-/// that never had one, a first key). Nothing here performs I/O.
+/// undelivered comment with its existing keys (or, for a legacy comment that
+/// never had one, a first key). Adopting a close is always refused. Nothing
+/// here performs I/O.
 pub async fn resolve_delivery(
     pool: &SqlitePool,
     id: &str,
@@ -480,16 +488,15 @@ pub async fn resolve_delivery(
             if let Some(reason) = &item.adopt_blocked_reason {
                 return Err(err("invalid", reason));
             }
-            let comment = item.purpose != LEGACY_CLOSE;
             sqlx::query(
                 "UPDATE focus_delivery SET state='pending',next_attempt_at=NULL,last_error=NULL,resolution_json=?,updated_at=?,
                     native_task_id=COALESCE(native_task_id,?),
                     idempotency_key=COALESCE(idempotency_key,?),
-                    temp_id=CASE WHEN ? THEN COALESCE(temp_id,?) ELSE temp_id END
+                    temp_id=COALESCE(temp_id,?)
                  WHERE id=?")
                 .bind(decision.to_string()).bind(&now).bind(&item.native_task_id)
                 .bind(uuid::Uuid::new_v4().to_string())
-                .bind(comment).bind(uuid::Uuid::new_v4().to_string())
+                .bind(uuid::Uuid::new_v4().to_string())
                 .bind(&item.id)
                 .execute(&mut *tx).await?;
         }
@@ -571,7 +578,6 @@ async fn claim_due(pool: &SqlitePool, now: DateTime<Utc>) -> crate::Result<Vec<C
         let content = payload.get("content").and_then(Value::as_str);
         let blocked = match &target {
             Ok(task) if task.local_only => Some("task is Nimble-only now".to_string()),
-            Ok(task) if purpose == LEGACY_CLOSE && task.recurring => Some("task repeats; old close refused".into()),
             Ok(_) => None,
             Err(reason) => Some(reason.clone()),
         };
@@ -584,8 +590,8 @@ async fn claim_due(pool: &SqlitePool, now: DateTime<Utc>) -> crate::Result<Vec<C
                         "args": {"item_id": ext, "content": text}})),
                     _ => Err("missing comment text or temp id".to_string()),
                 },
-                LEGACY_CLOSE => Ok(json!({"type": "item_close", "uuid": key, "args": {"id": ext}})),
-                other => Err(format!("unknown operation {other}")),
+                // Only comments are ever sent from here; a close is never built.
+                other => Err(format!("{other} is never sent by focus delivery")),
             },
         };
         match command {

@@ -77,6 +77,7 @@ export interface FocusDeliveryReviewItem {
   created_at: string
   resolution: Record<string, unknown> | null
   recurring_task: boolean
+  task_completed: boolean
   adoptable: boolean
   adopt_blocked_reason: string | null
 }

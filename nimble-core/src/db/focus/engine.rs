@@ -158,7 +158,8 @@ impl FocusTaskWriteGuard<'_> {
             .tx
             .as_mut()
             .expect("uncommitted focus task transaction");
-        reconcile_task_effects_owned_tx(tx, effects).await?;
+        // Only remote applies (`TaskWrite`) use this guard.
+        reconcile_task_effects_owned_tx(tx, effects, EffectOrigin::Remote).await?;
         replica::publish_focus_replica_tx(tx).await?;
         let snapshot = snapshot_tx(tx).await?;
         self.tx
@@ -798,7 +799,7 @@ impl FocusService {
         } else {
             None
         };
-        reconcile_task_effects_owned_tx(&mut tx, &effects).await?;
+        reconcile_task_effects_owned_tx(&mut tx, &effects, EffectOrigin::Local).await?;
         replica::publish_focus_replica_tx(&mut tx).await?;
         let snapshot = snapshot_tx(&mut tx).await?;
         let reply = NativeTaskReply {
@@ -1623,23 +1624,43 @@ async fn ensure_open_task_tx(conn: &mut SqliteConnection, entry: &FocusEntry) ->
 
 /// Reconcile native CRUD effects in the caller's transaction. Callers without the
 /// desktop service may only use the durable checkpoint; affected live work pauses.
+/// Where a task write came from. Only a LOCAL native completion (task
+/// list/detail, focus, `dt`/agent) may create an optional time comment; a
+/// remote apply (Todoist/Turso pull, Calendar edit) never echoes one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EffectOrigin {
+    Local,
+    Remote,
+}
+
+/// Headless reconcile for a LOCAL pool CRUD write (`db::tasks`).
 pub async fn reconcile_task_effects_tx(
     conn: &mut SqliteConnection,
     effects: &TaskEffects,
 ) -> crate::Result<()> {
-    reconcile_task_effects_inner_tx(conn, effects, true).await?;
+    reconcile_task_effects_inner_tx(conn, effects, true, EffectOrigin::Local).await?;
+    replica::publish_focus_replica_tx(conn).await
+}
+/// Headless reconcile for a REMOTE apply (`TaskWrite` without a live service).
+pub async fn reconcile_remote_task_effects_tx(
+    conn: &mut SqliteConnection,
+    effects: &TaskEffects,
+) -> crate::Result<()> {
+    reconcile_task_effects_inner_tx(conn, effects, true, EffectOrigin::Remote).await?;
     replica::publish_focus_replica_tx(conn).await
 }
 async fn reconcile_task_effects_owned_tx(
     conn: &mut SqliteConnection,
     effects: &TaskEffects,
+    origin: EffectOrigin,
 ) -> crate::Result<()> {
-    reconcile_task_effects_inner_tx(conn, effects, false).await
+    reconcile_task_effects_inner_tx(conn, effects, false, origin).await
 }
 async fn reconcile_task_effects_inner_tx(
     conn: &mut SqliteConnection,
     effects: &TaskEffects,
     pause_affected_live: bool,
+    origin: EffectOrigin,
 ) -> crate::Result<()> {
     let q: Option<(String, Option<String>)> = sqlx::query_as(
         "SELECT entries_json,selected_occurrence_id FROM focus_queue_state WHERE id=1",
@@ -1698,10 +1719,19 @@ async fn reconcile_task_effects_inner_tx(
         } else {
             "completed"
         };
-        sqlx::query("UPDATE focus_occurrences SET state=?,completed_at=CASE WHEN ?='completed' THEN ? ELSE completed_at END,completion_reason='task_effect' WHERE id=? AND state='open'")
+        let closed = sqlx::query("UPDATE focus_occurrences SET state=?,completed_at=CASE WHEN ?='completed' THEN ? ELSE completed_at END,completion_reason='task_effect' WHERE id=? AND state='open'")
             .bind(state).bind(state).bind(&stamp).bind(oid).execute(&mut *conn).await?;
         sqlx::query("UPDATE focus_sessions SET status='ended',ended_at=?,end_reason='task_effect' WHERE occurrence_id=? AND status!='ended'")
             .bind(&stamp).bind(oid).execute(&mut *conn).await?;
+        // A local native completion of an open occurrence (settled above)
+        // gets the same optional comment as focus Complete, in this same
+        // transaction; at most one per occurrence.
+        if origin == EffectOrigin::Local && state == "completed" && closed.rows_affected() == 1 {
+            if let Some(e) = entries.iter().find(|e| &e.occurrence_id == oid) {
+                let budget = (e.config.mode == FocusMode::Timebox).then_some(e.config.budget_ms).flatten();
+                crate::integrations::todoist::focus_delivery::enqueue_completion_tx(conn, oid, &e.task_id, budget).await?;
+            }
+        }
     }
     entries.retain(|e| !remove.contains(&e.occurrence_id));
     if selected.as_ref().is_some_and(|oid| remove.contains(oid)) {

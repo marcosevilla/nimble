@@ -10,7 +10,7 @@
 //! Never hold a `TaskWrite` across an await on the network.
 use sqlx::{SqliteConnection, SqlitePool};
 
-use super::engine::{reconcile_task_effects_tx, FocusService, FocusTaskWriteGuard};
+use super::engine::{reconcile_remote_task_effects_tx, FocusService, FocusTaskWriteGuard};
 use crate::db::task_tx::TaskEffects;
 
 pub enum TaskWrite<'a> {
@@ -56,7 +56,7 @@ impl<'a> TaskWrite<'a> {
                 guard.commit(effects).await?;
             }
             Self::Headless(mut tx) => {
-                reconcile_task_effects_tx(&mut tx, effects).await?;
+                reconcile_remote_task_effects_tx(&mut tx, effects).await?;
                 tx.commit().await?;
             }
         }

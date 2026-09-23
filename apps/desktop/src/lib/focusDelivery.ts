@@ -38,9 +38,20 @@ export function needsAttention(item: FocusDeliveryReviewItem): boolean {
 /** Decisions the backend can accept for this item's state. */
 export function availableResolutions(item: FocusDeliveryReviewItem): FocusDeliveryResolution[] {
   if (item.state === 'acknowledged' || item.state === 'archived' || item.state === 'sending') return []
-  return item.adoptable
+  // An old close is never replayed; only comments can be re-armed.
+  return item.adoptable && item.purpose !== 'legacy_close'
     ? ['acknowledged', 'adopt_verified_undelivered', 'archive_with_reason']
     : ['acknowledged', 'archive_with_reason']
+}
+
+/**
+ * An unresolved old close on a one-off, still-open Nimble task can be settled
+ * by completing the task natively: its normal task sync sends the close. Never
+ * for a repeating task (that would close a later occurrence).
+ */
+export function canCompleteNatively(item: FocusDeliveryReviewItem): boolean {
+  return item.purpose === 'legacy_close' && item.native_task_id != null && !item.recurring_task
+    && !item.task_completed && item.state !== 'acknowledged' && item.state !== 'archived'
 }
 
 /** Every decision records what was checked; sending also needs an explicit verification. */

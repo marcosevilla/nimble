@@ -5,6 +5,7 @@ import {
   DELIVERY_STATE_LABEL,
   availableResolutions,
   canResolve,
+  canCompleteNatively,
   needsAttention,
   purposeLabel,
   sortForReview,
@@ -14,7 +15,7 @@ const item = (over = {}) => ({
   id: 'd1', origin: 'focus', purpose: 'time_comment', state: 'uncertain', native_task_id: 't1', task_title: 'Write',
   external_id: 'R1', occurrence_id: 'o1', occurrence_title: 'Write', content: '⏱ 1m spent', recorded_ms: 61000,
   budget_ms: null, attempts: 1, last_error: 'timed out', next_attempt_at: null, remote_receipt: null, evidence: {},
-  created_at: '2026-09-22T10:00:00.000Z', resolution: null, recurring_task: false, adoptable: true, adopt_blocked_reason: null,
+  created_at: '2026-09-22T10:00:00.000Z', resolution: null, recurring_task: false, task_completed: false, adoptable: true, adopt_blocked_reason: null,
   ...over,
 })
 
@@ -43,6 +44,18 @@ test('a decision needs written evidence, and adopting needs a separate verificat
   assert.equal(canResolve('adopt_verified_undelivered', 'No comment in Todoist', true), true)
 })
 
+test('an old close is never sent; it can only be completed natively in Nimble', () => {
+  const close = item({ purpose: 'legacy_close', state: 'needs-review', adoptable: false, adopt_blocked_reason: 'An old close is never replayed.' })
+  assert.deepEqual(availableResolutions(close), ['acknowledged', 'archive_with_reason'])
+  assert.deepEqual(availableResolutions({ ...close, adoptable: true }), ['acknowledged', 'archive_with_reason'], 'close adoption is never offered')
+  assert.equal(canCompleteNatively(close), true)
+  assert.equal(canCompleteNatively({ ...close, recurring_task: true }), false, 'repeating: completing now would close a later occurrence')
+  assert.equal(canCompleteNatively({ ...close, task_completed: true }), false)
+  assert.equal(canCompleteNatively({ ...close, native_task_id: null }), false)
+  assert.equal(canCompleteNatively({ ...close, state: 'acknowledged' }), false)
+  assert.equal(canCompleteNatively(item({ state: 'needs-review' })), false, 'comments are not completed natively')
+})
+
 test('uncertain and needs-review sort first; resolved ones are not attention', () => {
   const list = sortForReview([
     item({ id: 'a', state: 'acknowledged' }),
@@ -58,7 +71,7 @@ test('uncertain and needs-review sort first; resolved ones are not attention', (
 test('the review shows evidence, the repeating-task warning and resolves through the provider', () => {
   const src = readFileSync(new URL('../src/components/focus/FocusDeliveryReview.tsx', import.meta.url), 'utf8')
   for (const needle of ['dp.focus.deliveries()', 'dp.focus.resolveDelivery(', 'item.evidence', 'item.recurring_task',
-    'item.adopt_blocked_reason', 'item.occurrence_title', 'item.last_error', 'item.resolution']) {
+    'item.adopt_blocked_reason', 'item.occurrence_title', 'item.last_error', 'item.resolution', 'dp.tasks.complete(']) {
     assert.ok(src.includes(needle), `renders ${needle}`)
   }
   assert.doesNotMatch(src, /setInterval|dp\.todoist/, 'the review never sends or polls on its own')

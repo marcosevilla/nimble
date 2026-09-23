@@ -530,44 +530,161 @@ async fn old_close_cannot_close_a_recurring_task() {
 }
 
 #[tokio::test]
-async fn adopted_legacy_operations_send_separately_with_mixed_outcomes() {
+async fn adopting_a_legacy_close_is_refused_and_no_item_close_is_ever_built() {
+    let h = Harness::new().await;
+    enable(&h.pool).await;
+    legacy_task(&h, false).await; // open, nonrecurring, mapped: the most permissive case
+    import_pending(&h).await;
+    let items = delivery::review(&h.pool).await.unwrap();
+    let close = items.iter().find(|i| i.purpose == "legacy_close").unwrap();
+    assert!(!close.adoptable);
+    assert!(close.adopt_blocked_reason.as_deref().unwrap().contains("Complete the task in Nimble"));
+    let refused = delivery::resolve_delivery(&h.pool, &close.id, DeliveryResolution::AdoptVerifiedUndelivered,
+        "not closed in Todoist".into()).await;
+    assert!(refused.unwrap_err().to_string().contains("never replayed"));
+
+    // Even a close row armed by hand (e.g. an older build) is never sent.
+    delivery::resolve_delivery(&h.pool, &close.id, DeliveryResolution::ArchiveWithReason, "testing".into()).await.unwrap();
+    sqlx::query("UPDATE focus_delivery SET state='pending',idempotency_key='forced-key' WHERE id=?")
+        .bind(&close.id).execute(&h.pool).await.unwrap();
+    let mock = Mock::new();
+    delivery::dispatch_due(&h.pool, &mock, now()).await.unwrap();
+    assert_eq!(mock.calls(), 0);
+    assert_eq!(state_of(&h.pool, &close.id).await, "needs-review");
+    let src = include_str!("../src/integrations/todoist/focus_delivery.rs");
+    assert!(!src.contains("\"item_close\""), "focus_delivery must never build an item_close command");
+}
+
+#[tokio::test]
+async fn adopted_legacy_comment_sends_once_and_retries_only_itself() {
     let h = Harness::new().await;
     enable(&h.pool).await;
     legacy_task(&h, false).await;
     import_pending(&h).await;
     let items = delivery::review(&h.pool).await.unwrap();
-    let close = items.iter().find(|i| i.purpose == "legacy_close").unwrap().id.clone();
     let comment = items.iter().find(|i| i.purpose == "legacy_comment").unwrap().id.clone();
-    for id in [&close, &comment] {
-        delivery::resolve_delivery(&h.pool, id, DeliveryResolution::AdoptVerifiedUndelivered,
-            "Verified absent in Todoist; old app stopped".into()).await.unwrap();
-    }
+    delivery::resolve_delivery(&h.pool, &comment, DeliveryResolution::AdoptVerifiedUndelivered,
+        "Verified absent in Todoist; old app stopped".into()).await.unwrap();
     let mock = Mock::new();
     mock.then(|cmds| {
         let mut status = serde_json::Map::new();
         for c in cmds {
-            let v = if c["type"] == "item_close" { json!("ok") } else { json!({"error": "Service unavailable", "http_code": 503}) };
-            status.insert(c["uuid"].as_str().unwrap().into(), v);
+            status.insert(c["uuid"].as_str().unwrap().into(), json!({"error": "Service unavailable", "http_code": 503}));
         }
         Ok(resp(json!({"sync_status": status})))
     });
     delivery::dispatch_due(&h.pool, &mock, now()).await.unwrap();
     let sent = mock.last();
-    assert_eq!(sent.len(), 2);
-    let close_cmd = sent.iter().find(|c| c["type"] == "item_close").unwrap();
-    assert_eq!(close_cmd["args"], json!({"id": LEGACY_REMOTE}));
-    let note = sent.iter().find(|c| c["type"] == "note_add").unwrap();
-    assert_eq!(note["args"]["content"], "Synthetic tracked-time comment");
-    assert_eq!(state_of(&h.pool, &close).await, "acknowledged");
+    assert_eq!(sent.len(), 1, "the quarantined close is not sent alongside");
+    assert_eq!(sent[0]["type"], "note_add");
+    assert_eq!(sent[0]["args"]["content"], "Synthetic tracked-time comment");
     assert_eq!(state_of(&h.pool, &comment).await, "retryable-error");
-    // The retry resends only the comment, never the acknowledged close.
     mock.then(all_ok);
     delivery::dispatch_due(&h.pool, &mock, now() + chrono::Duration::hours(2)).await.unwrap();
-    let retry = mock.last();
-    assert_eq!(retry.len(), 1);
-    assert_eq!(retry[0]["type"], "note_add");
-    assert_eq!(retry[0]["uuid"], note["uuid"]);
+    assert_eq!(mock.last()[0]["uuid"], sent[0]["uuid"]);
     assert_eq!(state_of(&h.pool, &comment).await, "acknowledged");
+}
+
+#[tokio::test]
+async fn native_close_and_time_comment_are_acknowledged_separately() {
+    let h = Harness::new().await;
+    nimble_core::integrations::ensure_state(&h.pool, "todoist").await.unwrap();
+    nimble_core::db::settings::set_setting(&h.pool, "todoist_api_token", "synthetic").await.unwrap();
+    enable(&h.pool).await;
+    let task = h.task("One-off").await;
+    map(&h.pool, &task, "R1").await;
+    sqlx::query("DELETE FROM todoist_outbox").execute(&h.pool).await.unwrap();
+    let oid = queue(&h, &task).await;
+    work(&h, &oid, 61_000).await;
+    complete(&h, &oid).await;
+    let close: (String, String) = sqlx::query_as("SELECT id,status FROM todoist_outbox WHERE local_id=? AND op='close'")
+        .bind(&task).fetch_one(&h.pool).await.unwrap();
+    assert_eq!(close.1, "pending");
+    let mock = Mock::new();
+    mock.then(|_| Err(TransportError::Uncertain("timed out".into())));
+    delivery::dispatch_due(&h.pool, &mock, now()).await.unwrap();
+    assert!(mock.last().iter().all(|c| c["type"] == "note_add"));
+    // The comment's failure never touches (or resends) the task's own close.
+    let after: String = sqlx::query_scalar("SELECT status FROM todoist_outbox WHERE id=?")
+        .bind(&close.0).fetch_one(&h.pool).await.unwrap();
+    assert_eq!(after, "pending");
+    assert_eq!(rows(&h.pool).await[0].2, "uncertain");
+}
+
+// ── completion paths beyond the focus Complete action ───────────────────────
+
+async fn queued_with_work(h: &Harness, title: &str, remote: &str, ms: u64) -> (String, String) {
+    let task = h.task(title).await;
+    map(&h.pool, &task, remote).await;
+    let oid = queue(h, &task).await;
+    work(h, &oid, ms).await;
+    (task, oid)
+}
+
+#[tokio::test]
+async fn task_list_completion_creates_one_intent_and_a_repeat_adds_none() {
+    let h = Harness::new().await;
+    enable(&h.pool).await;
+    let (task, oid) = queued_with_work(&h, "List", "R1", 60_000).await;
+    nimble_core::db::tasks::update_task_status(&h.pool, &task, "complete", None).await.unwrap();
+    let all = rows(&h.pool).await;
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].3["recorded_ms"], 60_000);
+    let occurrence: String = sqlx::query_scalar("SELECT state FROM focus_occurrences WHERE id=?")
+        .bind(&oid).fetch_one(&h.pool).await.unwrap();
+    assert_eq!(occurrence, "completed");
+    // Completing again, or asking the hook again, never adds a second summary.
+    nimble_core::db::tasks::update_task_status(&h.pool, &task, "complete", None).await.unwrap();
+    let mut conn = h.pool.acquire().await.unwrap();
+    assert!(delivery::enqueue_completion_tx(&mut conn, &oid, &task, None).await.unwrap().is_none());
+    drop(conn);
+    assert_eq!(rows(&h.pool).await.len(), 1);
+}
+
+#[tokio::test]
+async fn agent_or_dt_native_completion_creates_one_intent() {
+    use nimble_core::db::focus::engine::{NativeTaskAction, NativeTaskCommand};
+    let h = Harness::new().await;
+    enable(&h.pool).await;
+    let (task, _) = queued_with_work(&h, "Agent", "R1", 61_000).await;
+    let command = NativeTaskCommand { command_id: uuid::Uuid::new_v4().to_string(),
+        action: NativeTaskAction::SetStatus { id: task.clone(), status: "complete".into(), note: None, expected_due_date: None } };
+    h.service.execute_native_task(command.clone()).await.unwrap();
+    h.service.execute_native_task(command).await.unwrap(); // replayed receipt
+    let all = rows(&h.pool).await;
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].3["content"], "⏱ 1m spent");
+}
+
+#[tokio::test]
+async fn native_completion_under_a_minute_or_unmapped_creates_none() {
+    let h = Harness::new().await;
+    enable(&h.pool).await;
+    let (short, _) = queued_with_work(&h, "Short", "R1", 59_999).await;
+    nimble_core::db::tasks::update_task_status(&h.pool, &short, "complete", None).await.unwrap();
+    let local = h.task("Local").await;
+    let oid = queue(&h, &local).await;
+    work(&h, &oid, 90_000).await;
+    nimble_core::db::tasks::update_task_status(&h.pool, &local, "complete", None).await.unwrap();
+    assert!(rows(&h.pool).await.is_empty());
+}
+
+#[tokio::test]
+async fn remote_apply_completion_creates_no_comment() {
+    let h = Harness::new().await;
+    enable(&h.pool).await;
+    let (_, headless_oid) = queued_with_work(&h, "Remote headless", "RH", 90_000).await;
+    let (_, owned_oid) = queued_with_work(&h, "Remote owned", "RO", 90_000).await;
+    let pulled = |id: &str| resp(json!({"sync_token": format!("T-{id}"), "items": [
+        {"id": id, "content": "done remotely", "checked": true, "is_deleted": false}]}));
+    nimble_core::integrations::todoist::sync_loop::apply_pull(&h.pool, &pulled("RH")).await.unwrap();
+    nimble_core::integrations::todoist::sync_loop::apply_pull_with_focus(&h.pool, &pulled("RO"), Some(&h.service)).await.unwrap();
+    for oid in [&headless_oid, &owned_oid] {
+        let state: String = sqlx::query_scalar("SELECT state FROM focus_occurrences WHERE id=?")
+            .bind(oid).fetch_one(&h.pool).await.unwrap();
+        assert_eq!(state, "completed", "the remote completion did reach focus");
+    }
+    assert!(rows(&h.pool).await.is_empty(), "remote completions never echo a comment");
 }
 
 #[tokio::test]
