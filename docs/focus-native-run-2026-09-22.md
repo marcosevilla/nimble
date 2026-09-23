@@ -26,15 +26,15 @@ Hands-on native run of the Focus Queue absorption (Tasks 1–9) on Marco's Mac, 
 | A | 1 | Pop out opens the companion right away and nothing starts | **PASS** after native fix 1 (it failed first: every task showed "Task no longer available") |
 | B | 2 | Companion stays above other apps | **PASS** |
 | C | 5, 6 | Title-bar drag works; expanded height stops at its bounds; footer stays pinned | **PASS** |
-| D | 7 | Compact card-only mode refits and scales with width | **FAIL**: the timer digits were clipped vertically. Native fix 3 is pending, then a re-test |
+| D | 7 | Compact card-only mode refits and scales with width | **PASS** after native fix 3 (`9e002d1`). It failed first: the timer digits were clipped vertically |
 | E | 33 | Running timer ticks about once a second and never jumps back | **PASS** |
 | F | 17 | Space pauses a running timer and never resumes it | **PASS** |
-| G | 16 | Alt+↑/↓ reorder keeps keyboard focus | **FAIL**: Up next had no row focus at all. Native fix 3 (roving focus) is pending, then a re-test |
+| G | 16 | Alt+↑/↓ reorder keeps keyboard focus | **PASS** after native fix 3 plus `484cfb1`. It failed twice: first Up next had no row focus, then the ring stayed hidden until the last row (WebKit carried a click's no-ring `:focus-visible` state through programmatic focus) |
 | H | 28 | 1-minute timebox plays one chime at 0:00, then red overtime with no second chime | **PASS** |
 | I | 29 | Completing the focused task plays one completion sound | **PASS** |
 | J | 18, 20 | Closing the companion keeps timing; closing the last window pauses it and it never auto-resumes | **PASS**: the DB recorded "the last focus window was closed" |
 | K | 22 | ⌘Q while running; after relaunch it is paused with the time up to the quit | **PASS**: ⌘Q sent via osascript; 41,481 ms matched Start→quit exactly; reason "Nimble quit"; still paused after relaunch |
-| L | 25 | System sleep while running; after wake it is paused with no auto-resume | **NOT RUN**: needs Marco at the Mac |
+| L | 25 | System sleep while running; after wake it is paused with no auto-resume | **PASS** (Marco, 2026-09-22) |
 | — | new | Visible queue entries (row icon and menu, task detail control) | **PASS** |
 
 **Not run this pass:**
