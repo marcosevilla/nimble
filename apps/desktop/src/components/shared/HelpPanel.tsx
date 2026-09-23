@@ -1,14 +1,19 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { HelpCircle, X, Keyboard, Map } from 'lucide-react'
+import { HelpCircle, X, Keyboard, Map, Circle, CheckCircle2 } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Label, Meta } from '@/components/shared/typography'
 import { shortcutsBySection } from '@/lib/shortcuts'
 import { useHelpPanelStore } from '@/stores/helpPanelStore'
+import { parseRoadmap, type RoadmapSection } from '@/lib/roadmap'
+// NEXT.md (repo root) is the roadmap's source of truth — inlined at build
+// time, so the tab reflects NEXT.md as of this build (see the Build footer).
+import nextMd from '../../../../../NEXT.md?raw'
 
 // Shortcut rows come from the one registry both the handlers and this panel
-// read (lib/shortcuts.ts). Roadmap items used to live here as a 46-item
-// array; NEXT.md is the source of truth, so the tab now just points there.
+// read (lib/shortcuts.ts). Roadmap rows are parsed from NEXT.md at build time.
+
+const ROADMAP = parseRoadmap(nextMd)
 
 // ── Component ──
 
@@ -112,7 +117,7 @@ export function HelpPanel() {
                   <ShortcutsTab />
                 </TabsContent>
                 <TabsContent value="roadmap">
-                  <Meta as="p">The roadmap lives in NEXT.md at the repo root — what's open, what's decided, newest first.</Meta>
+                  <RoadmapTab />
                 </TabsContent>
               </div>
             </Tabs>
@@ -150,5 +155,61 @@ function ShortcutsTab() {
         </div>
       ))}
     </div>
+  )
+}
+
+// ── Roadmap tab ──
+
+function RoadmapTab() {
+  if (ROADMAP.length === 0) {
+    return <Meta as="p">No roadmap items found in NEXT.md for this build.</Meta>
+  }
+  return (
+    <div className="space-y-4">
+      {ROADMAP.map((section) => (
+        <RoadmapSectionBlock key={section.title} section={section} />
+      ))}
+    </div>
+  )
+}
+
+function RoadmapSectionBlock({ section }: { section: RoadmapSection }) {
+  const [showDone, setShowDone] = useState(false)
+  const open = section.items.filter((i) => !i.done)
+  const done = section.items.filter((i) => i.done)
+  return (
+    <div>
+      <Label as="h3" className="mb-1.5 text-muted-foreground">
+        {section.title}
+      </Label>
+      <ul className="space-y-1">
+        {open.map((item, i) => (
+          <RoadmapRow key={`open-${i}`} done={false} text={item.text} />
+        ))}
+        {showDone && done.map((item, i) => <RoadmapRow key={`done-${i}`} done text={item.text} />)}
+      </ul>
+      {done.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowDone((v) => !v)}
+          className="mt-1 rounded text-label text-muted-foreground hover:text-foreground"
+        >
+          {showDone ? 'Hide done' : `Show ${done.length} done`}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function RoadmapRow({ done, text }: { done: boolean; text: string }) {
+  const Icon = done ? CheckCircle2 : Circle
+  return (
+    <li className="flex items-start gap-2 py-0.5" title={text}>
+      <Icon className="mt-0.5 size-3 shrink-0 text-muted-foreground" aria-hidden />
+      <Meta className={cn('line-clamp-3 min-w-0 [overflow-wrap:anywhere]', done && 'text-muted-foreground line-through')}>
+        <span className="sr-only">{done ? 'Done: ' : 'Open: '}</span>
+        {text}
+      </Meta>
+    </li>
   )
 }
