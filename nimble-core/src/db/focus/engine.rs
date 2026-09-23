@@ -1420,6 +1420,13 @@ async fn apply_action_tx(
                     .bind(stamp).bind(oid).execute(&mut *conn).await?;
                 sqlx::query("UPDATE focus_occurrences SET state='completed',completed_at=?,completion_reason='native' WHERE id=?")
                     .bind(stamp).bind(oid).execute(&mut *conn).await?;
+                // Optional time comment, committed with the completion. It is
+                // only ever a comment: the task's own close or recurring due
+                // update was already enqueued by set_status_tx above.
+                if let Some(e) = entries.iter().find(|e| &e.occurrence_id == oid) {
+                    let budget = (e.config.mode == FocusMode::Timebox).then_some(e.config.budget_ms).flatten();
+                    crate::integrations::todoist::focus_delivery::enqueue_completion_tx(conn, oid, &e.task_id, budget).await?;
+                }
             }
             entries.retain(|e| !affected.contains(&e.occurrence_id));
             *changed = true;

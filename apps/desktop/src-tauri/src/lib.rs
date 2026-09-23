@@ -602,6 +602,8 @@ pub fn run() {
             focus::focus_history,
             focus::focus_preview_import,
             focus::focus_commit_import,
+            focus::focus_delivery_review,
+            focus::focus_resolve_delivery,
             focus::focus_open_companion,
             focus::focus_companion_apply_geometry,
             focus::focus_open_task_in_main,

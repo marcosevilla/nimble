@@ -3,6 +3,8 @@ import type {
   BackupStatus,
   FocusCapabilities,
   FocusCommand,
+  FocusDeliveryResolution,
+  FocusDeliveryReviewItem,
   FocusHistoryPage,
   FocusImportPreview,
   FocusImportResult,
@@ -705,6 +707,14 @@ export function focusPreviewImport(files: LegacyFocusFiles): Promise<FocusImport
 
 export function focusCommitImport(files: LegacyFocusFiles, previewToken: string, commandId: string): Promise<FocusImportResult> {
   return focusInvoke<FocusImportResult>('focus_commit_import', { files, previewToken, commandId })
+}
+
+export function focusDeliveries(): Promise<FocusDeliveryReviewItem[]> {
+  return focusInvoke<FocusDeliveryReviewItem[]>('focus_delivery_review')
+}
+
+export function focusResolveDelivery(id: string, resolution: FocusDeliveryResolution, evidence: string): Promise<FocusDeliveryReviewItem> {
+  return focusInvoke<FocusDeliveryReviewItem>('focus_resolve_delivery', { id, resolution, evidence })
 }
 
 // ── Goals ──

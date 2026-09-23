@@ -145,7 +145,7 @@ pub async fn normalize_focus_restore(pool: &SqlitePool) -> crate::Result<()> {
         .execute(&mut *tx).await?;
     sqlx::query("INSERT INTO focus_runtime(id,owner_epoch,process_generation,engine_revision,recovery_reason) VALUES(1,'',0,0,'restore requires explicit activation') ON CONFLICT(id) DO UPDATE SET live_session_id=NULL,owner_epoch='',process_generation=0,sound_token=NULL,boundary_token=NULL,recovery_reason='restore requires explicit activation'")
         .execute(&mut *tx).await?;
-    sqlx::query("UPDATE focus_delivery SET state='cancelled',next_attempt_at=NULL,last_error='restored; delivery quarantined' WHERE state IN ('pending','retry')")
+    sqlx::query("UPDATE focus_delivery SET state='needs-review',next_attempt_at=NULL,last_error='restored; delivery quarantined' WHERE state IN ('pending','sending','retryable-error')")
         .execute(&mut *tx).await?;
     sqlx::query("DELETE FROM focus_undo").execute(&mut *tx).await?;
     sqlx::query("UPDATE daily_state SET focus_task_id=NULL,focus_started_at=NULL,focus_paused_at=NULL")

@@ -112,7 +112,7 @@ async fn paused_20_second_ledger_round_trips_both_archive_routes() {
         assert!(writer.is_empty());
         let delivery: String = sqlx::query_scalar("SELECT state FROM focus_delivery WHERE id='pending-delivery'")
             .fetch_one(&restored).await.unwrap();
-        assert_eq!(delivery, "cancelled");
+        assert_eq!(delivery, "needs-review");
         let receipt_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM focus_command_receipts")
             .fetch_one(&restored).await.unwrap();
         assert!(receipt_count > 0);

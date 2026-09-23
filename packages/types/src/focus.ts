@@ -53,4 +53,31 @@ export interface FocusImportPreview {
   blocked: boolean
   noop: boolean
 }
+/** Optional Todoist time-comment / legacy pending-send lifecycle (Rust `DeliveryState`). */
+export type FocusDeliveryState = 'pending' | 'sending' | 'acknowledged' | 'uncertain' | 'retryable-error' | 'needs-review' | 'archived'
+export type FocusDeliveryResolution = 'acknowledged' | 'adopt_verified_undelivered' | 'archive_with_reason'
+export interface FocusDeliveryReviewItem {
+  id: string
+  origin: 'focus' | 'legacy_import'
+  purpose: 'time_comment' | 'legacy_close' | 'legacy_comment' | string
+  state: FocusDeliveryState
+  native_task_id: string | null
+  task_title: string | null
+  external_id: string | null
+  occurrence_id: string | null
+  occurrence_title: string | null
+  content: string | null
+  recorded_ms: number | null
+  budget_ms: number | null
+  attempts: number
+  last_error: string | null
+  next_attempt_at: string | null
+  remote_receipt: string | null
+  evidence: unknown
+  created_at: string
+  resolution: Record<string, unknown> | null
+  recurring_task: boolean
+  adoptable: boolean
+  adopt_blocked_reason: string | null
+}
 export interface FocusImportResult { batch_id: string | null; replayed: boolean; noop: boolean; created_task_ids: string[]; queued_task_ids: string[]; included_ms: number; quarantined_records: number }

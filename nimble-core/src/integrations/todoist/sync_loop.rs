@@ -1055,6 +1055,16 @@ pub async fn run_sync_with_focus(
 
     let result: crate::Result<SyncReport> = async {
         let pushed = push_outbox(pool, &token).await?;
+        // Optional focus time comments ride the same cycle (no second
+        // poller); a delivery failure never fails the task sync.
+        match client::HttpSyncTransport::todoist(token.clone()) {
+            Ok(transport) => {
+                if let Err(e) = super::focus_delivery::dispatch_due(pool, &transport, chrono::Utc::now()).await {
+                    log::warn!("focus time delivery: {e}");
+                }
+            }
+            Err(e) => log::warn!("focus time delivery transport: {e}"),
+        }
         let state = crate::integrations::ensure_state(pool, "todoist").await?;
         let sync_token = state.sync_token.unwrap_or_else(|| "*".to_string());
         let resp = client::sync(&token, &serde_json::json!({

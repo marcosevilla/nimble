@@ -70,6 +70,8 @@ import type {
   FocusImportPreview,
   FocusImportResult,
   LegacyFocusFiles,
+  FocusDeliveryReviewItem,
+  FocusDeliveryResolution,
 } from './index'
 
 export interface DataProvider {
@@ -292,6 +294,18 @@ export interface DataProvider {
      * Performs no remote calls and arms no outbound intent.
      */
     commitImport(files: LegacyFocusFiles, previewToken: string, commandId: string): Promise<FocusImportResult>
+    /**
+     * Desktop only. Optional Todoist time comments and imported old pending
+     * sends, each with its own state and evidence. Reading sends nothing.
+     */
+    deliveries(): Promise<FocusDeliveryReviewItem[]>
+    /**
+     * Desktop only. An explicit, recorded decision: acknowledge (verified
+     * delivered) or archive (with a reason) never send; adopt re-arms only an
+     * operation verified as undelivered, keeping its operation key. `evidence`
+     * (what was checked) is required.
+     */
+    resolveDelivery(id: string, resolution: FocusDeliveryResolution, evidence: string): Promise<FocusDeliveryReviewItem>
   }
 
   dailyState: {

@@ -1,5 +1,6 @@
 pub mod outbox;
 pub mod client;
+pub mod focus_delivery;
 pub mod mappers;
 pub mod merge;
 pub mod observer;

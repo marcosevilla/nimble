@@ -5,6 +5,9 @@ use nimble_core::focus_types::{
     FocusCapabilities, FocusCommand, FocusError, FocusErrorCode, FocusHistoryPage,
     FocusImportPreview, FocusImportResult, FocusReply, FocusSnapshot, LegacyFocusFiles,
 };
+use nimble_core::integrations::todoist::focus_delivery::{
+    self, DeliveryResolution, FocusDeliveryReviewItem,
+};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::focus_service::{broadcast, committed, FocusRuntime};
@@ -98,6 +101,32 @@ pub async fn focus_commit_import(
         }
         Err(e) => Err(focus_error(&e)),
     }
+}
+
+/// Optional Todoist time comments and imported old pending sends, for review.
+/// Owner-only (the owner is the only process that sends); reading sends nothing.
+#[tauri::command]
+pub async fn focus_delivery_review(app: AppHandle) -> Result<Vec<FocusDeliveryReviewItem>, FocusError> {
+    runtime(&app)?.writer().await?;
+    let pool = app.state::<sqlx::SqlitePool>();
+    focus_delivery::review(pool.inner()).await.map_err(|e| focus_error(&e))
+}
+
+/// Record an explicit decision on one send. No network I/O happens here;
+/// an adopted send goes out with the next Todoist sync, and only while the
+/// time-comment bridge is enabled.
+#[tauri::command]
+pub async fn focus_resolve_delivery(
+    app: AppHandle,
+    id: String,
+    resolution: DeliveryResolution,
+    evidence: String,
+) -> Result<FocusDeliveryReviewItem, FocusError> {
+    runtime(&app)?.writer().await?;
+    let pool = app.state::<sqlx::SqlitePool>();
+    focus_delivery::resolve_delivery(pool.inner(), &id, resolution, evidence)
+        .await
+        .map_err(|e| focus_error(&e))
 }
 
 /// Show the always-on-top companion (a view only: no session, no clock).

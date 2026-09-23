@@ -180,6 +180,8 @@ pub async fn mark_pending(pool: &SqlitePool, ids: &[String]) -> crate::Result<()
 
 /// Startup/crash recovery: any row left in 'sending' from a previous run (the
 /// app quit or crashed mid-push) gets reset to 'pending' so it's retried.
+/// Only `todoist_outbox` rows: focus time comments live in `focus_delivery`,
+/// where an interrupted send becomes `uncertain`, never a blind resend.
 pub async fn reset_stuck_sending(pool: &SqlitePool) -> crate::Result<()> {
     sqlx::query("UPDATE todoist_outbox SET status = 'pending', updated_at = datetime('now','localtime') WHERE status = 'sending'")
         .execute(pool)

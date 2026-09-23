@@ -616,12 +616,14 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
                 committed_at TEXT NOT NULL
             );
             CREATE TABLE focus_delivery (
-                id TEXT PRIMARY KEY, occurrence_id TEXT NOT NULL REFERENCES focus_occurrences(id),
+                id TEXT PRIMARY KEY, occurrence_id TEXT REFERENCES focus_occurrences(id),
                 purpose TEXT NOT NULL, native_task_id TEXT, external_id TEXT,
-                payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), idempotency_key TEXT,
-                state TEXT NOT NULL CHECK(state IN ('pending','retry','sent','error','cancelled')),
+                payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), idempotency_key TEXT, temp_id TEXT,
+                state TEXT NOT NULL CHECK(state IN ('pending','sending','acknowledged','uncertain','retryable-error','needs-review','archived')),
                 attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 9007199254740991), next_attempt_at TEXT,
                 last_error TEXT, remote_receipt TEXT, created_at TEXT NOT NULL,
+                import_record_id TEXT UNIQUE REFERENCES focus_import_records(id),
+                resolution_json TEXT CHECK(resolution_json IS NULL OR json_valid(resolution_json)), updated_at TEXT,
                 UNIQUE(occurrence_id, purpose)
             );
             CREATE TABLE focus_undo (
