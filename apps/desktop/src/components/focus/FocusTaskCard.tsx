@@ -35,11 +35,14 @@ export function CompletionButton({
   size = 'md',
   disabled,
   reason,
+  tabIndex,
   onComplete,
 }: {
   title: string
   size?: 'sm' | 'md' | 'lg'
   disabled?: boolean
+  /** Roving lists pass -1 for rows that are not the current Tab stop. */
+  tabIndex?: number
   reason?: string | null
   onComplete: () => void
 }) {
@@ -48,6 +51,7 @@ export function CompletionButton({
     <button
       type="button"
       aria-label={`Complete ${title}`}
+      tabIndex={tabIndex}
       title={reason ?? undefined}
       disabled={disabled}
       onClick={(e) => {
@@ -70,11 +74,14 @@ export function FocusTaskMenu({
   place,
   onSelect,
   className,
+  tabIndex,
 }: {
   task: LocalTask
   place: 'card' | 'row'
   onSelect: (id: TaskMenuId) => void
   className?: string
+  /** Roving lists pass -1 for rows that are not the current Tab stop. */
+  tabIndex?: number
 }) {
   const items = taskMenuItems(task, place)
   return (
@@ -83,6 +90,7 @@ export function FocusTaskMenu({
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label={`More actions for ${task.content}`}
+          tabIndex={tabIndex}
           className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground focus-ring"
         >
           <MoreHorizontal className="size-3.5" aria-hidden />

@@ -15,8 +15,13 @@ export const EXPANDED_MIN_HEIGHT = 420
 export const EXPANDED_MAX_HEIGHT = 640
 export const COMPACT_MAX_WIDTH = 1020
 export const MAX_SCALE = 3
-/** The standard macOS titlebar of the decorated companion window. */
-export const MACOS_TITLEBAR = 28
+/**
+ * Fallback height of the decorated companion's macOS titlebar, used only when
+ * the live window cannot be measured (see `chromeHeight`). macOS 26 draws a
+ * 32pt titlebar (measured: frame 198 vs content 166); older releases use 28.
+ * Taking the larger keeps content + chrome inside the work area on both.
+ */
+export const MACOS_TITLEBAR = 32
 /** Mirrors `--transition-base` in index.css (the ~220ms expand/collapse intent). */
 export const COMPANION_MOTION_MS = 220
 const EDGE_MARGIN = 16
@@ -50,10 +55,29 @@ const finite = (n: number, fallback: number) => (Number.isFinite(n) ? n : fallba
 const clamp = (n: number, lo: number, hi: number) => Math.min(Math.max(n, lo), hi)
 /** A usable dimension: finite, at least 1 logical pixel. */
 const extent = (n: number) => Math.max(1, Math.floor(finite(n, 1)))
+/**
+ * Whole logical pixels that fully contain a fractional extent. Layout heights
+ * are fractional (e.g. 203.23px); rounding to nearest could fit the window
+ * up to half a pixel (times the scale) short of the card. A tiny epsilon
+ * absorbs float noise so an exact 249.0000001 stays 249.
+ */
+const cover = (n: number) => Math.ceil(n - 1e-6)
+
+/**
+ * Titlebar height from the live window's outer and inner heights (logical
+ * px). Anything missing or implausible falls back to `MACOS_TITLEBAR`.
+ */
+export function chromeHeight(outerHeight: number | null | undefined, innerHeight: number | null | undefined): number {
+  if (outerHeight == null || innerHeight == null) return MACOS_TITLEBAR
+  const chrome = outerHeight - innerHeight
+  return Number.isFinite(chrome) && chrome >= 0 && chrome <= 200 ? chrome : MACOS_TITLEBAR
+}
 
 /**
  * Compact (card-only) geometry. `width` is the requested/remembered compact
- * width; `cardHeight` is the card's natural content height at 1x (340 wide).
+ * width; `cardHeight` is the card's natural content height at 1x (340 wide),
+ * fractional as laid out. The returned height is rounded UP so the window
+ * always contains the whole scaled card.
  * The card scales proportionally from 340 up to min(1020, work area), at most
  * 3x. If the scaled card is too tall for the work area the scale drops; at 1x
  * a still-too-tall card keeps the window inside the work area and scrolls.
@@ -65,16 +89,17 @@ export function fitFocusWindow(width: number, cardHeight: number, chromeHeight: 
   const card = Math.max(0, finite(cardHeight, 0))
 
   if (areaW < COMPANION_WIDTH) {
-    const height = Math.max(1, Math.min(Math.round(card), availH))
+    const height = Math.max(1, Math.min(cover(card), availH))
     return { width: areaW, height, scale: 1, overflow: true }
   }
 
   const maxWidth = Math.min(COMPACT_MAX_WIDTH, areaW)
   let scale = clamp(clamp(finite(width, COMPANION_WIDTH), COMPANION_WIDTH, maxWidth) / COMPANION_WIDTH, 1, MAX_SCALE)
   if (card > 0 && card * scale > availH) scale = Math.max(1, availH / card)
-  const outWidth = Math.min(maxWidth, Math.round(COMPANION_WIDTH * scale))
+  // Floor, so a height-limited scale is never nudged back over the work area.
+  const outWidth = Math.min(maxWidth, Math.floor(COMPANION_WIDTH * scale + 1e-6))
   scale = outWidth / COMPANION_WIDTH
-  const natural = Math.round(card * scale)
+  const natural = cover(card * scale)
   const overflow = natural > availH
   return { width: outWidth, height: Math.max(1, Math.min(natural, availH)), scale, overflow }
 }

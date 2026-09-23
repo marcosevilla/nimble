@@ -12,7 +12,7 @@ import {
   timerControl, controlBlockedReason, reorderAfterDrag, moveEntryAction, timeboxConfig,
   pomodoroConfig, parseCustomMinutes, planQuickAdd, runQuickAdd, taskMenuItems, failureControl,
   focusTaskOps, duplicateInput, dueLabel, localFailureMessage, visibleFailure, menuFocusAction, undoDeleteAction, stillOpenAction,
-  addToQueueLabel, sourceLabel,
+  addToQueueLabel, sourceLabel, queueRowKeyIntent, queueRowClickIntent, queueTabStop,
 } from '../src/lib/focusQueueIntents.ts'
 
 let output, rendered
@@ -251,13 +251,90 @@ test('queue rows expose separate handle, completion, promote and menu stops', ()
   const upNext = html.slice(html.indexOf('Up next'), html.indexOf('Add task'))
   assert.equal((upNext.match(/aria-label="Drag to reorder Second task"/g) ?? []).length, 1)
   assert.match(upNext, /aria-label="Complete Second task"/)
-  assert.match(upNext, /aria-label="Move Second task to top"/) // promote (paused) — labelled truthfully
+  assert.match(upNext, /aria-label="Move Second task to top"/) // explicit mouse promote (paused)
   assert.match(upNext, /aria-label="Focus Second task now"/) // separate explicit start
   assert.match(upNext, /aria-label="More actions for Second task"/)
-  assert.match(upNext, /aria-keyshortcuts="Alt\+ArrowUp Alt\+ArrowDown"/)
-  // Keyboard moves refocus this same control by entry id after the reorder commits.
-  const title = upNext.match(/<button\b[^>]*aria-label="Move Second task to top"[^>]*>/)?.[0] ?? ''
-  assert.match(title, /data-focus-entry="e2"/)
+  // The promote button is not the row: keyboard moves refocus the row by entry id.
+  const promote = upNext.match(/<button\b[^>]*aria-label="Move Second task to top"[^>]*>/)?.[0] ?? ''
+  assert.doesNotMatch(promote, /data-focus-entry/)
+})
+
+const rowTag = (html, id) => html.match(new RegExp(`<li\\b[^>]*data-focus-entry="${id}"[^>]*>`))?.[0] ?? ''
+const rowHtml = (html, id) => {
+  const start = html.indexOf(rowTag(html, id))
+  return html.slice(start, html.indexOf('</li>', start))
+}
+
+test('Up next is one Tab stop: the first row is current, named by its title, with its keys', () => {
+  const html = rendered.renderQueueTray()
+  assert.match(html, /<ul\b[^>]*aria-label="Up next"[^>]*class="[^"]*group\/queue/)
+  const first = rowTag(html, 'e2')
+  assert.match(first, /tabindex="0"/)
+  assert.match(first, /aria-current="true"/)
+  assert.match(first, /aria-label="Second task"/) // selecting, not "Move … to top"
+  assert.match(first, /aria-keyshortcuts="ArrowUp ArrowDown Alt\+ArrowUp Alt\+ArrowDown Home End Enter Delete"/)
+  // Visible current-row state while the list has focus, from the task-row token.
+  assert.match(first, /group-focus-within\/queue:bg-accent\/10/)
+  const second = rowTag(html, 'e3')
+  assert.match(second, /tabindex="-1"/)
+  assert.doesNotMatch(second, /aria-current/)
+  assert.doesNotMatch(second, /bg-accent\/10/)
+})
+
+test('only the current row\'s controls are Tab stops', () => {
+  const html = rendered.renderQueueTray()
+  const other = rowHtml(html, 'e3')
+  const buttons = other.match(/<button\b[^>]*>/g) ?? []
+  assert.ok(buttons.length >= 5, `row controls rendered: ${buttons.length}`)
+  for (const b of buttons) assert.match(b, /tabindex="-1"/, b)
+  for (const b of rowHtml(html, 'e2').match(/<button\b[^>]*>/g) ?? []) assert.doesNotMatch(b, /tabindex="-1"/, b)
+})
+
+test('row keys: arrows move the current row, clamped at the ends; Home/End jump', () => {
+  assert.deepEqual(queueRowKeyIntent('ArrowDown', {}, 0, 3), { kind: 'focus', index: 1 })
+  assert.deepEqual(queueRowKeyIntent('ArrowUp', {}, 2, 3), { kind: 'focus', index: 1 })
+  assert.deepEqual(queueRowKeyIntent('ArrowUp', {}, 0, 3), { kind: 'focus', index: 0 })
+  assert.deepEqual(queueRowKeyIntent('ArrowDown', {}, 2, 3), { kind: 'focus', index: 2 })
+  assert.deepEqual(queueRowKeyIntent('Home', {}, 2, 3), { kind: 'focus', index: 0 })
+  assert.deepEqual(queueRowKeyIntent('End', {}, 0, 3), { kind: 'focus', index: 2 })
+})
+
+test('row keys: Alt+arrows reorder, never past the ends (the card entry stays first)', () => {
+  assert.deepEqual(queueRowKeyIntent('ArrowUp', { alt: true }, 1, 3), { kind: 'move', direction: 'up' })
+  assert.deepEqual(queueRowKeyIntent('ArrowDown', { alt: true }, 1, 3), { kind: 'move', direction: 'down' })
+  assert.equal(queueRowKeyIntent('ArrowUp', { alt: true }, 0, 3), null, 'first Up next row cannot displace the card')
+  assert.equal(queueRowKeyIntent('ArrowDown', { alt: true }, 2, 3), null)
+  assert.equal(queueRowKeyIntent('ArrowDown', { alt: true }, 0, 1), null)
+  // …and the engine-side guard agrees: queue index 1 cannot move above index 0.
+  const queue = [{ id: 'e1', occurrence_id: 'o1' }, { id: 'e2', occurrence_id: 'o2' }]
+  assert.equal(moveEntryAction(queue, 'e2', 'up'), null)
+})
+
+test('row keys: Enter promotes, Delete/Backspace remove; other keys and chords are left alone', () => {
+  assert.deepEqual(queueRowKeyIntent('Enter', {}, 1, 3), { kind: 'promote' })
+  assert.deepEqual(queueRowKeyIntent('Delete', {}, 1, 3), { kind: 'remove' })
+  assert.deepEqual(queueRowKeyIntent('Backspace', {}, 1, 3), { kind: 'remove' })
+  for (const [key, mods] of [[' ', {}], ['f', {}], ['F', { shift: true }], ['Enter', { meta: true }],
+    ['ArrowDown', { shift: true }], ['ArrowUp', { ctrl: true }], ['Backspace', { meta: true }], ['Enter', { alt: true }]]) {
+    assert.equal(queueRowKeyIntent(key, mods, 1, 3), null, `${key} ${JSON.stringify(mods)}`)
+  }
+  assert.equal(queueRowKeyIntent('ArrowDown', {}, -1, 3), null, 'no row, no action')
+  assert.equal(queueRowKeyIntent('Enter', {}, 0, 0), null)
+})
+
+test('a row click focuses the row and never promotes', () => {
+  assert.deepEqual(queueRowClickIntent(2), { kind: 'focus', index: 2 })
+  assert.notEqual(queueRowClickIntent(0).kind, 'promote')
+})
+
+test('roving stop: remembered row, else the row now in its place, else the first', () => {
+  const ids = ['e2', 'e3', 'e4']
+  assert.equal(queueTabStop(ids, { id: null, index: -1 }), 'e2')
+  assert.equal(queueTabStop(ids, { id: 'e3', index: 1 }), 'e3')
+  assert.equal(queueTabStop(['e2', 'e4'], { id: 'e3', index: 1 }), 'e4', 'removed row: its neighbour takes the stop')
+  assert.equal(queueTabStop(['e2'], { id: 'e4', index: 2 }), 'e2', 'removed last row: clamps to the new last')
+  assert.equal(queueTabStop(['e4', 'e2', 'e3'], { id: 'e3', index: 1 }), 'e3', 'a moved row keeps the stop')
+  assert.equal(queueTabStop([], { id: 'e2', index: 0 }), null)
 })
 
 test('completed tray shows struck title with spent time and Show/Hide/Clear', () => {

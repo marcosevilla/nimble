@@ -14,13 +14,24 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useEffect, useRef } from 'react'
-import { GripVertical, Play } from 'lucide-react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { ArrowUpToLine, GripVertical, Play } from 'lucide-react'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { Label, Meta } from '@/components/shared/typography'
 import { CompletionButton, FocusTaskMenu, InlineRename } from '@/components/focus/FocusTaskCard'
 import { cn } from '@/lib/utils'
-import { controlBlockedReason, dueLabel, moveEntryAction, queueBlockedReason, reorderAfterDrag, type TaskMenuId } from '@/lib/focusQueueIntents'
+import {
+  controlBlockedReason,
+  dueLabel,
+  moveEntryAction,
+  queueBlockedReason,
+  queueRowClickIntent,
+  queueRowKeyIntent,
+  queueTabStop,
+  reorderAfterDrag,
+  type QueueRowIntent,
+  type TaskMenuId,
+} from '@/lib/focusQueueIntents'
 import type { FocusAction, FocusCapabilities, FocusEntry, FocusSnapshot, LocalTask } from '@nimble/types'
 
 export interface FocusQueueRow {
@@ -36,7 +47,7 @@ interface FocusQueueListProps {
   rows: FocusQueueRow[]
   today: string
   onAction: (action: FocusAction) => Promise<unknown>
-  /** Explicit promote (row click, Enter, "Move to top"); pauses any running task, starts nothing. */
+  /** Explicit promote (Enter on the current row, "Move to top"); pauses any running task, starts nothing. */
   onPromote: (entry: FocusEntry) => void
   /** "Focus now": promote and start in one engine command (`start`). */
   onFocusNow: (entry: FocusEntry) => void
@@ -49,17 +60,26 @@ interface FocusQueueListProps {
 }
 
 const UNAVAILABLE = 'Task no longer available'
+/** Keys the current row answers (see `queueRowKeyIntent`). */
+const ROW_KEYS = 'ArrowUp ArrowDown Alt+ArrowUp Alt+ArrowDown Home End Enter Delete'
+
+interface RowFocus {
+  id: string | null
+  index: number
+}
 
 function QueueRowItem({
   row,
   today,
+  current,
   blocked,
   focusNowBlocked,
   busy,
+  onSelect,
+  onRowClick,
   onComplete,
   onPromote,
   onFocusNow,
-  onMove,
   onMenu,
   onRemove,
   renaming,
@@ -68,14 +88,19 @@ function QueueRowItem({
 }: {
   row: FocusQueueRow
   today: string
+  /** This row is the list's roving tab stop (highlighted while the list has focus). */
+  current: boolean
   blocked: string | null
   /** Why Focus now is unavailable (live timing); the control stays visible. */
   focusNowBlocked: string | null
   busy: boolean
+  /** Focus landed on this row or inside it: it becomes current. */
+  onSelect: () => void
+  /** A click on the row itself (see `queueRowClickIntent`). */
+  onRowClick: () => void
   onComplete: () => void
   onPromote: () => void
   onFocusNow: () => void
-  onMove: (direction: 'up' | 'down') => void
   onMenu: (id: TaskMenuId, task: LocalTask) => void
   onRemove: () => void
   renaming: boolean
@@ -87,16 +112,26 @@ function QueueRowItem({
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
     useSortable({ id: entry.id, disabled: blocked != null })
   const due = task ? dueLabel(task, today) : null
+  // Only the current row's controls are Tab stops; the list itself is one.
+  const stop = current ? 0 : -1
 
   return (
     <li
       ref={setNodeRef}
+      tabIndex={stop}
+      aria-label={title}
+      aria-current={current || undefined}
+      aria-keyshortcuts={ROW_KEYS}
+      data-focus-entry={entry.id}
       style={{ transform: CSS.Transform.toString(transform), transition }}
+      onFocus={onSelect}
       onClick={() => {
-        if (!renaming && !blocked && !busy && task) onPromote()
+        // A click selects the row; it never promotes (use "Move to top").
+        if (!renaming) onRowClick()
       }}
       className={cn(
-        'group relative flex min-w-0 items-center gap-2.5 border-b border-border bg-background py-2 pr-3 pl-5 transition-colors duration-(--transition-fast) hover:bg-hover motion-reduce:transition-none',
+        'group relative flex min-w-0 items-center gap-2.5 border-b border-border bg-background py-2 pr-3 pl-5 transition-colors duration-(--transition-fast) hover:bg-hover focus-ring focus-visible:-outline-offset-2 motion-reduce:transition-none',
+        current && 'group-focus-within/queue:bg-accent/10',
         isDragging && 'z-10 opacity-90 shadow-md',
       )}
     >
@@ -106,15 +141,16 @@ function QueueRowItem({
         type="button"
         {...attributes}
         {...listeners}
+        tabIndex={stop}
         aria-label={`Drag to reorder ${title}`}
         disabled={blocked != null}
         onClick={(e) => e.stopPropagation()}
-        className="absolute top-1/2 left-0.5 flex h-6 w-4 -translate-y-1/2 cursor-grab touch-none items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-ring focus-visible:opacity-100 active:cursor-grabbing disabled:hidden"
+        className="absolute top-1/2 left-0.5 flex h-6 w-4 -translate-y-1/2 cursor-grab touch-none items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-ring active:cursor-grabbing disabled:hidden"
       >
         <GripVertical className="size-3" aria-hidden />
       </button>
       {task ? (
-        <CompletionButton title={title} disabled={blocked != null || busy} reason={blocked} onComplete={onComplete} />
+        <CompletionButton title={title} tabIndex={stop} disabled={blocked != null || busy} reason={blocked} onComplete={onComplete} />
       ) : (
         <span className="size-4 shrink-0" />
       )}
@@ -122,34 +158,29 @@ function QueueRowItem({
       {renaming && task && onRename && onRenameCancel ? (
         <InlineRename task={task} className="text-body" onCommit={(c) => onRename(task, c)} onCancel={onRenameCancel} />
       ) : (
-        <button
-          type="button"
-          aria-label={task ? `Move ${title} to top` : title}
-          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-          data-focus-entry={entry.id}
-          disabled={blocked != null || busy || !task}
-          onClick={(e) => {
-            e.stopPropagation()
-            onPromote()
-          }}
-          onKeyDown={(e) => {
-            if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
-            e.preventDefault()
-            e.stopPropagation()
-            onMove(e.key === 'ArrowUp' ? 'up' : 'down')
-          }}
-          className={cn(
-            'min-w-0 flex-1 truncate rounded-sm text-left text-body text-foreground focus-ring disabled:cursor-default',
-            !task && 'text-muted-foreground',
-          )}
-        >
-          {title}
-        </button>
+        <span className={cn('min-w-0 flex-1 truncate text-body text-foreground', !task && 'text-muted-foreground')}>{title}</span>
       )}
       {due && <Meta className="shrink-0">{due}</Meta>}
       {task && (
         <button
           type="button"
+          tabIndex={stop}
+          aria-label={`Move ${title} to top`}
+          title={blocked ?? 'Move to top'}
+          disabled={blocked != null || busy}
+          onClick={(e) => {
+            e.stopPropagation()
+            onPromote()
+          }}
+          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity duration-(--transition-fast) group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-hover hover:text-foreground focus-ring disabled:cursor-default disabled:hover:bg-transparent"
+        >
+          <ArrowUpToLine className="size-3" aria-hidden />
+        </button>
+      )}
+      {task && (
+        <button
+          type="button"
+          tabIndex={stop}
           aria-label={`Focus ${title} now`}
           title={focusNowBlocked ?? 'Focus now'}
           disabled={focusNowBlocked != null || busy}
@@ -157,16 +188,17 @@ function QueueRowItem({
             e.stopPropagation()
             onFocusNow()
           }}
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity duration-(--transition-fast) group-hover:opacity-100 hover:bg-hover hover:text-foreground focus-ring focus-visible:opacity-100 disabled:cursor-default disabled:hover:bg-transparent"
+          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity duration-(--transition-fast) group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-hover hover:text-foreground focus-ring disabled:cursor-default disabled:hover:bg-transparent"
         >
           <Play className="size-3" aria-hidden />
         </button>
       )}
       {task ? (
-        <FocusTaskMenu task={task} place="row" onSelect={(id) => onMenu(id, task)} />
+        <FocusTaskMenu task={task} place="row" tabIndex={stop} onSelect={(id) => onMenu(id, task)} />
       ) : (
         <button
           type="button"
+          tabIndex={stop}
           disabled={blocked != null}
           onClick={(e) => {
             e.stopPropagation()
@@ -185,6 +217,11 @@ function QueueRowItem({
  * "Up next": the shared ordered queue below the card. Order is the
  * snapshot's; it changes only through the drag handle, Alt+Arrow keyboard
  * moves, promote and the row menu — never on refresh or source switch.
+ *
+ * The list is one Tab stop with a roving current row: ↑/↓ (Home/End) move
+ * it, Alt+↑/↓ reorder it and keep it current, Enter promotes it,
+ * Delete/Backspace removes it. A click only selects a row; promotion by
+ * mouse is the row's explicit "Move to top" (hover button or menu).
  */
 export function FocusQueueList({
   snapshot,
@@ -209,26 +246,71 @@ export function FocusQueueList({
   const submit = (action: FocusAction | null) => {
     if (action) void onAction(action)
   }
-  // Keyboard move keeps focus on the moved row: the reorder commits async
-  // and React moves the focused node (WebKit blurs it), so refocus the same
-  // entry's title once the new snapshot has rendered.
+  const ids = rows.map((r) => r.entry.id)
+  const [current, setCurrent] = useState<RowFocus>({ id: null, index: -1 })
+  const stopId = queueTabStop(ids, current)
+
   const listRef = useRef<HTMLUListElement>(null)
-  const refocusEntryId = useRef<string | null>(null)
-  useEffect(() => {
-    const id = refocusEntryId.current
-    if (!id) return
-    const target = Array.from(listRef.current?.querySelectorAll<HTMLElement>('[data-focus-entry]') ?? []).find(
+  const rowEl = (id: string | null) =>
+    Array.from(listRef.current?.querySelectorAll<HTMLElement>('[data-focus-entry]') ?? []).find(
       (el) => el.dataset.focusEntry === id,
     )
+  const focusRow = (id: string | null) => {
+    const el = rowEl(id)
+    el?.focus()
+    el?.scrollIntoView?.({ block: 'nearest' })
+  }
+
+  // A keyboard move or removal commits async and React moves/drops the
+  // focused node (WebKit blurs it), so once the new snapshot renders put
+  // focus back on the same row — or, if it left, the row now in its place.
+  const refocus = useRef<RowFocus | null>(null)
+  useEffect(() => {
+    const pending = refocus.current
+    if (!pending) return
+    const target = rowEl(queueTabStop(ids, pending))
     if (target && document.activeElement !== target) target.focus()
-    if (target) refocusEntryId.current = null
+    if (target || ids.length === 0) refocus.current = null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.queue_revision])
-  const move = (entryId: string, direction: 'up' | 'down') => {
+
+  const move = (entryId: string, index: number, direction: 'up' | 'down') => {
     const action = moveEntryAction(snapshot.queue, entryId, direction)
     if (!action) return
-    refocusEntryId.current = entryId
+    refocus.current = { id: entryId, index }
     void onAction(action)
   }
+
+  const run = (intent: QueueRowIntent, row: FocusQueueRow, index: number) => {
+    switch (intent.kind) {
+      case 'focus':
+        return focusRow(ids[intent.index] ?? null)
+      case 'move':
+        if (blocked == null && !busy) move(row.entry.id, index, intent.direction)
+        return
+      case 'promote':
+        if (blocked == null && !busy && row.task) onPromote(row.entry)
+        return
+      case 'remove':
+        if (blocked != null || busy) return
+        refocus.current = { id: row.entry.id, index }
+        return submit({ kind: 'remove', occurrence_id: row.entry.occurrence_id })
+    }
+  }
+
+  const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
+    // Only keys aimed at a row itself: its controls, the rename field and
+    // open menus keep their native keys.
+    const target = e.target as HTMLElement
+    if (e.defaultPrevented || !target.dataset?.focusEntry) return
+    const index = ids.indexOf(target.dataset.focusEntry)
+    const intent = queueRowKeyIntent(e.key, { alt: e.altKey, meta: e.metaKey, ctrl: e.ctrlKey, shift: e.shiftKey }, index, ids.length)
+    if (!intent) return
+    e.preventDefault()
+    e.stopPropagation()
+    run(intent, rows[index], index)
+  }
+
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     if (over) submit(reorderAfterDrag(snapshot.queue, String(active.id), String(over.id)))
   }
@@ -241,20 +323,22 @@ export function FocusQueueList({
         Up next
       </Label>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-        <SortableContext items={rows.map((r) => r.entry.id)} strategy={verticalListSortingStrategy}>
-          <ul ref={listRef} aria-label="Up next">
-            {rows.map((row) => (
+        <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+          <ul ref={listRef} aria-label="Up next" className="group/queue" onKeyDown={onKeyDown}>
+            {rows.map((row, index) => (
               <QueueRowItem
                 key={row.entry.id}
                 row={row}
                 today={today}
+                current={row.entry.id === stopId}
                 blocked={blocked}
                 focusNowBlocked={focusNowBlocked}
                 busy={busy}
+                onSelect={() => setCurrent({ id: row.entry.id, index })}
+                onRowClick={() => run(queueRowClickIntent(index), row, index)}
                 onComplete={() => submit({ kind: 'complete', occurrence_id: row.entry.occurrence_id })}
                 onPromote={() => onPromote(row.entry)}
                 onFocusNow={() => onFocusNow(row.entry)}
-                onMove={(direction) => move(row.entry.id, direction)}
                 onMenu={(id, task) => onMenu(id, task, row.entry)}
                 onRemove={() => submit({ kind: 'remove', occurrence_id: row.entry.occurrence_id })}
                 renaming={renamingEntryId === row.entry.id}

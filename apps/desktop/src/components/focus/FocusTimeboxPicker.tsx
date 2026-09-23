@@ -63,7 +63,7 @@ export function FocusTimeboxPicker({ config, presentation, caption, disabledReas
           disabled={disabledReason != null}
           data-phase={presentation.phase}
           className={cn(
-            'rounded-md text-timer leading-none transition-opacity duration-(--transition-fast) hover:opacity-70 focus-ring disabled:hover:opacity-100 motion-reduce:transition-none',
+            'rounded-md text-timer transition-opacity duration-(--transition-fast) hover:opacity-70 focus-ring disabled:hover:opacity-100 motion-reduce:transition-none',
             PHASE_CLASS[presentation.phase],
           )}
         >

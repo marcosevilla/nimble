@@ -122,7 +122,7 @@ export const TYPO_TOKENS: TypoToken[] = [
     family: 'mono',
     size: 48,
     weight: 500,
-    lineHeight: 1,
+    lineHeight: 1.2,
     tracking: -0.02,
     case: 'none',
     preview: '24:32',

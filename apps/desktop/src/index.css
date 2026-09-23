@@ -49,7 +49,9 @@
     --text-display:      1.25rem;     /* 20 — editor H1, celebration moments */
     --text-display--line-height: 1.2;
     --text-timer:        3rem;        /* 48 — FocusView timer */
-    --text-timer--line-height: 1;
+    /* 1.2, not 1: the mono face's ascent+descent is ~1.17em, so a 1em line
+       box under-reports the painted digits and tight fits clip them. */
+    --text-timer--line-height: 1.2;
 }
 
 @theme inline {

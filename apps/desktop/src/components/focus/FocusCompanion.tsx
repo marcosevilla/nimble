@@ -100,15 +100,19 @@ export function FocusCompanion({ windowApi }: { windowApi?: CompanionWindowApi }
     return () => clearTimeout(id)
   }, [dp, prefs])
 
-  // Card-only mode refits to the card's natural (1x) height.
+  // Card-only mode refits to the card's natural (1x) height. The observer's
+  // border box is the untransformed, fractional layout height; offsetHeight
+  // is an integer that can round the card down and clip its bottom edge.
   const compact = prefs?.compact ?? false
   const hasSnapshot = snapshot != null
   useEffect(() => {
     const el = contentRef.current
     if (!compact || !el || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => setCardHeight(el.offsetHeight))
+    const observer = new ResizeObserver(([entry]) => {
+      const box = entry?.borderBoxSize?.[0]?.blockSize
+      setCardHeight(typeof box === 'number' && box > 0 ? box : el.offsetHeight)
+    })
     observer.observe(el)
-    setCardHeight(el.offsetHeight)
     return () => observer.disconnect()
   }, [compact, hasSnapshot])
 
@@ -130,9 +134,11 @@ export function FocusCompanion({ windowApi }: { windowApi?: CompanionWindowApi }
     if (!windowApi || !prefs || (prefs.compact && cardHeight <= 0)) return
     let cancelled = false
     void (async () => {
-      const area = await windowApi.workArea()
+      const [area, chrome] = await Promise.all([
+        windowApi.workArea(),
+        windowApi.chromeHeight().catch(() => MACOS_TITLEBAR),
+      ])
       if (cancelled || !area) return
-      const chrome = MACOS_TITLEBAR
       const next = prefs.compact
         ? fitFocusWindow(prefs.compactWidth, cardHeight, chrome, area)
         : fitExpandedWindow(prefs.expandedHeight, chrome, area)

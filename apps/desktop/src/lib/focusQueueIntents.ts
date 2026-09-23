@@ -199,6 +199,76 @@ export function moveEntryAction(queue: FocusEntry[], entryId: string, direction:
   return { kind: 'reorder', entry_ids: ids }
 }
 
+// ── Up next roving focus ──
+//
+// Up next is one tab stop. Exactly one row is "current" (the roving stop);
+// plain arrows move it, Alt+arrows reorder it (focus follows the row), Enter
+// promotes it, Delete/Backspace removes it. A click only makes a row current:
+// promotion by mouse is the explicit "Move to top" control.
+
+export type QueueRowIntent =
+  | { kind: 'focus'; index: number }
+  | { kind: 'move'; direction: 'up' | 'down' }
+  | { kind: 'promote' }
+  | { kind: 'remove' }
+
+export interface QueueKeyMods {
+  alt?: boolean
+  meta?: boolean
+  ctrl?: boolean
+  shift?: boolean
+}
+
+/**
+ * What a key on the current Up next row means, or null to leave the event
+ * alone (no preventDefault). `index` is the row's position among `length`
+ * Up next rows (the card's entry is not one of them, so a move can never
+ * displace it: Alt+↑ on the first row is null). ⌘/Ctrl/⇧ combos stay with
+ * the app's global shortcuts.
+ */
+export function queueRowKeyIntent(key: string, mods: QueueKeyMods, index: number, length: number): QueueRowIntent | null {
+  if (length <= 0 || index < 0 || index >= length) return null
+  if (mods.meta || mods.ctrl || mods.shift) return null
+  if (mods.alt) {
+    if (key === 'ArrowUp') return index > 0 ? { kind: 'move', direction: 'up' } : null
+    if (key === 'ArrowDown') return index < length - 1 ? { kind: 'move', direction: 'down' } : null
+    return null
+  }
+  switch (key) {
+    case 'ArrowUp':
+      return { kind: 'focus', index: Math.max(0, index - 1) }
+    case 'ArrowDown':
+      return { kind: 'focus', index: Math.min(length - 1, index + 1) }
+    case 'Home':
+      return { kind: 'focus', index: 0 }
+    case 'End':
+      return { kind: 'focus', index: length - 1 }
+    case 'Enter':
+      return { kind: 'promote' }
+    case 'Delete':
+    case 'Backspace':
+      return { kind: 'remove' }
+    default:
+      return null
+  }
+}
+
+/** A click on a row (not on one of its controls) only makes it current. */
+export function queueRowClickIntent(index: number): QueueRowIntent {
+  return { kind: 'focus', index }
+}
+
+/**
+ * The roving tab stop: the remembered current row if it is still queued,
+ * else the row now at its old position, else the first row.
+ */
+export function queueTabStop(ids: readonly string[], current: { id: string | null; index: number }): string | null {
+  if (ids.length === 0) return null
+  if (current.id && ids.includes(current.id)) return current.id
+  if (current.index >= 0) return ids[Math.min(current.index, ids.length - 1)]
+  return ids[0]
+}
+
 // ── Menus ──
 
 export type TaskMenuId =

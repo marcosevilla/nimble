@@ -9,6 +9,8 @@ import {
   EXPANDED_DEFAULT_HEIGHT,
   EXPANDED_MAX_HEIGHT,
   EXPANDED_MIN_HEIGHT,
+  MACOS_TITLEBAR,
+  chromeHeight,
   clampFocusPosition,
   companionMotionMs,
   defaultFocusPosition,
@@ -127,4 +129,43 @@ test('stored sizes reject corrupt values and fall back', () => {
 test('expand/collapse motion uses the Nimble base token and is immediate under reduced motion', () => {
   assert.equal(companionMotionMs(false), 220)
   assert.equal(companionMotionMs(true), 0)
+})
+
+test('compact fit rounds fractional card heights up, never down', () => {
+  const big = { width: 2560, height: 1440 }
+  // 203.23px laid out: round-to-nearest (203) would clip the card's bottom.
+  assert.equal(fitFocusWindow(340, 203.23, 32, big).height, 204)
+  assert.equal(fitFocusWindow(1020, 203.23, 32, big).height, 610)
+  // Exact products stay exact (no float-noise pixel).
+  assert.equal(fitFocusWindow(510, 166, 32, big).height, 249)
+})
+
+test('fitted compact window contains the whole card at 1x and every scaled width', () => {
+  const big = { width: 2560, height: 1440 }
+  for (const card of [166, 182, 202.5, 203.23, 203.6875]) {
+    for (let w = 340; w <= 1020; w += 17) {
+      const x = fitFocusWindow(w, card, 32, big)
+      assert.equal(x.overflow, false)
+      assert.ok(x.height >= card * x.scale - 1e-6, `card ${card} @ ${w}: ${x.height} < ${card * x.scale}`)
+      assert.ok(x.height - card * x.scale < 1, 'fits within one pixel')
+      assert.ok(Math.abs(x.width - COMPANION_WIDTH * x.scale) < 1e-9, 'card width fills the window exactly')
+    }
+  }
+})
+
+test('a height-limited scale is not nudged back over the work area', () => {
+  const area = { width: 2560, height: 700 }
+  const x = fitFocusWindow(1020, 301, 32, area)
+  assert.equal(x.overflow, false)
+  assert.ok(x.height + 32 <= area.height)
+  assert.ok(x.height >= 301 * x.scale - 1e-6)
+})
+
+test('titlebar chrome is measured from the live window, with a safe fallback', () => {
+  assert.equal(chromeHeight(198, 166), 32)
+  assert.equal(chromeHeight(228, 200), 28)
+  assert.equal(chromeHeight(null, 166), MACOS_TITLEBAR)
+  assert.equal(chromeHeight(100, 166), MACOS_TITLEBAR)
+  assert.equal(chromeHeight(Number.NaN, 1), MACOS_TITLEBAR)
+  assert.equal(MACOS_TITLEBAR, 32)
 })

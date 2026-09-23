@@ -9,7 +9,7 @@
  */
 import { invoke } from '@tauri-apps/api/core'
 import { currentMonitor, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window'
-import type { Point, Size, WorkAreaRect } from '@/lib/focusWindow'
+import { chromeHeight, type Point, type Size, type WorkAreaRect } from '@/lib/focusWindow'
 
 export interface CompanionGeometry extends Size {
   min_width: number
@@ -27,6 +27,8 @@ export interface CompanionWindowApi {
   position(): Promise<Point | null>
   /** Inner (content) size in logical px. */
   innerSize(): Promise<Size | null>
+  /** Titlebar height (outer minus inner) in logical px; a fallback when unknown. */
+  chromeHeight(): Promise<number>
   /** User/window resizes, in logical inner px. Returns unsubscribe. */
   onResized(callback: (size: Size) => void): () => void
   apply(geometry: CompanionGeometry): Promise<void>
@@ -63,6 +65,14 @@ export function createCompanionWindow(): CompanionWindowApi {
         return { width: s.width / f, height: s.height / f }
       } catch {
         return null
+      }
+    },
+    async chromeHeight() {
+      try {
+        const [outer, inner, f] = await Promise.all([win.outerSize(), win.innerSize(), win.scaleFactor()])
+        return chromeHeight(outer.height / f, inner.height / f)
+      } catch {
+        return chromeHeight(null, null)
       }
     },
     onResized(callback) {
