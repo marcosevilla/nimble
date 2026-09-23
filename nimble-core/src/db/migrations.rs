@@ -655,9 +655,30 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
         description: "Project archiving",
         sql: "ALTER TABLE projects ADD COLUMN archived_at TEXT",
     },
+    Migration {
+        version: 23,
+        description: "Morning brief snapshots",
+        sql: "CREATE TABLE IF NOT EXISTS briefs (
+            date TEXT PRIMARY KEY,
+            version INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL CHECK(status IN ('ready','partial','fallback','failed')),
+            source TEXT NOT NULL DEFAULT 'nimble',
+            layout_json TEXT NOT NULL,
+            snapshot_json TEXT NOT NULL,
+            snapshot_schema INTEGER NOT NULL,
+            energy_level TEXT,
+            model TEXT,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            error_code TEXT,
+            notes TEXT,
+            generated_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+    },
 ];
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 22;
+pub const CURRENT_SCHEMA_VERSION: i64 = 23;
 
 pub async fn current_schema_version(pool: &SqlitePool) -> crate::Result<i64> {
     let version = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM schema_version")
@@ -817,5 +838,20 @@ mod v19_tests {
         let dup = sqlx::query("INSERT INTO task_labels (task_id, label_id) VALUES ('t1', 'l1')")
             .execute(&pool).await;
         assert!(dup.is_err(), "task_labels (task_id, label_id) must be unique");
+    }
+}
+
+#[cfg(test)]
+mod v23_tests {
+    use crate::test_util::test_pool;
+
+    #[tokio::test]
+    async fn v23_creates_the_briefs_table() {
+        let pool = test_pool().await;
+        let cols: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('briefs') ORDER BY cid")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(cols, ["date","version","status","source","layout_json","snapshot_json","snapshot_schema",
+            "energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at"]);
+        assert_eq!(super::CURRENT_SCHEMA_VERSION, 23);
     }
 }
