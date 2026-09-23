@@ -1351,3 +1351,47 @@ async fn activation_refuses_a_profile_another_device_owns() {
     assert!(refused.to_string().starts_with("wrong_owner"), "{refused}");
     assert_eq!(h.snapshot().await.writer_device_id, "test-device");
 }
+
+// ── Final review M-b: Undo-delete re-logs the restored task labels ──
+
+#[tokio::test]
+async fn undo_delete_logs_restored_task_labels_for_sync() {
+    let h = fixture::Harness::new().await;
+    let label = nimble_core::db::labels::create_label(&h.pool, "deep work", "orange")
+        .await
+        .unwrap();
+    let task = nimble_core::db::tasks::create_local_task(
+        &h.pool,
+        CreateTaskInput {
+            content: "Labeled".into(),
+            label_ids: Some(vec![label.id.clone()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let reply = h
+        .service
+        .execute_native_task(NativeTaskCommand {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            action: NativeTaskAction::Delete { id: task.id.clone() },
+        })
+        .await
+        .unwrap();
+    let token = reply.undo_token.expect("delete issues an undo token");
+    sqlx::query("UPDATE sync_log SET synced=1").execute(&h.pool).await.unwrap();
+    h.send(FocusAction::UndoDelete { token }).await.unwrap();
+    let labels: Vec<String> = sqlx::query_scalar("SELECT label_id FROM task_labels WHERE task_id=?")
+        .bind(&task.id).fetch_all(&h.pool).await.unwrap();
+    assert_eq!(labels, vec![label.id.clone()]);
+    let logged: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT row_id,operation,snapshot FROM sync_log WHERE table_name='task_labels' AND synced=0")
+        .fetch_all(&h.pool).await.unwrap();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    assert_eq!(logged[0].0, format!("{}::{}", task.id, label.id));
+    assert_eq!(logged[0].1, "INSERT");
+    let snapshot: serde_json::Value = serde_json::from_str(logged[0].2.as_deref().unwrap()).unwrap();
+    assert_eq!(snapshot["task_id"], task.id);
+    assert_eq!(snapshot["label_id"], label.id);
+    assert!(snapshot["created_at"].is_string());
+}

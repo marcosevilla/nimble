@@ -653,13 +653,20 @@ pub async fn restore_deleted_tasks_tx(conn: &mut SqliteConnection, tasks: &[Loca
             .bind(&task.created_at).bind(&task.updated_at).bind(&task.external_id).bind(&task.external_source)
             .bind(&task.remote_updated_at).bind(&task.synced_snapshot).bind(&task.sync_policy)
             .execute(&mut *conn).await?;
-        for label in &task.labels {
-            sqlx::query("INSERT OR IGNORE INTO task_labels(task_id,label_id) VALUES(?,?)")
-                .bind(&task.id).bind(label).execute(&mut *conn).await?;
-        }
         sqlx::query("DELETE FROM todoist_outbox WHERE local_id=? AND object_type='task' AND op='delete' AND status='pending'")
             .bind(&task.id).execute(&mut *conn).await?;
         sync_task(conn, task, "INSERT", None).await?;
+        // Labels sync like every other label path, after their task row, so
+        // Turso/web get the join rows back too (not just the local copy).
+        for label in &task.labels {
+            sqlx::query("INSERT OR IGNORE INTO task_labels(task_id,label_id) VALUES(?,?)")
+                .bind(&task.id).bind(label).execute(&mut *conn).await?;
+            let created: String =
+                sqlx::query_scalar("SELECT created_at FROM task_labels WHERE task_id=? AND label_id=?")
+                    .bind(&task.id).bind(label).fetch_one(&mut *conn).await?;
+            let snapshot = serde_json::json!({"task_id":task.id,"label_id":label,"created_at":created}).to_string();
+            sync::append_sync_log_tx(conn, "task_labels", &sync::task_labels_row_id(&task.id, label), "INSERT", None, Some(&snapshot)).await?;
+        }
         observer::on_task_mutation_tx(conn, TaskMutation::Created(task)).await?;
     }
     Ok(())
