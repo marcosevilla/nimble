@@ -24,8 +24,20 @@ fn task_create_payload(task: &LocalTask) -> serde_json::Value {
         "duration_minutes": task.duration_minutes,
         "priority": task.priority,
         "project_local_id": task.project_id,
+        "section_local_id": task.section_id,
         "parent_local_id": task.parent_id,
     })
+}
+
+/// `move` payload: the task's full target location. `section_local_id` is
+/// null when the task sits at the project root.
+fn task_move_payload(task: &LocalTask) -> serde_json::Value {
+    serde_json::json!({"project_local_id": task.project_id, "section_local_id": task.section_id})
+}
+
+/// A location change (project and/or section) needs a Todoist `item_move`.
+fn location_changed(fields_changed: &[String]) -> bool {
+    fields_changed.iter().any(|f| f == "project_id" || f == "section_id")
 }
 
 async fn active(pool: &SqlitePool) -> bool {
@@ -81,9 +93,8 @@ pub async fn on_task_mutation(pool: &SqlitePool, m: TaskMutation<'_>) {
             if !payload.is_empty() {
                 r = outbox::enqueue(pool, "task", &task.id, "update", payload.into()).await;
             }
-            if r.is_ok() && fields_changed.iter().any(|f| f == "project_id") {
-                r = outbox::enqueue(pool, "task", &task.id, "move",
-                    serde_json::json!({"project_local_id": task.project_id})).await;
+            if r.is_ok() && location_changed(fields_changed) {
+                r = outbox::enqueue(pool, "task", &task.id, "move", task_move_payload(task)).await;
             }
             r
         }
@@ -145,8 +156,8 @@ pub async fn on_task_mutation_tx(conn: &mut SqliteConnection, m: TaskMutation<'_
             if !payload.is_empty() {
                 outbox::enqueue_tx(conn, "task", &task.id, "update", payload.into()).await?;
             }
-            if fields_changed.iter().any(|f| f == "project_id") {
-                outbox::enqueue_tx(conn, "task", &task.id, "move", serde_json::json!({"project_local_id": task.project_id})).await?;
+            if location_changed(fields_changed) {
+                outbox::enqueue_tx(conn, "task", &task.id, "move", task_move_payload(task)).await?;
             }
         }
         TaskMutation::StatusChanged { task, was_completed } => {
@@ -451,6 +462,81 @@ mod tests {
         let moves: Vec<_> = batch.iter().filter(|r| r.op == "move").collect();
         assert_eq!(moves.len(), 1);
         assert_eq!(moves[0].payload["project_local_id"], p.id);
+    }
+
+    #[tokio::test]
+    async fn create_in_section_enqueues_section_local_id() {
+        let pool = test_pool().await;
+        activate(&pool).await;
+        let p = crate::db::projects::create_project(&pool, "Work", "#fff", None).await.unwrap();
+        let s = crate::db::sections::create_section(&pool, &p.id, "Lane").await.unwrap();
+        let t = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "x".to_string(),
+                project_id: Some(p.id.clone()),
+                section_id: Some(s.id.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let batch = outbox::pending_batch(&pool, 10).await.unwrap();
+        let create = batch.iter().find(|r| r.local_id == t.id && r.op == "create").expect("task create");
+        assert_eq!(create.payload["section_local_id"], s.id);
+        assert_eq!(create.payload["project_local_id"], p.id);
+    }
+
+    #[tokio::test]
+    async fn section_only_change_enqueues_move_with_section() {
+        let pool = test_pool().await;
+        activate(&pool).await;
+        let p = crate::db::projects::create_project(&pool, "Work", "#fff", None).await.unwrap();
+        let s = crate::db::sections::create_section(&pool, &p.id, "Lane").await.unwrap();
+        let t = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput { content: "x".to_string(), project_id: Some(p.id.clone()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        crate::db::tasks::update_local_task(
+            &pool,
+            &t.id,
+            UpdateTaskInput { section_id: Some(s.id.clone()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        let batch = outbox::pending_batch(&pool, 10).await.unwrap();
+        let moves: Vec<_> = batch.iter().filter(|r| r.local_id == t.id && r.op == "move").collect();
+        assert_eq!(moves.len(), 1);
+        assert_eq!(moves[0].payload["project_local_id"], p.id);
+        assert_eq!(moves[0].payload["section_local_id"], s.id);
+    }
+
+    #[tokio::test]
+    async fn project_change_move_carries_section_local_id() {
+        // project_id + section_id in one edit: exactly one move, carrying both.
+        let pool = test_pool().await;
+        activate(&pool).await;
+        let p = crate::db::projects::create_project(&pool, "Work", "#fff", None).await.unwrap();
+        let s = crate::db::sections::create_section(&pool, &p.id, "Lane").await.unwrap();
+        let t = crate::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput { content: "x".to_string(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        crate::db::tasks::update_local_task(
+            &pool,
+            &t.id,
+            UpdateTaskInput { project_id: Some(p.id.clone()), section_id: Some(s.id.clone()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        let batch = outbox::pending_batch(&pool, 10).await.unwrap();
+        let moves: Vec<_> = batch.iter().filter(|r| r.local_id == t.id && r.op == "move").collect();
+        assert_eq!(moves.len(), 1);
+        assert_eq!(moves[0].payload["section_local_id"], s.id);
     }
 
     #[tokio::test]

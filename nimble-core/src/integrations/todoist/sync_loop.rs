@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 /// Todoist-facing identifiers a command needs (external id, in-batch temp_id,
 /// or a "section:{id}" pseudo-project), plus enough snapshot state to build
 /// due-date args and detect no-op moves.
+#[derive(Default)]
 pub struct PushCtx {
     /// local task id → external_id (None = exists locally, unsynced)
     task_external: HashMap<String, Option<String>>,
@@ -20,6 +21,10 @@ pub struct PushCtx {
     /// (used to detect a `move` op that would be a no-op on Todoist's side)
     current_project: HashMap<String, String>,
     local_only_tasks: HashSet<String>,
+    /// local section id → Todoist section id, for sections that are synced.
+    /// A Nimble-only section (no external_id) is absent, so its tasks fall
+    /// back to their project.
+    pub section_external: HashMap<String, String>,
 }
 
 impl PushCtx {
@@ -31,10 +36,7 @@ impl PushCtx {
         Self {
             task_external,
             project_external,
-            base_due: HashMap::new(),
-            temp_ids: HashMap::new(),
-            current_project: HashMap::new(),
-            local_only_tasks: HashSet::new(),
+            ..Default::default()
         }
     }
     #[cfg(test)]
@@ -67,6 +69,20 @@ impl PushCtx {
             .or_else(|| self.temp_ids.get(local_id).cloned())
             .or_else(|| extra_temp_ids.get(local_id).cloned())
     }
+
+    /// The Todoist location a create/move row targets: its synced section
+    /// ("section:{id}") when it names one, else its project.
+    fn resolve_location(&self, row: &outbox::OutboxRow, extra: &HashMap<String, String>) -> Option<String> {
+        if let Some(sid) = row.payload.get("section_local_id").and_then(|v| v.as_str()) {
+            if let Some(ext) = self.section_external.get(sid) {
+                return Some(format!("section:{ext}"));
+            }
+        }
+        row.payload
+            .get("project_local_id")
+            .and_then(|v| v.as_str())
+            .and_then(|p| self.resolve_project_ref(p, extra))
+    }
 }
 
 /// Every row in the current batch that carries a `temp_id` (only pending
@@ -83,14 +99,7 @@ fn batch_temp_ids(rows: &[outbox::OutboxRow]) -> HashMap<String, String> {
 }
 
 pub async fn load_push_ctx(pool: &SqlitePool, rows: &[outbox::OutboxRow]) -> crate::Result<PushCtx> {
-    let mut ctx = PushCtx {
-        task_external: HashMap::new(),
-        project_external: HashMap::new(),
-        base_due: HashMap::new(),
-        temp_ids: HashMap::new(),
-        current_project: HashMap::new(),
-        local_only_tasks: HashSet::new(),
-    };
+    let mut ctx = PushCtx::default();
     for row in rows {
         if let Some(t) = &row.temp_id {
             ctx.temp_ids.insert(row.local_id.clone(), t.clone());
@@ -114,6 +123,19 @@ pub async fn load_push_ctx(pool: &SqlitePool, rows: &[outbox::OutboxRow]) -> cra
                 ctx.current_project.insert(row.local_id.clone(), project_ext);
             }
             ctx.task_external.insert(row.local_id.clone(), ext);
+        }
+        // referenced target section for create/move payloads
+        if let Some(sid) = row.payload.get("section_local_id").and_then(|v| v.as_str()) {
+            if !ctx.section_external.contains_key(sid) {
+                let ext: Option<Option<String>> =
+                    sqlx::query_scalar("SELECT external_id FROM sections WHERE id = ?")
+                        .bind(sid)
+                        .fetch_optional(pool)
+                        .await?;
+                if let Some(Some(e)) = ext {
+                    ctx.section_external.insert(sid.to_string(), e);
+                }
+            }
         }
         // referenced target projects for create/move payloads
         for key in ["project_local_id", "parent_local_id"] {
@@ -205,12 +227,10 @@ pub fn build_commands(
                 if let Some(v) = row.payload.get("labels") {
                     args.insert("labels".into(), v.clone());
                 }
-                if let Some(p) = row.payload.get("project_local_id").and_then(|v| v.as_str()) {
-                    if let Some(ext) = ctx.resolve_project_ref(p, &extra_temp_ids) {
-                        let (k, v) = project_ref_args(&ext);
-                        args.insert(k, v);
-                    } // unresolvable project → task lands in Todoist inbox; fine
-                }
+                if let Some(ext) = ctx.resolve_location(row, &extra_temp_ids) {
+                    let (k, v) = project_ref_args(&ext);
+                    args.insert(k, v);
+                } // unresolvable project → task lands in Todoist inbox; fine
                 if let Some(par) = row.payload.get("parent_local_id").and_then(|v| v.as_str()) {
                     if let Some(ext) = ctx.resolve_task_id(par, &extra_temp_ids) {
                         args.insert("parent_id".into(), ext.into());
@@ -272,11 +292,7 @@ pub fn build_commands(
             },
             ("task", "move") => {
                 let resolved_id = ctx.resolve_task_id(&row.local_id, &extra_temp_ids);
-                let resolved_project = row
-                    .payload
-                    .get("project_local_id")
-                    .and_then(|v| v.as_str())
-                    .and_then(|p| ctx.resolve_project_ref(p, &extra_temp_ids));
+                let resolved_project = ctx.resolve_location(row, &extra_temp_ids);
                 match (resolved_id, resolved_project) {
                     (Some(id), Some(ext)) => {
                         if ctx.current_project.get(&row.local_id) == Some(&ext) {
@@ -1534,6 +1550,81 @@ mod push_tests {
         assert!(bad.is_empty());
         assert_eq!(cmds[0]["type"], "item_move");
         assert_eq!(cmds[0]["args"]["project_id"], "EXT-P2");
+    }
+
+    #[test]
+    fn create_in_section_sends_section_id() {
+        let mut ctx = ctx_with(&[], &[("p1", "P1")]);
+        ctx.section_external.insert("s1".into(), "S1".into());
+        let rows = vec![row("create", "t1", json!({"content": "c", "project_local_id": "p1", "section_local_id": "s1"}), Some("tmp-t1"))];
+        let (cmds, bad) = build_commands(&rows, &ctx);
+        assert!(bad.is_empty());
+        assert_eq!(cmds[0]["args"]["section_id"], "S1");
+        assert!(cmds[0]["args"].get("project_id").is_none(), "section_id implies project");
+    }
+
+    #[test]
+    fn move_into_section_sends_section_id_and_skips_noop() {
+        let mut ctx = ctx_with(&[("t1", Some("R1"))], &[("p1", "P1")]);
+        ctx.section_external.insert("s1".into(), "S1".into());
+        ctx.set_current_project_for_tests("t1", "section:S1");
+        let rows = vec![row("move", "t1", json!({"project_local_id": "p1", "section_local_id": "s1"}), None)];
+        let (cmds, bad) = build_commands(&rows, &ctx);
+        assert!(cmds.is_empty());
+        assert!(bad[0].1.contains("no-op move"));
+    }
+
+    #[test]
+    fn move_into_section_from_plain_project_builds_item_move_with_section_id() {
+        let mut ctx = ctx_with(&[("t1", Some("R1"))], &[("p1", "P1")]);
+        ctx.section_external.insert("s1".into(), "S1".into());
+        ctx.set_current_project_for_tests("t1", "P1");
+        let rows = vec![row("move", "t1", json!({"project_local_id": "p1", "section_local_id": "s1"}), None)];
+        let (cmds, bad) = build_commands(&rows, &ctx);
+        assert!(bad.is_empty());
+        assert_eq!(cmds[0]["type"], "item_move");
+        assert_eq!(cmds[0]["args"]["section_id"], "S1");
+        assert!(cmds[0]["args"].get("project_id").is_none());
+    }
+
+    #[test]
+    fn move_out_of_section_targets_project() {
+        let ctx = {
+            let mut c = ctx_with(&[("t1", Some("R1"))], &[("p1", "P1")]);
+            c.set_current_project_for_tests("t1", "section:S1");
+            c
+        };
+        let rows = vec![row("move", "t1", json!({"project_local_id": "p1", "section_local_id": null}), None)];
+        let (cmds, bad) = build_commands(&rows, &ctx);
+        assert!(bad.is_empty());
+        assert_eq!(cmds[0]["args"]["project_id"], "P1");
+    }
+
+    #[test]
+    fn unsynced_local_section_falls_back_to_project() {
+        // A Nimble-created section has no Todoist id yet: the task lands in the
+        // right project with no section (accepted until cutover).
+        let ctx = ctx_with(&[], &[("p1", "P1")]);
+        let rows = vec![row("create", "t1", json!({"content": "c", "project_local_id": "p1", "section_local_id": "local-only"}), Some("tmp-t1"))];
+        let (cmds, bad) = build_commands(&rows, &ctx);
+        assert!(bad.is_empty());
+        assert_eq!(cmds[0]["args"]["project_id"], "P1");
+        assert!(cmds[0]["args"].get("section_id").is_none());
+    }
+
+    #[tokio::test]
+    async fn load_push_ctx_resolves_section_external_ids() {
+        let pool = crate::test_util::test_pool().await;
+        apply_pull(&pool, &serde_json::from_value(json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Lane"}]})).unwrap()).await.unwrap();
+        let (pid, sid): (String, String) = sqlx::query_as("SELECT project_id, id FROM sections WHERE external_id = 'S'")
+            .fetch_one(&pool).await.unwrap();
+        let rows = vec![row("create", "t1", json!({"content": "c", "project_local_id": pid, "section_local_id": sid}), Some("tmp-t1"))];
+        let ctx = load_push_ctx(&pool, &rows).await.unwrap();
+        assert_eq!(ctx.section_external.get(&sid).map(String::as_str), Some("S"));
+        let (cmds, _) = build_commands(&rows, &ctx);
+        assert_eq!(cmds[0]["args"]["section_id"], "S");
     }
 
     // I3 regression: push_outbox's progress guard relies on count_resolved to
