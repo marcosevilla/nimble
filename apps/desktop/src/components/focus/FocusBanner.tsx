@@ -1,69 +1,111 @@
-import { useFocusStore } from '@/stores/focusStore'
-import { cn } from '@/lib/utils'
-import { Pause, Play, Square, Maximize2 } from 'lucide-react'
+import { useId } from 'react'
+import { toast } from 'sonner'
+import { Maximize2, Pause, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { emitTasksChanged, useLocalTasks } from '@/hooks/useLocalTasks'
+import { cn } from '@/lib/utils'
+import { cardTiming, controlBlockedReason, timerControl } from '@/lib/focusQueueIntents'
+import { isDroppedRepeat, sendFocusAction, useFocusCache } from '@/stores/focusStore'
+import { useFocusSurface } from '@/stores/focusSurfaceStore'
+import type { FocusAction, FocusCapabilities, FocusSnapshot, LocalTask } from '@nimble/types'
 
-function formatTime(seconds: number): string {
-  const m = Math.floor(Math.abs(seconds) / 60)
-  const s = Math.abs(seconds) % 60
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+const PHASE_CLASS = {
+  normal: '',
+  amber: 'text-warning',
+  deepAmber: 'text-warning font-semibold',
+  overtime: 'text-destructive',
+} as const
+
+export interface FocusBannerViewProps {
+  snapshot: FocusSnapshot
+  capabilities: FocusCapabilities | null
+  /** The first entry's task; null when it left native storage. */
+  task: LocalTask | null
+  busy: boolean
+  onAction: (action: FocusAction) => void
+  onExpand: () => void
 }
 
-export function FocusBanner() {
-  const task = useFocusStore((s) => s.task)
-  const config = useFocusStore((s) => s.config)
-  const elapsed = useFocusStore((s) => s.elapsed)
-  const pausedAt = useFocusStore((s) => s.pausedAt)
-  const isOnBreak = useFocusStore((s) => s.isOnBreak)
-  const pauseFocus = useFocusStore((s) => s.pauseFocus)
-  const resumeFocus = useFocusStore((s) => s.resumeFocus)
-  const abandonFocus = useFocusStore((s) => s.abandonFocus)
-  const setCompact = useFocusStore((s) => s.setCompact)
-
-  if (!task) return null
-
-  const isPaused = pausedAt !== null
-  const isCountdown = config.timerMode === 'down'
-  const remaining = isCountdown ? Math.max(config.targetMinutes * 60 - elapsed, 0) : 0
-  const displayTime = isCountdown ? remaining : elapsed
+/**
+ * Compact single-row focus banner that coexists with shell navigation: the
+ * selected task, its snapshot total, the same Start/Pause control as the
+ * card (disabled with its reason when unavailable) and Expand. It never
+ * stops or clears the queue — Stop/Skip live on the card.
+ */
+export function FocusBannerView({ snapshot, capabilities, task, busy, onAction, onExpand }: FocusBannerViewProps) {
+  const reasonId = useId()
+  const entry = snapshot.queue[0]
+  if (!entry) return null
+  const control = timerControl(snapshot, entry)
+  const blocked = controlBlockedReason(control, capabilities)
+  const timing = cardTiming(snapshot, entry)
+  const running = control.label === 'Pause' || control.label === 'End break'
+  const title = task?.content ?? 'Task no longer available'
 
   return (
-    <div className="flex h-10 items-center gap-3 border-b border-border/50 bg-accent-blue/5 px-4 animate-in slide-in-from-top duration-200">
-      {/* Timer */}
-      <span className={cn(
-        'font-mono text-body tabular-nums',
-        isPaused && 'animate-pulse text-muted-foreground',
-        isOnBreak && 'text-warning',
-      )}>
-        {formatTime(displayTime)}
+    <div className="flex h-10 shrink-0 items-center gap-3 border-b border-border/50 bg-accent-blue/5 px-4 animate-in slide-in-from-top duration-(--transition-fast) motion-reduce:animate-none">
+      <span className={cn('font-mono text-body tabular-nums', PHASE_CLASS[timing.presentation.phase])} data-phase={timing.presentation.phase}>
+        {timing.presentation.text}
       </span>
-
-      {/* Task name */}
       <button
-        onClick={() => setCompact(false)}
-        className="flex-1 min-w-0 truncate text-left text-body hover:text-foreground transition-colors"
+        type="button"
+        onClick={onExpand}
+        className={cn('min-w-0 flex-1 truncate rounded-sm text-left text-body transition-colors hover:text-foreground focus-ring', !task && 'text-muted-foreground')}
       >
-        {isOnBreak ? 'Break' : task.content}
+        {title}
       </button>
-
-      {/* Controls */}
+      {blocked && (
+        <span id={reasonId} className="sr-only">
+          {blocked}
+        </span>
+      )}
       <div className="flex items-center gap-2">
-        {isPaused ? (
-          <Button variant="ghost" size="icon-sm" onClick={resumeFocus} aria-label="Resume focus">
-            <Play className="size-3.5" />
-          </Button>
-        ) : (
-          <Button variant="ghost" size="icon-sm" onClick={pauseFocus} aria-label="Pause focus">
-            <Pause className="size-3.5" />
+        {task && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={control.label}
+            aria-describedby={blocked ? reasonId : undefined}
+            title={blocked ?? control.label}
+            disabled={blocked != null || busy}
+            onClick={() => onAction(control.action)}
+          >
+            {running ? <Pause className="size-3.5" aria-hidden /> : <Play className="size-3.5" aria-hidden />}
           </Button>
         )}
-        <Button variant="ghost" size="icon-sm" onClick={abandonFocus} aria-label="Stop focus">
-          <Square className="size-3.5" />
-        </Button>
-        <Button variant="ghost" size="icon-sm" onClick={() => setCompact(false)} aria-label="Expand focus view">
-          <Maximize2 className="size-3.5" />
+        <Button variant="ghost" size="icon-sm" onClick={onExpand} aria-label="Expand focus view">
+          <Maximize2 className="size-3.5" aria-hidden />
         </Button>
       </div>
     </div>
+  )
+}
+
+/** The banner wired to the focus cache; shown by the Dashboard while something is queued. */
+export function FocusBanner() {
+  const snapshot = useFocusCache((s) => s.snapshot)
+  const capabilities = useFocusCache((s) => s.capabilities)
+  const busy = useFocusCache((s) => s.pending != null)
+  const setExpanded = useFocusSurface((s) => s.setExpanded)
+  const { tasks } = useLocalTasks()
+  if (!snapshot || snapshot.queue.length === 0) return null
+  const task = tasks.find((t) => t.id === snapshot.queue[0].task_id) ?? null
+  return (
+    <FocusBannerView
+      snapshot={snapshot}
+      capabilities={capabilities}
+      task={task}
+      busy={busy}
+      onAction={(action) => {
+        sendFocusAction(action).then(
+          () => { if (action.kind === 'start') emitTasksChanged() },
+          // A dropped duplicate (still saving) is not a failure worth a toast.
+          (error: unknown) => {
+            if (!isDroppedRepeat(error)) toast(error instanceof Error ? error.message : 'Focus change was not saved.')
+          },
+        )
+      }}
+      onExpand={() => setExpanded(true)}
+    />
   )
 }

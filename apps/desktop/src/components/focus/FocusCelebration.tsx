@@ -1,157 +1,65 @@
-import { useEffect, useCallback } from 'react'
-import { useFocusStore } from '@/stores/focusStore'
-import { playCompletionSound } from '@/lib/sound'
+import { useEffect } from 'react'
+import { Button } from '@/components/ui/button'
+import { Caption, Meta } from '@/components/shared/typography'
+import { completionNextAction, formatDurationMs } from '@/lib/focusModel'
 import { shouldIgnoreKey } from '@/lib/keyGuard'
-import { toast } from 'sonner'
+import type { FocusCelebrationState } from '@/stores/focusSurfaceStore'
 
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return s > 0 ? `${m}m ${s}s` : `${m}m`
-}
+const VISIBLE_MS = 2_500
 
-// Generate random confetti particles
-const PARTICLES = Array.from({ length: 18 }, (_, i) => {
-  const angle = (i / 18) * 360
-  const distance = 60 + Math.random() * 40
-  const size = 4 + Math.random() * 4
-  const delay = Math.random() * 0.15
-  // Theme tokens at three opacities (session P1-4) so the burst re-themes
-  // with the palette instead of spraying Tailwind's cool 500s on a warm page.
-  const colors = [
-    'var(--success)',
-    'var(--accent-blue)',
-    'var(--foreground)',
-    'oklch(from var(--success) l c h / 0.6)',
-    'oklch(from var(--accent-blue) l c h / 0.6)',
-    'oklch(from var(--foreground) l c h / 0.35)',
-  ]
-  const color = colors[i % colors.length]
-  return { angle, distance, size, delay, color }
-})
-
-export function FocusCelebration() {
-  const completedDuration = useFocusStore((s) => s.completedDuration)
-  const task = useFocusStore((s) => s.task)
-  const nextTask = useFocusStore((s) => s.nextTask)
-  const dismissCelebration = useFocusStore((s) => s.dismissCelebration)
-  const endCelebration = useFocusStore((s) => s.endCelebration)
-
-  // Play sound on mount
+/**
+ * Completion acknowledgement, shown only after the engine committed the
+ * completion. It is inline (never a full-screen overlay), so it cannot hide
+ * a failure shown above it. The next entry is already selected paused;
+ * dismissing — Enter, Escape, Space, a click or the timeout — never starts it.
+ */
+export function FocusCelebration({ celebration, onDismiss }: { celebration: FocusCelebrationState; onDismiss: () => void }) {
   useEffect(() => {
-    playCompletionSound()
-  }, [])
+    const id = setTimeout(onDismiss, VISIBLE_MS)
+    return () => clearTimeout(id)
+  }, [celebration.id, onDismiss])
 
-  // Auto-dismiss after 2.5 seconds writes nothing: the session ends and the
-  // next task is only surfaced in a toast whose Start action is the first
-  // thing that touches the backend (session P1-2, §2.4; review I-1).
+  // While up, these keys only dismiss: the Enter that completed the task
+  // (or a repeat) must not reach the next task's controls underneath.
   useEffect(() => {
-    const timeout = setTimeout(() => {
-      const { nextTask: next, config, queue } = useFocusStore.getState()
-      endCelebration()
-      if (next) {
-        toast(`Up next: ${next.content}`, {
-          action: { label: 'Start', onClick: () => useFocusStore.getState().startFocus(next, config, queue) },
-        })
-      }
-    }, 2500)
-    return () => clearTimeout(timeout)
-  }, [endCelebration])
-
-  // Escape and a stray click end the session; only Enter commits to the
-  // next task. The overlay owns these keys while it is up (capture phase,
-  // so the focused Complete button underneath can't fire twice), except in
-  // text entry or an open dialog. Space is swallowed, not mapped: it means
-  // "pause" everywhere else, so it must never start a 25-minute session.
-  // Held-key repeats are ignored — the Enter that completed the task must
-  // not auto-repeat into starting the next one.
-  const handleEnd = useCallback(() => { endCelebration() }, [endCelebration])
-  const handleNext = useCallback(() => { dismissCelebration() }, [dismissCelebration])
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key !== 'Escape' && e.key !== 'Enter' && e.key !== ' ') return
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Enter' && e.key !== 'Escape' && e.key !== ' ') return
       if (shouldIgnoreKey(e.target as HTMLElement, { allowInteractive: true })) return
       e.preventDefault()
       e.stopPropagation()
       if (e.repeat) return
-      if (e.key === 'Escape') handleEnd()
-      else if (e.key === 'Enter') handleNext()
+      if (completionNextAction(e.key) == null) onDismiss()
     }
-    window.addEventListener('keydown', handleKey, true)
-    return () => window.removeEventListener('keydown', handleKey, true)
-  }, [handleEnd, handleNext])
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [onDismiss])
 
   return (
     <div
       role="status"
       aria-live="polite"
-      aria-label="Session complete"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-in fade-in duration-(--transition-fast)"
-      onClick={handleEnd}
+      className="flex items-start gap-2.5 rounded-md bg-success/10 px-2.5 py-2 animate-in fade-in duration-(--transition-fast) motion-reduce:animate-none"
     >
-      <div className="relative text-center space-y-4">
-        {/* Confetti particles */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-          {PARTICLES.map((p, i) => (
-            <span
-              key={i}
-              className="absolute rounded-full"
-              style={{
-                width: p.size,
-                height: p.size,
-                backgroundColor: p.color,
-                animation: `confetti-burst 800ms cubic-bezier(0.22, 1, 0.36, 1) ${p.delay}s forwards`,
-                '--confetti-x': `${Math.cos((p.angle * Math.PI) / 180) * p.distance}px`,
-                '--confetti-y': `${Math.sin((p.angle * Math.PI) / 180) * p.distance}px`,
-              } as React.CSSProperties}
-            />
-          ))}
-        </div>
-
-        {/* Checkmark */}
-        <div className="relative mx-auto flex size-20 items-center justify-center rounded-full timer-glow">
-          <svg viewBox="0 0 24 24" className="size-10 text-success">
-            <path
-              d="M5 13l4 4L19 7"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="checkmark-draw"
-            />
-          </svg>
-        </div>
-
-        {/* Task name */}
-        <p className="text-title line-through text-muted-foreground animate-in fade-in duration-(--transition-base)">
-          {task?.content}
+      <svg viewBox="0 0 24 24" className="mt-0.5 size-4 shrink-0 text-success" aria-hidden>
+        <path d="M5 13l4 4L19 7" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="checkmark-draw" />
+      </svg>
+      <div className="min-w-0 flex-1">
+        <p className="text-body text-foreground">
+          <span className="sr-only">Completed </span>
+          <span className="line-through decoration-muted-foreground">{celebration.title}</span>
+          {celebration.totalMs > 0 && <Meta as="span">{` · ${formatDurationMs(celebration.totalMs)}`}</Meta>}
         </p>
-
-        {/* Duration */}
-        {completedDuration != null && (
-          <p className="text-body text-muted-foreground animate-in fade-in slide-in-from-bottom-2 duration-(--transition-base)">
-            Focused for {formatDuration(completedDuration)}
-          </p>
-        )}
-
-        {/* Next task preview — shown, not started */}
-        {nextTask ? (
-          <p className="text-meta text-muted-foreground animate-in fade-in duration-(--transition-slow)">
-            Next: <span className="text-foreground">{nextTask.content}</span>
-            {' — '}
-            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Enter</kbd> to start,{' '}
-            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Esc</kbd> to stop here
-          </p>
+        {celebration.nextTitle ? (
+          <Caption as="p">
+            Next: <span className="text-foreground">{celebration.nextTitle}</span> is ready when you are.
+          </Caption>
         ) : (
-          <p className="text-meta text-muted-foreground animate-in fade-in duration-(--transition-slow)">
-            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Enter</kbd> or{' '}
-            <kbd className="rounded bg-muted/60 px-1 font-mono text-label text-foreground">Esc</kbd> to close
-          </p>
+          celebration.queueEmpty && <Caption as="p">Queue is clear.</Caption>
         )}
       </div>
+      <Button size="xs" variant="ghost" onClick={onDismiss}>
+        Dismiss
+      </Button>
     </div>
   )
 }

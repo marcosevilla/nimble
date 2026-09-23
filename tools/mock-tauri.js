@@ -1407,12 +1407,17 @@
     delete_doc_note: function () { return null },
     reorder_doc_notes: function () { return null },
 
-    // Focus
-    start_focus_session: function () { return null },
-    end_focus_session: function () { return null },
-    get_active_focus: function () {
-      return { task_id: null, started_at: null, paused_at: null }
+    // Focus (durable engine): an empty, read-only queue in the harness.
+    focus_capabilities: function () {
+      return { queue_read: true, queue_write: false, history_read: true, live_timing: false,
+        companion: false, import: false, reason: 'Focus is read-only in the browser harness.' }
     },
+    focus_snapshot: function () {
+      return { queue_revision: 0, engine_revision: 0, owner_epoch: 'mock', process_generation: 1,
+        writer_device_id: 'mock', queue: [], selected_occurrence_id: null, session: null, totals: {},
+        as_of: new Date().toISOString(), checkpoint_at: null, recovery_reason: null, replica: false }
+    },
+    focus_history: function () { return { rows: [], next_cursor: null } },
 
     // Goals
     get_goals: function () { return GOALS },

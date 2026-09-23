@@ -8,6 +8,8 @@
  * (`overtime`) is reserved for an exceeded timebox.
  */
 
+import type { FocusAction } from '@nimble/types'
+
 export type TimerPhase = 'normal' | 'amber' | 'deepAmber' | 'overtime'
 
 export interface TimerPresentation {
@@ -41,4 +43,15 @@ export function timerPresentation(totalMs: number, budgetMs: number | null): Tim
   // Ceil the remaining seconds so the countdown reads 0:00 only at zero.
   const remaining = budget - total
   return { text: formatDurationMs(Math.ceil(remaining / 1000) * 1000), phase: 'normal' }
+}
+
+/**
+ * What dismissing the completion acknowledgement does. Always nothing: the
+ * next entry is already selected paused and needs its own explicit Start.
+ * Enter, Escape, Space or a click only close the acknowledgement — a
+ * generic key never starts a task (spec §4 "Complete").
+ */
+export function completionNextAction(key: string): FocusAction | null {
+  void key
+  return null
 }

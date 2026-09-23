@@ -166,7 +166,9 @@ test('web focus is read-only with a reason and never fakes a write', async () =>
     assert.equal(e.code, 'unsupported'); assert.equal(e.command, command); return true
   })
   await assert.rejects(web.focus.openCompanion(), (e) => e.code === 'unsupported')
-  await assert.rejects(web.focus.startSession('t', 'x'), (e) => e.code === 'unsupported')
+  for (const legacy of ['startSession', 'endSession', 'getActive']) {
+    assert.equal(legacy in web.focus, false, `legacy ${legacy} path is gone`)
+  }
   assert.equal(calls.length, 0, 'writes and capabilities never touch the network')
 })
 

@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
 import { StatusDropdown } from './StatusDropdown'
 import { useSelectionStore } from '@/stores/selectionStore'
-import { useFocusStore } from '@/stores/focusStore'
+import { focusSpaceAction } from '@/stores/focusStore'
 import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import type { TaskStatus } from '@nimble/types'
@@ -158,7 +158,7 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
         if (e.target !== e.currentTarget || !onOpen) return
         // Enter and Space open, like any role="button" (review I2). Space
         // stays with Dashboard's pause/resume while a focus session runs.
-        if (e.key === 'Enter' || (e.key === ' ' && !useFocusStore.getState().isActive)) {
+        if (e.key === 'Enter' || (e.key === ' ' && !focusSpaceAction())) {
           e.preventDefault()
           onOpen()
         }

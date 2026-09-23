@@ -1,6 +1,8 @@
-import { useEffect, useState, useCallback } from 'react'
-import { useDataProvider } from '@/services/provider-context'
-import { useFocusStore, type FocusConfig } from '@/stores/focusStore'
+import { useState } from 'react'
+import { useLocalTasks } from '@/hooks/useLocalTasks'
+import { recoveryNotice, type RecoveryNotice } from '@/lib/focusFlows'
+import { useFocusCache } from '@/stores/focusStore'
+import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import {
   Dialog,
   DialogContent,
@@ -9,62 +11,67 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import type { LocalTask } from '@nimble/types'
 
+/** Notices already dismissed in this window (keyed by the recovery itself). */
+const dismissed = new Set<string>()
+
+/** The notice body: the paused task and its durable total. It offers no Start or Resume. */
+export function FocusRecoveryBody({ notice, onOpen, onDismiss }: { notice: RecoveryNotice; onOpen: () => void; onDismiss: () => void }) {
+  return (
+    <>
+      <p className="text-body-strong">{notice.title}</p>
+      <p className="text-meta text-muted-foreground">
+        {`${notice.total} saved · ${notice.reason}`}
+      </p>
+      <div className="mt-2 flex justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={onDismiss}>
+          Dismiss
+        </Button>
+        <Button size="sm" onClick={onOpen}>
+          Show focus
+        </Button>
+      </div>
+    </>
+  )
+}
+
+/**
+ * Recovery after an interruption (sleep, crash, relaunch — from any date):
+ * the engine already paused the selected task at its last durable
+ * checkpoint. This only shows that paused total; continuing is the card's
+ * explicit Resume. Nothing starts from recovery.
+ */
 export function FocusResumeDialog() {
-  const dp = useDataProvider()
-  const [open, setOpen] = useState(false)
-  const [resumeTask, setResumeTask] = useState<LocalTask | null>(null)
-  const startFocus = useFocusStore((s) => s.startFocus)
-  const isActive = useFocusStore((s) => s.isActive)
+  const snapshot = useFocusCache((s) => s.snapshot)
+  const setExpanded = useFocusSurface((s) => s.setExpanded)
+  const { tasks } = useLocalTasks()
+  const [, rerender] = useState(0)
+  const notice = recoveryNotice(snapshot, tasks)
+  const key = notice && snapshot ? `${snapshot.owner_epoch}:${snapshot.process_generation}:${snapshot.checkpoint_at}:${notice.reason}` : null
+  const open = key != null && !dismissed.has(key)
 
-  useEffect(() => {
-    if (isActive) return // Don't check if already focusing
-    dp.focus.getActive().then(async (state) => {
-      if (state.task_id && state.started_at) {
-        // Find the task
-        const tasks = await dp.tasks.list({})
-        const task = tasks.find((t) => t.id === state.task_id)
-        if (task && !task.completed) {
-          setResumeTask(task)
-          setOpen(true)
-        }
-      }
-    }).catch(() => {})
-  }, [isActive, dp])
-
-  const handleResume = useCallback(() => {
-    if (!resumeTask) return
-    const config: FocusConfig = { timerMode: 'up', targetMinutes: 25, breakMinutes: 5, totalPomodoros: 1 }
-    startFocus(resumeTask, config)
-    setOpen(false)
-  }, [resumeTask, startFocus])
-
-  const handleDismiss = useCallback(() => {
-    setOpen(false)
-    // The session will be cleared next time a new focus starts
-  }, [])
+  const dismiss = () => {
+    if (key) dismissed.add(key)
+    rerender((n) => n + 1)
+  }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && handleDismiss()}>
+    <Dialog open={open} onOpenChange={(v) => !v && dismiss()}>
       <DialogContent className="sm:max-w-sm" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>Resume focus?</DialogTitle>
-          <DialogDescription>
-            You were working on this task.
-          </DialogDescription>
+          <DialogTitle>Focus was paused</DialogTitle>
+          <DialogDescription>Your time is saved. Pick it back up whenever you like.</DialogDescription>
         </DialogHeader>
-        {resumeTask && (
-          <p className="text-body-strong">{resumeTask.content}</p>
+        {notice && (
+          <FocusRecoveryBody
+            notice={notice}
+            onDismiss={dismiss}
+            onOpen={() => {
+              dismiss()
+              setExpanded(true)
+            }}
+          />
         )}
-        <div className="flex justify-end gap-2 mt-2">
-          <Button variant="ghost" size="sm" onClick={handleDismiss}>
-            Dismiss
-          </Button>
-          <Button size="sm" onClick={handleResume}>
-            Resume
-          </Button>
-        </div>
       </DialogContent>
     </Dialog>
   )

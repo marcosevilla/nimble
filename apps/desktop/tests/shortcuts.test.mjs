@@ -88,10 +88,12 @@ test('Goals section carries the habit toggle and timeline today', () => {
   for (const k of ['Enter / Space', 'T']) assert.ok(keys.includes(k), `missing Goals ${k}`)
 })
 
-test('Session section carries complete, minimize, stop and the celebration keys', () => {
+test('Session section carries complete, minimize, stop and the completion-note keys', () => {
   const keys = SHORTCUTS.filter((s) => s.section === 'Session').map((s) => s.keys)
   for (const k of ['Enter', 'Escape', 's']) assert.ok(keys.includes(k), `missing Session ${k}`)
-  const labels = SHORTCUTS.filter((s) => s.section === 'Session').map((s) => s.label.toLowerCase())
-  assert.ok(labels.some((l) => l.includes('next')), 'celebration Enter → next')
-  assert.ok(labels.some((l) => l.includes('end')), 'celebration Escape → end')
+  const note = SHORTCUTS.filter((s) => s.section === 'Session' && s.keys.includes('completion note'))
+  assert.equal(note.length, 2, 'Enter and Escape on the completion note')
+  for (const s of note) assert.match(s.label, /^Dismiss/, 'dismissing never starts the next task')
+  assert.ok(note.some((s) => s.label.includes('stays paused')))
+  for (const s of SHORTCUTS) assert.doesNotMatch(s.label, /start the next task/i)
 })

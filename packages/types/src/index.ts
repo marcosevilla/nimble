@@ -336,6 +336,11 @@ export type VaultSaveResult =
 
 // ── Focus Mode ──
 
+/**
+ * @deprecated The legacy single-task focus marker. The desktop and web no
+ * longer read it (the durable focus engine owns timing); kept only for the
+ * dormant mobile provider copy.
+ */
 export interface FocusState {
   task_id: string | null
   started_at: string | null

@@ -150,9 +150,6 @@ export function createTauriProvider(): DataProvider {
       execute: tauri.focusExecute,
       history: tauri.focusHistory,
       openCompanion: tauri.focusOpenCompanion,
-      startSession: tauri.startFocusSession,
-      endSession: tauri.endFocusSession,
-      getActive: tauri.getActiveFocus,
     },
 
     dailyState: {

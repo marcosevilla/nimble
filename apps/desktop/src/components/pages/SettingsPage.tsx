@@ -101,24 +101,7 @@ const OBSIDIAN_FIELDS: SettingField[] = [
   },
 ]
 
-const FOCUS_FIELDS: SettingField[] = [
-  {
-    key: 'focus_break_minutes',
-    label: 'Break duration (minutes)',
-    placeholder: '5',
-    help: 'Default break length between Pomodoro rounds (e.g., 5, 10, 15)',
-    type: 'text',
-  },
-  {
-    key: 'focus_abandon_status',
-    label: 'Status on abandon',
-    placeholder: 'todo',
-    help: 'What status a task gets when you stop a focus session (todo or in_progress)',
-    type: 'text',
-  },
-]
-
-const ALL_FIELDS = [...INTEGRATIONS_FIELDS, ...OBSIDIAN_FIELDS, ...FOCUS_FIELDS]
+const ALL_FIELDS = [...INTEGRATIONS_FIELDS, ...OBSIDIAN_FIELDS]
 
 // ── Components ──
 
@@ -1652,26 +1635,6 @@ export function SettingsPage() {
           description="Keeps your tasks mirrored in Todoist both ways."
         />
         <TodoistSyncSection />
-      </section>
-    ),
-
-    focus: (
-      <section id="focus" className={SECTION_CLASS}>
-        <SectionHeader
-          title="Focus mode"
-          description="Configure Pomodoro and focus session behavior."
-        />
-        <div className="space-y-4">
-          {FOCUS_FIELDS.map((field) => (
-            <SettingFieldRow
-              key={field.key}
-              field={field}
-              state={fields[field.key]}
-              onChange={(v) => updateFieldValue(field.key, v)}
-              onSave={() => saveField(field.key)}
-            />
-          ))}
-        </div>
       </section>
     ),
 

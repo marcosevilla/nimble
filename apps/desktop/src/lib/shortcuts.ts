@@ -68,8 +68,8 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Tasks', keys: 'Enter', label: 'Open focused task' },
 
   // ── Focus (Dashboard.tsx Space; FocusCelebration.tsx) ──
-  { section: 'Focus', keys: 'Space', label: 'Pause / resume timer' },
-  { section: 'Focus', keys: 'Enter / Escape', label: 'Dismiss celebration' },
+  { section: 'Focus', keys: 'Space', label: 'Pause / resume timer (never starts one)' },
+  { section: 'Focus', keys: 'Enter / Escape', label: 'Dismiss completion note (next task waits for Start)' },
 
   // ── Command bar (CommandBar.tsx) ──
   { section: 'Command bar', keys: '⌥C', label: 'Complete selected task' },
@@ -101,7 +101,7 @@ export const SHORTCUTS: Shortcut[] = [
 
   // ── B3a: Tasks rows (hooks/useTaskNavigation.ts via useTaskRowActions) ──
   // Appended, never reordered — the panel groups by section.
-  { section: 'Tasks', keys: 'f', label: 'Start focus on focused task' },
+  { section: 'Tasks', keys: 'f', label: 'Focus now on focused task (explicit Start)' },
   { section: 'Tasks', keys: 'Escape', label: 'Clear row focus' },
 
   // ── Inbox (InboxPage.tsx) ──
@@ -128,9 +128,9 @@ export const SHORTCUTS: Shortcut[] = [
   // ── Session (FocusView.tsx while expanded; FocusCelebration.tsx) ──
   { section: 'Session', keys: 'Enter', label: 'Complete the focused task' },
   { section: 'Session', keys: 'Escape', label: 'Minimize to the banner' },
-  { section: 'Session', keys: 's', label: 'Stop the session' },
-  { section: 'Session', keys: 'Enter (celebration)', label: 'Start the next task' },
-  { section: 'Session', keys: 'Escape (celebration)', label: 'End the session' },
+  { section: 'Session', keys: 's', label: 'Stop (banks time, keeps the queue)' },
+  { section: 'Session', keys: 'Enter (completion note)', label: 'Dismiss; the next task stays paused' },
+  { section: 'Session', keys: 'Escape (completion note)', label: 'Dismiss' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [

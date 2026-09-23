@@ -44,7 +44,6 @@ export type {
   VaultScanReport,
   VaultStatus,
   VaultSaveResult,
-  FocusState,
   GoalStatus,
   Goal,
   GoalWithProgress,
@@ -97,7 +96,6 @@ import type {
   VaultScanReport,
   VaultStatus,
   VaultSaveResult,
-  FocusState,
   GoalStatus,
   Goal,
   GoalWithProgress,
@@ -696,20 +694,6 @@ export function focusHistory(opts?: { cursor?: string; task_id?: string }): Prom
 
 export function focusOpenCompanion(): Promise<void> {
   return focusInvoke<void>('focus_open_companion')
-}
-
-// ── Legacy focus mode (compatibility errors until Task 8 replaces consumers) ──
-
-export async function startFocusSession(taskId: string, taskContent: string): Promise<void> {
-  return focusInvoke<void>('start_focus_session', { taskId, taskContent })
-}
-
-export async function endFocusSession(taskId: string, outcome: string, durationSecs: number): Promise<void> {
-  return focusInvoke<void>('end_focus_session', { taskId, outcome, durationSecs: Math.floor(durationSecs) })
-}
-
-export async function getActiveFocus(): Promise<FocusState> {
-  return invoke<FocusState>('get_active_focus')
 }
 
 // ── Goals ──

@@ -1,70 +1,54 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
+import { format } from 'date-fns'
+import { toast } from 'sonner'
+import { ListPlus, Play } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useFocusStore, type FocusConfig } from '@/stores/focusStore'
-import { useDataProvider } from '@/services/provider-context'
-import { Play, Timer, TrendingUp } from 'lucide-react'
+import { emitTasksChanged } from '@/hooks/useLocalTasks'
+import { sourceForTask } from '@/lib/focusFlows'
+import { enqueueTasks, focusNow, focusNowBlockedReason, isDroppedRepeat, useFocusCache } from '@/stores/focusStore'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { LocalTask } from '@nimble/types'
-
-const COUNTDOWN_OPTIONS = [
-  { minutes: 15, label: '15 min' },
-  { minutes: 25, label: '25 min' },
-  { minutes: 30, label: '30 min' },
-  { minutes: 45, label: '45 min' },
-  { minutes: 60, label: '60 min' },
-]
-
-const ROUND_OPTIONS = [1, 2, 3, 4]
 
 interface FocusPlayMenuProps {
   task: LocalTask
   onOpenChange?: (open: boolean) => void
 }
 
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+/**
+ * Command-bar focus entry: "Add to focus queue" appends (the default, starts
+ * nothing); "Focus now" is the explicit Start, shown disabled with its reason
+ * while live timing is unavailable. Timebox choice lives on the focus card.
+ */
 export function FocusPlayMenu({ task, onOpenChange }: FocusPlayMenuProps) {
-  const dp = useDataProvider()
   const [open, setOpenState] = useState(false)
+  const capabilities = useFocusCache((s) => s.capabilities)
+  const busy = useFocusCache((s) => s.pending != null)
   const setOpen = useCallback((v: boolean) => {
     setOpenState(v)
     onOpenChange?.(v)
   }, [onOpenChange])
-  const [breakMinutes, setBreakMinutes] = useState(5)
-  const startFocus = useFocusStore((s) => s.startFocus)
+  const blocked = focusNowBlockedReason(capabilities)
+  const source = sourceForTask(task, format(new Date(), 'yyyy-MM-dd'))
 
-  // Load break length default from settings
-  useEffect(() => {
-    if (open) {
-      dp.settings.get('focus_break_minutes').then((val) => {
-        if (val) setBreakMinutes(parseInt(val, 10) || 5)
-      }).catch(() => {})
-    }
-  }, [open, dp])
-
-  const handleStart = useCallback((config: FocusConfig) => {
-    startFocus(task, config)
+  const run = (label: string, write: () => Promise<unknown>) => {
     setOpen(false)
-  }, [task, startFocus, setOpen])
-
-  const handleStopwatch = useCallback(() => {
-    handleStart({ timerMode: 'up', targetMinutes: 0, breakMinutes: 0, totalPomodoros: 1 })
-  }, [handleStart])
-
-  const handleCountdown = useCallback((minutes: number, rounds: number) => {
-    handleStart({ timerMode: 'down', targetMinutes: minutes, breakMinutes, totalPomodoros: rounds })
-  }, [handleStart, breakMinutes])
+    write().then(
+      () => toast(label),
+      (error) => { if (!isDroppedRepeat(error)) toast(messageOf(error)) },
+    )
+  }
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
+        aria-label={`Focus options for ${task.content}`}
         className={cn(
           'inline-flex size-6 items-center justify-center rounded-md transition-colors',
           'text-accent-blue/60 hover:text-accent-blue hover:bg-hover',
@@ -73,44 +57,27 @@ export function FocusPlayMenu({ task, onOpenChange }: FocusPlayMenuProps) {
         <Play className="size-3" />
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent
-        side="bottom"
-        align="end"
-        sideOffset={4}
-        className="w-44"
-      >
-        {/* Countdown options with rounds sub-menus */}
-        {COUNTDOWN_OPTIONS.map((opt) => (
-          <DropdownMenuSub key={opt.minutes}>
-            <DropdownMenuSubTrigger
-              className="gap-2"
-              onClick={() => handleCountdown(opt.minutes, 1)}
-            >
-              <Timer className="size-3.5 text-muted-foreground" />
-              <span className="flex-1 text-left">{opt.label}</span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-32">
-              <DropdownMenuItem onClick={() => handleCountdown(opt.minutes, 1)}>
-                No breaks
-              </DropdownMenuItem>
-              {ROUND_OPTIONS.filter((r) => r > 1).map((rounds) => (
-                <DropdownMenuItem
-                  key={rounds}
-                  onClick={() => handleCountdown(opt.minutes, rounds)}
-                >
-                  {rounds} rounds
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        ))}
-
-        <DropdownMenuSeparator />
-
-        {/* Stopwatch option */}
-        <DropdownMenuItem className="gap-2" onClick={handleStopwatch}>
-          <TrendingUp className="size-3.5 text-muted-foreground" />
-          <span>Stopwatch</span>
+      <DropdownMenuContent side="bottom" align="end" sideOffset={4} className="w-52">
+        <DropdownMenuItem className="gap-2" disabled={busy} onClick={() => {
+          if (useFocusCache.getState().snapshot?.queue.some((e) => e.task_id === task.id)) {
+            setOpen(false)
+            toast('Already in the focus queue')
+          } else run('Added to focus queue', () => enqueueTasks([task.id], source))
+        }}>
+          <ListPlus className="size-3.5 text-muted-foreground" />
+          <span>Add to focus queue</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="gap-2"
+          disabled={blocked != null || busy}
+          title={blocked ?? undefined}
+          onClick={() => run('Focusing now', async () => { await focusNow(task.id, source); emitTasksChanged() })}
+        >
+          <Play className="size-3.5 text-muted-foreground" />
+          <span className="flex flex-col">
+            Focus now
+            {blocked && <span className="text-label text-muted-foreground">{blocked}</span>}
+          </span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

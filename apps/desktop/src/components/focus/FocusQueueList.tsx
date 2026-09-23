@@ -15,12 +15,12 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useEffect, useRef } from 'react'
-import { GripVertical } from 'lucide-react'
+import { GripVertical, Play } from 'lucide-react'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { Label, Meta } from '@/components/shared/typography'
 import { CompletionButton, FocusTaskMenu, InlineRename } from '@/components/focus/FocusTaskCard'
 import { cn } from '@/lib/utils'
-import { dueLabel, moveEntryAction, queueBlockedReason, reorderAfterDrag, type TaskMenuId } from '@/lib/focusQueueIntents'
+import { controlBlockedReason, dueLabel, moveEntryAction, queueBlockedReason, reorderAfterDrag, type TaskMenuId } from '@/lib/focusQueueIntents'
 import type { FocusAction, FocusCapabilities, FocusEntry, FocusSnapshot, LocalTask } from '@nimble/types'
 
 export interface FocusQueueRow {
@@ -36,8 +36,12 @@ interface FocusQueueListProps {
   rows: FocusQueueRow[]
   today: string
   onAction: (action: FocusAction) => Promise<unknown>
-  /** Explicit promote (row click, Enter, "Focus now"); pauses any running task. */
+  /** Explicit promote (row click, Enter, "Move to top"); pauses any running task, starts nothing. */
   onPromote: (entry: FocusEntry) => void
+  /** "Focus now": promote and start in one engine command (`start`). */
+  onFocusNow: (entry: FocusEntry) => void
+  /** A focus action is awaiting its commit: gate controls that would repeat it. */
+  busy?: boolean
   onMenu: (id: TaskMenuId, task: LocalTask, entry: FocusEntry) => void
   renamingEntryId?: string | null
   onRename?: (task: LocalTask, content: string) => Promise<boolean>
@@ -50,8 +54,11 @@ function QueueRowItem({
   row,
   today,
   blocked,
+  focusNowBlocked,
+  busy,
   onComplete,
   onPromote,
+  onFocusNow,
   onMove,
   onMenu,
   onRemove,
@@ -62,8 +69,12 @@ function QueueRowItem({
   row: FocusQueueRow
   today: string
   blocked: string | null
+  /** Why Focus now is unavailable (live timing); the control stays visible. */
+  focusNowBlocked: string | null
+  busy: boolean
   onComplete: () => void
   onPromote: () => void
+  onFocusNow: () => void
   onMove: (direction: 'up' | 'down') => void
   onMenu: (id: TaskMenuId, task: LocalTask) => void
   onRemove: () => void
@@ -82,7 +93,7 @@ function QueueRowItem({
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       onClick={() => {
-        if (!renaming && !blocked && task) onPromote()
+        if (!renaming && !blocked && !busy && task) onPromote()
       }}
       className={cn(
         'group relative flex min-w-0 items-center gap-2.5 border-b border-border bg-background py-2 pr-3 pl-5 transition-colors duration-(--transition-fast) hover:bg-hover motion-reduce:transition-none',
@@ -103,7 +114,7 @@ function QueueRowItem({
         <GripVertical className="size-3" aria-hidden />
       </button>
       {task ? (
-        <CompletionButton title={title} disabled={blocked != null} reason={blocked} onComplete={onComplete} />
+        <CompletionButton title={title} disabled={blocked != null || busy} reason={blocked} onComplete={onComplete} />
       ) : (
         <span className="size-4 shrink-0" />
       )}
@@ -113,10 +124,10 @@ function QueueRowItem({
       ) : (
         <button
           type="button"
-          aria-label={task ? `Focus ${title} now` : title}
+          aria-label={task ? `Move ${title} to top` : title}
           aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
           data-focus-entry={entry.id}
-          disabled={blocked != null || !task}
+          disabled={blocked != null || busy || !task}
           onClick={(e) => {
             e.stopPropagation()
             onPromote()
@@ -136,6 +147,21 @@ function QueueRowItem({
         </button>
       )}
       {due && <Meta className="shrink-0">{due}</Meta>}
+      {task && (
+        <button
+          type="button"
+          aria-label={`Focus ${title} now`}
+          title={focusNowBlocked ?? 'Focus now'}
+          disabled={focusNowBlocked != null || busy}
+          onClick={(e) => {
+            e.stopPropagation()
+            onFocusNow()
+          }}
+          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity duration-(--transition-fast) group-hover:opacity-100 hover:bg-hover hover:text-foreground focus-ring focus-visible:opacity-100 disabled:cursor-default disabled:hover:bg-transparent"
+        >
+          <Play className="size-3" aria-hidden />
+        </button>
+      )}
       {task ? (
         <FocusTaskMenu task={task} place="row" onSelect={(id) => onMenu(id, task)} />
       ) : (
@@ -167,12 +193,15 @@ export function FocusQueueList({
   today,
   onAction,
   onPromote,
+  onFocusNow,
+  busy = false,
   onMenu,
   renamingEntryId,
   onRename,
   onRenameCancel,
 }: FocusQueueListProps) {
   const blocked = queueBlockedReason(capabilities)
+  const focusNowBlocked = controlBlockedReason({ live: true }, capabilities)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -220,8 +249,11 @@ export function FocusQueueList({
                 row={row}
                 today={today}
                 blocked={blocked}
+                focusNowBlocked={focusNowBlocked}
+                busy={busy}
                 onComplete={() => submit({ kind: 'complete', occurrence_id: row.entry.occurrence_id })}
                 onPromote={() => onPromote(row.entry)}
+                onFocusNow={() => onFocusNow(row.entry)}
                 onMove={(direction) => move(row.entry.id, direction)}
                 onMenu={(id, task) => onMenu(id, task, row.entry)}
                 onRemove={() => submit({ kind: 'remove', occurrence_id: row.entry.occurrence_id })}

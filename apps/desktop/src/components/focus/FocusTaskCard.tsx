@@ -180,6 +180,8 @@ export interface FocusTaskCardProps {
   onRename?: (task: LocalTask, content: string) => Promise<boolean>
   onRenameCancel?: () => void
   headingRef?: Ref<HTMLHeadingElement>
+  /** A focus action is awaiting its commit: gate the controls that would repeat it. */
+  busy?: boolean
 }
 
 /**
@@ -204,6 +206,7 @@ export function FocusTaskCard({
   onRename,
   onRenameCancel,
   headingRef,
+  busy = false,
 }: FocusTaskCardProps) {
   const reasonId = useId()
   const toggle = (
@@ -274,7 +277,7 @@ export function FocusTaskCard({
           <CompletionButton
             title={task.content}
             size="lg"
-            disabled={writeBlocked != null}
+            disabled={writeBlocked != null || busy}
             reason={writeBlocked}
             onComplete={() => void onAction({ kind: 'complete', occurrence_id: entry.occurrence_id })}
           />
@@ -331,7 +334,8 @@ export function FocusTaskCard({
         <Button
           aria-label={control.label}
           aria-describedby={blocked ? reasonId : undefined}
-          disabled={blocked != null}
+          aria-busy={busy || undefined}
+          disabled={blocked != null || busy}
           variant={running ? 'secondary' : 'default'}
           onClick={() => void onAction(control.action)}
           className="size-11 shrink-0 rounded-full p-0"

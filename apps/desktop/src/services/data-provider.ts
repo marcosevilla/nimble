@@ -53,7 +53,6 @@ export type {
   VaultScanReport,
   VaultStatus,
   VaultSaveResult,
-  FocusState,
   Goal,
   GoalWithProgress,
   GoalStatus,

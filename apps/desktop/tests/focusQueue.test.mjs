@@ -250,11 +250,12 @@ test('queue rows expose separate handle, completion, promote and menu stops', ()
   const upNext = html.slice(html.indexOf('Up next'), html.indexOf('Add task'))
   assert.equal((upNext.match(/aria-label="Drag to reorder Second task"/g) ?? []).length, 1)
   assert.match(upNext, /aria-label="Complete Second task"/)
-  assert.match(upNext, /aria-label="Focus Second task now"/)
+  assert.match(upNext, /aria-label="Move Second task to top"/) // promote (paused) — labelled truthfully
+  assert.match(upNext, /aria-label="Focus Second task now"/) // separate explicit start
   assert.match(upNext, /aria-label="More actions for Second task"/)
   assert.match(upNext, /aria-keyshortcuts="Alt\+ArrowUp Alt\+ArrowDown"/)
   // Keyboard moves refocus this same control by entry id after the reorder commits.
-  const title = upNext.match(/<button\b[^>]*aria-label="Focus Second task now"[^>]*>/)?.[0] ?? ''
+  const title = upNext.match(/<button\b[^>]*aria-label="Move Second task to top"[^>]*>/)?.[0] ?? ''
   assert.match(title, /data-focus-entry="e2"/)
 })
 

@@ -13,9 +13,9 @@ import type {
   FocusCommand,
   FocusReply,
   FocusSnapshot,
-  LocalTask,
-  TaskStatus,
+  FocusSource,
 } from '@nimble/types'
+import { enqueueSelectionAction, focusNowPlan, spaceKeyAction, startActionFor } from '@/lib/focusFlows'
 
 // ── Provider-backed focus cache (the authority is the Rust FocusService) ──
 //
@@ -101,6 +101,13 @@ const NEEDS_LIVE_TIMING: ReadonlySet<FocusAction['kind']> = new Set(['start', 'r
 /** Typed rejections are certain; only a storage/transport failure may or may not have committed. */
 const isUncertain = (error: FocusRequestError) => error.code === 'storage'
 
+const PENDING_MESSAGE = 'Still saving the previous focus change.'
+
+/** True for a repeat that was dropped because an action was still in flight (nothing was sent). */
+export function isDroppedRepeat(error: unknown): boolean {
+  return error instanceof FocusRequestError && error.code === 'conflict' && error.message === PENDING_MESSAGE
+}
+
 function newCommandId(): string {
   return globalThis.crypto.randomUUID()
 }
@@ -130,6 +137,9 @@ function unsupported(capabilities: FocusCapabilities, action: FocusAction): Focu
  * from the latest snapshot; capability gating happens before any call.
  */
 export async function sendFocusAction(action: FocusAction): Promise<FocusReply> {
+  // One action at a time: a repeat click while the last one is in flight is
+  // dropped (typed, but not surfaced) instead of sent as a second intent.
+  if (useFocusCache.getState().pending) throw new FocusRequestError('conflict', PENDING_MESSAGE)
   if (!useFocusCache.getState().snapshot || !useFocusCache.getState().capabilities) await refreshFocus()
   const { snapshot, capabilities, error: loadError } = useFocusCache.getState()
   if (!snapshot || !capabilities) {
@@ -190,247 +200,42 @@ async function submit(command: FocusCommand, autoRetry: boolean): Promise<FocusR
   }
 }
 
-// ── Legacy single-task timer (compatibility only) ──
-//
-// @deprecated Kept compiling for the existing FocusView/FocusBanner/entry
-// points until Tasks 7–8 move them onto `useFocusCache`; Task 8 deletes it.
-// It is NOT focus authority: new code must use the cache above.
+// ── Entry points (task rows, multi-select, command bar, shortcuts) ──
 
-export type TimerMode = 'up' | 'down'
-
-export interface FocusConfig {
-  timerMode: TimerMode
-  targetMinutes: number
-  breakMinutes: number
-  totalPomodoros: number
+/** Multi-select default: append the tasks in selection order; nothing starts. */
+export async function enqueueTasks(taskIds: string[], source: FocusSource): Promise<FocusReply | null> {
+  const action = enqueueSelectionAction(taskIds, source)
+  return action ? sendFocusAction(action) : null
 }
 
-/** Exported for the `f` row shortcut (tasks audit P1-1), which starts a
- * session without the setup screen. */
-export const DEFAULT_FOCUS_CONFIG: FocusConfig = {
-  timerMode: 'down',
-  targetMinutes: 25,
-  breakMinutes: 5,
-  totalPomodoros: 1,
+/** Whether "Focus now" can run here; null = allowed, else the visible reason. */
+export function focusNowBlockedReason(capabilities: FocusCapabilities | null): string | null {
+  if (!capabilities) return 'Focus is still loading.'
+  return unsupported(capabilities, { kind: 'start', occurrence_id: '' })?.message ?? null
 }
 
-interface FocusStore {
-  // State
-  isActive: boolean
-  isPendingSetup: boolean // show setup screen
-  taskId: string | null
-  task: LocalTask | null
-  config: FocusConfig
-  startedAt: number | null // ms timestamp
-  pausedAt: number | null // ms timestamp
-  pausedElapsed: number // seconds accumulated before pause
-  elapsed: number // total seconds
-  isCompact: boolean
-  isOnBreak: boolean
-  breakStartedAt: number | null
-  breakElapsed: number
-  currentPomodoro: number
-  showCelebration: boolean
-  completedDuration: number | null
-  nextTask: LocalTask | null
-  queue: LocalTask[] // tasks lined up after the current one
-
-  // Actions
-  beginSetup: (task: LocalTask) => void
-  startFocus: (task: LocalTask, config: FocusConfig, queue?: LocalTask[]) => void
-  pauseFocus: () => void
-  resumeFocus: () => void
-  completeFocus: (nextTask?: LocalTask | null) => void
-  abandonFocus: () => void
-  skipFocus: () => void
-  setCompact: (compact: boolean) => void
-  tick: () => void
-  startBreak: () => void
-  endBreak: () => void
-  /** Enter: start the next queued task now (or end if there is none). */
-  dismissCelebration: () => void
-  /** Escape / click: end the session; never starts anything (session P1-2). */
-  endCelebration: () => void
-  reset: () => void
+/**
+ * "Focus now": one explicit user gesture that appends the task when needed
+ * and starts it (the engine settles any running task and moves this one
+ * first). Refused before any write when live timing is unavailable, so a
+ * blocked Focus now never leaves a half-done queue change behind.
+ */
+export async function focusNow(taskId: string, source: FocusSource): Promise<FocusReply> {
+  if (!useFocusCache.getState().snapshot || !useFocusCache.getState().capabilities) await refreshFocus()
+  const { snapshot, capabilities } = useFocusCache.getState()
+  const reason = focusNowBlockedReason(capabilities)
+  if (reason || !snapshot) throw new FocusRequestError('unsupported', reason ?? 'Focus is not loaded yet.')
+  const plan = focusNowPlan(snapshot, taskId, source)
+  let start = plan.start
+  if (plan.enqueue) {
+    const reply = await sendFocusAction(plan.enqueue)
+    start = startActionFor(reply.snapshot, taskId)
+    if (!start) throw new FocusRequestError('not_found', 'That task could not be added to the focus queue.')
+  }
+  return sendFocusAction(start as FocusAction)
 }
 
-export const useFocusStore = create<FocusStore>((set, get) => ({
-  isActive: false,
-  isPendingSetup: false,
-  taskId: null,
-  task: null,
-  config: DEFAULT_FOCUS_CONFIG,
-  startedAt: null,
-  pausedAt: null,
-  pausedElapsed: 0,
-  elapsed: 0,
-  isCompact: false,
-  isOnBreak: false,
-  breakStartedAt: null,
-  breakElapsed: 0,
-  currentPomodoro: 1,
-  showCelebration: false,
-  completedDuration: null,
-  nextTask: null,
-  queue: [],
-
-  beginSetup: (task) => {
-    set({
-      isPendingSetup: true,
-      task,
-      taskId: task.id,
-      config: DEFAULT_FOCUS_CONFIG,
-    })
-  },
-
-  startFocus: (task, config, queue = []) => {
-    const dp = getDataProvider()
-    dp.focus.startSession(task.id, task.content).catch(() => {})
-    dp.tasks.updateStatus(task.id, 'in_progress').catch(() => {})
-    set({
-      isActive: true,
-      isPendingSetup: false,
-      taskId: task.id,
-      task,
-      config,
-      startedAt: Date.now(),
-      pausedAt: null,
-      pausedElapsed: 0,
-      elapsed: 0,
-      isCompact: false,
-      isOnBreak: false,
-      breakStartedAt: null,
-      breakElapsed: 0,
-      currentPomodoro: 1,
-      showCelebration: false,
-      completedDuration: null,
-      nextTask: null,
-      queue,
-    })
-  },
-
-  pauseFocus: () => {
-    const { startedAt, pausedElapsed } = get()
-    if (!startedAt) return
-    const now = Date.now()
-    const currentElapsed = pausedElapsed + Math.floor((now - startedAt) / 1000)
-    set({ pausedAt: now, pausedElapsed: currentElapsed })
-  },
-
-  resumeFocus: () => {
-    set({ startedAt: Date.now(), pausedAt: null })
-  },
-
-  completeFocus: (nextTask) => {
-    const dp = getDataProvider()
-    const { taskId, task, elapsed, queue } = get()
-    if (taskId) {
-      dp.tasks.updateStatus(taskId, 'complete', undefined, task?.id === taskId ? task.due_date : undefined).catch(() => {})
-      dp.focus.endSession(taskId, 'focus_completed', elapsed).catch(() => {})
-    }
-    // If no explicit next task was passed, pull the next one from the queue.
-    let resolvedNext: LocalTask | null = nextTask ?? null
-    let newQueue = queue
-    if (!resolvedNext && queue.length > 0) {
-      resolvedNext = queue[0]
-      newQueue = queue.slice(1)
-    }
-    set({
-      showCelebration: true,
-      completedDuration: elapsed,
-      nextTask: resolvedNext,
-      queue: newQueue,
-    })
-  },
-
-  abandonFocus: async () => {
-    const dp = getDataProvider()
-    const { taskId, elapsed } = get()
-    if (taskId) {
-      dp.focus.endSession(taskId, 'focus_abandoned', elapsed).catch(() => {})
-      // Set status based on setting (default: todo)
-      const abandonStatus = await dp.settings.get('focus_abandon_status').catch(() => null)
-      const status: TaskStatus = (abandonStatus === 'in_progress' ? 'in_progress' : 'todo')
-      dp.tasks.updateStatus(taskId, status).catch(() => {})
-    }
-    get().reset()
-  },
-
-  skipFocus: () => {
-    const dp = getDataProvider()
-    const { taskId, elapsed } = get()
-    if (taskId) {
-      dp.focus.endSession(taskId, 'focus_skipped', elapsed).catch(() => {})
-    }
-    get().reset()
-  },
-
-  setCompact: (compact) => set({ isCompact: compact }),
-
-  tick: () => {
-    const { startedAt, pausedAt, pausedElapsed, isOnBreak, breakStartedAt } = get()
-    if (isOnBreak && breakStartedAt) {
-      set({ breakElapsed: Math.floor((Date.now() - breakStartedAt) / 1000) })
-      return
-    }
-    if (!startedAt || pausedAt) return
-    set({ elapsed: pausedElapsed + Math.floor((Date.now() - startedAt) / 1000) })
-  },
-
-  startBreak: () => {
-    set({ isOnBreak: true, breakStartedAt: Date.now(), breakElapsed: 0 })
-  },
-
-  endBreak: () => {
-    const { currentPomodoro } = get()
-    set({
-      isOnBreak: false,
-      breakStartedAt: null,
-      breakElapsed: 0,
-      currentPomodoro: currentPomodoro + 1,
-      startedAt: Date.now(),
-      pausedAt: null,
-      pausedElapsed: 0,
-      elapsed: 0,
-    })
-  },
-
-  dismissCelebration: () => {
-    const { nextTask, config, queue } = get()
-    if (nextTask) {
-      // Start the next queued task immediately with the same config —
-      // don't send the user back through the setup screen mid-queue.
-      set({ showCelebration: false, completedDuration: null, nextTask: null })
-      get().startFocus(nextTask, config, queue)
-    } else {
-      get().reset()
-    }
-  },
-
-  endCelebration: () => {
-    get().reset()
-  },
-
-  reset: () => {
-    set({
-      isActive: false,
-      isPendingSetup: false,
-      taskId: null,
-      task: null,
-      config: DEFAULT_FOCUS_CONFIG,
-      startedAt: null,
-      pausedAt: null,
-      pausedElapsed: 0,
-      elapsed: 0,
-      isCompact: false,
-      isOnBreak: false,
-      breakStartedAt: null,
-      breakElapsed: 0,
-      currentPomodoro: 1,
-      showCelebration: false,
-      completedDuration: null,
-      nextTask: null,
-      queue: [],
-    })
-  },
-}))
+/** What Space does right now (pause/resume the selected session), or null — Space never starts. */
+export function focusSpaceAction(): FocusAction | null {
+  return spaceKeyAction(useFocusCache.getState().snapshot)
+}

@@ -8,7 +8,9 @@ import { FocusTaskCard } from '@/components/focus/FocusTaskCard'
 import { FocusQueueList, type FocusQueueRow } from '@/components/focus/FocusQueueList'
 import { FocusCompletedTray } from '@/components/focus/FocusCompletedTray'
 import { FocusSourcePicker, FocusStillOpenDrawer } from '@/components/focus/FocusSourcePicker'
+import { FocusCelebration } from '@/components/focus/FocusCelebration'
 import { useFocusCache, retryFocusCommand } from '@/stores/focusStore'
+import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import type { FocusRequestError } from '@/services/focus-events'
 import { buildFocusPrompt, copyFocusPrompt } from '@/lib/focusPrompt'
 import { candidateIds, queueTheseAction } from '@/lib/focusSources'
@@ -24,7 +26,6 @@ import {
   type FocusTaskOps,
   type TaskMenuId,
 } from '@/lib/focusQueueIntents'
-import { playCompletionSound } from '@/lib/sound'
 import { cn } from '@/lib/utils'
 import type {
   FocusAction,
@@ -66,6 +67,8 @@ export interface FocusQueueTrayProps {
   onSoundMutedChange?: (muted: boolean) => void
   /** Focus request failure to show; defaults to the shared focus cache's error. */
   error?: FocusRequestError | null
+  /** In-flight action; defaults to the shared focus cache's `pending`. */
+  pending?: FocusAction | null
 }
 
 /** Inline Add: Enter submits (Shift+Enter for a batch line); focus stays for rapid entry. */
@@ -184,6 +187,7 @@ export function FocusQueueTray({
   soundMuted = false,
   onSoundMutedChange,
   error,
+  pending,
 }: FocusQueueTrayProps) {
   const [compact, setCompact] = useState(initialCompact)
   const [source, setSource] = useState<FocusSource>(initialSource)
@@ -194,6 +198,10 @@ export function FocusQueueTray({
   const [manualCopy, setManualCopy] = useState<{ text: string; message: string } | null>(null)
   const storeError = useFocusCache((s) => s.error)
   const cacheError = error !== undefined ? error : storeError
+  const storePending = useFocusCache((s) => s.pending)
+  const busy = (pending !== undefined ? pending : storePending) != null
+  const celebration = useFocusSurface((s) => s.celebration)
+  const dismissCelebration = useFocusSurface((s) => s.dismissCelebration)
   const headingRef = useRef<HTMLHeadingElement>(null)
 
   useEffect(() => {
@@ -211,23 +219,21 @@ export function FocusQueueTray({
   const projectName = useCallback((id: string) => projects.find((p) => p.id === id)?.name, [projects])
   const blocked = queueBlockedReason(capabilities)
 
-  /** Every write goes through here: failures stay visible, completion is acknowledged after commit. */
+  /**
+   * Every write goes through here so failures stay visible. Completion
+   * acknowledgement and sound come from `onAction` after the commit.
+   */
   const run = useCallback(
     async (action: FocusAction): Promise<FocusReply | null> => {
       setLocalError(null)
       try {
-        const reply = await onAction(action)
-        if (action.kind === 'complete') {
-          if (!soundMuted) playCompletionSound()
-          setAck('Completed. Next task is ready when you are.')
-        }
-        return reply
+        return await onAction(action)
       } catch (error) {
         setLocalError(localFailureMessage(error))
         return null
       }
     },
-    [onAction, soundMuted],
+    [onAction],
   )
 
   const [first, ...rest] = snapshot.queue
@@ -248,6 +254,10 @@ export function FocusQueueTray({
   const focusCard = () => requestAnimationFrame(() => headingRef.current?.focus())
   const promote = async (entry: FocusEntry) => {
     if (await run({ kind: 'promote', occurrence_id: entry.occurrence_id })) focusCard()
+  }
+  /** Focus now: the engine's `start` promotes and starts in one committed command. */
+  const focusNow = async (entry: FocusEntry) => {
+    if (await run({ kind: 'start', occurrence_id: entry.occurrence_id })) focusCard()
   }
 
   const rename = async (task: LocalTask, content: string) => {
@@ -337,6 +347,7 @@ export function FocusQueueTray({
           onRename={rename}
           onRenameCancel={() => setRenamingEntryId(null)}
           headingRef={headingRef}
+          busy={busy}
         />
 
         {/* Feedback stays in both modes. Failures render above acknowledgement
@@ -386,6 +397,7 @@ export function FocusQueueTray({
               )}
             </div>
           )}
+          {celebration && !failure && <FocusCelebration celebration={celebration} onDismiss={dismissCelebration} />}
           {ack && !failure && (
             <Caption as="p" role="status">
               {ack}
@@ -417,6 +429,8 @@ export function FocusQueueTray({
               today={today}
               onAction={run}
               onPromote={(entry) => void promote(entry)}
+              onFocusNow={(entry) => void focusNow(entry)}
+              busy={busy}
               onMenu={(id, task, entry) => void handleMenu(id, task, entry)}
               renamingEntryId={renamingEntryId}
               onRename={rename}

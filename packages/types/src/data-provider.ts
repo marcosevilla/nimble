@@ -47,7 +47,6 @@ import type {
   VaultScanReport,
   VaultStatus,
   VaultSaveResult,
-  FocusState,
   Goal,
   GoalWithProgress,
   GoalStatus,
@@ -278,12 +277,6 @@ export interface DataProvider {
     execute(command: FocusCommand): Promise<FocusReply>
     history(opts?: { cursor?: string; task_id?: string }): Promise<FocusHistoryPage>
     openCompanion(): Promise<void>
-    /** @deprecated Legacy single-task timer. Rejects `unsupported` until Task 8 replaces its consumers. */
-    startSession(taskId: string, taskContent: string): Promise<void>
-    /** @deprecated Legacy single-task timer. Rejects `unsupported` until Task 8 replaces its consumers. */
-    endSession(taskId: string, outcome: string, durationSecs: number): Promise<void>
-    /** @deprecated Legacy resume marker (cleared by the v21 migration). */
-    getActive(): Promise<FocusState>
   }
 
   dailyState: {

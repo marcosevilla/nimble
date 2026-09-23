@@ -25,6 +25,7 @@ import { TaskItem, type TaskItemData } from '@/components/tasks/TaskItem'
 import { labelColor } from '@/lib/labelColors'
 import { DetailBreadcrumbs } from './DetailBreadcrumbs'
 import { TaskActivityLog } from './TaskActivityLog'
+import { FocusTaskHistory } from '@/components/focus/FocusTaskHistory'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -608,6 +609,9 @@ export function TaskDetailPage() {
             </div>
           )}
         </div>
+
+        {/* Focus time from the engine's history (not the activity log) */}
+        <FocusTaskHistory taskId={task.id} />
       </div>
 
       {/* Activity log — moved off the page body into the gear menu's "View

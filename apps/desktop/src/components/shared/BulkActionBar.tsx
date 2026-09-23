@@ -3,7 +3,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { useDetailStore } from '@/stores/detailStore'
 import { useProjects } from '@/hooks/useLocalTasks'
-import { useFocusStore, type FocusConfig } from '@/stores/focusStore'
+import { enqueueTasks, focusNow, focusNowBlockedReason, isDroppedRepeat, useFocusCache } from '@/stores/focusStore'
+import { completionSummary, isStaleRefusal } from '@/lib/focusFlows'
 import { useDataProvider } from '@/services/provider-context'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { cn } from '@/lib/utils'
@@ -16,8 +17,7 @@ import {
   Pencil,
   Plus,
   Play,
-  Timer,
-  TrendingUp,
+  ListPlus,
 } from 'lucide-react'
 import { STATUSES } from '@/components/tasks/StatusDropdown'
 import { useDeleteTasks } from '@/components/tasks/useDeleteTasks'
@@ -28,22 +28,13 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import type { LocalTask, TaskStatus } from '@nimble/types'
+import type { FocusSource, LocalTask, TaskStatus } from '@nimble/types'
 
-const COUNTDOWN_OPTIONS = [
-  { minutes: 15, label: '15 min' },
-  { minutes: 25, label: '25 min' },
-  { minutes: 30, label: '30 min' },
-  { minutes: 45, label: '45 min' },
-  { minutes: 60, label: '60 min' },
-]
+/** Multi-select has no single source view; Today is the provenance for a batch. */
+const SELECTION_SOURCE: FocusSource = { kind: 'today' }
 
-const ROUND_OPTIONS = [1, 2, 3, 4]
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 export function BulkActionBar() {
   const dp = useDataProvider()
@@ -55,18 +46,10 @@ export function BulkActionBar() {
   const setAddingSubtaskTo = useSelectionStore((s) => s.setAddingSubtaskTo)
   const markTaskCompleting = useSelectionStore((s) => s.markTaskCompleting)
   const clearTaskCompleting = useSelectionStore((s) => s.clearTaskCompleting)
-  const startFocus = useFocusStore((s) => s.startFocus)
+  const focusCapabilities = useFocusCache((s) => s.capabilities)
+  const focusBusy = useFocusCache((s) => s.pending != null)
 
   const { projects } = useProjects()
-
-  // Load break length default from settings when the focus menu is needed
-  const [breakMinutes, setBreakMinutes] = useState(5)
-  useEffect(() => {
-    if (!hasSelection) return
-    dp.settings.get('focus_break_minutes').then((val) => {
-      if (val) setBreakMinutes(parseInt(val, 10) || 5)
-    }).catch(() => {})
-  }, [hasSelection, dp])
 
   // Load the metadata of the single selected task (needed to decide whether
   // "Add subtask" is available and to resolve full tasks for focus queuing).
@@ -121,11 +104,24 @@ export function BulkActionBar() {
       })
       const lastStartDelay = (ids.length - 1) * 40
       setTimeout(async () => {
+        // Each completion carries the displayed due date; a task that changed
+        // elsewhere (stale occurrence) is refused and reported, not counted.
+        let done = 0
+        let refused = 0
+        let failed = 0
         for (const id of ids) {
-          try { await dp.tasks.updateStatus(id, status, undefined, displayedDueDate(id)) } catch { /* skip */ }
+          try {
+            await dp.tasks.updateStatus(id, status, undefined, displayedDueDate(id))
+            done++
+          } catch (error) {
+            if (isStaleRefusal(error)) refused++
+            else failed++
+          }
           clearTaskCompleting(id)
         }
-        toast.success(`Completed ${ids.length} task${ids.length !== 1 ? 's' : ''}`)
+        const summary = completionSummary(done, refused, failed)
+        if (summary.ok) toast.success(summary.message)
+        else toast(summary.message)
         emitTasksChanged()
       }, lastStartDelay + 580)
       clear()
@@ -179,33 +175,35 @@ export function BulkActionBar() {
     clear()
   }, [selectionType, count, singleSelected, setAddingSubtaskTo, clear])
 
-  const handleFocus = useCallback(async (config: FocusConfig) => {
+  // Multi-select default: append the selection to the focus queue in
+  // selection order. Nothing starts.
+  const handleEnqueue = useCallback(async () => {
     if (selectionType !== 'task') return
     const ids = Array.from(selectedIds)
-    if (ids.length === 0) return
-    const all = await dp.tasks.list().catch(() => [] as LocalTask[])
-    // Preserve the selection order
-    const selected = ids
-      .map((id) => all.find((t) => t.id === id))
-      .filter((t): t is LocalTask => t != null)
-    if (selected.length === 0) return
-    const [first, ...queue] = selected
-    startFocus(first, config, queue)
-    clear()
-  }, [selectionType, selectedIds, dp, startFocus, clear])
+    try {
+      await enqueueTasks(ids, SELECTION_SOURCE)
+      toast(`Added ${ids.length} task${ids.length !== 1 ? 's' : ''} to the focus queue`)
+      clear()
+    } catch (error) {
+      if (!isDroppedRepeat(error)) toast(messageOf(error))
+    }
+  }, [selectionType, selectedIds, clear])
 
-  const handleCountdown = useCallback((minutes: number, rounds: number) => {
-    handleFocus({
-      timerMode: 'down',
-      targetMinutes: minutes,
-      breakMinutes,
-      totalPomodoros: rounds,
-    })
-  }, [handleFocus, breakMinutes])
-
-  const handleStopwatch = useCallback(() => {
-    handleFocus({ timerMode: 'up', targetMinutes: 0, breakMinutes: 0, totalPomodoros: 1 })
-  }, [handleFocus])
+  // Focus now: append the selection, then explicitly start the first one.
+  const handleFocusNow = useCallback(async () => {
+    if (selectionType !== 'task') return
+    const [first, ...rest] = Array.from(selectedIds)
+    if (!first) return
+    try {
+      await focusNow(first, SELECTION_SOURCE)
+      if (rest.length) await enqueueTasks(rest, SELECTION_SOURCE)
+      emitTasksChanged()
+      clear()
+    } catch (error) {
+      if (!isDroppedRepeat(error)) toast(messageOf(error))
+    }
+  }, [selectionType, selectedIds, clear])
+  const focusNowBlocked = focusNowBlockedReason(focusCapabilities)
 
   if (!hasSelection) return null
 
@@ -226,45 +224,33 @@ export function BulkActionBar() {
 
         {isTask && (
           <>
-            {/* Focus — shared across single + bulk. Bulk queues remaining. */}
+            {/* Focus — shared across single + bulk. The default appends the
+                selection to the queue; Focus now is the explicit Start. */}
             <DropdownMenu>
               <DropdownMenuTrigger>
                 <ActionButton
                   icon={Play}
-                  label={count > 1 ? 'Focus queue' : 'Focus'}
+                  label="Focus"
                   onClick={() => {}}
                   className="text-accent-blue/80 hover:text-accent-blue"
                 />
               </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" sideOffset={8} className="w-44">
-                {COUNTDOWN_OPTIONS.map((opt) => (
-                  <DropdownMenuSub key={opt.minutes}>
-                    <DropdownMenuSubTrigger
-                      className="gap-2"
-                      onClick={() => handleCountdown(opt.minutes, 1)}
-                    >
-                      <Timer className="size-3.5 text-muted-foreground" />
-                      <span className="flex-1 text-left">{opt.label}</span>
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="w-32">
-                      <DropdownMenuItem onClick={() => handleCountdown(opt.minutes, 1)}>
-                        No breaks
-                      </DropdownMenuItem>
-                      {ROUND_OPTIONS.filter((r) => r > 1).map((rounds) => (
-                        <DropdownMenuItem
-                          key={rounds}
-                          onClick={() => handleCountdown(opt.minutes, rounds)}
-                        >
-                          {rounds} rounds
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="gap-2" onClick={handleStopwatch}>
-                  <TrendingUp className="size-3.5 text-muted-foreground" />
-                  <span>Stopwatch</span>
+              <DropdownMenuContent side="top" sideOffset={8} className="w-52">
+                <DropdownMenuItem className="gap-2" disabled={focusBusy} onClick={() => void handleEnqueue()}>
+                  <ListPlus className="size-3.5 text-muted-foreground" />
+                  <span>Add to focus queue</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="gap-2"
+                  disabled={focusNowBlocked != null || focusBusy}
+                  title={focusNowBlocked ?? undefined}
+                  onClick={() => void handleFocusNow()}
+                >
+                  <Play className="size-3.5 text-muted-foreground" />
+                  <span className="flex flex-col">
+                    {count > 1 ? 'Focus now (first selected)' : 'Focus now'}
+                    {focusNowBlocked && <span className="text-label text-muted-foreground">{focusNowBlocked}</span>}
+                  </span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

@@ -2,7 +2,8 @@ import { useMemo } from 'react'
 import { addDays, format } from 'date-fns'
 import { useDataProvider } from '@/services/provider-context'
 import { useDetailStore } from '@/stores/detailStore'
-import { useFocusStore, DEFAULT_FOCUS_CONFIG } from '@/stores/focusStore'
+import { focusNow, isDroppedRepeat } from '@/stores/focusStore'
+import { sourceForTask } from '@/lib/focusFlows'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { taskToast } from '@/lib/taskToast'
 import { completeTaskWithExit } from './StatusDropdown'
@@ -16,7 +17,8 @@ import type { LocalTask } from '@nimble/types'
  * - Enter: open detail
  * - x / Space: complete, with the same exit animation as the status menu
  * - s: snooze — due date moves to tomorrow (neutral copy, §1.1)
- * - f: start a focus session with the default timer config
+ * - f: Focus now — one explicit Start (appends the task first if needed);
+ *   while live timing is unavailable it explains why and writes nothing
  */
 export function useTaskRowActions(tasks: LocalTask[]) {
   const dp = useDataProvider()
@@ -38,7 +40,10 @@ export function useTaskRowActions(tasks: LocalTask[]) {
       onFocusStart: (id: string) => {
         const task = tasks.find((t) => t.id === id)
         if (!task) return
-        useFocusStore.getState().startFocus(task, DEFAULT_FOCUS_CONFIG)
+        focusNow(task.id, sourceForTask(task, format(new Date(), 'yyyy-MM-dd'))).then(
+          () => emitTasksChanged(),
+          (e) => { if (!isDroppedRepeat(e)) toast(e instanceof Error ? e.message : String(e)) },
+        )
       },
     }),
     [dp, tasks],

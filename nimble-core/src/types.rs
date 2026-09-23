@@ -223,15 +223,6 @@ pub struct DocNote {
     pub created_at: String,
 }
 
-// ── Focus ──
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FocusState {
-    pub task_id: Option<String>,
-    pub started_at: Option<String>,
-    pub paused_at: Option<String>,
-}
-
 // ── Goals ──
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
