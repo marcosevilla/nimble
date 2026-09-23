@@ -116,6 +116,10 @@ export function HelpPanel() {
                 </TabsContent>
               </div>
             </Tabs>
+            {/* Which commit this app was built from — compare with `git log` to see if an update is due. */}
+            <div className="shrink-0 border-t border-border/20 px-3 py-2" title={__BUILD_DATE__}>
+              <Meta className="font-mono text-label">Build {__BUILD_SHA__}</Meta>
+            </div>
           </div>
         </div>
       )}

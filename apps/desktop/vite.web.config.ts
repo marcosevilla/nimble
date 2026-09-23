@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import fs from 'node:fs'
 import path from 'path'
+import { buildDefine } from './build-info'
 
 /**
  * Web build target.
@@ -55,6 +56,7 @@ function webEntry(): Plugin {
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), webEntry()],
+  define: buildDefine(),
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
