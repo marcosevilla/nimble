@@ -332,6 +332,10 @@ impl Builder<'_> {
             }
         };
         let mut completions: Vec<(String, Value)> = Vec::new();
+        // Identical (id, completedAt) keys are one completion: the first is
+        // counted, later ones are kept as indexed evidence (like pending ops)
+        // so preview contributions and included_ms match the one stored row.
+        let mut seen_keys: HashMap<String, (usize, Value)> = HashMap::new();
         match manual.get("completed") {
             Some(Value::Array(items)) => {
                 for (i, item) in items.iter().enumerate() {
@@ -341,6 +345,19 @@ impl Builder<'_> {
                         (Some(id), Some(at)) => format!("completion:{id}:{at}"),
                         _ => format!("completion:#{i}"),
                     };
+                    if let Some((n, first)) = seen_keys.get_mut(&key) {
+                        *n += 1;
+                        let dup_key = format!("{key}:duplicate:{n}");
+                        let same = first == item;
+                        self.record(&dup_key, "completion", ImportRecordStatus::Quarantined,
+                            "duplicate completion entry for the same task and time; counted once", item.clone(), Value::Null);
+                        if !same {
+                            self.issue(ImportSeverity::Review, Some(&dup_key), format!(
+                                "{key} appears more than once with different values; only the first is counted."));
+                        }
+                        continue;
+                    }
+                    seen_keys.insert(key.clone(), (0, item.clone()));
                     if let (Some(id), Some(_)) = (id, at) {
                         if safe_u64(item.get("spentMs")).is_some() && tasks.contains_key(id) {
                             self.legacy_completed.insert(id.to_owned());

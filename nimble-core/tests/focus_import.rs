@@ -482,3 +482,34 @@ async fn same_files_under_another_namespace_are_blocked() {
     assert!(preview_import(&h.pool, &renamed).await.unwrap().blocked);
     assert_eq!(count(&h.pool, "SELECT count(*) FROM local_tasks").await, tasks);
 }
+
+/// Final review M-a: an identical duplicate completion entry (same id and
+/// completedAt) is one completion: counted once in the preview and in
+/// included_ms, with the duplicate kept as quarantined evidence.
+#[tokio::test]
+async fn duplicate_completion_key_counts_once_and_keeps_the_duplicate_as_evidence() {
+    let h = Harness::new().await;
+    let entry = "{ \"id\": \"manual:m1\", \"spentMs\": 12345, \"completedAt\": 1758542400000 }";
+    let mut dup = files();
+    dup.manual_json = Some(fixture("manual.json").replace(entry, &format!("{entry}, {entry}")));
+    let preview = preview_import(&h.pool, &dup).await.unwrap();
+    assert!(!preview.blocked, "{:?}", preview.issues);
+    let included: Vec<_> = preview
+        .contributions
+        .iter()
+        .filter(|c| c.source_kind == "completion" && c.inclusion == ImportInclusion::Included)
+        .collect();
+    assert_eq!(included.len(), 1, "{:?}", preview.contributions);
+    let key = "completion:manual:m1:1758542400000";
+    assert_eq!(record(&preview, key).status, ImportRecordStatus::Included);
+    let duplicate = record(&preview, &format!("{key}:duplicate:1"));
+    assert_eq!(duplicate.status, ImportRecordStatus::Quarantined);
+
+    let (result, _) = h.service.commit_import(&dup, &preview.preview_token, &command()).await.unwrap();
+    let stored: i64 = sqlx::query_scalar("SELECT COALESCE(sum(duration_ms),0) FROM focus_import_totals WHERE inclusion='included'")
+        .fetch_one(&h.pool).await.unwrap();
+    assert_eq!(result.included_ms, stored as u64, "result matches what was stored");
+    let completions: i64 = sqlx::query_scalar("SELECT COALESCE(sum(duration_ms),0) FROM focus_import_totals WHERE inclusion='included' AND source_kind='completion'")
+        .fetch_one(&h.pool).await.unwrap();
+    assert_eq!(completions, 12_345);
+}
