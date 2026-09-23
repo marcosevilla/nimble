@@ -596,7 +596,7 @@ function ManageHabitsPopover({ habits, onChanged }: { habits: HabitWithStats[]; 
     <>
       <Popover>
         <PopoverTrigger
-          className="flex size-5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover transition-colors"
+          className="relative flex size-5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover transition-colors before:absolute before:-inset-2 before:content-['']"
           aria-label="Manage habits"
         >
           <Settings2 className="size-3" />

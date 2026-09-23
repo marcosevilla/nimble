@@ -168,7 +168,7 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
         }
       }}
       className={cn(
-        'group relative flex h-10 items-center min-w-0 transition-colors hover:bg-hover cursor-default',
+        'group relative flex h-9 items-center min-w-0 transition-colors hover:bg-hover cursor-default',
         // Inset ring: the row spans the column, so an outside offset would
         // paint over its neighbours.
         'focus-visible:-outline-offset-2',
@@ -186,7 +186,7 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
           edge to this row's own left edge (before the content's `ml-4`), so
           it never nudges the border or the status icon. */}
       {(showGrip || selectable) && (
-        <div className="absolute right-full top-0 flex h-10 items-center gap-1 pr-2">
+        <div className="absolute right-full top-0 flex h-9 items-center gap-1 pr-2">
           {/* dnd-kit's attributes make the grip a focusable button — so it
               reveals on focus-within too, never an invisible tab stop, and
               the 12px glyph gets a 24px target (P1-2, P3-3). */}
@@ -209,7 +209,7 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
           starts exactly at the status icon's left edge (matching the
           section/page title's `pl-4` inset) instead of under the gutter or
           the overhanging hover cluster. */}
-      <div className="flex flex-1 h-10 items-center gap-3 min-w-0 ml-4 border-b border-secondary">
+      <div className="flex flex-1 h-9 items-center gap-3 min-w-0 ml-4 border-b border-secondary">
         {/* Status (before priority per updated row anatomy) */}
         {task.source === 'local' && task.status ? (
           <StatusDropdown taskId={task.id} status={task.status} dueDate={task.dueDate} />
