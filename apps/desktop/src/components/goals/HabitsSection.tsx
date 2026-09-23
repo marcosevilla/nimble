@@ -5,6 +5,7 @@ import { useDataProvider } from '@/services/provider-context'
 import type { HabitHeatmapEntry, HabitWithStats } from '@nimble/types'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { Skeleton } from '@/components/ui/skeleton'
+import { SectionTitle } from '@/components/shared/typography'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
@@ -427,7 +428,7 @@ export function HabitsSection() {
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Sparkles className="size-3.5 text-muted-foreground" />
-          <h3 className="text-body-strong">Habits</h3>
+          <SectionTitle>Habits</SectionTitle>
         </div>
         <div className="flex items-center gap-3">
           <p className="text-meta text-muted-foreground">
@@ -451,10 +452,7 @@ export function HabitsSection() {
       <div className="flex items-baseline justify-between">
         <div className="flex items-center gap-2">
           <Sparkles className="size-3.5 text-muted-foreground" />
-          <h3 className="text-body-strong">Habits</h3>
-          <span className="text-label text-muted-foreground tabular-nums">
-            {completedCount}/{activeHabits.length}
-          </span>
+          <SectionTitle count={`${completedCount}/${activeHabits.length}`}>Habits</SectionTitle>
           <ManageHabitsPopover habits={activeHabits} onChanged={loadHabits} />
         </div>
         {avgMomentum > 0 && (

@@ -1,5 +1,5 @@
 import { ReminderCatchUp } from '@/components/today/ReminderCatchUp'
-import { useMemo, useState, useCallback, useEffect } from 'react'
+import { useMemo, useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { LocalTaskRow } from '@/components/tasks/LocalTaskRow'
@@ -13,10 +13,12 @@ import { useDataProvider } from '@/services/provider-context'
 import type { Priority } from '@nimble/types'
 import { BriefDisplay } from '@/components/shared/BriefDisplay'
 import { DateStrip } from '@/components/shared/DateStrip'
-import { HabitsSection } from '@/components/goals/HabitsSection'
-import { Check, Coffee } from 'lucide-react'
-import { PageHeader } from '@/components/shared/PageHeader'
-import { Meta } from '@/components/shared/typography'
+import { CalendarCheck, Check, ChevronRight, Coffee } from 'lucide-react'
+import { PageFrame } from '@/components/shared/PageFrame'
+import { EmptyState } from '@/components/shared/EmptyState'
+import { Meta, SectionTitle } from '@/components/shared/typography'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { scrollPageToTop } from '@/lib/pageScroll'
 
 // ── Shared Utilities ──
 
@@ -25,6 +27,14 @@ function getGreeting(): { headline: string; subtitle: string } {
   if (hour < 12) return { headline: 'Good morning', subtitle: "Let's plan your day." }
   if (hour < 17) return { headline: 'Good afternoon', subtitle: "Pick up where you left off." }
   return { headline: 'Good evening', subtitle: "Here's where things stand." }
+}
+
+/** The greeting lives in the header's meta slot — one title per page
+ *  (cross-cutting move 1: the second text-title h2 is gone). */
+function greetingMeta(remaining: number | null): string {
+  const g = getGreeting()
+  if (remaining === null) return g.headline
+  return `${g.headline} · ${remaining === 0 ? 'all done for today' : `${remaining} remaining`}`
 }
 
 function ProgressBar({ completed, total }: { completed: number; total: number }) {
@@ -62,25 +72,11 @@ function ReviewStep({
   completed: boolean
   children: React.ReactNode
 }) {
-  if (!active && !done) {
-    return (
-      <div className="rounded-xl p-4 opacity-40">
-        <div className="flex items-center gap-2">
-          <span className="flex size-6 items-center justify-center rounded-full bg-muted text-meta-strong text-muted-foreground">
-            {step}
-          </span>
-          <h3 className="text-body-strong text-muted-foreground">{title}</h3>
-        </div>
-      </div>
-    )
-  }
-
+  // One surface recipe for every state (today P2-4); pending and done vary
+  // only opacity, so the step never changes its edge or fill.
   return (
-    <div className={cn(
-      'rounded-xl border p-4 transition-[background-color,border-color] duration-300',
-      active ? 'bg-card border-border' : 'bg-muted/30 border-border/30',
-    )}>
-      <div className="flex items-center gap-2 mb-3">
+    <div className={cn('surface-panel p-4', !active && !done && 'opacity-40', done && 'opacity-60')}>
+      <div className={cn('flex items-center gap-2', active && 'mb-3')}>
         <span
           className={cn(
             'flex size-6 items-center justify-center rounded-full text-meta-strong',
@@ -89,14 +85,7 @@ function ReviewStep({
         >
           {done ? <Check className="size-3.5" /> : step}
         </span>
-        <h3
-          className={cn(
-            'text-body-strong',
-            done && 'text-muted-foreground',
-          )}
-        >
-          {title}
-        </h3>
+        <SectionTitle className={cn(!active && 'text-muted-foreground')}>{title}</SectionTitle>
       </div>
       {active && <div>{children}</div>}
     </div>
@@ -150,15 +139,9 @@ function CalendarGlance() {
 
 // ── Review Mode ──
 
-function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => void }) {
-  const dp = useDataProvider()
+function ReviewMode({ brief, onComplete }: { brief: string | null | undefined; onComplete: (priorities: Priority[]) => void }) {
   const [step, setStep] = useState(1)
   const [priorities, setPriorities] = useState<Priority[] | null>(null)
-  const [brief, setBrief] = useState<string | null | undefined>(undefined) // undefined = loading
-
-  useEffect(() => {
-    dp.dailyState.readDailyBrief().then(setBrief).catch(() => setBrief(null))
-  }, [dp])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -184,89 +167,143 @@ function ReviewMode({ onComplete }: { onComplete: (priorities: Priority[]) => vo
   }, [priorities, onComplete])
 
   return (
-    <>
-      <PageHeader title="Today" />
-      <div className="px-5 py-6 w-full flex justify-center">
-        <div className="w-full max-w-[520px] space-y-4">
-          <ReminderCatchUp />
-          {/* Greeting — demoted to first content block */}
-          {(() => { const g = getGreeting(); return (
-            <div className="py-4">
-              <h2 className="text-title text-balance">
-                {g.headline}
-              </h2>
-            </div>
-          )})()}
+    <PageFrame title="Today" meta={greetingMeta(null)} bodyClassName="space-y-4">
+      <ReminderCatchUp />
 
-        {/* Step 1: Daily brief or calendar glance */}
-        <ReviewStep
-          step={1}
-          title={brief ? 'Your daily brief' : 'Your schedule'}
-          active={step === 1}
-          completed={step > 1}
-        >
-          {brief === undefined ? (
+      {/* Step 1: Daily brief or calendar glance */}
+      <ReviewStep
+        step={1}
+        title={brief ? 'Your daily brief' : 'Your schedule'}
+        active={step === 1}
+        completed={step > 1}
+      >
+        {brief === undefined ? (
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-3/4" />
+            <Skeleton className="h-5 w-1/2" />
+            <Skeleton className="h-5 w-2/3" />
+          </div>
+        ) : brief ? (
+          <div className="max-h-[32rem] overflow-y-auto [scrollbar-gutter:stable]">
+            <BriefDisplay markdown={brief} />
+          </div>
+        ) : (
+          <CalendarGlance />
+        )}
+        <div className="flex justify-end mt-3">
+          <Button size="sm" onClick={() => setStep(2)} className="gap-1.5">
+            Next <span className="ml-1 inline-flex items-center justify-center rounded bg-foreground/10 px-1 text-meta tabular-nums">↵</span>
+          </Button>
+        </div>
+      </ReviewStep>
+
+      {/* Step 2: Energy + Priorities */}
+      <ReviewStep step={2} title="Set your energy & get priorities" active={step === 2} completed={false}>
+        <PrioritiesSection onGenerated={handlePrioritiesGenerated} compact />
+        {priorities && (
+          <div className="flex justify-end mt-3">
+            <Button size="sm" onClick={handleFinish} className="gap-1.5">
+              <Check className="size-3.5" /> Ready to go
+              <span className="ml-1 inline-flex items-center justify-center rounded bg-foreground/10 px-1 text-meta tabular-nums">↵</span>
+            </Button>
+          </div>
+        )}
+      </ReviewStep>
+    </PageFrame>
+  )
+}
+
+// ── Brief card (dashboard) ──
+
+/** The daily brief, collapsed by default at the bottom of the lane
+ *  (today P2-1); the date control sits in its header (P2-5). Picking a
+ *  date opens the card. */
+function BriefCard({
+  today,
+  selectedDate,
+  onSelectDate,
+  briefDates,
+  content,
+}: {
+  today: string
+  selectedDate: string
+  onSelectDate: (date: string) => void
+  briefDates: Set<string>
+  content: string | null | undefined // undefined = loading
+}) {
+  const [open, setOpen] = useState(false)
+  const select = (date: string) => {
+    onSelectDate(date)
+    setOpen(true)
+  }
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="surface-panel px-4 py-2">
+      <SectionTitle
+        as="h2"
+        action={<DateStrip briefDates={briefDates} selected={selectedDate} today={today} onSelect={select} />}
+      >
+        <CollapsibleTrigger className="flex items-center gap-1.5 py-1 text-left data-[panel-open]:[&>svg:first-child]:rotate-90">
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-150" />
+          Daily brief
+        </CollapsibleTrigger>
+      </SectionTitle>
+      <CollapsibleContent className="overflow-hidden transition-all duration-150 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0">
+        <div className="pb-2 pt-1">
+          {content === undefined ? (
             <div className="space-y-2">
               <Skeleton className="h-5 w-3/4" />
               <Skeleton className="h-5 w-1/2" />
-              <Skeleton className="h-5 w-2/3" />
             </div>
-          ) : brief ? (
-            <div className="max-h-[32rem] overflow-y-auto [scrollbar-gutter:stable]">
-              <BriefDisplay markdown={brief} />
-            </div>
+          ) : content ? (
+            <BriefDisplay markdown={content} />
           ) : (
-            <CalendarGlance />
+            <EmptyState size="compact">No brief for this date.</EmptyState>
           )}
-          <div className="flex justify-end mt-3">
-            <Button size="sm" onClick={() => setStep(2)} className="gap-1.5">
-              Next <span className="ml-1 inline-flex items-center justify-center rounded bg-foreground/10 px-1 text-meta tabular-nums">↵</span>
-            </Button>
-          </div>
-        </ReviewStep>
-
-        {/* Step 2: Energy + Priorities */}
-        <ReviewStep step={2} title="Set your energy & get priorities" active={step === 2} completed={false}>
-          <PrioritiesSection onGenerated={handlePrioritiesGenerated} compact />
-          {priorities && (
-            <div className="flex justify-end mt-3">
-              <Button size="sm" onClick={handleFinish} className="gap-1.5">
-                <Check className="size-3.5" /> Ready to go
-                <span className="ml-1 inline-flex items-center justify-center rounded bg-foreground/10 px-1 text-meta tabular-nums">↵</span>
-              </Button>
-            </div>
-          )}
-        </ReviewStep>
         </div>
-      </div>
-    </>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
 // ── Dashboard Mode ──
 
-function DashboardMode({ cachedPriorities, cachedEnergy }: { cachedPriorities: Priority[] | null; cachedEnergy: string | null }) {
+function DashboardMode({
+  today,
+  todayBrief,
+  cachedPriorities,
+  cachedEnergy,
+}: {
+  today: string
+  todayBrief: string | null | undefined
+  cachedPriorities: Priority[] | null
+  cachedEnergy: string | null
+}) {
   const dp = useDataProvider()
   const { todayData } = useObsidian()
-  const today = new Date().toISOString().slice(0, 10)
 
-  // Brief browsing
+  // Brief browsing. Today's brief comes from TodayPage state — the one the
+  // review just showed — so the swap never re-fetches it (today P2-3).
   const [selectedDate, setSelectedDate] = useState(today)
   const [briefDates, setBriefDates] = useState<Set<string>>(new Set())
-  const [briefContent, setBriefContent] = useState<string | null>(null)
-  const [briefLoading, setBriefLoading] = useState(true)
+  const [otherBrief, setOtherBrief] = useState<{ date: string; content: string | null } | null>(null)
 
   useEffect(() => {
     dp.dailyState.listBriefDates().then((dates) => setBriefDates(new Set(dates))).catch(() => {})
   }, [dp])
 
   useEffect(() => {
-    setBriefLoading(true)
-    dp.dailyState.readDailyBrief(selectedDate).then((content) => {
-      setBriefContent(content)
-      setBriefLoading(false)
-    }).catch(() => setBriefLoading(false))
-  }, [selectedDate, dp])
+    if (selectedDate === today) return
+    let live = true
+    dp.dailyState.readDailyBrief(selectedDate)
+      .then((content) => { if (live) setOtherBrief({ date: selectedDate, content }) })
+      .catch(() => { if (live) setOtherBrief({ date: selectedDate, content: null }) })
+    return () => { live = false }
+  }, [selectedDate, today, dp])
+
+  const briefContent = selectedDate === today
+    ? todayBrief
+    : otherBrief?.date === selectedDate ? otherBrief.content : undefined
+
   const { tasks: localTasks, loading: localLoading, remove: removeLocal, addTask, refresh: refreshLocal } = useLocalTasks({ dueDate: today })
   const { projects } = useProjects()
   const projectMap = useMemo(() => {
@@ -304,49 +341,15 @@ function DashboardMode({ cachedPriorities, cachedEnergy }: { cachedPriorities: P
 
   const remaining = total - completed
 
+  // Primary lane: Priorities → Tasks → collapsed Brief (today P2-1). Habits
+  // live in the right rail under the calendar (RightSidebar).
   return (
-    <>
-      <PageHeader title="Today" />
-      <div className="px-5 py-6 space-y-4 w-full">
-        <ReminderCatchUp />
-        {/* Greeting — demoted to first content block */}
-        {(() => { const g = getGreeting(); return (
-          <div className="mb-2 space-y-1">
-            <h2 className="text-title text-balance">{g.headline}</h2>
-            {total > 0 ? (
-              <p className="text-body text-muted-foreground [text-wrap:pretty]">
-                {remaining === 0 ? 'All done for today.' : `${remaining} item${remaining === 1 ? '' : 's'} remaining`}
-              </p>
-            ) : (
-              <p className="text-body text-muted-foreground [text-wrap:pretty]">{g.subtitle}</p>
-            )}
-          </div>
-        )})()}
+    <PageFrame title="Today" meta={greetingMeta(total > 0 ? remaining : null)} bodyClassName="space-y-4">
+      <ReminderCatchUp />
 
-      {/* Date strip + Brief */}
-      <DateStrip briefDates={briefDates} selected={selectedDate} onSelect={setSelectedDate} />
-      {briefLoading ? (
-        <div className="space-y-2">
-          <Skeleton className="h-5 w-3/4" />
-          <Skeleton className="h-5 w-1/2" />
-        </div>
-      ) : briefContent ? (
-        <div className="rounded-xl border border-border/30 bg-muted/30 p-4">
-          <BriefDisplay markdown={briefContent} />
-        </div>
-      ) : (
-        <p className="text-meta text-muted-foreground text-center py-2">
-          No brief for this date.
-        </p>
-      )}
-
-      {/* Cached priorities */}
       {cachedPriorities && cachedPriorities.length > 0 && (
         <PrioritiesSection initialPriorities={cachedPriorities} initialEnergy={cachedEnergy} />
       )}
-
-      {/* Habits */}
-      <HabitsSection />
 
       {completed > 0 && <ProgressBar completed={completed} total={total} />}
 
@@ -378,8 +381,21 @@ function DashboardMode({ cachedPriorities, cachedEnergy }: { cachedPriorities: P
           </div>
         </CollapsibleSection>
       )}
-      </div>
-    </>
+
+      {/* Only when the day is truly empty — Obsidian daily-note tasks count
+          toward the header's "remaining" even though they aren't listed. */}
+      {!localLoading && total === 0 && (
+        <EmptyState icon={CalendarCheck} kbd="Q">Nothing scheduled today. Add a task with</EmptyState>
+      )}
+
+      <BriefCard
+        today={today}
+        selectedDate={selectedDate}
+        onSelectDate={setSelectedDate}
+        briefDates={briefDates}
+        content={briefContent}
+      />
+    </PageFrame>
   )
 }
 
@@ -387,9 +403,17 @@ function DashboardMode({ cachedPriorities, cachedEnergy }: { cachedPriorities: P
 
 export function TodayPage() {
   const dp = useDataProvider()
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const [reviewComplete, setReviewComplete] = useState<boolean | null>(null) // null = loading
   const [cachedPriorities, setCachedPriorities] = useState<Priority[] | null>(null)
   const [cachedEnergy, setCachedEnergy] = useState<string | null>(null)
+  // Today's brief is read once here and handed to both modes, so the
+  // review → dashboard swap keeps what the user just read (today P2-3).
+  const [todayBrief, setTodayBrief] = useState<string | null | undefined>(undefined)
+
+  useEffect(() => {
+    dp.dailyState.readDailyBrief().then(setTodayBrief).catch(() => setTodayBrief(null))
+  }, [dp])
 
   // Check if today's review has been done
   useEffect(() => {
@@ -416,24 +440,37 @@ export function TodayPage() {
     setReviewComplete(true)
   }, [])
 
-  // Loading state while checking daily state
+  // Review → dashboard lands at the top like a new page instead of
+  // inheriting the review's scroll offset (today P2-3). Before paint.
+  const prevReviewComplete = useRef(reviewComplete)
+  useLayoutEffect(() => {
+    if (prevReviewComplete.current === false && reviewComplete === true) scrollPageToTop()
+    prevReviewComplete.current = reviewComplete
+  }, [reviewComplete])
+
+  // Loading state while checking daily state — same frame, so the header
+  // never flickers in.
   if (reviewComplete === null) {
     return (
-      <>
-        <PageHeader title="Today" />
-        <div className="px-5 py-6 space-y-4 w-full">
-          <Skeleton className="h-32 rounded-lg" />
-          <Skeleton className="h-24 rounded-lg" />
-        </div>
-      </>
+      <PageFrame title="Today" bodyClassName="space-y-4">
+        <Skeleton className="h-32 rounded-xl" />
+        <Skeleton className="h-24 rounded-xl" />
+      </PageFrame>
     )
   }
 
   // Review mode (first open of the day)
   if (!reviewComplete) {
-    return <ReviewMode onComplete={handleReviewComplete} />
+    return <ReviewMode brief={todayBrief} onComplete={handleReviewComplete} />
   }
 
   // Dashboard mode (review done)
-  return <DashboardMode cachedPriorities={cachedPriorities} cachedEnergy={cachedEnergy} />
+  return (
+    <DashboardMode
+      today={today}
+      todayBrief={todayBrief}
+      cachedPriorities={cachedPriorities}
+      cachedEnergy={cachedEnergy}
+    />
+  )
 }

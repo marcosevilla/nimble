@@ -22,8 +22,9 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
 import { taskToast } from '@/lib/taskToast'
-import { PenLine, ArrowRight, FileText, Download, Search, Lightbulb, Quote, CheckSquare, X } from 'lucide-react'
-import { PageHeader } from '@/components/shared/PageHeader'
+import { Inbox as InboxIcon, PenLine, ArrowRight, FileText, Download, Search, Lightbulb, Quote, CheckSquare, X } from 'lucide-react'
+import { PageFrame } from '@/components/shared/PageFrame'
+import { EmptyState } from '@/components/shared/EmptyState'
 import type { LocalTask, Capture, DocFolder, Document } from '@nimble/types'
 
 // ── Route icon map ──
@@ -344,29 +345,25 @@ export function InboxPage() {
   const { focusedId, focusRow } = useRowNavigation(rowIds, openRow, { pages: ['inbox'], keys: rowKeys, memoryKey: 'inbox' })
 
   return (
-    <>
-      <PageHeader
-        title="Inbox"
-        meta={items.length > 0 ? `${items.length} item${items.length !== 1 ? 's' : ''}` : undefined}
-        actions={
-          <button
-            onClick={handleImport}
-            disabled={importing}
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-meta text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:opacity-50"
-            title="Import from Obsidian"
-          >
-            <Download className="size-3" />
-            {importing ? 'Importing…' : 'Import'}
-          </button>
-        }
-      />
-      {/* pl-6 leaves room for the row's hover cluster (checkbox), which
-          hangs outside the column to the left like the Tasks list. The
-          capture field's ml-4 lines its edge up with the rows' content. */}
-      <div className="px-5 py-6 pl-11 space-y-4 w-full min-w-0">
+    <PageFrame
+      title="Inbox"
+      meta={items.length > 0 ? `${items.length} item${items.length !== 1 ? 's' : ''}` : undefined}
+      actions={
+        <button
+          onClick={handleImport}
+          disabled={importing}
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-meta text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:opacity-50"
+          title="Import from Obsidian"
+        >
+          <Download className="size-3" />
+          {importing ? 'Importing…' : 'Import'}
+        </button>
+      }
+      bodyClassName="space-y-4"
+    >
       {/* Note input — command bar style. Never disabled: rapid capture is
           the point (inbox audit P1-4); the ring is the focus state (P2-7). */}
-      <div className="ml-4 flex h-10 items-center gap-2 rounded-xl border border-border/30 bg-muted/30 px-3 transition-colors focus-within:border-ring">
+      <div className="ml-4 flex h-10 items-center gap-2 surface-inset border border-transparent px-3 transition-colors focus-within:border-ring">
         <Search className="size-3.5 shrink-0 text-muted-foreground" />
         <input
           ref={inputRef}
@@ -412,9 +409,9 @@ export function InboxPage() {
       ) : items.length === 0 ? (
         // Inbox zero is the good state (§1.1, inbox audit P2-5): one calm
         // line, no button — Import stays in the header.
-        <p className="text-body text-muted-foreground text-center py-8">
+        <EmptyState icon={InboxIcon}>
           Inbox zero. New thoughts land here — ⌘K or the capture strip.
-        </p>
+        </EmptyState>
       ) : (
         <div>
           {items.map((item) => {
@@ -449,8 +446,7 @@ export function InboxPage() {
           })}
         </div>
       )}
-      </div>
-    </>
+    </PageFrame>
   )
 }
 
@@ -532,9 +528,15 @@ function InboxNoteRow({
         )}
 
         {/* Actions — revealed on hover AND on keyboard focus anywhere in the
-            row (P1-2); each carries its single-key hint. */}
+            row (P1-2); each carries its single-key hint. Out of the layout
+            until then (not just transparent), so in the 640px page column
+            the note text gets the row's full width (C1). Kept mounted while
+            the picker is open — the popover anchors to its trigger. */}
         <div
-          className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          className={cn(
+            'hidden shrink-0 items-center gap-1 group-hover:flex group-focus-within:flex',
+            pickerOpen && 'flex',
+          )}
           onClick={(e) => e.stopPropagation()}
         >
           <Popover open={pickerOpen} onOpenChange={onPickerOpenChange}>
@@ -547,7 +549,7 @@ function InboxNoteRow({
               side="bottom"
               align="end"
               sideOffset={4}
-              className="w-72 gap-0 p-2"
+              className="w-72 gap-0 rounded-xl p-2"
               finalFocus={rowRef}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
@@ -637,7 +639,7 @@ function MoveToDocPicker({ capture, onMoved, onFailed }: { capture: Capture; onM
         <button
           type="button"
           onClick={() => setSelectedFolderId(null)}
-          className={cn('rounded-md px-2 py-0.5 text-label transition-colors', !selectedFolderId ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-hover')}
+          className={cn('rounded-sm px-2 py-0.5 text-label transition-colors', !selectedFolderId ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-hover')}
         >
           All
         </button>
@@ -646,7 +648,7 @@ function MoveToDocPicker({ capture, onMoved, onFailed }: { capture: Capture; onM
             key={f.id}
             type="button"
             onClick={() => setSelectedFolderId(f.id)}
-            className={cn('rounded-md px-2 py-0.5 text-label transition-colors', selectedFolderId === f.id ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-hover')}
+            className={cn('rounded-sm px-2 py-0.5 text-label transition-colors', selectedFolderId === f.id ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-hover')}
           >
             {f.name}
           </button>
@@ -658,9 +660,9 @@ function MoveToDocPicker({ capture, onMoved, onFailed }: { capture: Capture; onM
       <div className="max-h-48 space-y-0.5 overflow-y-auto [scrollbar-gutter:stable]">
         {loading ? (
           <>
-            <Skeleton className="h-8 rounded-md" />
-            <Skeleton className="h-8 rounded-md" />
-            <Skeleton className="h-8 rounded-md" />
+            <Skeleton className="h-8 rounded-sm" />
+            <Skeleton className="h-8 rounded-sm" />
+            <Skeleton className="h-8 rounded-sm" />
           </>
         ) : filteredDocs.length === 0 ? (
           <p className="py-2 text-center text-meta text-muted-foreground">No docs yet</p>
@@ -671,7 +673,7 @@ function MoveToDocPicker({ capture, onMoved, onFailed }: { capture: Capture; onM
               type="button"
               autoFocus={i === 0}
               onClick={() => handleSelect(doc.id)}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors hover:bg-hover"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-body transition-colors hover:bg-hover"
             >
               <FileText className="size-3 shrink-0 text-muted-foreground" />
               <span className="truncate">{doc.title || 'Untitled'}</span>

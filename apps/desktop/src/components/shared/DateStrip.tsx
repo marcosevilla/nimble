@@ -1,108 +1,54 @@
-import { useMemo, useRef, useEffect } from 'react'
-import { cn } from '@/lib/utils'
 import { IconButton } from '@/components/shared/IconButton'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { formatBriefDate, shiftIsoDate } from '@/lib/briefDate'
+import { cn } from '@/lib/utils'
 
 interface DateStripProps {
   briefDates: Set<string>
   selected: string
+  today: string
   onSelect: (date: string) => void
 }
 
-function formatDatePill(dateStr: string): { day: string; weekday: string; isToday: boolean } {
-  const date = new Date(dateStr + 'T12:00:00') // avoid timezone issues
-  const today = new Date()
-  const isToday =
-    date.getFullYear() === today.getFullYear() &&
-    date.getMonth() === today.getMonth() &&
-    date.getDate() === today.getDate()
-  return {
-    day: date.getDate().toString(),
-    weekday: date.toLocaleDateString('en-US', { weekday: 'short' }).slice(0, 2),
-    isToday,
-  }
-}
-
-function generateDateRange(center: string, range: number): string[] {
-  const dates: string[] = []
-  const centerDate = new Date(center + 'T12:00:00')
-  for (let i = -range; i <= range; i++) {
-    const d = new Date(centerDate)
-    d.setDate(d.getDate() + i)
-    dates.push(d.toISOString().slice(0, 10))
-  }
-  return dates
-}
-
-export function DateStrip({ briefDates, selected, onSelect }: DateStripProps) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const dates = useMemo(() => generateDateRange(selected, 14), [selected])
-
-  // Scroll to selected date on mount
-  useEffect(() => {
-    const el = scrollRef.current?.querySelector('[data-selected="true"]')
-    if (el) el.scrollIntoView({ inline: 'center', behavior: 'instant' })
-  }, [selected])
-
-  // Scroll one date pill at a time
-  const scroll = (dir: number) => {
-    const container = scrollRef.current
-    if (!container) return
-    const pills = container.querySelectorAll('button')
-    if (pills.length === 0) return
-    const pillWidth = pills[0].offsetWidth + 4 // pill width + gap
-    container.scrollBy({ left: dir * pillWidth, behavior: 'instant' })
-  }
-
+/** Brief date control — "‹ Sat, Aug 1 ›" in text-meta, living in the brief
+ *  card's header (today P2-5). The old 29-pill strip used the page-title
+ *  token for every numeral; the calendar rail already navigates dates. The
+ *  dot marks a date that has a brief; the label returns to today. */
+export function DateStrip({ briefDates, selected, today, onSelect }: DateStripProps) {
+  const isToday = selected === today
+  const hasBrief = briefDates.has(selected)
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5 text-meta text-muted-foreground">
       <IconButton
-        onClick={() => scroll(-1)}
+        onClick={() => onSelect(shiftIsoDate(selected, -1))}
         tone="subtle"
-        aria-label="Scroll dates left"
+        aria-label="Previous day's brief"
       >
         <ChevronLeft className="size-3.5" />
       </IconButton>
-
-      <div
-        ref={scrollRef}
-        className="flex-1 flex gap-1 overflow-x-hidden py-1 snap-x snap-mandatory"
+      <button
+        type="button"
+        onClick={() => onSelect(today)}
+        disabled={isToday}
+        title={isToday ? undefined : 'Back to today'}
+        className={cn(
+          'inline-flex min-w-20 items-center justify-center gap-1.5 rounded-md px-1 tabular-nums transition-colors',
+          !isToday && 'hover:text-foreground',
+        )}
       >
-        {dates.map((dateStr) => {
-          const { day, weekday, isToday } = formatDatePill(dateStr)
-          const isSelected = dateStr === selected
-          const hasBrief = briefDates.has(dateStr)
-
-          return (
-            <button
-              key={dateStr}
-              data-selected={isSelected}
-              onClick={() => onSelect(dateStr)}
-              style={{ scrollSnapAlign: 'center' }}
-              className={cn(
-                'flex flex-col items-center gap-1 rounded-lg px-3 py-2 min-w-[44px] transition-all duration-150',
-                isSelected
-                  ? 'bg-card text-foreground ring-1 ring-border shadow-xs'
-                  : isToday
-                    ? 'ring-1 ring-foreground/20 text-foreground'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-hover',
-              )}
-            >
-              <span className="text-label">{weekday}</span>
-              <span className="text-title tabular-nums">{day}</span>
-              {hasBrief && !isSelected && (
-                <span className="size-1 rounded-full bg-foreground/40" />
-              )}
-              {!hasBrief && <span className="size-1" />}
-            </button>
-          )
-        })}
-      </div>
-
+        {formatBriefDate(selected, today)}
+        <span
+          className={cn('size-1 rounded-full', hasBrief ? 'bg-foreground/40' : 'bg-transparent')}
+          aria-hidden="true"
+        />
+        {hasBrief && <span className="sr-only">, brief available</span>}
+      </button>
       <IconButton
-        onClick={() => scroll(1)}
+        onClick={() => onSelect(shiftIsoDate(selected, 1))}
+        disabled={selected >= today}
         tone="subtle"
-        aria-label="Scroll dates right"
+        className="disabled:pointer-events-none disabled:opacity-40"
+        aria-label="Next day's brief"
       >
         <ChevronRight className="size-3.5" />
       </IconButton>

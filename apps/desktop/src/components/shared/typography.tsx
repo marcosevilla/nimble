@@ -94,16 +94,52 @@ export function FieldLabel({ className, ...props }: FieldLabelProps) {
   return <label className={cn('text-body text-foreground', className)} {...props} />
 }
 
-type SectionTitleProps = React.HTMLAttributes<HTMLHeadingElement> & {
+type SectionTitleProps = Omit<React.HTMLAttributes<HTMLHeadingElement>, 'children'> & {
   as?: 'h2' | 'h3' | 'h4'
+  /** `lg` (text-title) is reserved for Settings, whose sections are pages
+   *  within a page — the one named exception (cross-cutting move 3). */
+  size?: 'default' | 'lg'
+  /** Dimmer count after the title (text-meta, tabular). */
+  count?: React.ReactNode
+  /** Trailing slot on the same line, pushed to the right edge. */
+  action?: React.ReactNode
+  children?: React.ReactNode
 }
 
+/** One section heading for every page: 13px medium in the foreground, an
+ *  optional dimmer count, an optional right-aligned action. */
 export function SectionTitle({
   className,
   as: Tag = 'h3',
+  size = 'default',
+  count,
+  action,
+  children,
   ...props
 }: SectionTitleProps) {
-  return <Tag className={cn('text-title text-foreground', className)} {...props} />
+  const heading = (
+    <Tag
+      className={cn(
+        size === 'lg' ? 'text-title' : 'text-body-strong',
+        'text-foreground',
+        count !== undefined && 'inline-flex items-baseline gap-1.5',
+        !action && className,
+      )}
+      {...props}
+    >
+      {children}
+      {count !== undefined && (
+        <span className="text-meta text-muted-foreground tabular-nums">{count}</span>
+      )}
+    </Tag>
+  )
+  if (!action) return heading
+  return (
+    <div className={cn('flex items-center justify-between gap-3', className)}>
+      {heading}
+      {action}
+    </div>
+  )
 }
 
 type PageTitleProps = React.HTMLAttributes<HTMLHeadingElement>

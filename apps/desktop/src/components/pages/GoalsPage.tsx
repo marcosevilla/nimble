@@ -34,7 +34,8 @@ import {
   Target,
 } from 'lucide-react'
 import { GoalTimeline } from '@/components/goals/GoalTimeline'
-import { PageHeader } from '@/components/shared/PageHeader'
+import { PageFrame } from '@/components/shared/PageFrame'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { useDetailStore } from '@/stores/detailStore'
 import { GOAL_STATUSES, GOAL_COLORS, statusLabel, statusColor } from '@/lib/goalStatus'
 
@@ -410,16 +411,13 @@ export function GoalsPage() {
 
   if (goalsLoading) {
     return (
-      <>
-        <PageHeader title="Goals" />
-        <div className="max-w-2xl mx-auto p-6 space-y-4 w-full">
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
-            {[...Array(4)].map((_, i) => (
-              <Skeleton key={i} className="h-36 rounded-xl" />
-            ))}
-          </div>
+      <PageFrame title="Goals" bodyClassName="space-y-4">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
+          {[...Array(4)].map((_, i) => (
+            <Skeleton key={i} className="h-36 rounded-xl" />
+          ))}
         </div>
-      </>
+      </PageFrame>
     )
   }
 
@@ -500,37 +498,28 @@ export function GoalsPage() {
   ) : undefined
 
   return (
-    <>
-      <PageHeader
-        title="Goals"
-        meta={`${filteredGoals.length} goal${filteredGoals.length !== 1 ? 's' : ''}`}
-        actions={headerActions}
-        secondary={headerSecondary}
-      />
-      <div className="max-w-2xl mx-auto p-6 space-y-4 w-full">
+    <PageFrame
+      title="Goals"
+      meta={`${filteredGoals.length} goal${filteredGoals.length !== 1 ? 's' : ''}`}
+      actions={headerActions}
+      secondary={headerSecondary}
+      bodyClassName="space-y-4"
+    >
       {/* Content */}
       {filteredGoals.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 space-y-4">
-          <Target className="size-10 text-muted-foreground" />
-          <div className="text-center space-y-1">
-            <p className="text-body text-muted-foreground">
-              No goals yet. Import from Obsidian or create your first goal.
-            </p>
-            <p className="text-meta text-muted-foreground">
-              Goals help you track long-term progress across life areas.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleImport} disabled={importing}>
-              <Download className="size-3.5" />
-              {importing ? 'Importing...' : 'Import from Vault'}
-            </Button>
-            <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+        // Import stays in the header actions; the empty state offers one
+        // action (cross-cutting move 3).
+        <EmptyState
+          icon={Target}
+          action={
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
               <Plus className="size-3.5" />
-              Create goal
+              New goal
             </Button>
-          </div>
-        </div>
+          }
+        >
+          No goals yet. Start one here, or import them from Obsidian.
+        </EmptyState>
       ) : view === 'cards' ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
           {filteredGoals.map((goal) => (
@@ -557,7 +546,6 @@ export function GoalsPage() {
         lifeAreas={lifeAreas}
         onCreated={refresh}
       />
-      </div>
-    </>
+    </PageFrame>
   )
 }

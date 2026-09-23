@@ -41,7 +41,7 @@ import {
 import { FONT_OPTIONS } from '@/lib/fonts'
 import type { ProductFont } from '@/lib/fonts'
 import { IconButton } from '@/components/shared/IconButton'
-import { PageHeader } from '@/components/shared/PageHeader'
+import { PageFrame } from '@/components/shared/PageFrame'
 import { Label as SectionLabel, Meta, SectionTitle } from '@/components/shared/typography'
 import { BackupSection } from '@/components/settings/BackupSection'
 import { TodoistSyncSection } from '@/components/settings/TodoistSyncSection'
@@ -197,7 +197,7 @@ function SectionHeader({
 }) {
   return (
     <div className="space-y-1">
-      <SectionTitle as={as}>{title}</SectionTitle>
+      <SectionTitle as={as} size="lg">{title}</SectionTitle>
       {description && (
         <p className="text-body text-muted-foreground">{description}</p>
       )}
@@ -1290,7 +1290,7 @@ function SyncMaintenance() {
 
 // ── Scroll-spy (settings P2-1) ──
 
-const SECTION_CLASS = 'space-y-4 scroll-mt-[calc(var(--page-header-h)+2rem)]'
+const SECTION_CLASS = 'space-y-4 scroll-mt-[calc(var(--page-header-h)+1.5rem)]'
 const SCROLL_SPY_THRESHOLDS = Array.from({ length: 21 }, (_, i) => i / 20)
 const NAV_CLICK_LOCK_MS = 800
 
@@ -1807,13 +1807,11 @@ export function SettingsPage() {
   }
 
   return (
-    <>
-      <PageHeader title="Settings" />
-      <div className="mx-auto flex max-w-3xl gap-8 p-8 w-full">
+    <PageFrame title="Settings" width="wide" bodyClassName="flex gap-8">
       {/* Left rail — section navigation, generated from SETTINGS_SECTIONS */}
       <nav
         aria-label="Settings sections"
-        className="sticky top-[calc(var(--page-header-h)+2rem)] hidden w-40 shrink-0 self-start md:block"
+        className="sticky top-[calc(var(--page-header-h)+1.5rem)] hidden w-40 shrink-0 self-start md:block"
       >
         <ul className="space-y-0.5 text-body">
           {sections.map((s) => {
@@ -1840,7 +1838,7 @@ export function SettingsPage() {
       {/* Main content — same array, same order */}
       {/* Section offset on every direct child, so the standalone Backups /
           Reminders / Phone alerts components land like the rest. */}
-      <div className="flex-1 min-w-0 space-y-8 [&>section]:scroll-mt-[calc(var(--page-header-h)+2rem)]">
+      <div className="flex-1 min-w-0 space-y-8 [&>section]:scroll-mt-[calc(var(--page-header-h)+1.5rem)]">
         {sections.map((s, i) => (
           <Fragment key={s.id}>
             {i > 0 && !s.standalone && <Separator />}
@@ -1848,7 +1846,6 @@ export function SettingsPage() {
           </Fragment>
         ))}
       </div>
-      </div>
-    </>
+    </PageFrame>
   )
 }

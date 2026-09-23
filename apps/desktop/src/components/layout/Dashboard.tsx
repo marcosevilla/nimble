@@ -276,6 +276,7 @@ export function Dashboard() {
 
   const hideSidebar = currentPage === 'settings' || currentPage === 'session'
   const contentMaxW = hideSidebar ? 'max-w-3xl' : 'max-w-2xl'
+  const pageOwnsScroll = currentPage === 'tasks' || currentPage === 'docs'
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
@@ -291,7 +292,11 @@ export function Dashboard() {
             Each page now renders its own <PageHeader> — there's no longer
             a separate Dashboard title bar. The PageHeader provides the
             Tauri drag region for every page. */}
-        <div ref={scrollRef} className="flex flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+        {/* flex-col so a page's <main> is content-height and PageHeader's
+            `sticky top-0` holds for the whole scroll (settings P2-3). Tasks
+            and Docs own an inner scroller, so their <main> is pinned to the
+            viewport height instead (min-h-0). */}
+        <div ref={scrollRef} data-page-scroller className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
           {focusExpanded ? (
             <FocusView />
           ) : detailTarget && detailMode === 'body' && !(currentPage === 'tasks' && detailTarget.type === 'task') ? (
@@ -309,7 +314,7 @@ export function Dashboard() {
           ) : (
             <main
               key={currentPage}
-              className="flex-1 min-w-0 flex flex-col"
+              className={cn('flex-1 min-w-0 flex flex-col', pageOwnsScroll && 'min-h-0')}
             >
               <PageContent page={currentPage} />
             </main>

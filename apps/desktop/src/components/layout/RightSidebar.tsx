@@ -5,6 +5,8 @@ import { IconButton } from '@/components/shared/IconButton'
 import { PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { Icon } from '@/components/shared/Icon'
 import { cn } from '@/lib/utils'
+import { useAppStore } from '@/stores/appStore'
+import { HabitsSection } from '@/components/goals/HabitsSection'
 
 const MIN_WIDTH = 200
 const MAX_WIDTH = 480
@@ -14,6 +16,9 @@ export function RightSidebar() {
   const setCollapsed = useLayoutStore((s) => s.setRightCollapsed)
   const width = useLayoutStore((s) => s.rightWidth)
   const setRightWidth = useLayoutStore((s) => s.setRightWidth)
+  // Habits moved out of Today's primary lane into the rail (today P2-1,
+  // §2.1 "habits + calendar live in collapsible sidebars").
+  const showHabits = useAppStore((s) => s.currentPage === 'today')
 
   const [dragging, setDragging] = useState(false)
   const startX = useRef(0)
@@ -99,6 +104,11 @@ export function RightSidebar() {
           <div className="p-4 pt-2 flex flex-col flex-1 min-h-0">
             <CalendarPanel />
           </div>
+          {showHabits && (
+            <div className="shrink-0 border-t border-border/30 p-4 min-w-0">
+              <HabitsSection />
+            </div>
+          )}
         </div>
       </div>}
     </aside>

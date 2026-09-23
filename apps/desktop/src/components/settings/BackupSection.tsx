@@ -92,7 +92,7 @@ function DesktopBackupSection() {
   return (
     <section id="backups" className="space-y-4 border-t border-border pt-6" aria-label="Backups">
       <div className="space-y-1">
-        <SectionTitle>Backups</SectionTitle>
+        <SectionTitle size="lg">Backups</SectionTitle>
         <Meta as="p">Automatic daily copies on this Mac, with a separate private online archive.</Meta>
       </div>
       {(error || loadError) && <p className="text-body text-destructive" role="alert">{error || loadError}</p>}

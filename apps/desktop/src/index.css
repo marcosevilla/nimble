@@ -52,6 +52,12 @@
     /* 1.2, not 1: the mono face's ascent+descent is ~1.17em, so a 1em line
        box under-reports the painted digits and tight fits clip them. */
     --text-timer--line-height: 1.2;
+
+    /* Page frame widths (facelift C1). One reading column for every page;
+       `wide` only for Settings and the document editor. Border-box: the
+       frame's px-6 gutter sits inside these widths. */
+    --container-page:      40rem;   /* 640 */
+    --container-page-wide: 48rem;   /* 768 */
 }
 
 @theme inline {
@@ -157,6 +163,21 @@
        figures ever matter. */
     font-variant-numeric: tabular-nums;
     }
+}
+
+/* Three surface tiers (facelift C1, cross-cutting move 2). Padding stays
+   with the caller (`surface-panel p-4` is the Today card recipe).
+   - panel:   a card that holds content (brief, priorities, review step)
+   - inset:   a recessed strip with no edge (reminders, capture field)
+   - popover: floats above the page with the one overlay shadow */
+@utility surface-panel {
+  @apply rounded-xl border border-border/30 bg-card;
+}
+@utility surface-inset {
+  @apply rounded-xl bg-muted/40;
+}
+@utility surface-popover {
+  @apply rounded-xl border border-border/30 bg-popover shadow-popover;
 }
 
 @layer components {
