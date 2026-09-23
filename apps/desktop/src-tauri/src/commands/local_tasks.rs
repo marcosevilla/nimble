@@ -65,11 +65,14 @@ pub async fn create_local_task(
     recurrence_rule: Option<String>,
     section_id: Option<String>,
     label_ids: Option<Vec<String>>,
+    sync_policy: Option<String>,
     command_id: Option<String>,
 ) -> Result<LocalTask, String> {
+    // `sync_policy` is validated in core ("default" | "local_only"); focus
+    // quick-add in the local-only view creates unbound tasks through it.
     let action = NativeTaskAction::Create {
         input: nimble_core::types::CreateTaskInput {
-            sync_policy: None,
+            sync_policy,
             content,
             project_id,
             parent_id,
@@ -176,13 +179,22 @@ pub async fn uncomplete_local_task(
     update_task_status(app, id, "todo".to_string(), None, None, command_id).await
 }
 
+/// What the UI needs after a delete: the service's durable undo token
+/// (valid 10 seconds, redeemed with the focus `undo_delete` action). `None`
+/// when the write ran headless (no focus owner in this process).
+#[derive(serde::Serialize)]
+pub struct DeleteTaskResult {
+    pub undo_token: Option<String>,
+}
+
 #[tauri::command]
 pub async fn delete_local_task(
     app: AppHandle,
     id: String,
     command_id: Option<String>,
-) -> Result<(), String> {
-    write(&app, NativeTaskAction::Delete { id }, command_id).await.map(|_| ())
+) -> Result<DeleteTaskResult, String> {
+    let outcome = write(&app, NativeTaskAction::Delete { id }, command_id).await?;
+    Ok(DeleteTaskResult { undo_token: outcome.undo_token })
 }
 
 #[tauri::command]

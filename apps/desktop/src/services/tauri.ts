@@ -310,6 +310,7 @@ export async function createLocalTask(opts: {
   recurrenceRule?: string
   sectionId?: string
   labelIds?: string[]
+  syncPolicy?: 'default' | 'local_only'
 }): Promise<LocalTask> {
   return invoke<LocalTask>('create_local_task', {
     content: opts.content,
@@ -325,6 +326,7 @@ export async function createLocalTask(opts: {
     recurrenceRule: opts.recurrenceRule,
     sectionId: opts.sectionId,
     labelIds: opts.labelIds,
+    syncPolicy: opts.syncPolicy,
   })
 }
 
@@ -367,8 +369,10 @@ export async function uncompleteLocalTask(id: string): Promise<void> {
   return invoke<void>('uncomplete_local_task', { id })
 }
 
-export async function deleteLocalTask(id: string): Promise<void> {
-  return invoke<void>('delete_local_task', { id })
+/** `undo_token`: the focus service's 10-second delete undo (see `undo_delete`). */
+export async function deleteLocalTask(id: string): Promise<{ undo_token: string | null }> {
+  const result = await invoke<{ undo_token?: string | null }>('delete_local_task', { id })
+  return { undo_token: result?.undo_token ?? null }
 }
 
 export async function reorderLocalTasks(taskIds: string[]): Promise<void> {

@@ -157,6 +157,7 @@ export interface CreateTaskOptions {
   recurrenceRule?: string
   sectionId?: string
   labelIds?: string[]
+  syncPolicy?: 'default' | 'local_only'
 }
 
 /**
@@ -184,6 +185,13 @@ export async function createTask(opts: CreateTaskOptions): Promise<LocalTask> {
   // kind of loss you would not notice for weeks.
   if (opts.labelIds && opts.labelIds.length > 0) {
     throw new TursoError('Labels cannot be set from the web client yet — create the task, then add labels on the desktop app')
+  }
+
+  // Local-only is a desktop policy (the focus owner creates unbound tasks and
+  // forces local-only children in core). Web rows are always 'default', so a
+  // local-only request must fail loudly rather than become an exported task.
+  if (opts.syncPolicy === 'local_only') {
+    throw new TursoError('Local-only tasks can be created only in the desktop app')
   }
 
   const projectId = opts.projectId ?? 'inbox'

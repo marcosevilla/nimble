@@ -1,0 +1,309 @@
+import { useEffect, useId, useRef, useState, type Ref } from 'react'
+import { Check, ChevronDown, ChevronUp, MoreHorizontal, Pause, Play } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { IconButton } from '@/components/shared/IconButton'
+import { PriorityBars } from '@/components/shared/PriorityBars'
+import { Caption, Meta } from '@/components/shared/typography'
+import { FocusTimeboxPicker } from '@/components/focus/FocusTimeboxPicker'
+import { cn } from '@/lib/utils'
+import {
+  cardTiming,
+  controlBlockedReason,
+  dueLabel,
+  isLocalOnly,
+  queueBlockedReason,
+  taskMenuItems,
+  timerControl,
+  type TaskMenuId,
+} from '@/lib/focusQueueIntents'
+import type { FocusAction, FocusCapabilities, FocusEntry, FocusSnapshot, LocalTask } from '@nimble/types'
+
+// ── Shared pieces (also used by the Up next rows) ──
+
+/** Completion circle — its own control, never the row's promote target. */
+export function CompletionButton({
+  title,
+  size = 'md',
+  disabled,
+  reason,
+  onComplete,
+}: {
+  title: string
+  size?: 'sm' | 'md' | 'lg'
+  disabled?: boolean
+  reason?: string | null
+  onComplete: () => void
+}) {
+  const box = size === 'lg' ? 'size-5' : size === 'md' ? 'size-4' : 'size-3.5'
+  return (
+    <button
+      type="button"
+      aria-label={`Complete ${title}`}
+      title={reason ?? undefined}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation()
+        onComplete()
+      }}
+      className={cn(
+        'group/complete relative flex shrink-0 items-center justify-center rounded-full border border-muted-foreground/60 text-transparent transition-colors duration-(--transition-fast) focus-ring hover:border-success hover:text-success disabled:pointer-events-none disabled:opacity-50 after:absolute after:-inset-2',
+        box,
+      )}
+    >
+      <Check className="size-2.5" strokeWidth={3} aria-hidden />
+    </button>
+  )
+}
+
+/** One "More actions" menu for the card and each row. Clicks never reach the row. */
+export function FocusTaskMenu({
+  task,
+  place,
+  onSelect,
+  className,
+}: {
+  task: LocalTask
+  place: 'card' | 'row'
+  onSelect: (id: TaskMenuId) => void
+  className?: string
+}) {
+  const items = taskMenuItems(task, place)
+  return (
+    // Stop propagation at a React ancestor: portal events still bubble to the row.
+    <div className={cn('shrink-0', className)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label={`More actions for ${task.content}`}
+          className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground focus-ring"
+        >
+          <MoreHorizontal className="size-3.5" aria-hidden />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          {items.map((item) => (
+            <div key={item.id}>
+              {item.destructive && <DropdownMenuSeparator />}
+              <DropdownMenuItem variant={item.destructive ? 'destructive' : 'default'} onClick={() => onSelect(item.id)}>
+                {item.label}
+              </DropdownMenuItem>
+            </div>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
+/**
+ * Inline local rename. Enter commits (empty is rejected and keeps editing),
+ * Escape cancels. A failed save keeps the typed text.
+ */
+export function InlineRename({
+  task,
+  className,
+  onCommit,
+  onCancel,
+}: {
+  task: LocalTask
+  className?: string
+  onCommit: (content: string) => Promise<boolean>
+  onCancel: () => void
+}) {
+  const [value, setValue] = useState(task.content)
+  const [error, setError] = useState<string | null>(null)
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    ref.current?.focus()
+    ref.current?.select()
+  }, [])
+  const commit = async () => {
+    if (!value.trim()) {
+      setError('A task name cannot be empty.')
+      return
+    }
+    if (value.trim() === task.content) return onCancel()
+    if (!(await onCommit(value))) ref.current?.focus()
+  }
+  return (
+    <div className="min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
+      <input
+        ref={ref}
+        aria-label={`Rename ${task.content}`}
+        aria-invalid={error ? true : undefined}
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value)
+          setError(null)
+        }}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            void commit()
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            onCancel()
+          }
+        }}
+        className={cn('w-full min-w-0 rounded-sm bg-transparent outline-none focus-ring', className)}
+      />
+      {error && <Caption className="text-destructive">{error}</Caption>}
+    </div>
+  )
+}
+
+// ── The focused-task card ──
+
+export interface FocusTaskCardProps {
+  snapshot: FocusSnapshot
+  capabilities: FocusCapabilities | null
+  /** First queue entry and its resolved task; null renders the empty card. */
+  entry: FocusEntry | null
+  task: LocalTask | null
+  /** Open children, completable inline. */
+  subtasks: LocalTask[]
+  projectName?: string
+  today: string
+  /** Card-only (companion/compact) presentation: the queue is hidden. */
+  compact: boolean
+  onToggleCompact: () => void
+  onAction: (action: FocusAction) => Promise<unknown>
+  onCompleteSubtask: (task: LocalTask) => void
+  onMenu: (id: TaskMenuId, task: LocalTask, entry: FocusEntry) => void
+  renaming?: boolean
+  onRename?: (task: LocalTask, content: string) => Promise<boolean>
+  onRenameCancel?: () => void
+  headingRef?: Ref<HTMLHeadingElement>
+}
+
+/**
+ * Focus Queue's familiar card in Nimble tokens: completion + multiline title
+ * + actions, metadata, inline subtasks, then the timer bottom-left and the
+ * circular Start/Pause bottom-right. Rendering it never starts timing.
+ */
+export function FocusTaskCard({
+  snapshot,
+  capabilities,
+  entry,
+  task,
+  subtasks,
+  projectName,
+  today,
+  compact,
+  onToggleCompact,
+  onAction,
+  onCompleteSubtask,
+  onMenu,
+  renaming,
+  onRename,
+  onRenameCancel,
+  headingRef,
+}: FocusTaskCardProps) {
+  const reasonId = useId()
+  const toggle = (
+    <IconButton
+      size="lg"
+      aria-label={compact ? 'Show queue' : 'Hide queue'}
+      aria-expanded={!compact}
+      onClick={onToggleCompact}
+      className="focus-ring"
+    >
+      {compact ? <ChevronDown className="size-3.5" aria-hidden /> : <ChevronUp className="size-3.5" aria-hidden />}
+    </IconButton>
+  )
+
+  if (!entry || !task) {
+    return (
+      <section aria-label="Focused task" className="relative flex min-h-32 flex-col items-center justify-center gap-1 border-b border-border px-8 py-6 text-center">
+        <div className="absolute top-2 right-3">{toggle}</div>
+        <p className="text-body-strong text-foreground">Queue is clear</p>
+        <Meta>{compact ? 'Show the queue to add what’s next.' : 'Pick a source below and queue what you want to work on.'}</Meta>
+      </section>
+    )
+  }
+
+  const control = timerControl(snapshot, entry)
+  const blocked = controlBlockedReason(control, capabilities)
+  const writeBlocked = queueBlockedReason(capabilities)
+  const timing = cardTiming(snapshot, entry)
+  const running = control.label === 'Pause' || control.label === 'End break'
+  const due = dueLabel(task, today)
+  const meta = [projectName, isLocalOnly(task) ? 'Local only' : null, due].filter(Boolean).join(' · ')
+
+  return (
+    <section aria-label="Focused task" className="border-b border-border px-4 pt-4 pb-3">
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5">
+          <CompletionButton
+            title={task.content}
+            size="lg"
+            disabled={writeBlocked != null}
+            reason={writeBlocked}
+            onComplete={() => void onAction({ kind: 'complete', occurrence_id: entry.occurrence_id })}
+          />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-1.5">
+            {renaming && onRename && onRenameCancel ? (
+              <InlineRename task={task} className="text-title" onCommit={(c) => onRename(task, c)} onCancel={onRenameCancel} />
+            ) : (
+              <h2 ref={headingRef} tabIndex={-1} className="min-w-0 flex-1 text-title break-words text-foreground outline-none">
+                {task.content}
+              </h2>
+            )}
+            <div className="flex shrink-0 items-center gap-0.5">
+              <FocusTaskMenu task={task} place="card" onSelect={(id) => onMenu(id, task, entry)} />
+              {toggle}
+            </div>
+          </div>
+          <div className="mt-1 flex min-w-0 items-center gap-1.5">
+            <PriorityBars priority={task.priority} />
+            {meta && <Meta className="truncate">{meta}</Meta>}
+          </div>
+        </div>
+      </div>
+
+      {subtasks.length > 0 && (
+        <ul aria-label="Subtasks" className="mt-2.5 ml-7.5 flex flex-col gap-1.5">
+          {subtasks.map((sub) => (
+            <li key={sub.id} className="flex min-w-0 items-center gap-2">
+              <CompletionButton title={sub.content} size="sm" onComplete={() => onCompleteSubtask(sub)} />
+              <span className="min-w-0 truncate text-body text-foreground">{sub.content}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <FocusTimeboxPicker
+          config={timing.config}
+          presentation={timing.presentation}
+          caption={timing.caption}
+          disabledReason={writeBlocked}
+          onConfigure={(config) => void onAction({ kind: 'configure', occurrence_id: entry.occurrence_id, config })}
+        />
+        <Button
+          aria-label={control.label}
+          aria-describedby={blocked ? reasonId : undefined}
+          disabled={blocked != null}
+          variant={running ? 'secondary' : 'default'}
+          onClick={() => void onAction(control.action)}
+          className="size-11 shrink-0 rounded-full p-0"
+        >
+          {running ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
+        </Button>
+      </div>
+      {blocked && (
+        <Caption as="p" id={reasonId} className="mt-1.5 text-right">
+          {blocked}
+        </Caption>
+      )}
+    </section>
+  )
+}

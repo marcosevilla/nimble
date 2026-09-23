@@ -179,6 +179,8 @@ export interface DataProvider {
       recurrenceRule?: string
       sectionId?: string
       labelIds?: string[]
+      /** 'local_only' creates an unbound task (never exported). Omitted = 'default'. */
+      syncPolicy?: 'default' | 'local_only'
     }): Promise<LocalTask>
     update(opts: {
       id: string
@@ -211,7 +213,11 @@ export interface DataProvider {
     updateStatus(id: string, status: TaskStatus, note?: string, expectedDueDate?: string | null): Promise<void>
     complete(id: string, expectedDueDate: string | null): Promise<void>
     uncomplete(id: string): Promise<void>
-    delete(id: string): Promise<void>
+    /**
+     * `undo_token` redeems the delete through the focus `undo_delete` action
+     * for 10 seconds (null when no focus owner ran the write).
+     */
+    delete(id: string): Promise<{ undo_token: string | null }>
     reorder(taskIds: string[]): Promise<void>
     previewMarkdownMigration(): Promise<TasksMdPreview>
     migrateToMarkdown(): Promise<TasksMdResult>
