@@ -58,6 +58,53 @@ pub async fn record_activity(
     })
 }
 
+/// One task status change, as the activity log sees it.
+pub struct StatusActivity<'a> {
+    pub content: Option<&'a str>,
+    pub old_status: Option<&'a str>,
+    pub new_status: &'a str,
+    pub note: Option<&'a str>,
+    /// (before_due, after_due) when completing advanced a recurring task.
+    pub recurrence: Option<(&'a str, &'a str)>,
+}
+
+/// Which row a status change becomes. Completion and reopening get their own
+/// actions carrying the title, so the timeline names the task and counts it
+/// (re-score 1c: every completion read "Status changed" with no name). The
+/// completed row deliberately has no `new_status`: the timeline prints
+/// `old → new` whenever both keys exist, which would hide the title.
+pub fn status_activity(s: &StatusActivity) -> (&'static str, serde_json::Value) {
+    let mut meta = serde_json::Map::new();
+    if let Some(c) = s.content {
+        meta.insert("content".into(), c.into());
+    }
+    let action = if let Some((from, to)) = s.recurrence {
+        meta.insert("from".into(), from.into());
+        meta.insert("to".into(), to.into());
+        "task_recurred"
+    } else if s.new_status == "complete" {
+        meta.insert("old_status".into(), s.old_status.unwrap_or_default().into());
+        "task_completed"
+    } else if s.old_status == Some("complete") {
+        meta.insert("new_status".into(), s.new_status.into());
+        "task_uncompleted"
+    } else {
+        meta.insert("old_status".into(), s.old_status.unwrap_or_default().into());
+        meta.insert("new_status".into(), s.new_status.into());
+        "status_changed"
+    };
+    if let Some(n) = s.note {
+        meta.insert("note".into(), n.into());
+    }
+    (action, serde_json::Value::Object(meta))
+}
+
+/// Fire-and-forget, like `log_activity`.
+pub async fn log_task_status(pool: &SqlitePool, task_id: &str, s: StatusActivity<'_>) {
+    let (action, meta) = status_activity(&s);
+    log_activity(pool, action, Some(task_id), Some(meta)).await;
+}
+
 /// Get activity log entries for a date range with optional filters
 pub async fn get_activity_log(
     pool: &SqlitePool,
@@ -127,4 +174,54 @@ pub async fn get_activity_summary(
         .into_iter()
         .map(|(action_type, count)| ActivitySummary { action_type, count })
         .collect())
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::{status_activity, StatusActivity};
+    use serde_json::json;
+
+    fn s<'a>(old: Option<&'a str>, new: &'a str) -> StatusActivity<'a> {
+        StatusActivity { content: Some("Pay taxes"), old_status: old, new_status: new, note: None, recurrence: None }
+    }
+
+    #[test]
+    fn completion_is_a_named_task_completed() {
+        let (a, m) = status_activity(&s(Some("in_progress"), "complete"));
+        assert_eq!(a, "task_completed");
+        assert_eq!(m, json!({"content": "Pay taxes", "old_status": "in_progress"}));
+    }
+
+    #[test]
+    fn reopening_is_task_uncompleted() {
+        let (a, m) = status_activity(&s(Some("complete"), "todo"));
+        assert_eq!(a, "task_uncompleted");
+        assert_eq!(m, json!({"content": "Pay taxes", "new_status": "todo"}));
+    }
+
+    #[test]
+    fn recurrence_wins_over_completion() {
+        let mut x = s(Some("todo"), "complete");
+        x.recurrence = Some(("2026-09-01", "2026-09-02"));
+        let (a, m) = status_activity(&x);
+        assert_eq!(a, "task_recurred");
+        assert_eq!(m, json!({"content": "Pay taxes", "from": "2026-09-01", "to": "2026-09-02"}));
+    }
+
+    #[test]
+    fn other_moves_stay_status_changed_with_note() {
+        let mut x = s(Some("todo"), "blocked");
+        x.note = Some("waiting on Sara");
+        let (a, m) = status_activity(&x);
+        assert_eq!(a, "status_changed");
+        assert_eq!(m, json!({"content": "Pay taxes", "old_status": "todo", "new_status": "blocked", "note": "waiting on Sara"}));
+    }
+
+    #[test]
+    fn unknown_title_and_old_status_are_tolerated() {
+        let x = StatusActivity { content: None, old_status: None, new_status: "in_progress", note: None, recurrence: None };
+        let (a, m) = status_activity(&x);
+        assert_eq!(a, "status_changed");
+        assert_eq!(m, json!({"old_status": "", "new_status": "in_progress"}));
+    }
 }
