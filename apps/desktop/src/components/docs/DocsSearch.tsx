@@ -28,6 +28,7 @@ export function DocsSearch() {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Guards against an older, slower query overwriting a newer one's results.
   const requestId = useRef(0)
+  const listId = `${DOCS_SEARCH_INPUT_ID}-results`
 
   const run = useCallback(async (q: string) => {
     const id = ++requestId.current
@@ -70,6 +71,14 @@ export function DocsSearch() {
 
   const clear = useCallback(() => { setQuery(''); setHits([]); setActiveIdx(0) }, [])
 
+  // Keep the active option in view as arrow keys move it — inside the nav's
+  // capped tree region, the highlight can otherwise walk off screen (re-score
+  // shell N-P1-1 review, docs search minor 1).
+  useEffect(() => {
+    if (hits.length === 0) return
+    document.getElementById(`${listId}-${activeIdx}`)?.scrollIntoView({ block: 'nearest' })
+  }, [activeIdx, hits.length, listId])
+
   const openHit = useCallback((hit: DocsSearchHit) => {
     const id = hit.key.slice(hit.key.indexOf(':') + 1)
     if (hit.backend === 'native') selectDoc(id)
@@ -88,7 +97,6 @@ export function DocsSearch() {
   }
 
   const showList = query.trim().length > 0
-  const listId = `${DOCS_SEARCH_INPUT_ID}-results`
 
   return (
     <div className="py-1">

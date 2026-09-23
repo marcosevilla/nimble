@@ -177,14 +177,14 @@ function SortableNavItem({
     'aria-current': isActive ? ('page' as const) : undefined,
     'aria-expanded': expanded && treeId ? treeOpen : undefined,
     onClick,
-    className: cn(navItemClasses(expanded, isActive), 'touch-none'),
+    className: cn(navItemClasses(expanded, isActive), 'touch-none', 'shrink-0'),
   }
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={cn('relative flex flex-col', isDragging && 'opacity-60 shadow-md z-10')}
+      className={cn('relative flex flex-col', showTree ? 'min-h-0' : 'shrink-0', isDragging && 'opacity-60 shadow-md z-10')}
     >
       {expanded ? (
         <button type="button" {...shared}>
@@ -210,10 +210,12 @@ function SortableNavItem({
           <ChevronRight className={cn('size-3.5 transition-transform duration-(--transition-fast)', treeOpen && 'rotate-90')} />
         </IconButton>
       )}
-      {/* Own scroll region, capped so every page item stays in view (re-score shell N-P1-1) */}
+      {/* Own scroll region that shrinks (min-h-0) and gives ground first, so every
+          page item stays in view even with a tall tree (re-score shell N-P1-1).
+          py-1/pr-1 keep the focus ring from clipping against the scroll edge. */}
       {showTree && (
         <div
-          className="mt-0.5 mb-1 max-h-[40vh] overflow-y-auto overflow-x-hidden overscroll-contain pl-4 [scrollbar-width:thin]"
+          className="mt-0.5 mb-1 min-h-0 max-h-[40vh] overflow-y-auto overflow-x-hidden overscroll-contain py-1 pl-4 pr-1 [scrollbar-width:thin]"
           role="group"
           aria-label={`${label} list`}
         >
