@@ -6,7 +6,9 @@ Updated 2026-09-23 (agentation-1 merged + installed at `0ad4bd5`). Before that 2
 
 - [x] **Bug:** calendar events showed 7h late (e.g. Covered CA 10:00 PDT displayed as 17:00). Root cause: `parsers/ical.rs` stripped the `Z` from UTC `DTSTART`s (1,405 of Google's feed lines) and treated them as local; `TZID` zones other than local were also read as local, and events were bucketed by their UTC date. Fixed to convert UTC/`TZID` times into the local zone before date-matching and formatting; floating and unknown (Windows) TZIDs stay as written. Tests: `nimble-core/tests/ical_timezones.rs`; verified against the live feed.
 - [x] **Second bug, same symptom ("sync is off"):** `useCalendar` returned on any cache hit, so a day with cached rows never refetched (Today was stuck on the 2026-09-22 02:22 UTC snapshot, missing 18 newer events). Now shows the cache at once, then revalidates via `fetch_calendar_events` (backend still serves the cache while under 15 min old); a failed revalidation keeps the cached rows. Logic in `src/lib/calendarLoad.ts`, tests `tests/calendarLoad.test.mjs`.
-- [ ] Verify on the installed app (verification page linked in `~/Developer/second-brain/outputs/INDEX.md`).
+- [x] Installed `c3443b5` 2026-09-23 08:55; app refetched at launch. Independent zoneinfo check vs Google feed: **36/36 timed events match** (Sep 20–26; 15 times corrected, 18 newly showing). Page: https://claude.ai/artifact/Ggs3cG3tv1r7oRbGX9TaSL (local copy in second-brain `outputs/2026/`).
+- [ ] Marco: phone spot-check of a few events against Google Calendar (optional).
+- [ ] Minor: event titles show iCal escapes literally (e.g. `shot list\, grade`) — `ical` crate doesn't unescape TEXT values.
 - [ ] "Work" iCal feed returns 404 from Google (likely the revoked Canary calendar) — remove it in Settings → Calendar.
 - [ ] Separate, not fixed: the iCal parser doesn't expand `RRULE` recurring events, so only the first occurrence of a series shows.
 
