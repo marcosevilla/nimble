@@ -9,6 +9,22 @@ Status: **written, not yet run.** This is the manual native acceptance list for 
 - For each item, record the date, build commit, macOS version, display setup, and pass or fail with a note.
 - "Timer total" means the total in the committed snapshot, which both windows show. The engine is the only clock.
 
+## Companion permissions (verify in the dev log)
+
+The companion has its own capability, `capabilities/focus.json` (`focus-companion`). It is not in `default`. Its permissions are exactly:
+
+- `core:event:allow-listen` and `core:event:allow-unlisten`, for the provider event bridge and resize events.
+- `core:window:allow-current-monitor`, `allow-primary-monitor`, `allow-outer-position`, `allow-inner-size` and `allow-scale-factor`, all read-only geometry.
+
+It has no fs, shell, clipboard, show/hide/size/position or start-dragging permission. The native titlebar drags without a permission. Resizing, positioning, showing main and opening a task go through the validated app commands `focus_companion_apply_geometry` and `focus_open_task_in_main`. Tauri app commands are not per-window gated without an app manifest.
+
+0. Run the companion with the dev log open. Confirm there is no `not allowed` / permission error while it:
+   - loads,
+   - receives focus changes,
+   - reads monitor geometry,
+   - resizes (compact and expanded),
+   - opens details in main.
+
 ## Window: open, activation, always-on-top
 
 1. From expanded focus in main, click **Pop out**. The companion appears at once, already key, at the top-right of the current display's work area. Nothing starts, pauses or changes a total.
@@ -74,7 +90,13 @@ Status: **written, not yet run.** This is the manual native acceptance list for 
 
 ## Sound
 
-28. A timebox reaching zero plays the chime exactly once, even with both windows open. Overtime continues in red and no further chime plays.
+28. A timebox reaching zero plays the chime exactly once and on time (within about a second of the displayed 0:00, not up to 20 s late), even with both windows open. Overtime continues in red and no further chime plays.
 29. Completing the focused task plays the completion sound once, with both windows open.
 30. With mute on (footer speaker toggle), neither sound plays, and a later unmute does not replay a missed sound.
 31. With output muted or no audio device, timing and totals are unaffected.
+32. A Pomodoro round end and a break end each chime once, on time. The card flips to "Start break" / "Start next round" at the boundary, not up to 20 s later.
+
+## Display ticking
+
+33. A running timer ticks about once a second in main, the banner and the companion, never in 20-second jumps. It never steps backwards when a heartbeat snapshot arrives.
+34. When the timer is paused, stopped or hidden, the display stops ticking. When the window is shown again, it shows the committed total.

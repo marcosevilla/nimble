@@ -104,17 +104,24 @@ export interface CardTiming {
   config: FocusConfig
 }
 
-export function cardTiming(snapshot: FocusSnapshot, entry: FocusEntry): CardTiming {
+/**
+ * `displayExtraMs` is display-only unsettled running time (see
+ * `lib/focusDisplay.ts`), added to the quantity that ticks. Phase colors and
+ * overtime derive from the interpolated value; a Pomodoro round never shows
+ * more than its target (the engine caps it too).
+ */
+export function cardTiming(snapshot: FocusSnapshot, entry: FocusEntry, displayExtraMs = 0): CardTiming {
   const session = sessionFor(snapshot, entry)
   const config = session?.config ?? entry.config
-  const total = snapshot.totals[entry.occurrence_id] ?? 0
+  const extra = session?.status === 'running' ? Math.max(0, displayExtraMs) : 0
+  const total = (snapshot.totals[entry.occurrence_id] ?? 0) + extra
   if (config.mode === 'pomodoro') {
     const round = session?.round ?? 1
     const onBreak = session?.phase === 'break'
     return {
       presentation: onBreak
-        ? timerPresentation(session?.break_ms ?? 0, config.break_ms)
-        : timerPresentation(session?.round_work_ms ?? 0, config.work_ms),
+        ? timerPresentation((session?.break_ms ?? 0) + extra, config.break_ms)
+        : timerPresentation(Math.min((session?.round_work_ms ?? 0) + extra, config.work_ms), config.work_ms),
       caption: onBreak ? `Break · round ${round} of ${config.rounds}` : `Round ${round} of ${config.rounds}`,
       config,
     }

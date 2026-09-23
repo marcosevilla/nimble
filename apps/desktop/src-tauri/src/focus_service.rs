@@ -77,6 +77,9 @@ pub struct FocusRuntime {
     owns_profile: bool,
     /// Heartbeat + window/quit/power lifecycle installed (see `focus_window`).
     lifecycle_wired: AtomicBool,
+    /// Poked after every commit so the heartbeat re-plans its next wake
+    /// (a new timebox/Pomodoro boundary may now be sooner than 20 s).
+    heartbeat_wake: Arc<tokio::sync::Notify>,
 }
 
 fn not_profile_owner() -> FocusError {
@@ -139,7 +142,12 @@ impl FocusRuntime {
             last_emitted: std::sync::Mutex::new(None),
             owns_profile,
             lifecycle_wired: AtomicBool::new(false),
+            heartbeat_wake: Arc::new(tokio::sync::Notify::new()),
         }
+    }
+
+    pub fn heartbeat_wake(&self) -> Arc<tokio::sync::Notify> {
+        self.heartbeat_wake.clone()
     }
 
     pub fn owns_profile(&self) -> bool {
@@ -203,10 +211,21 @@ impl FocusRuntime {
         self.resolve(true).await
     }
 
-    /// The live service for incoming applies, or `None` to use the headless
-    /// checkpoint path (nothing can be running when this process isn't the writer).
-    pub async fn live(&self) -> Option<Arc<FocusService>> {
-        self.writer().await.ok()
+    /// Gate for incoming applies (Todoist, Turso, Google Calendar).
+    ///
+    /// - Profile owner and writer: `Ok(Some(service))`; applies join its lock
+    ///   and clock.
+    /// - Profile owner but not the queue writer (a restored profile):
+    ///   `Ok(None)`, the headless checkpoint path. Nothing can be timing live,
+    ///   because this process holds the owner lock.
+    /// - Not the profile owner: `Err`. Another process owns the profile and
+    ///   may be timing live, so this process must not apply anything to the
+    ///   shared database at all, not even headlessly.
+    pub async fn apply_service(&self) -> Result<Option<Arc<FocusService>>, FocusError> {
+        if !self.owns_profile {
+            return Err(not_profile_owner());
+        }
+        Ok(self.writer().await.ok())
     }
 
     pub async fn capabilities(&self) -> FocusCapabilities {
@@ -274,6 +293,7 @@ fn runtime(app: &AppHandle) -> Option<tauri::State<'_, FocusRuntime>> {
 pub async fn committed(app: &AppHandle, snapshot: &FocusSnapshot, command_id: Option<String>) {
     let Some(rt) = runtime(app) else { return };
     rt.emit(app, snapshot, command_id);
+    rt.heartbeat_wake.notify_one();
     let Ok(service) = rt.writer().await else { return };
     let token = match service.claim_sound().await {
         Ok(Some(token)) => token,
@@ -305,6 +325,13 @@ pub async fn interrupt(app: &AppHandle, reason: &str) {
     }
 }
 
+/// Milliseconds until the owner's running segment reaches its next boundary.
+pub async fn ms_until_boundary(app: &AppHandle) -> Option<u64> {
+    let rt = runtime(app)?;
+    let service = rt.writer().await.ok()?;
+    service.ms_until_boundary().await.ok().flatten()
+}
+
 /// One heartbeat tick: checkpoint the live session from the service's own
 /// monotonic clock. Idle ticks commit nothing and emit nothing new.
 pub async fn heartbeat(app: &AppHandle) {
@@ -329,11 +356,12 @@ pub async fn broadcast(app: &AppHandle) {
     }
 }
 
-/// The live service for sync/calendar applies (see `FocusRuntime::live`).
-pub async fn live(app: &AppHandle) -> Option<Arc<FocusService>> {
+/// The apply gate for sync/calendar runners (see `FocusRuntime::apply_service`).
+/// `Err` means skip the run entirely: another process owns this profile.
+pub async fn apply_service(app: &AppHandle) -> Result<Option<Arc<FocusService>>, FocusError> {
     match runtime(app) {
-        Some(rt) => rt.live().await,
-        None => None,
+        Some(rt) => rt.apply_service().await,
+        None => Ok(None),
     }
 }
 
@@ -522,5 +550,25 @@ mod tests {
         let caps = rt.capabilities().await;
         assert!(caps.queue_read && !caps.queue_write && !caps.live_timing && !caps.companion);
         assert!(caps.reason.unwrap().contains("Another Nimble process"));
+    }
+
+    #[tokio::test]
+    async fn non_owner_sync_applies_are_refused_instead_of_going_headless() {
+        // Non-owner: the owner may be timing live, so no apply path at all
+        // (not even the headless checkpoint path) may run.
+        let non_owner = FocusRuntime::start(memory_pool().await, false).await;
+        let e = non_owner.apply_service().await.err().expect("refused");
+        assert!(matches!(e.code, FocusErrorCode::WrongOwner));
+
+        // Owner and writer: applies join the live service.
+        let owner = FocusRuntime::start(memory_pool().await, true).await;
+        assert!(owner.apply_service().await.unwrap().is_some());
+
+        // Owner of a restored (other-device) profile: headless is safe,
+        // because this process holds the lock and nothing is timing.
+        let restored_pool = memory_pool().await;
+        FocusService::new(restored_pool.clone(), "other-device".into()).initialize().await.unwrap();
+        let restored = FocusRuntime::start(restored_pool, true).await;
+        assert!(restored.apply_service().await.unwrap().is_none());
     }
 }

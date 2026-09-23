@@ -1006,3 +1006,100 @@ async fn two_subscribers_cannot_both_claim_one_sound() {
     assert!(first.is_some_and(|t| t.starts_with("complete:")));
     assert_eq!(h.service.claim_sound().await.unwrap(), None);
 }
+
+async fn configured(h: &fixture::Harness, config: FocusConfig) -> String {
+    let t = h.task("B").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![t],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Configure {
+        occurrence_id: oid.clone(),
+        config,
+    })
+    .await
+    .unwrap();
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    oid
+}
+
+#[tokio::test]
+async fn next_boundary_accounts_for_unsettled_time_and_vanishes_in_overtime() {
+    let h = fixture::Harness::new().await;
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), None, "nothing live");
+    let oid = configured(
+        &h,
+        FocusConfig { mode: FocusMode::Timebox, budget_ms: Some(60_000), work_ms: 1_500_000, break_ms: 300_000, rounds: 4 },
+    )
+    .await;
+    h.clock.advance(15_000);
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), Some(45_000));
+    h.service.heartbeat().await.unwrap();
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), Some(45_000));
+    h.clock.advance(20_000);
+    h.service.heartbeat().await.unwrap();
+    h.clock.advance(20_000);
+    h.service.heartbeat().await.unwrap();
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), Some(5_000));
+    // Waking exactly at the boundary (not a full 20 s later) settles the
+    // crossing and its chime on time.
+    h.clock.advance(5_000);
+    let snap = h.service.heartbeat().await.unwrap();
+    assert_eq!(snap.totals[&oid], 60_000);
+    assert!(h.service.claim_sound().await.unwrap().is_some_and(|t| t.starts_with("chime:")));
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), None, "overtime has no further boundary");
+}
+
+#[tokio::test]
+async fn count_up_has_no_boundary() {
+    let h = fixture::Harness::new().await;
+    configured(
+        &h,
+        FocusConfig { mode: FocusMode::CountUp, budget_ms: None, work_ms: 1_500_000, break_ms: 300_000, rounds: 4 },
+    )
+    .await;
+    h.clock.advance(5_000);
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn pomodoro_round_and_break_boundaries_signal_one_sound_each() {
+    let h = fixture::Harness::new().await;
+    configured(
+        &h,
+        FocusConfig { mode: FocusMode::Pomodoro, budget_ms: None, work_ms: 60_000, break_ms: 60_000, rounds: 3 },
+    )
+    .await;
+    h.clock.advance(20_000);
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), Some(40_000));
+    h.service.heartbeat().await.unwrap();
+    h.clock.advance(20_000);
+    h.service.heartbeat().await.unwrap();
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), Some(20_000));
+    h.clock.advance(20_000);
+    let snap = h.service.heartbeat().await.unwrap();
+    assert_eq!(snap.session.unwrap().phase, FocusPhase::RoundReady);
+    let (a, b) = tokio::join!(h.service.claim_sound(), h.service.claim_sound());
+    assert_eq!([a.unwrap(), b.unwrap()].iter().flatten().count(), 1, "round end signals once");
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), None, "round_ready is not live");
+    h.send(FocusAction::StartBreak).await.unwrap();
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), Some(60_000));
+    for _ in 0..2 {
+        h.clock.advance(20_000);
+        h.service.heartbeat().await.unwrap();
+    }
+    assert_eq!(h.service.claim_sound().await.unwrap(), None, "no signal mid-break");
+    h.clock.advance(20_000);
+    let snap = h.service.heartbeat().await.unwrap();
+    assert_eq!(snap.session.unwrap().phase, FocusPhase::WorkReady);
+    assert!(h.service.claim_sound().await.unwrap().is_some_and(|t| t.starts_with("chime:")));
+    assert_eq!(h.service.claim_sound().await.unwrap(), None);
+}

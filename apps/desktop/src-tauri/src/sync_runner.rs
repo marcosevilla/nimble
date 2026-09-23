@@ -7,7 +7,9 @@ pub async fn run_and_emit(
     app: &AppHandle,
 ) -> nimble_core::Result<nimble_core::integrations::todoist::sync_loop::SyncReport> {
     let pool = app.state::<SqlitePool>();
-    let focus = crate::focus_service::live(app).await;
+    let focus = crate::focus_service::apply_service(app)
+        .await
+        .map_err(|e| nimble_core::Error::Other(format!("wrong_owner: {}", e.message)))?;
     let report = nimble_core::integrations::todoist::sync_loop::run_sync_with_focus(
         pool.inner(),
         focus.as_deref(),
@@ -27,7 +29,8 @@ pub async fn run_and_emit(
 /// the next trigger to retry (the outbox and sync_token make this safe).
 pub async fn run_if_due_and_emit(app: &AppHandle, min_interval_secs: i64) {
     let pool = app.state::<SqlitePool>();
-    let focus = crate::focus_service::live(app).await;
+    // A non-owner process never syncs: the owner may be timing live.
+    let Ok(focus) = crate::focus_service::apply_service(app).await else { return };
     match nimble_core::integrations::todoist::sync_loop::run_sync_if_due_with_focus(
         pool.inner(),
         min_interval_secs,
@@ -92,6 +95,10 @@ async fn run_turso_report(app: &AppHandle, min_interval_secs: i64) -> TursoRunRe
     let Ok(_guard) = TURSO_LOCK.try_lock() else {
         return TursoRunReport::skipped("already_running");
     };
+    // A non-owner process never pushes or pulls: the owner may be timing live.
+    let Ok(focus) = crate::focus_service::apply_service(app).await else {
+        return TursoRunReport::skipped("not_profile_owner");
+    };
     let state = app.state::<SqlitePool>();
     let pool = state.inner();
     if nimble_core::db::recovery::require_activation_clear(pool).await.is_err() {
@@ -123,7 +130,6 @@ async fn run_turso_report(app: &AppHandle, min_interval_secs: i64) -> TursoRunRe
     .await;
     // Independent outcomes preserve the existing rule: failed push must not suppress pull.
     let pushed = nimble_core::db::sync::push(pool, &url, &token).await;
-    let focus = crate::focus_service::live(app).await;
     let pulled = nimble_core::db::sync::pull_with_focus(pool, &url, &token, focus.as_deref()).await;
     if pulled.as_ref().is_ok_and(|n| *n > 0) {
         let _ = app.emit("remote-sync-applied", ());
@@ -152,6 +158,7 @@ pub async fn push_turso(app: &AppHandle) -> Result<u64, String> {
     let _guard = TURSO_LOCK
         .try_lock()
         .map_err(|_| "Sync already running".to_owned())?;
+    crate::focus_service::apply_service(app).await.map_err(|e| e.message)?;
     let pool = app.state::<SqlitePool>();
     let (url, token) = turso_credentials(pool.inner())
         .await
@@ -170,7 +177,7 @@ pub async fn pull_turso(app: &AppHandle) -> Result<u64, String> {
         .await
         .map_err(|_| "Cannot read sync configuration")?
         .ok_or("Turso is not configured")?;
-    let focus = crate::focus_service::live(app).await;
+    let focus = crate::focus_service::apply_service(app).await.map_err(|e| e.message)?;
     let count = nimble_core::db::sync::pull_with_focus(pool.inner(), &url, &token, focus.as_deref())
         .await
         .map_err(|_| "Turso pull failed")?;

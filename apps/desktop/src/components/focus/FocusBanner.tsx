@@ -8,6 +8,7 @@ import { cardTiming, controlBlockedReason, timerControl } from '@/lib/focusQueue
 import { isDroppedRepeat, sendFocusAction, useFocusCache } from '@/stores/focusStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import type { FocusAction, FocusCapabilities, FocusSnapshot, LocalTask } from '@nimble/types'
+import { useFocusDisplayExtra } from '@/hooks/useFocusDisplayExtra'
 
 const PHASE_CLASS = {
   normal: '',
@@ -35,10 +36,11 @@ export interface FocusBannerViewProps {
 export function FocusBannerView({ snapshot, capabilities, task, busy, onAction, onExpand }: FocusBannerViewProps) {
   const reasonId = useId()
   const entry = snapshot.queue[0]
+  const displayExtra = useFocusDisplayExtra(snapshot, entry ?? null, capabilities?.live_timing === true)
   if (!entry) return null
   const control = timerControl(snapshot, entry)
   const blocked = controlBlockedReason(control, capabilities)
-  const timing = cardTiming(snapshot, entry)
+  const timing = cardTiming(snapshot, entry, displayExtra)
   const running = control.label === 'Pause' || control.label === 'End break'
   const title = task?.content ?? 'Task no longer available'
 

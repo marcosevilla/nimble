@@ -493,6 +493,44 @@ impl FocusService {
         }
         result
     }
+    /// Milliseconds until the running segment reaches its next boundary
+    /// (timebox zero, Pomodoro round end, break end), net of time already
+    /// elapsed since the last settle; `None` when nothing live has one. The
+    /// owner's heartbeat wakes at min(20 s, this) so a crossing is settled,
+    /// persisted and chimed on time instead of up to one heartbeat late.
+    pub async fn ms_until_boundary(&self) -> crate::Result<Option<u64>> {
+        let guard = self.lock.lock().await;
+        let pending = self.clock.elapsed_ms().saturating_sub(guard.sampled_ms);
+        let mut conn = self.pool.acquire().await?;
+        let live: Option<String> =
+            sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+                .fetch_optional(&mut *conn)
+                .await?
+                .flatten();
+        let Some(sid) = live else { return Ok(None) };
+        let row = sqlx::query(
+            "SELECT phase,round_work_ms,round_break_ms,config_json,occurrence_id FROM focus_sessions WHERE id=?",
+        )
+        .bind(&sid)
+        .fetch_one(&mut *conn)
+        .await?;
+        let config: FocusConfig = serde_json::from_str(row.get("config_json"))
+            .map_err(|e| err("storage", &e.to_string()))?;
+        let phase: String = row.get("phase");
+        let oid: String = row.get("occurrence_id");
+        let prior = checked(
+            recorded_total_tx(&mut conn, &oid).await?,
+            imported_total_tx(&mut conn, &oid).await?,
+        )?;
+        Ok(boundary_remaining_ms(
+            &config,
+            &phase,
+            prior,
+            u(row.get("round_work_ms"))?,
+            u(row.get("round_break_ms"))?,
+        )
+        .map(|remaining| remaining.saturating_sub(pending)))
+    }
     /// Take the pending sound token, if any. The claim is a durable
     /// compare-and-swap (clear only if still equal to the token read), so
     /// exactly one caller wins a given token even when several race; it is
@@ -936,6 +974,28 @@ async fn save_queue_tx(
     Ok(())
 }
 
+/// Settled milliseconds left before the running phase's next boundary.
+/// Timebox: until the budget (none once in overtime: zero chimes once).
+/// Pomodoro: until the round's work target or the break's length.
+/// Count-up has no boundary.
+pub fn boundary_remaining_ms(
+    config: &FocusConfig,
+    phase: &str,
+    prior_total_ms: u64,
+    round_work_ms: u64,
+    round_break_ms: u64,
+) -> Option<u64> {
+    match (config.mode, phase) {
+        (FocusMode::Timebox, "work") => config
+            .budget_ms
+            .filter(|budget| prior_total_ms < *budget)
+            .map(|budget| budget - prior_total_ms),
+        (FocusMode::Pomodoro, "work") => Some(config.work_ms.saturating_sub(round_work_ms)),
+        (FocusMode::Pomodoro, "break") => Some(config.break_ms.saturating_sub(round_break_ms)),
+        _ => None,
+    }
+}
+
 async fn settle_tx(conn: &mut SqliteConnection, delta: u64, stamp: &str) -> crate::Result<()> {
     let live: Option<String> =
         sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
@@ -1017,8 +1077,10 @@ async fn settle_tx(conn: &mut SqliteConnection, delta: u64, stamp: &str) -> crat
             .execute(&mut *conn)
             .await?;
         }
-        sqlx::query("UPDATE focus_runtime SET boundary_token=? WHERE id=1")
+        // Signal the round/break boundary once, like the timebox chime.
+        sqlx::query("UPDATE focus_runtime SET boundary_token=?,sound_token=? WHERE id=1")
             .bind(id())
+            .bind(format!("chime:{}", id()))
             .execute(&mut *conn)
             .await?;
     }

@@ -31,6 +31,8 @@ pub async fn client_id(pool:&SqlitePool)->Result<String,String> {
 pub async fn tick(app:&AppHandle)->Result<nimble_core::integrations::google_calendar::ReconcileResult,String> {
     let _guard=lock().await;
     if !network_allowed(app) { return Err("google_live_network_disabled".into()) }
+    // A non-owner process never reconciles: the owner may be timing live.
+    let focus=crate::focus_service::apply_service(app).await.map_err(|_|"not_profile_owner")?;
     let pool=app.state::<SqlitePool>();
     nimble_core::db::recovery::require_activation_clear(pool.inner()).await
         .map_err(|_|"restore_activation_required")?;
@@ -62,7 +64,6 @@ pub async fn tick(app:&AppHandle)->Result<nimble_core::integrations::google_cale
     let transport=nimble_core::api::google_calendar::CalendarTransport::new(client,nimble_core::api::google_calendar::GOOGLE_API_BASE,token.access_token)
         .map_err(|_|"google_transport_failed")?;
     // Calendar HTTP runs outside the focus guard; each local edit enters it.
-    let focus=crate::focus_service::live(app).await;
     nimble_core::integrations::google_calendar::run_once_with_focus(pool.inner(),&transport,chrono::Utc::now(),focus.as_deref())
         .await.map_err(|_|"google_sync_failed".into())
 }

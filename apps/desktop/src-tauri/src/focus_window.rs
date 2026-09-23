@@ -29,6 +29,8 @@ pub const COMPANION_LABEL: &str = "focus";
 /// Windows that render a focus surface (main shows the banner/tray).
 const SURFACE_LABELS: [&str; 2] = ["main", COMPANION_LABEL];
 const HEARTBEAT: Duration = Duration::from_secs(20);
+/// Wake just after a boundary so the settle is sure to cross it.
+const BOUNDARY_MARGIN: Duration = Duration::from_millis(50);
 /// How long quit/sleep may block the main thread to settle focus.
 const SETTLE_BUDGET: Duration = Duration::from_secs(3);
 
@@ -224,16 +226,39 @@ pub fn wire_lifecycle(app: &AppHandle) {
         return;
     }
     let handle = app.clone();
+    let wake = rt.heartbeat_wake();
     tauri::async_runtime::spawn(async move {
-        let mut timer = tokio::time::interval(HEARTBEAT);
-        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // Regular checkpoints every 20 s, plus an extra wake at the next
+        // timebox/Pomodoro boundary so it settles and chimes on time. Any
+        // commit re-plans (a Start or Configure may bring a boundary closer)
+        // without pushing back the regular deadline.
+        let mut next_regular = tokio::time::Instant::now() + HEARTBEAT;
         loop {
-            timer.tick().await;
-            focus_service::heartbeat(&handle).await;
+            let until_regular = next_regular.saturating_duration_since(tokio::time::Instant::now());
+            let boundary = focus_service::ms_until_boundary(&handle).await;
+            let delay = next_heartbeat_delay(until_regular, boundary);
+            tokio::select! {
+                _ = tokio::time::sleep(delay) => {
+                    focus_service::heartbeat(&handle).await;
+                    if tokio::time::Instant::now() >= next_regular {
+                        next_regular = tokio::time::Instant::now() + HEARTBEAT;
+                    }
+                }
+                _ = wake.notified() => {}
+            }
         }
     });
     install_power_observers(app);
     rt.mark_lifecycle_wired();
+}
+
+/// When the heartbeat should next run: the regular 20 s deadline, or just
+/// after the next boundary if that comes first.
+pub fn next_heartbeat_delay(until_regular: Duration, until_boundary_ms: Option<u64>) -> Duration {
+    match until_boundary_ms {
+        Some(ms) => until_regular.min(Duration::from_millis(ms) + BOUNDARY_MARGIN),
+        None => until_regular,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -335,6 +360,36 @@ mod tests {
         ] {
             assert!(bad.validate().is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn heartbeat_wakes_at_the_sooner_of_twenty_seconds_and_the_next_boundary() {
+        let regular = Duration::from_secs(20);
+        assert_eq!(
+            next_heartbeat_delay(regular, None),
+            regular,
+            "count-up/idle keeps 20 s"
+        );
+        assert_eq!(
+            next_heartbeat_delay(regular, Some(5_000)),
+            Duration::from_millis(5_050),
+            "timebox zero 5 s away wakes just after it"
+        );
+        assert_eq!(
+            next_heartbeat_delay(regular, Some(90_000)),
+            regular,
+            "far boundary waits for the regular tick"
+        );
+        assert_eq!(
+            next_heartbeat_delay(regular, Some(0)),
+            BOUNDARY_MARGIN,
+            "a due boundary settles now"
+        );
+        assert_eq!(
+            next_heartbeat_delay(Duration::from_secs(3), Some(10_000)),
+            Duration::from_secs(3),
+            "a closer regular deadline still wins"
+        );
     }
 
     #[test]

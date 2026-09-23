@@ -24,6 +24,7 @@ import {
   type TaskMenuId,
 } from '@/lib/focusQueueIntents'
 import type { FocusAction, FocusCapabilities, FocusEntry, FocusSnapshot, LocalTask } from '@nimble/types'
+import { useFocusDisplayExtra } from '@/hooks/useFocusDisplayExtra'
 
 // ── Shared pieces (also used by the Up next rows) ──
 
@@ -209,6 +210,7 @@ export function FocusTaskCard({
   busy = false,
 }: FocusTaskCardProps) {
   const reasonId = useId()
+  const displayExtra = useFocusDisplayExtra(snapshot, entry, capabilities?.live_timing === true)
   const toggle = (
     <IconButton
       size="lg"
@@ -265,7 +267,7 @@ export function FocusTaskCard({
 
   const control = timerControl(snapshot, entry)
   const blocked = controlBlockedReason(control, capabilities)
-  const timing = cardTiming(snapshot, entry)
+  const timing = cardTiming(snapshot, entry, displayExtra)
   const running = control.label === 'Pause' || control.label === 'End break'
   const due = dueLabel(task, today)
   const meta = [projectName, isLocalOnly(task) ? 'Local only' : null, due].filter(Boolean).join(' · ')
