@@ -317,8 +317,17 @@ async fn apply_structure_tx(
 ) -> crate::Result<PulledRows> {
     let mut rows = PulledRows::default();
 
+    // 0. Same guards as the preflight, now under the write lock, so a sync
+    // or focus timer switched on since the preflight can't slip in.
+    check_guards(&mut *conn).await?;
+
     // 1. Forget the incremental token: if anything after this commit fails,
-    // the next sync is a full one.
+    // the next sync is a full one. A missing state row is created paused
+    // (the column defaults to enabled), so the reconcile never turns sync on;
+    // the user does that in Settings afterwards.
+    sqlx::query("INSERT OR IGNORE INTO integration_sync_state (provider, enabled) VALUES ('todoist', 0)")
+        .execute(&mut *conn)
+        .await?;
     sqlx::query("UPDATE integration_sync_state SET sync_token = NULL WHERE provider = 'todoist'")
         .execute(&mut *conn)
         .await?;
@@ -369,15 +378,17 @@ async fn apply_structure_tx(
         fold_project_tx(conn, fake, &project_id, Some(&section_id), *planned, &mut rows).await?;
     }
 
-    // 5 + 6. Archive fake sections Todoist deleted, and dead projects.
+    // 5 + 6. Archive fake sections Todoist deleted, and dead projects. A
+    // project the payload lists as archived was already archived by step 3's
+    // upsert; COALESCE keeps that stamp, and only a missing row fails.
     for (id, _) in plan.fake_sections_archived.iter().chain(&plan.projects_archived) {
         let res = sqlx::query(
-            "UPDATE projects SET archived_at = datetime('now','localtime') WHERE id = ? AND archived_at IS NULL",
+            "UPDATE projects SET archived_at = COALESCE(archived_at, datetime('now','localtime')) WHERE id = ?",
         )
         .bind(id)
         .execute(&mut *conn)
         .await?;
-        expect_one(res, || format!("project {id} is missing or already archived"))?;
+        expect_one(res, || format!("project {id} is missing"))?;
         rows.project_sync_ops.push((id.clone(), "UPDATE"));
     }
 
@@ -443,12 +454,32 @@ async fn apply_structure_tx(
 /// Steps 1–7 run in ONE transaction: any row that no longer matches the plan
 /// rolls every one of them back. After commit, the regular full pull runs on
 /// top (creates missing tasks, stores the new sync token), then the `nimble`
-/// origin label is backfilled. The caller takes a backup first.
+/// origin label is backfilled. The caller takes a backup first. A failure
+/// after the commit comes back as `finish_failed_message` (re-run to finish).
 pub async fn apply(
     pool: &SqlitePool,
     full: &client::SyncResponse,
     plan: &ReconcilePlan,
 ) -> crate::Result<ApplyOutcome> {
+    apply_structure(pool, full, plan).await?;
+    finish_apply(pool, full).await.map_err(|e| crate::Error::Other(finish_failed_message(&e)))
+}
+
+/// What to tell the user when the structural transaction committed but the
+/// final pull or label backfill didn't.
+pub fn finish_failed_message(e: &crate::Error) -> String {
+    format!(
+        "Structure applied; the final pull failed: {e}. Run `dt sync reconcile --apply` again to finish (safe to re-run)."
+    )
+}
+
+/// Steps 1–7 in one transaction, then their sync_log. On error nothing was
+/// written.
+pub async fn apply_structure(
+    pool: &SqlitePool,
+    full: &client::SyncResponse,
+    plan: &ReconcilePlan,
+) -> crate::Result<()> {
     let mut write = crate::db::focus::task_write::TaskWrite::begin(pool, None).await?;
     let rows = match apply_structure_tx(write.conn(), full, plan).await {
         Ok(rows) => rows,
@@ -462,7 +493,13 @@ pub async fn apply(
     write.commit(&rows.effects).await?;
     let PulledRows { logged, label_sync_ops, project_sync_ops, section_sync_ops, .. } = rows;
     sync_loop::log_pulled_rows(pool, logged, label_sync_ops, project_sync_ops, section_sync_ops).await;
+    Ok(())
+}
 
+/// After `apply_structure` committed: the regular full pull (creates missing
+/// tasks, stores the new token), then the `nimble` origin-label backfill.
+/// Idempotent, so a failure here is fixed by running the reconcile again.
+pub async fn finish_apply(pool: &SqlitePool, full: &client::SyncResponse) -> crate::Result<ApplyOutcome> {
     let pull = sync_loop::apply_pull(pool, full).await?;
     let origin_labeled = crate::db::origin_label::backfill_origin_label(pool).await?;
     Ok(ApplyOutcome { pull, origin_labeled })
@@ -503,6 +540,28 @@ pub async fn prepare(pool: &SqlitePool, mut progress: impl FnMut(usize, usize)) 
         .filter(|(_, ext, _)| !active.contains(ext))
         .collect();
 
+    // Positive control: before trusting "deleted"/404 answers, a task the
+    // full sync says is open must come back Active from the same endpoint.
+    if !stale_open.is_empty() {
+        let control = positive_control_id(&full).ok_or_else(|| {
+            crate::Error::Other(
+                "Todoist returned no open tasks, so task lookups can't be checked. Nothing was planned.".into(),
+            )
+        })?;
+        let status = match client::get_task_status(&token, control).await {
+            Ok(s) => s,
+            Err(_) => {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                client::get_task_status(&token, control).await.map_err(|e| {
+                    crate::Error::Other(format!(
+                        "Checking a known open task ({control}) failed: {e}. Nothing was planned."
+                    ))
+                })?
+            }
+        };
+        verify_positive_control(control, &status)?;
+    }
+
     let mut statuses: HashMap<String, RemoteStatus> = HashMap::new();
     let mut failures: HashMap<String, String> = HashMap::new();
     for (i, (local_id, ext, _)) in stale_open.iter().enumerate() {
@@ -540,6 +599,27 @@ pub async fn prepare(pool: &SqlitePool, mut progress: impl FnMut(usize, usize)) 
     Ok(Prepared { full, plan })
 }
 
+/// The open task used to check the lookup endpoint: the first active item.
+pub fn positive_control_id(full: &client::SyncResponse) -> Option<&str> {
+    full.items
+        .iter()
+        .find(|i| !i.checked.unwrap_or(false) && !i.is_deleted.unwrap_or(false))
+        .map(|i| i.id.as_str())
+}
+
+/// A task the full sync lists as open must look up as Active; anything else
+/// means the lookup (id format, endpoint) is wrong and its answers can't be
+/// used to complete or delete tasks.
+pub fn verify_positive_control(id: &str, status: &RemoteStatus) -> crate::Result<()> {
+    match status {
+        RemoteStatus::Active { .. } => Ok(()),
+        other => Err(crate::Error::Other(format!(
+            "Todoist reported open task {id} as {other:?}, so task lookups can't be trusted \
+             (wrong id format or endpoint). Nothing was planned or applied."
+        ))),
+    }
+}
+
 /// `--apply` refuses a plan with unread statuses: guessing would complete or
 /// keep the wrong tasks.
 pub fn require_complete(plan: &ReconcilePlan) -> crate::Result<()> {
@@ -562,16 +642,29 @@ pub fn require_complete(plan: &ReconcilePlan) -> crate::Result<()> {
 /// Guards before any reconcile write: a restored profile must be activated,
 /// Todoist sync must be paused (so the app's periodic sync can't interleave
 /// a pull or push), and no focus timer may be running (the write happens
-/// outside the app's focus service).
-pub async fn preflight_apply(pool: &SqlitePool) -> crate::Result<()> {
-    crate::db::recovery::require_activation_clear(pool).await?;
-    if crate::integrations::get_state(pool, "todoist").await?.is_some_and(|s| s.enabled) {
+/// outside the app's focus service). Checked up front by `preflight_apply`
+/// and again inside the apply transaction.
+async fn check_guards(conn: &mut SqliteConnection) -> crate::Result<()> {
+    let restored: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'restored_activation_required'")
+            .fetch_optional(&mut *conn)
+            .await?;
+    if restored.as_deref() == Some("1") {
+        return Err(crate::Error::Other(
+            "This restored profile hasn't been activated yet (dt backup activate). Nothing was written.".into(),
+        ));
+    }
+    let enabled: Option<i64> =
+        sqlx::query_scalar("SELECT enabled FROM integration_sync_state WHERE provider = 'todoist'")
+            .fetch_optional(&mut *conn)
+            .await?;
+    if enabled.unwrap_or(0) != 0 {
         return Err(crate::Error::Other(
             "Todoist sync is on. Pause it in Settings, then apply again. Nothing was written.".into(),
         ));
     }
     let running: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM focus_segments WHERE closed_at IS NULL")
-        .fetch_one(pool)
+        .fetch_one(&mut *conn)
         .await?;
     if running > 0 {
         return Err(crate::Error::Other(
@@ -579,6 +672,12 @@ pub async fn preflight_apply(pool: &SqlitePool) -> crate::Result<()> {
         ));
     }
     Ok(())
+}
+
+pub async fn preflight_apply(pool: &SqlitePool) -> crate::Result<()> {
+    crate::db::recovery::require_activation_clear(pool).await?;
+    let mut conn = pool.acquire().await?;
+    check_guards(&mut conn).await
 }
 
 /// `<dir>/reconcile-<YYYYMMDD-HHMMSS>.json`
@@ -593,6 +692,7 @@ pub fn write_report(
     mode: &str,
     plan: &ReconcilePlan,
     applied: Option<&ApplyOutcome>,
+    error: Option<&str>,
 ) -> crate::Result<()> {
     use std::io::Write;
     let body = serde_json::json!({
@@ -600,6 +700,7 @@ pub fn write_report(
         "mode": mode,
         "plan": plan,
         "applied": applied,
+        "error": error,
     });
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -631,14 +732,25 @@ pub async fn run(pool: &SqlitePool, apply: bool) -> crate::Result<ReconcilePlan>
         .await?
         .map(|dir| report_path(&dir, chrono::Local::now().naive_local()));
     if let Some(path) = &report {
-        write_report(path, if apply { "apply_planned" } else { "dry_run" }, &plan, None)?;
+        write_report(path, if apply { "apply_planned" } else { "dry_run" }, &plan, None, None)?;
     }
     if apply {
         require_complete(&plan)?;
         preflight_apply(pool).await?;
-        let outcome = self::apply(pool, &full, &plan).await?;
-        if let Some(path) = &report {
-            write_report(path, "applied", &plan, Some(&outcome))?;
+        apply_structure(pool, &full, &plan).await?;
+        match finish_apply(pool, &full).await {
+            Ok(outcome) => {
+                if let Some(path) = &report {
+                    write_report(path, "applied", &plan, Some(&outcome), None)?;
+                }
+            }
+            Err(e) => {
+                let message = finish_failed_message(&e);
+                if let Some(path) = &report {
+                    write_report(path, "structure_applied_pull_failed", &plan, None, Some(&message)).ok();
+                }
+                return Err(crate::Error::Other(message));
+            }
         }
     }
     Ok(plan)
@@ -874,6 +986,133 @@ mod tests {
         sqlx::query("UPDATE integration_sync_state SET enabled = 0 WHERE provider = 'todoist'")
             .execute(&pool).await.unwrap();
         preflight_apply(&pool).await.unwrap();
+    }
+
+    // ---- review fixes ----
+
+    fn full_with(extra_projects: serde_json::Value, extra_items: serde_json::Value) -> client::SyncResponse {
+        let mut v = json!({
+            "sync_token": "FULL", "full_sync": true,
+            "projects": [{"id": "INBOX", "name": "Inbox", "inbox_project": true}, {"id": "P", "name": "Work"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Lane"}],
+            "items": [
+                {"id": "R1", "content": "in lane", "project_id": "P", "section_id": "S", "checked": false, "is_deleted": false},
+                {"id": "R3", "content": "inbox item", "project_id": "INBOX", "checked": false, "is_deleted": false},
+                {"id": "R9", "content": "new since aug", "project_id": "P", "checked": false, "is_deleted": false}
+            ]
+        });
+        v["projects"].as_array_mut().unwrap().extend(extra_projects.as_array().unwrap().iter().cloned());
+        v["items"].as_array_mut().unwrap().extend(extra_items.as_array().unwrap().iter().cloned());
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[tokio::test]
+    async fn project_listed_as_archived_in_the_payload_applies_without_rollback() {
+        let pool = test_pool().await;
+        seed_legacy(&pool).await;
+        let payload = full_with(json!([{"id": "DEAD", "name": "Dead", "is_archived": true}]), json!([]));
+        let mut st = HashMap::new();
+        st.insert("R5".to_string(), RemoteStatus::Completed);
+        let plan = build_plan(&pool, &payload, &st).await.unwrap();
+        assert!(plan.projects_archived.iter().any(|(id, _)| id == "ldead"));
+        apply(&pool, &payload, &plan).await.unwrap();
+        let archived: Option<String> = sqlx::query_scalar("SELECT archived_at FROM projects WHERE id='ldead'").fetch_one(&pool).await.unwrap();
+        assert!(archived.is_some());
+        let t5: i64 = sqlx::query_scalar("SELECT completed FROM local_tasks WHERE id='t5'").fetch_one(&pool).await.unwrap();
+        assert_eq!(t5, 1, "the rest of the plan applied");
+    }
+
+    #[tokio::test]
+    async fn archiving_a_missing_project_still_fails() {
+        let pool = test_pool().await;
+        seed_legacy(&pool).await;
+        let mut plan = build_plan(&pool, &full(), &HashMap::new()).await.unwrap();
+        plan.lookup_errors.clear();
+        plan.projects_archived.push(("no-such-project".into(), "x".into()));
+        let err = apply(&pool, &full(), &plan).await.unwrap_err().to_string();
+        assert!(err.contains("no-such-project"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn failed_final_pull_says_structure_applied_and_a_rerun_finishes() {
+        let pool = test_pool().await;
+        seed_legacy(&pool).await;
+        let mut st = HashMap::new();
+        st.insert("R5".to_string(), RemoteStatus::Completed);
+        let bad = full_with(json!([]), json!([{"id": "RX", "content": "__FORCE_TEST_APPLY_FAILURE__", "project_id": "P", "checked": false, "is_deleted": false}]));
+        let plan = build_plan(&pool, &bad, &st).await.unwrap();
+        let err = apply(&pool, &bad, &plan).await.unwrap_err().to_string();
+        assert!(err.contains("Structure applied; the final pull failed"), "{err}");
+        assert!(err.contains("safe to re-run"), "{err}");
+        let fakes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE id='lfs'").fetch_one(&pool).await.unwrap();
+        assert_eq!(fakes, 0, "structure stayed committed");
+        let token: Option<String> = sqlx::query_scalar("SELECT sync_token FROM integration_sync_state WHERE provider='todoist'").fetch_optional(&pool).await.unwrap().flatten();
+        assert!(token.is_none(), "next sync would be a full one");
+
+        // Re-run against a good payload finishes the job.
+        let again = build_plan(&pool, &full(), &st).await.unwrap();
+        assert!(again.fake_sections_converted.is_empty() && again.inbox_merge.is_none() && again.to_complete.is_empty());
+        apply(&pool, &full(), &again).await.unwrap();
+        let r9: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM local_tasks WHERE external_id='R9'").fetch_one(&pool).await.unwrap();
+        assert_eq!(r9, 1);
+    }
+
+    #[tokio::test]
+    async fn reapplying_after_a_completed_apply_is_a_clean_no_op() {
+        let pool = test_pool().await;
+        seed_legacy(&pool).await;
+        let mut st = HashMap::new();
+        st.insert("R5".to_string(), RemoteStatus::Completed);
+        let plan = build_plan(&pool, &full(), &st).await.unwrap();
+        apply(&pool, &full(), &plan).await.unwrap();
+        let again = build_plan(&pool, &full(), &st).await.unwrap();
+        assert!(again.lookup_errors.is_empty());
+        let outcome = apply(&pool, &full(), &again).await.unwrap();
+        assert_eq!(outcome.pull.created, 0);
+        let tasks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM local_tasks").fetch_one(&pool).await.unwrap();
+        assert_eq!(tasks, 6, "t1..t5 plus R9, nothing duplicated");
+        let enabled: i64 = sqlx::query_scalar("SELECT enabled FROM integration_sync_state WHERE provider='todoist'").fetch_one(&pool).await.unwrap();
+        assert_eq!(enabled, 0, "the reconcile never switches sync on");
+    }
+
+    #[test]
+    fn positive_control_requires_an_active_answer() {
+        assert!(verify_positive_control("A", &RemoteStatus::Active { project_id: "P".into() }).is_ok());
+        for wrong in [RemoteStatus::Deleted, RemoteStatus::Completed] {
+            let err = verify_positive_control("A", &wrong).unwrap_err().to_string();
+            assert!(err.contains("can't be trusted"), "{err}");
+        }
+    }
+
+    #[test]
+    fn positive_control_picks_an_active_item_only() {
+        let resp: client::SyncResponse = serde_json::from_value(json!({
+            "items": [
+                {"id": "C", "content": "c", "checked": true},
+                {"id": "D", "content": "d", "is_deleted": true},
+                {"id": "A", "content": "a", "checked": false, "is_deleted": false}
+            ]
+        })).unwrap();
+        assert_eq!(positive_control_id(&resp), Some("A"));
+        let none: client::SyncResponse = serde_json::from_value(json!({"items": []})).unwrap();
+        assert_eq!(positive_control_id(&none), None);
+    }
+
+    #[tokio::test]
+    async fn guards_are_rechecked_inside_the_transaction() {
+        let pool = test_pool().await;
+        seed_legacy(&pool).await;
+        let mut st = HashMap::new();
+        st.insert("R5".to_string(), RemoteStatus::Completed);
+        let plan = build_plan(&pool, &full(), &st).await.unwrap();
+        preflight_apply(&pool).await.unwrap();
+        // Sync switched on between preflight and apply.
+        sqlx::query("INSERT INTO integration_sync_state (provider, enabled) VALUES ('todoist', 1)")
+            .execute(&pool).await.unwrap();
+        let err = apply(&pool, &full(), &plan).await.unwrap_err().to_string();
+        assert!(err.contains("Todoist sync is on"), "{err}");
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE external_id LIKE 'section:%'").fetch_one(&pool).await.unwrap();
+        assert_eq!(n, 2, "nothing applied");
     }
 
     #[test]

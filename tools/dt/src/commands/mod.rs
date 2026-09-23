@@ -619,6 +619,7 @@ fn first_titles(out: &mut String, heading: &str, rows: &[(String, String)]) {
 fn reconcile_text(
     plan: &nimble_core::integrations::todoist::reconcile::ReconcilePlan,
     applied: Option<&nimble_core::integrations::todoist::reconcile::ApplyOutcome>,
+    refreshed: bool,
     report: &std::path::Path,
 ) -> String {
     use std::fmt::Write;
@@ -664,7 +665,15 @@ fn reconcile_text(
         );
     }
     let _ = writeln!(out, "\nReport: {}", report.display());
-    if applied.is_none() {
+    if applied.is_some() {
+        let _ = writeln!(out, "\nNext:");
+        if refreshed {
+            let _ = writeln!(out, "  1. Nimble was asked to refresh. If lists still look out of date, quit and reopen Nimble.");
+        } else {
+            let _ = writeln!(out, "  1. Nimble didn't confirm a refresh. Quit and reopen Nimble to see the changes.");
+        }
+        let _ = writeln!(out, "  2. When everything looks right, turn Todoist sync back on in Settings.");
+    } else {
         let _ = writeln!(
             out,
             "To write these changes: dt sync reconcile --apply (backs up through the running Nimble app first)."
@@ -697,10 +706,11 @@ pub async fn reconcile(
         .parent()
         .ok_or_else(|| CliError::new("unavailable", "Cannot resolve the profile directory."))?;
     let report = rc::report_path(dir, chrono::Local::now().naive_local());
-    rc::write_report(&report, if apply { "apply_planned" } else { "dry_run" }, &plan, None)
+    rc::write_report(&report, if apply { "apply_planned" } else { "dry_run" }, &plan, None, None)
         .map_err(reconcile_error)?;
 
     let mut applied = None;
+    let mut refreshed = false;
     if apply {
         rc::require_complete(&plan).map_err(reconcile_error)?;
         // Same code path as `dt backup now`; no backup, no apply.
@@ -710,25 +720,47 @@ pub async fn reconcile(
                 CliError::new(e.code, format!("Backup failed, so nothing was applied. {}", e.message))
             })?;
         rc::preflight_apply(pool).await.map_err(reconcile_error)?;
-        let outcome = rc::apply(pool, &full, &plan).await.map_err(reconcile_error)?;
-        rc::write_report(&report, "applied", &plan, Some(&outcome)).map_err(reconcile_error)?;
-        // Refresh the open app; best-effort, the data is already committed.
-        let _ = crate::ipc::request(
-            profile,
-            nimble_core::agent_protocol::AgentOperation::Invalidate {
-                domains: vec![Domain::Tasks, Domain::Projects, Domain::Sections, Domain::Labels],
-                ids: vec![],
-            },
-        )
-        .await;
-        applied = Some(outcome);
+        // On error here nothing was written (one transaction).
+        rc::apply_structure(pool, &full, &plan).await.map_err(reconcile_error)?;
+        // From here the structure is committed; tell the app either way.
+        let finished = rc::finish_apply(pool, &full).await;
+        refreshed = refresh_app(profile).await;
+        match finished {
+            Ok(outcome) => {
+                rc::write_report(&report, "applied", &plan, Some(&outcome), None).map_err(reconcile_error)?;
+                applied = Some(outcome);
+            }
+            Err(e) => {
+                let message = rc::finish_failed_message(&e);
+                rc::write_report(&report, "structure_applied_pull_failed", &plan, None, Some(&message)).ok();
+                return Err(CliError::new(
+                    "reconcile_incomplete",
+                    format!("{message} Report: {}", report.display()),
+                ));
+            }
+        }
     }
-    let text = reconcile_text(&plan, applied.as_ref(), &report);
+    let text = reconcile_text(&plan, applied.as_ref(), refreshed, &report);
     let data = json!({
         "mode": if apply { "applied" } else { "dry_run" },
         "report": report.display().to_string(),
         "plan": plan,
         "applied": applied,
+        "app_refreshed": refreshed,
     });
     Ok((data, text))
+}
+
+/// Ask the open app to reload everything the reconcile touched. Best-effort:
+/// the data is already committed. `true` when the app acknowledged.
+async fn refresh_app(profile: &nimble_core::agent_protocol::AgentProfile) -> bool {
+    crate::ipc::request(
+        profile,
+        nimble_core::agent_protocol::AgentOperation::Invalidate {
+            domains: vec![Domain::Tasks, Domain::Projects, Domain::Sections, Domain::Labels],
+            ids: vec![],
+        },
+    )
+    .await
+    .is_ok()
 }
