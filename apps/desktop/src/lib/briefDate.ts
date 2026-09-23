@@ -26,3 +26,23 @@ export function formatBriefDate(date: string, today: string): string {
     timeZone: 'UTC',
   })
 }
+
+// ── "Today" in the user's timezone ──
+// `toISOString()` is UTC: in Pacific time it rolls to tomorrow at 5pm, so
+// "Today", the next-day guard and the brief dot all pointed at the wrong
+// day every evening. These read the local calendar instead.
+
+function pad(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+/** The local calendar date of `now` as `YYYY-MM-DD`. */
+export function localIsoDate(now: Date = new Date()): string {
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
+/** Milliseconds from `now` until the next local midnight (23h / 25h on DST days). */
+export function msUntilNextLocalDay(now: Date = new Date()): number {
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  return next.getTime() - now.getTime()
+}

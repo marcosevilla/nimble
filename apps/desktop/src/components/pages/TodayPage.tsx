@@ -19,6 +19,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { Meta, SectionTitle } from '@/components/shared/typography'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { scrollPageToTop } from '@/lib/pageScroll'
+import { useLocalToday } from '@/hooks/useLocalToday'
 
 // ── Shared Utilities ──
 
@@ -85,7 +86,9 @@ function ReviewStep({
         >
           {done ? <Check className="size-3.5" /> : step}
         </span>
-        <SectionTitle className={cn(!active && 'text-muted-foreground')}>{title}</SectionTitle>
+        {/* Done steps dim by opacity alone (C1 review): muting the title too
+            would dim it twice. */}
+        <SectionTitle className={cn(!active && !done && 'text-muted-foreground')}>{title}</SectionTitle>
       </div>
       {active && <div>{children}</div>}
     </div>
@@ -279,13 +282,23 @@ function DashboardMode({
   cachedEnergy: string | null
 }) {
   const dp = useDataProvider()
-  const { todayData } = useObsidian()
+  const { todayData, loading: obsidianLoading } = useObsidian()
 
   // Brief browsing. Today's brief comes from TodayPage state — the one the
   // review just showed — so the swap never re-fetches it (today P2-3).
   const [selectedDate, setSelectedDate] = useState(today)
   const [briefDates, setBriefDates] = useState<Set<string>>(new Set())
   const [otherBrief, setOtherBrief] = useState<{ date: string; content: string | null } | null>(null)
+
+  // Past midnight, a card that was showing "Today" follows the new today
+  // instead of turning into yesterday's date.
+  const prevToday = useRef(today)
+  useEffect(() => {
+    if (prevToday.current === today) return
+    const previous = prevToday.current
+    prevToday.current = today
+    setSelectedDate((d) => (d === previous ? today : d))
+  }, [today])
 
   useEffect(() => {
     dp.dailyState.listBriefDates().then((dates) => setBriefDates(new Set(dates))).catch(() => {})
@@ -384,7 +397,7 @@ function DashboardMode({
 
       {/* Only when the day is truly empty — Obsidian daily-note tasks count
           toward the header's "remaining" even though they aren't listed. */}
-      {!localLoading && total === 0 && (
+      {!localLoading && !obsidianLoading && total === 0 && (
         <EmptyState icon={CalendarCheck} kbd="Q">Nothing scheduled today. Add a task with</EmptyState>
       )}
 
@@ -403,7 +416,9 @@ function DashboardMode({
 
 export function TodayPage() {
   const dp = useDataProvider()
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  // Local calendar date, re-read at midnight (C1 review: UTC rolled over at
+  // 5pm Pacific, and useMemo froze it across midnight).
+  const today = useLocalToday()
   const [reviewComplete, setReviewComplete] = useState<boolean | null>(null) // null = loading
   const [cachedPriorities, setCachedPriorities] = useState<Priority[] | null>(null)
   const [cachedEnergy, setCachedEnergy] = useState<string | null>(null)
