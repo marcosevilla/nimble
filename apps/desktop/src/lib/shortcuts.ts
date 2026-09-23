@@ -132,6 +132,12 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Session', keys: 's', label: 'Stop (banks time, keeps the queue)' },
   { section: 'Session', keys: 'Enter (completion note)', label: 'Dismiss; the next task stays paused' },
   { section: 'Session', keys: 'Escape (completion note)', label: 'Dismiss' },
+
+  // ── Tasks: nav project tree (ProjectSidebar.tsx via components/shared/treeKeys.ts) ──
+  { section: 'Tasks', keys: '↑ / ↓', label: 'Move through the project list in the nav (Enter opens)' },
+  { section: 'Tasks', keys: '← / →', label: 'Collapse / expand a parent project' },
+  { section: 'Tasks', keys: 'e', label: 'Edit the focused project' },
+  { section: 'Tasks', keys: '⌫', label: 'Delete the focused project (asks first)' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [

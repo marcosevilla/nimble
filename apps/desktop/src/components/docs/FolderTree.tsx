@@ -8,14 +8,8 @@ import { IconButton } from '@/components/shared/IconButton'
 import { Button } from '@/components/ui/button'
 import { DocsSearch } from './DocsSearch'
 import { visibleTreeKeys, pickRovingKey } from '@/lib/docsTree'
+import { handleTreeKeyDown } from '@/components/shared/treeKeys'
 import type { Document, VaultNoteSummary } from '@nimble/types'
-
-/* Tree rows are real <button>s carrying data-tree-row / data-kind /
-   data-expanded / data-parent / data-key. One keydown handler on the list
-   (handleTreeKeyDown) reads those attributes so every row type — native
-   folder, native doc, vault folder, vault note, the Vault header — shares
-   the same ↑ ↓ ← → Home End ⌫ behaviour without a per-row hook (docs audit
-   P1-1, P2-8). Enter/Space is the button's native click. */
 
 const ROW = 'flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-foreground transition-colors duration-(--transition-fast)'
 const ROW_WRAP = 'group relative flex items-center rounded-md transition-colors duration-(--transition-fast)'
@@ -23,44 +17,6 @@ const ACTION = 'relative flex size-6 shrink-0 items-center justify-center rounde
 const REVEAL = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100'
 
 type ConfirmTarget = { kind: 'doc' | 'folder'; id: string; name: string }
-
-export function handleTreeKeyDown(e: React.KeyboardEvent<HTMLElement>, expand: (key: string) => void, collapse: (key: string) => void, requestDelete: (row: HTMLElement) => void) {
-  const container = e.currentTarget
-  const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-tree-row]'))
-  const active = document.activeElement as HTMLElement | null
-  const idx = active ? rows.indexOf(active) : -1
-  if (idx === -1) return
-  const row = rows[idx]
-  const focusAt = (i: number) => { rows[Math.max(0, Math.min(rows.length - 1, i))]?.focus() }
-
-  switch (e.key) {
-    // Space is the row's native click. Stop it here so the Dashboard's
-    // window-level Space (pause a focus session) never swallows it.
-    case ' ': e.stopPropagation(); break
-    case 'ArrowDown': e.preventDefault(); focusAt(idx + 1); break
-    case 'ArrowUp': e.preventDefault(); focusAt(idx - 1); break
-    case 'Home': e.preventDefault(); focusAt(0); break
-    case 'End': e.preventDefault(); focusAt(rows.length - 1); break
-    case 'ArrowRight': {
-      e.preventDefault()
-      if (row.dataset.kind === 'folder' && row.dataset.expanded === 'false') expand(row.dataset.key!)
-      else if (row.dataset.kind === 'folder') focusAt(idx + 1)
-      break
-    }
-    case 'ArrowLeft': {
-      e.preventDefault()
-      if (row.dataset.kind === 'folder' && row.dataset.expanded === 'true') { collapse(row.dataset.key!); break }
-      const parent = row.dataset.parent
-      if (parent) rows.find((r) => r.dataset.key === parent)?.focus()
-      break
-    }
-    case 'Backspace':
-    case 'Delete': {
-      if (row.dataset.deletable === 'true') { e.preventDefault(); requestDelete(row) }
-      break
-    }
-  }
-}
 
 export function FolderTree() {
   const dp = useDataProvider()

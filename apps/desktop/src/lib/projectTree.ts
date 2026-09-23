@@ -22,3 +22,20 @@ export function buildProjectTree(projects: Project[]): {
   }
   return { roots, childrenByParent }
 }
+
+/** Row keys the nav project tree renders, in order: "All tasks", then each
+ *  root followed by its children unless it is collapsed. Feeds the roving
+ *  tab stop (re-score tasks N-P1-1); pure for tests/projectTree. */
+export function visibleProjectKeys(input: {
+  roots: { id: string }[]
+  childrenByParent: Record<string, { id: string }[]>
+  collapsed: Set<string>
+}): string[] {
+  const keys = ['all']
+  for (const root of input.roots) {
+    keys.push(`project:${root.id}`)
+    if (input.collapsed.has(root.id)) continue
+    for (const child of input.childrenByParent[root.id] ?? []) keys.push(`project:${child.id}`)
+  }
+  return keys
+}
