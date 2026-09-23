@@ -265,7 +265,7 @@ export function CommandBarResults({
             >
               <Plus className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="text-muted-foreground">Create task</span>
-              <span className="flex-1 min-w-0 truncate font-medium">"{query}"</span>
+              <span className="flex-1 min-w-0 truncate text-body-strong">"{query}"</span>
               {selectedIndex === createIndex && (
                 <kbd className="rounded-sm bg-muted px-1 py-0.5 text-label text-muted-foreground">Enter</kbd>
               )}
@@ -282,7 +282,7 @@ export function CommandBarResults({
             >
               <PenLine className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="text-muted-foreground">Save as note</span>
-              <span className="flex-1 min-w-0 truncate font-medium">"{query}"</span>
+              <span className="flex-1 min-w-0 truncate text-body-strong">"{query}"</span>
             </button>
           )}
         </div>

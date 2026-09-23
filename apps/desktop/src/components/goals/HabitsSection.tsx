@@ -201,8 +201,7 @@ function HabitCircle({
         )}
         {Icon ? <Icon className="size-4" aria-hidden="true" /> : <span aria-hidden="true">{emoji}</span>}
         {completed && (
-          // font-bold kept for legibility of checkmark on colored bg overlay
-          <span aria-hidden="true" className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full flex items-center justify-center text-label font-bold text-success-fg bg-success">
+          <span aria-hidden="true" className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full flex items-center justify-center text-label text-success-fg bg-success">
             ✓
           </span>
         )}

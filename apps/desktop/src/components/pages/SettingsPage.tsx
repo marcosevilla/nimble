@@ -487,11 +487,10 @@ function CalendarsSection() {
                   role="radio"
                   aria-checked={newColor === color}
                   aria-label={`Color ${color}`}
-                  className={`h-6 w-6 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast) ${
-                    newColor === color
-                      ? 'border-foreground scale-110'
-                      : 'border-transparent hover:border-muted-foreground/50'
-                  }`}
+                  className={cn(
+                    'h-6 w-6 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
+                    newColor === color ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',
+                  )}
                   style={{ backgroundColor: color }}
                   onClick={() => setNewColor(color)}
                 />

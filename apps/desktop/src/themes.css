@@ -487,3 +487,17 @@
   --sidebar-border: oklch(1 0 0 / 9%);
   --sidebar-ring: oklch(0.68 0.13 55);
 }
+
+/* ── Activity heatmap ramp (every theme) ─────────────────────────────
+   The warm-amber intensity ramp is a Goals decision; it lives here so
+   the heatmap never carries raw color literals (re-score session N-P1-1).
+   One set for all themes and both modes: the alpha ramp reads on light
+   and dark backgrounds. --heat-empty resolves against the active theme's
+   --border (`.dark` is on <html>, the same element as :root). */
+:root {
+  --heat-1: oklch(0.85 0.12 85 / 0.25);
+  --heat-2: oklch(0.78 0.14 80 / 0.45);
+  --heat-3: oklch(0.72 0.16 75 / 0.65);
+  --heat-4: oklch(0.65 0.17 70 / 0.85);
+  --heat-empty: oklch(from var(--border) l c h / 0.15);
+}

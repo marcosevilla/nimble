@@ -8,18 +8,13 @@ const STEP = CELL_SIZE + CELL_GAP
 const MAX_WEEKS = 52
 const MIN_WEEKS = 8
 const DAYS = 7
-const AMBER_LEVELS = [
-  'transparent',
-  'oklch(0.85 0.12 85 / 0.25)',   // intensity 1
-  'oklch(0.78 0.14 80 / 0.45)',   // intensity 2
-  'oklch(0.72 0.16 75 / 0.65)',   // intensity 3
-  'oklch(0.65 0.17 70 / 0.85)',   // intensity 4+
-]
+// Intensity 0–4+ → the heatmap ramp in themes.css (--heat-*).
+const HEAT_LEVELS = ['transparent', 'var(--heat-1)', 'var(--heat-2)', 'var(--heat-3)', 'var(--heat-4)']
 
 function heatColor(value: number): string {
-  if (value <= 0) return AMBER_LEVELS[0]
-  if (value >= 4) return AMBER_LEVELS[4]
-  return AMBER_LEVELS[value]
+  if (value <= 0) return HEAT_LEVELS[0]
+  if (value >= 4) return HEAT_LEVELS[4]
+  return HEAT_LEVELS[value]
 }
 
 function formatCellDate(dateStr: string): string {
@@ -141,7 +136,7 @@ export function ActivityHeatmap({ values, describe, label }: ActivityHeatmapProp
                 left: cell.col * STEP,
                 top: cell.row * STEP,
                 backgroundColor: heatColor(cell.value),
-                border: cell.value === 0 ? '1px solid oklch(from var(--border) l c h / 0.15)' : 'none',
+                border: cell.value === 0 ? '1px solid var(--heat-empty)' : 'none',
               }}
             />
           ))}
