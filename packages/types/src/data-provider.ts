@@ -67,6 +67,9 @@ import type {
   FocusCommand,
   FocusReply,
   FocusHistoryPage,
+  FocusImportPreview,
+  FocusImportResult,
+  LegacyFocusFiles,
 } from './index'
 
 export interface DataProvider {
@@ -277,6 +280,18 @@ export interface DataProvider {
     execute(command: FocusCommand): Promise<FocusReply>
     history(opts?: { cursor?: string; task_id?: string }): Promise<FocusHistoryPage>
     openCompanion(): Promise<void>
+    /**
+     * Desktop only. Validate user-chosen frozen Focus Queue files and
+     * propose every decision; writes nothing. Web rejects `unsupported`.
+     */
+    previewImport(files: LegacyFocusFiles): Promise<FocusImportPreview>
+    /**
+     * Desktop only. Commit exactly the previewed decisions, or nothing: a
+     * changed file or destination rejects (`conflict`) and needs a fresh
+     * preview. `commandId` is reused on retry after an uncertain response.
+     * Performs no remote calls and arms no outbound intent.
+     */
+    commitImport(files: LegacyFocusFiles, previewToken: string, commandId: string): Promise<FocusImportResult>
   }
 
   dailyState: {

@@ -250,6 +250,8 @@ export function createTursoProvider(): DataProvider {
       execute: (command) => focusUnsupported(WEB_FOCUS_REASON, command),
       history: readFocusHistory,
       openCompanion: () => focusUnsupported(WEB_FOCUS_REASON),
+      previewImport: () => focusUnsupported(WEB_FOCUS_REASON),
+      commitImport: () => focusUnsupported(WEB_FOCUS_REASON),
     },
 
     // Out of v1: the Today page needs AI priorities + calendar + the daily

@@ -238,10 +238,10 @@ impl FocusRuntime {
                     history_read: true,
                     live_timing: wired,
                     companion: wired,
-                    import: false,
-                    reason: Some(if wired {
-                        "Import is not connected yet.".into()
-                    } else {
+                    // Import is a local, owner-only transaction; it does not
+                    // need the live-timing lifecycle.
+                    import: true,
+                    reason: (!wired).then(|| {
                         "Live timing and the companion window are not connected in this process."
                             .into()
                     }),
@@ -502,7 +502,7 @@ mod tests {
         assert!(matches!(e.code, FocusErrorCode::WrongOwner));
         assert!(rt.reader().await.is_ok());
         let caps = rt.capabilities().await;
-        assert!(caps.queue_read && !caps.queue_write && !caps.live_timing);
+        assert!(caps.queue_read && !caps.queue_write && !caps.live_timing && !caps.import);
         assert!(caps.reason.unwrap().contains("restored"));
     }
 
@@ -512,8 +512,8 @@ mod tests {
         let rt = FocusRuntime::start(pool, true).await;
         assert!(rt.writer().await.is_ok());
         let caps = rt.capabilities().await;
-        assert!(caps.queue_write && caps.queue_read && caps.history_read);
-        assert!(!caps.live_timing && !caps.companion && !caps.import);
+        assert!(caps.queue_write && caps.queue_read && caps.history_read && caps.import);
+        assert!(!caps.live_timing && !caps.companion);
     }
 
     #[tokio::test]
@@ -530,7 +530,8 @@ mod tests {
         rt.mark_lifecycle_wired();
         assert!(rt.check_live_timing(&start).is_ok());
         let caps = rt.capabilities().await;
-        assert!(caps.live_timing && caps.companion && !caps.import);
+        assert!(caps.live_timing && caps.companion && caps.import);
+        assert!(caps.reason.is_none());
     }
 
     #[tokio::test]

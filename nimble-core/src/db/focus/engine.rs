@@ -680,6 +680,23 @@ impl FocusService {
             next_cursor,
         })
     }
+    /// Commit a previewed frozen-file import under the service lock, so no
+    /// command or checkpoint interleaves. The import itself refuses while a
+    /// session is running, so there is no live clock to settle here.
+    pub async fn commit_import(
+        &self,
+        files: &LegacyFocusFiles,
+        preview_token: &str,
+        command_id: &str,
+    ) -> crate::Result<(FocusImportResult, FocusSnapshot)> {
+        let guard = self.lock.lock().await;
+        if guard.frozen {
+            return Err(err("storage", "focus clock frozen after storage failure"));
+        }
+        let result = super::import::commit_import(&self.pool, files, preview_token, command_id).await?;
+        let mut conn = self.pool.acquire().await?;
+        Ok((result, snapshot_tx(&mut conn).await?))
+    }
     /// Desktop/agent/CLI RPC task writes use this method while the app owns the clock.
     /// The command ID is durable for uncertain-response retries.
     pub async fn execute_native_task(

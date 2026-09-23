@@ -140,3 +140,130 @@ pub struct FocusError {
     pub code: FocusErrorCode,
     pub message: String,
 }
+
+/// The three frozen Focus Queue files, supplied explicitly by the user.
+/// `config.json` (credentials) is deliberately not a field and is refused.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyFocusFiles {
+    pub source_namespace: String,
+    pub state_json: Option<String>,
+    pub manual_json: Option<String>,
+    pub pending_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportInclusion { Included, Excluded, Unresolved }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportRecordStatus { Included, Excluded, Unresolved, Quarantined }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportChange { New, Unchanged, Changed }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportSeverity { Blocking, Review }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportTaskAction { Create, Reuse, Unchanged, Unresolved }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FocusImportIssue {
+    pub severity: ImportSeverity,
+    pub record_key: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FocusImportDestination {
+    pub queue_revision: u64,
+    pub engine_revision: u64,
+    pub tasks_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FocusImportTaskProposal {
+    pub legacy_task_id: String,
+    pub native_task_id: Option<String>,
+    pub action: ImportTaskAction,
+    pub title: Option<String>,
+    pub completed_at: Option<String>,
+    pub differences: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FocusImportOrderItem {
+    /// `None` for an entry already in the Nimble queue.
+    pub legacy_task_id: Option<String>,
+    pub task_id: String,
+    pub title: String,
+    /// `existing`, `source` (old active source order) or `manual`.
+    pub origin: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FocusImportContribution {
+    pub record_key: String,
+    pub legacy_task_id: String,
+    pub task_id: Option<String>,
+    pub occurrence_id: Option<String>,
+    pub duration_ms: u64,
+    pub completed_at: Option<String>,
+    /// `completion` or `timer`.
+    pub source_kind: String,
+    pub inclusion: ImportInclusion,
+    pub reason: String,
+    /// The previously imported cumulative value this snapshot replaces.
+    pub replaces_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FocusImportRecordPreview {
+    pub record_key: String,
+    /// `task`, `completion`, `timer`, `pending`, `state` or `manual`.
+    pub kind: String,
+    pub status: ImportRecordStatus,
+    pub change: ImportChange,
+    pub fingerprint: String,
+    pub reason: String,
+    pub raw_evidence: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FocusImportPreview {
+    /// Deterministic over file hashes, destination revisions and every
+    /// proposed decision. Commit rejects when it no longer matches.
+    pub preview_token: String,
+    pub source_namespace: String,
+    pub file_hashes: std::collections::BTreeMap<String, String>,
+    pub destination: FocusImportDestination,
+    pub source_kind: Option<String>,
+    pub source_order: Vec<String>,
+    pub manual_order: Vec<String>,
+    pub merged_order: Vec<FocusImportOrderItem>,
+    pub tasks: Vec<FocusImportTaskProposal>,
+    pub contributions: Vec<FocusImportContribution>,
+    pub records: Vec<FocusImportRecordPreview>,
+    pub issues: Vec<FocusImportIssue>,
+    /// Legacy daily completion count: a summary, never completion records.
+    pub legacy_completed_today: Option<u64>,
+    pub blocked: bool,
+    /// Nothing new: committing changes nothing.
+    pub noop: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FocusImportResult {
+    pub batch_id: Option<String>,
+    pub replayed: bool,
+    pub noop: bool,
+    pub created_task_ids: Vec<String>,
+    pub queued_task_ids: Vec<String>,
+    pub included_ms: u64,
+    pub quarantined_records: u64,
+}

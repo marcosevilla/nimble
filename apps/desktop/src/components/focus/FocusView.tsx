@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Minimize2, PictureInPicture2 } from 'lucide-react'
+import { FileInput, Minimize2, PictureInPicture2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Caption } from '@/components/shared/typography'
 import { FocusQueueTray } from '@/components/focus/FocusQueueTray'
 import { FocusLoadState } from '@/components/focus/FocusLoadState'
+import { FocusImportDialog } from '@/components/focus/FocusImportDialog'
 import { useFocusTrayData } from '@/hooks/useFocusTrayData'
 import { focusViewKey } from '@/lib/keyGuard'
 import { useDataProvider } from '@/services/provider-context'
@@ -38,6 +39,7 @@ export function FocusView() {
   const data = useFocusTrayData()
   const dp = useDataProvider()
   const [popOutError, setPopOutError] = useState<string | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
   const canPopOut = capabilities?.companion === true
   const popOut = () => {
     setPopOutError(null)
@@ -94,6 +96,18 @@ export function FocusView() {
               {popOutError}
             </Caption>
           )}
+          {capabilities?.import && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setImportOpen(true)}
+              title="Import tasks and time from frozen Focus Queue files"
+              className="gap-1.5 text-muted-foreground"
+            >
+              <FileInput className="size-3" aria-hidden />
+              Import
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -127,6 +141,7 @@ export function FocusView() {
           />
         </div>
       </div>
+      {importOpen && <FocusImportDialog open={importOpen} onOpenChange={setImportOpen} />}
     </div>
   )
 }

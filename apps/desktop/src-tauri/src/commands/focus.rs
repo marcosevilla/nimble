@@ -2,8 +2,8 @@
 //! Every error is a typed `FocusError { code, message }`.
 use nimble_core::db::focus::engine::focus_error;
 use nimble_core::focus_types::{
-    FocusCapabilities, FocusCommand, FocusError, FocusErrorCode, FocusHistoryPage, FocusReply,
-    FocusSnapshot,
+    FocusCapabilities, FocusCommand, FocusError, FocusErrorCode, FocusHistoryPage,
+    FocusImportPreview, FocusImportResult, FocusReply, FocusSnapshot, LegacyFocusFiles,
 };
 use tauri::{AppHandle, Manager, WebviewWindow};
 
@@ -63,6 +63,41 @@ pub async fn focus_history(
 ) -> Result<FocusHistoryPage, FocusError> {
     let service = runtime(&app)?.reader().await?;
     service.history(cursor, task_id).await.map_err(|e| focus_error(&e))
+}
+
+/// Read-only preview of user-chosen frozen Focus Queue file contents.
+/// Owner-only, like commit: the preview is proposed against the writer's queue.
+#[tauri::command]
+pub async fn focus_preview_import(
+    app: AppHandle,
+    files: LegacyFocusFiles,
+) -> Result<FocusImportPreview, FocusError> {
+    runtime(&app)?.writer().await?;
+    let pool = app.state::<sqlx::SqlitePool>();
+    nimble_core::db::focus::import::preview_import(pool.inner(), &files)
+        .await
+        .map_err(|e| focus_error(&e))
+}
+
+/// Atomic local import of exactly the previewed decisions. No remote calls.
+#[tauri::command]
+pub async fn focus_commit_import(
+    app: AppHandle,
+    files: LegacyFocusFiles,
+    preview_token: String,
+    command_id: String,
+) -> Result<FocusImportResult, FocusError> {
+    let service = runtime(&app)?.writer().await?;
+    match service.commit_import(&files, &preview_token, &command_id).await {
+        Ok((result, snapshot)) => {
+            committed(&app, &snapshot, Some(command_id)).await;
+            if !result.created_task_ids.is_empty() {
+                crate::data_events::broadcast(&app, crate::data_events::TASKS, Vec::new());
+            }
+            Ok(result)
+        }
+        Err(e) => Err(focus_error(&e)),
+    }
 }
 
 /// Show the always-on-top companion (a view only: no session, no clock).

@@ -4,6 +4,9 @@ import type {
   FocusCapabilities,
   FocusCommand,
   FocusHistoryPage,
+  FocusImportPreview,
+  FocusImportResult,
+  LegacyFocusFiles,
   FocusReply,
   FocusSnapshot,
 } from '@nimble/types'
@@ -694,6 +697,14 @@ export function focusHistory(opts?: { cursor?: string; task_id?: string }): Prom
 
 export function focusOpenCompanion(): Promise<void> {
   return focusInvoke<void>('focus_open_companion')
+}
+
+export function focusPreviewImport(files: LegacyFocusFiles): Promise<FocusImportPreview> {
+  return focusInvoke<FocusImportPreview>('focus_preview_import', { files })
+}
+
+export function focusCommitImport(files: LegacyFocusFiles, previewToken: string, commandId: string): Promise<FocusImportResult> {
+  return focusInvoke<FocusImportResult>('focus_commit_import', { files, previewToken, commandId })
 }
 
 // ── Goals ──

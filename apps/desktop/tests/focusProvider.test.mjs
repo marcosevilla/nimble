@@ -166,6 +166,9 @@ test('web focus is read-only with a reason and never fakes a write', async () =>
     assert.equal(e.code, 'unsupported'); assert.equal(e.command, command); return true
   })
   await assert.rejects(web.focus.openCompanion(), (e) => e.code === 'unsupported')
+  const files = { source_namespace: 'fixture', state_json: '{}', manual_json: null, pending_json: null }
+  await assert.rejects(web.focus.previewImport(files), (e) => e.code === 'unsupported')
+  await assert.rejects(web.focus.commitImport(files, 'token', 'c2'), (e) => e.code === 'unsupported')
   for (const legacy of ['startSession', 'endSession', 'getActive']) {
     assert.equal(legacy in web.focus, false, `legacy ${legacy} path is gone`)
   }

@@ -178,6 +178,17 @@ pub async fn create_task_tx(
     input: CreateTaskInput,
     policy: MutationPolicy,
 ) -> crate::Result<LocalTask> {
+    create_task_with_id_tx(conn, &Uuid::new_v4().to_string(), input, policy).await
+}
+
+/// `create_task_tx` with a caller-chosen ID. Import uses deterministic IDs so
+/// a repeated import maps the same legacy record to the same native row.
+pub async fn create_task_with_id_tx(
+    conn: &mut SqliteConnection,
+    id: &str,
+    input: CreateTaskInput,
+    policy: MutationPolicy,
+) -> crate::Result<LocalTask> {
     let project = input.project_id.as_deref().unwrap_or("inbox");
     let sync_policy = input.sync_policy.as_deref().unwrap_or("default");
     if !matches!(sync_policy, "default" | "local_only") {
@@ -229,7 +240,7 @@ pub async fn create_task_tx(
         sqlx::query_scalar("SELECT COALESCE(MAX(position),-1)+1 FROM local_tasks WHERE project_id=? AND parent_id IS NULL")
             .bind(project).fetch_one(&mut *conn).await?
     };
-    let id = Uuid::new_v4().to_string();
+    let id = id.to_string();
     sqlx::query("INSERT INTO local_tasks (id,parent_id,content,description,project_id,priority,due_date,due_time,duration_minutes,recurrence_rule,section_id,reminder_offset_minutes,google_calendar_enabled,position,sync_policy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&id).bind(&input.parent_id).bind(&input.content).bind(&input.description).bind(project)
         .bind(input.priority.unwrap_or(1)).bind(&input.due_date).bind(&input.due_time).bind(input.duration_minutes)
@@ -257,6 +268,22 @@ pub async fn create_task_tx(
             .await?;
         }
     }
+    Ok(task)
+}
+
+/// Record a historical completion at its actual time (import only). Unlike
+/// `set_status_tx` this never advances recurrence, cascades or notifies an
+/// observer: it is not a new completion to echo anywhere.
+pub async fn record_imported_completion_tx(
+    conn: &mut SqliteConnection,
+    id: &str,
+    completed_at: &str,
+) -> crate::Result<LocalTask> {
+    sqlx::query("UPDATE local_tasks SET status='complete',completed=1,completed_at=?,updated_at=datetime('now','localtime') WHERE id=?")
+        .bind(completed_at).bind(id).execute(&mut *conn).await?;
+    let task = fetch(conn, id).await?;
+    let changed = serde_json::json!(["status", "completed", "completed_at"]).to_string();
+    sync_task(conn, &task, "UPDATE", Some(&changed)).await?;
     Ok(task)
 }
 

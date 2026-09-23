@@ -21,3 +21,36 @@ export interface FocusHistoryRow { occurrence_id: string; task_id: string | null
 export interface FocusHistoryPage { rows: FocusHistoryRow[]; next_cursor: string | null }
 export type FocusErrorCode = 'conflict' | 'wrong_owner' | 'stale_occurrence' | 'not_found' | 'invalid' | 'unsupported' | 'storage' | 'needs_review'
 export interface FocusError { code: FocusErrorCode; message: string }
+
+// ── Frozen Focus Queue import (desktop only; mirrors focus_types.rs) ──
+/** The three legacy files the user picked. `config.json` is never accepted. */
+export interface LegacyFocusFiles { source_namespace: string; state_json: string | null; manual_json: string | null; pending_json: string | null }
+export type ImportInclusion = 'included' | 'excluded' | 'unresolved'
+export type ImportRecordStatus = 'included' | 'excluded' | 'unresolved' | 'quarantined'
+export type ImportChange = 'new' | 'unchanged' | 'changed'
+export type ImportSeverity = 'blocking' | 'review'
+export type ImportTaskAction = 'create' | 'reuse' | 'unchanged' | 'unresolved'
+export interface FocusImportIssue { severity: ImportSeverity; record_key: string | null; message: string }
+export interface FocusImportDestination { queue_revision: number; engine_revision: number; tasks_fingerprint: string }
+export interface FocusImportTaskProposal { legacy_task_id: string; native_task_id: string | null; action: ImportTaskAction; title: string | null; completed_at: string | null; differences: string[] }
+export interface FocusImportOrderItem { legacy_task_id: string | null; task_id: string; title: string; origin: 'existing' | 'source' | 'manual' }
+export interface FocusImportContribution { record_key: string; legacy_task_id: string; task_id: string | null; occurrence_id: string | null; duration_ms: number; completed_at: string | null; source_kind: 'completion' | 'timer'; inclusion: ImportInclusion; reason: string; replaces_ms: number | null }
+export interface FocusImportRecordPreview { record_key: string; kind: string; status: ImportRecordStatus; change: ImportChange; fingerprint: string; reason: string; raw_evidence: unknown }
+export interface FocusImportPreview {
+  preview_token: string
+  source_namespace: string
+  file_hashes: Record<string, string>
+  destination: FocusImportDestination
+  source_kind: string | null
+  source_order: string[]
+  manual_order: string[]
+  merged_order: FocusImportOrderItem[]
+  tasks: FocusImportTaskProposal[]
+  contributions: FocusImportContribution[]
+  records: FocusImportRecordPreview[]
+  issues: FocusImportIssue[]
+  legacy_completed_today: number | null
+  blocked: boolean
+  noop: boolean
+}
+export interface FocusImportResult { batch_id: string | null; replayed: boolean; noop: boolean; created_task_ids: string[]; queued_task_ids: string[]; included_ms: number; quarantined_records: number }
