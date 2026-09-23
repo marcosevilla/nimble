@@ -183,6 +183,24 @@ pub async fn create_task_tx(
     if !matches!(sync_policy, "default" | "local_only") {
         return Err(crate::Error::Other("invalid task sync policy".into()));
     }
+    // A child of a local-only parent is local-only on every create path, so it
+    // never becomes a Todoist create with an unmapped parent. `default` input is
+    // coerced, not rejected. Later parent policy changes do not cascade.
+    let parent_local_only = match &input.parent_id {
+        Some(parent) => {
+            sqlx::query_scalar::<_, String>("SELECT sync_policy FROM local_tasks WHERE id=?")
+                .bind(parent)
+                .fetch_optional(&mut *conn)
+                .await?
+                .is_some_and(|p| p == "local_only")
+        }
+        None => false,
+    };
+    let sync_policy = if parent_local_only {
+        "local_only"
+    } else {
+        sync_policy
+    };
     validate_reminder(
         input.reminder_offset_minutes,
         input.google_calendar_enabled.unwrap_or(false),

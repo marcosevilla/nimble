@@ -62,11 +62,39 @@ test('prompt never promises comment refresh or guilt framing', () => {
     assert.doesNotMatch(text, /\b(overdue|late|behind)\b/i)
   }
   // Bound task: truthful about the Todoist route, and says comments are not shown in Nimble.
-  assert.match(bound, /regular sync/i)
   assert.match(bound, /comments are not shown in Nimble/i)
-  // Local-only task: no external route is claimed.
+  // Local-only task: no external link is claimed (Todoist is only named as forbidden).
   assert.match(local, /exists only in Nimble/i)
-  assert.doesNotMatch(local, /todoist/i)
+  assert.doesNotMatch(local, /linked to/i)
+})
+
+test('linked route names the external task and how results reach Nimble', () => {
+  const text = buildFocusPrompt(task(), [], snapshot(), { capabilities: caps })
+  assert.ok(text.includes('It is linked to todoist task 8123456789012345678.'), text)
+  assert.ok(text.includes('Put results in subtasks or the description of that todoist task; Nimble pulls them in on its next sync.'), text)
+  assert.ok(text.includes('Task comments are not shown in Nimble.'), text)
+  assert.doesNotMatch(text, /reply here/i)
+  assert.doesNotMatch(text, /\bdt\b/)
+  assert.ok(text.includes('**External ID:** todoist 8123456789012345678'))
+})
+
+test('local-only route writes back with dt on the Nimble task ID, never Todoist', () => {
+  const text = buildFocusPrompt(task({ external_id: null, external_source: null, sync_policy: 'local_only' }),
+    [], snapshot(), { capabilities: caps })
+  assert.ok(text.includes('It exists only in Nimble, with no external link.'), text)
+  assert.ok(text.includes('Write results to Nimble with the `dt` CLI using Nimble task ID task-9007199254740993123.'), text)
+  assert.ok(text.includes('Never write them to Todoist or any external service.'), text)
+  assert.doesNotMatch(text, /reply here/i)
+  assert.doesNotMatch(text, /External ID/)
+})
+
+test('local_only task with a stale external_id prints no External ID line and the local-only route', () => {
+  const text = buildFocusPrompt(task({ sync_policy: 'local_only' }), [], snapshot(), { capabilities: caps })
+  assert.doesNotMatch(text, /External ID/)
+  assert.doesNotMatch(text, /8123456789012345678/)
+  assert.doesNotMatch(text, /linked to/i)
+  assert.ok(text.includes('Write results to Nimble with the `dt` CLI using Nimble task ID task-9007199254740993123.'), text)
+  assert.ok(text.includes('Never write them to Todoist or any external service.'), text)
 })
 
 test('prompt reports capability limits truthfully', () => {

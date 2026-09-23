@@ -30,16 +30,26 @@ function timerLines(task: LocalTask, snapshot: FocusSnapshot, caps: FocusCapabil
   ]
 }
 
+/** Linked = has an external ID and is not local-only; the route and ID lines must agree. */
+function isLinked(task: LocalTask): boolean {
+  return Boolean(task.external_id) && task.sync_policy !== 'local_only'
+}
+
 function routeLines(task: LocalTask, caps: FocusCapabilities | null): string[] {
   const lines = [`Nimble is the source of truth for this task (native ID ${task.id}).`]
-  if (task.external_id && task.sync_policy !== 'local_only') {
-    const service = task.external_source ?? 'an external service'
+  if (isLinked(task)) {
+    const service = task.external_source ?? 'external'
     lines.push(
-      `It is linked to ${service} task ${task.external_id}. Changes made there reach Nimble only through Nimble's regular sync.`,
-      'Task comments are not shown in Nimble — put results in subtasks or the description, or reply here.',
+      `It is linked to ${service} task ${task.external_id}.`,
+      `Put results in subtasks or the description of that ${service} task; Nimble pulls them in on its next sync.`,
+      'Task comments are not shown in Nimble.',
     )
   } else {
-    lines.push('It exists only in Nimble, with no external link — reply here and I will add the results myself.')
+    lines.push(
+      'It exists only in Nimble, with no external link.',
+      `Write results to Nimble with the \`dt\` CLI using Nimble task ID ${task.id}.`,
+      'Never write them to Todoist or any external service.',
+    )
   }
   if (caps && !caps.queue_write) {
     lines.push(`Focus controls are read-only in this view${caps.reason ? `: ${caps.reason}` : '.'}`)
@@ -64,7 +74,7 @@ export function buildFocusPrompt(
     `**Task:** ${task.content}`,
     `**Nimble task ID:** ${task.id}`,
   ]
-  if (task.external_id) lines.push(`**External ID:** ${task.external_source ?? 'external'} ${task.external_id}`)
+  if (isLinked(task)) lines.push(`**External ID:** ${task.external_source ?? 'external'} ${task.external_id}`)
   lines.push(
     `**Project:** ${project}`,
     `**Due:** ${due}`,

@@ -386,3 +386,87 @@ async fn recurring_completion_emits_due_update_without_close() {
     assert_eq!(payload["due_date"], "2026-09-23");
     tx.rollback().await.unwrap();
 }
+
+#[tokio::test]
+async fn child_of_local_only_parent_inherits_local_only_and_never_exports() {
+    let pool = nimble_core::test_util::test_pool().await;
+    nimble_core::integrations::ensure_state(&pool, "todoist")
+        .await
+        .unwrap();
+    nimble_core::db::settings::set_setting(&pool, "todoist_api_token", "synthetic")
+        .await
+        .unwrap();
+    let outbox = |id: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM todoist_outbox WHERE local_id=?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let private = nimble_core::db::tasks::create_local_task(
+        &pool,
+        CreateTaskInput {
+            content: "Private parent".into(),
+            sync_policy: Some("local_only".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let mut children = Vec::new();
+    for policy in [None, Some("default".to_string())] {
+        let child = nimble_core::db::tasks::create_local_task(
+            &pool,
+            CreateTaskInput {
+                content: "Private child".into(),
+                parent_id: Some(private.id.clone()),
+                sync_policy: policy,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(child.sync_policy, "local_only");
+        let stored: String = sqlx::query_scalar("SELECT sync_policy FROM local_tasks WHERE id=?")
+            .bind(&child.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, "local_only");
+        assert_eq!(outbox(child.id.clone()).await, 0);
+        children.push(child);
+    }
+    let (seeded, _) = nimble_core::integrations::todoist::observer::seed_outbox_for_unlinked(&pool)
+        .await
+        .unwrap();
+    assert_eq!(seeded, 0);
+    for child in &children {
+        assert_eq!(outbox(child.id.clone()).await, 0);
+    }
+
+    // Control: a child under a default parent stays default and exports.
+    let shared = nimble_core::db::tasks::create_local_task(
+        &pool,
+        CreateTaskInput {
+            content: "Shared parent".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let child = nimble_core::db::tasks::create_local_task(
+        &pool,
+        CreateTaskInput {
+            content: "Shared child".into(),
+            parent_id: Some(shared.id.clone()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(child.sync_policy, "default");
+    assert_eq!(outbox(child.id.clone()).await, 1);
+}
