@@ -24,19 +24,49 @@ import {
 
 const QUIET = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100'
 
-/** Row hover icon: quiet "Add to focus queue"; a persistent queued state whose click removes. */
-export function FocusQueueRowButton({ controls, onToggle }: { controls: FocusTaskControls; onToggle: () => void }) {
-  if (!controls.writable) return null
-  const queued = controls.toggle.kind === 'remove'
+/**
+ * Row icon. `add`: quiet until row hover/focus. `remove`: persistent queued
+ * state, click removes. `open`: the selected entry — a non-removing
+ * indicator whose click opens the queue (removing it pauses a live
+ * session, so that is menu-only). Disabled via `aria-disabled` + a click
+ * guard, so QUIET keeps control of opacity, keyboard focus stays put and
+ * the reason tooltip still shows.
+ */
+export function FocusQueueRowButton({
+  controls,
+  onToggle,
+  onOpenQueue,
+}: {
+  controls: FocusTaskControls
+  onToggle: () => void
+  onOpenQueue: () => void
+}) {
+  if (!controls.visible || !controls.writable) return null
+  const icon = controls.rowIcon
+  if (icon === 'open') {
+    return (
+      <IconButton
+        type="button"
+        aria-label={`${controls.status} (current), open focus queue`}
+        title={`${controls.status} — current task`}
+        className="text-accent-blue/70 hover:text-accent-blue"
+        onClick={(e) => { e.stopPropagation(); onOpenQueue() }}
+      >
+        <ListCheck className="size-3.5" />
+      </IconButton>
+    )
+  }
+  const queued = icon === 'remove'
+  const { disabled, reason, label } = controls.toggle
   return (
     <IconButton
       type="button"
-      aria-label={queued ? `${controls.status}, remove from focus queue` : controls.toggle.label}
+      aria-label={queued ? `${controls.status}, remove from focus queue` : label}
       aria-pressed={queued}
-      title={controls.toggle.reason ?? (queued ? `${controls.status} — click to remove` : controls.toggle.label)}
-      disabled={controls.toggle.disabled}
-      className={cn(queued ? 'text-accent-blue/70 hover:text-accent-blue' : QUIET, 'disabled:opacity-50')}
-      onClick={(e) => { e.stopPropagation(); onToggle() }}
+      aria-disabled={disabled || undefined}
+      title={reason ?? (queued ? `${controls.status} — click to remove` : label)}
+      className={cn(queued ? 'text-accent-blue/70 hover:text-accent-blue' : QUIET, 'aria-disabled:cursor-default')}
+      onClick={(e) => { e.stopPropagation(); if (!disabled) onToggle() }}
     >
       {queued ? <ListCheck className="size-3.5" /> : <ListPlus className="size-3.5" />}
     </IconButton>
@@ -87,11 +117,13 @@ export function FocusTaskMenuItems({
 
 /** Trailing row actions: the focus-queue icon and the row's overflow menu. */
 export function TaskRowActions({ task, focusShortcut = false }: { task: FocusEntryTask; focusShortcut?: boolean }) {
-  const { controls, toggle, start } = useFocusTaskEntry(task)
+  const { controls, toggle, start, openQueue } = useFocusTaskEntry(task)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  // Completed tasks and read-only queues (web) get no row focus actions.
+  if (!controls.visible || !controls.writable) return null
   return (
     <div className="flex shrink-0 items-center gap-0.5">
-      <FocusQueueRowButton controls={controls} onToggle={toggle} />
+      <FocusQueueRowButton controls={controls} onToggle={toggle} onOpenQueue={openQueue} />
       <DropdownMenu>
         <DropdownMenuTrigger
           ref={triggerRef}
@@ -140,6 +172,7 @@ export function TaskFocusControlsView({
   onFocusNow: () => void
 }) {
   const { toggle, focusNow: now } = controls
+  if (!controls.visible) return null
   return (
     <div className="flex items-center gap-1" role="group" aria-label="Focus">
       {toggle.kind === 'remove' ? (

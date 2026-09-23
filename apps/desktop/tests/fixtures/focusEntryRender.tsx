@@ -6,7 +6,7 @@ import { TaskItem } from '../../src/components/tasks/TaskItem'
 import { TaskRowActions, TaskFocusControlsView } from '../../src/components/focus/FocusTaskEntry'
 import { BulkActionBar } from '../../src/components/shared/BulkActionBar'
 import { DataProviderRoot } from '../../src/services/provider-context'
-import { focusTaskControls } from '../../src/lib/focusTaskEntry'
+import { focusTaskControls, queuedEntryFor } from '../../src/lib/focusTaskEntry'
 import { useFocusCache } from '../../src/stores/focusStore'
 import { useSelectionStore } from '../../src/stores/selectionStore'
 import type { DataProvider } from '../../src/services/data-provider'
@@ -15,15 +15,18 @@ import type { FocusCapabilities, FocusConfig, FocusSnapshot } from '@nimble/type
 const MIN = 60_000
 const config: FocusConfig = { mode: 'count_up', budget_ms: null, work_ms: 25 * MIN, break_ms: 5 * MIN, rounds: 4 }
 
-function snapshot(queued: boolean): FocusSnapshot {
+type Queued = false | 'upcoming' | 'selected'
+
+/** 'selected' puts the row task first (selected); 'upcoming' queues it behind another task. */
+function snapshot(queued: Queued): FocusSnapshot {
+  const entry = (task_id: string, occurrence_id: string) => ({ id: `e-${occurrence_id}`, task_id, occurrence_id,
+    added_at: '2026-09-22T08:00:00Z', source: { kind: 'today' as const }, explicit_still_open: false, config })
+  const queue = queued === 'selected' ? [entry('row', 'o1')]
+    : queued === 'upcoming' ? [entry('other', 'o0'), entry('row', 'o1')] : []
   return {
     queue_revision: 1, engine_revision: 1, owner_epoch: 'epoch', process_generation: 1, writer_device_id: 'mac',
-    queue: queued
-      ? [{ id: 'e1', task_id: 'row', occurrence_id: 'o1', added_at: '2026-09-22T08:00:00Z', source: { kind: 'today' },
-          explicit_still_open: false, config }]
-      : [],
-    selected_occurrence_id: queued ? 'o1' : null, session: null, totals: {}, as_of: '2026-09-22T17:00:00Z',
-    checkpoint_at: null, recovery_reason: null, replica: false,
+    queue, selected_occurrence_id: queue[0]?.occurrence_id ?? null, session: null, totals: {},
+    as_of: '2026-09-22T17:00:00Z', checkpoint_at: null, recovery_reason: null, replica: false,
   }
 }
 
@@ -32,7 +35,8 @@ const caps = (readOnly = false): FocusCapabilities => ({
   import: false, reason: readOnly ? 'Focus runs on the desktop app.' : null,
 })
 
-const rowTask = { id: 'row', content: 'Row task', sync_policy: 'default' as const, due_date: null, project_id: 'inbox' }
+const rowTask = (completed = false) => ({ id: 'row', content: 'Row task', sync_policy: 'default' as const, due_date: null,
+  project_id: 'inbox', completed, status: completed ? 'complete' as const : 'todo' as const })
 const noop = () => {}
 
 /* Zustand's server snapshot is the store's INITIAL state (SSR never sees
@@ -46,21 +50,22 @@ const withProvider = (node: React.ReactNode) => (
   <DataProviderRoot provider={{} as DataProvider}>{node}</DataProviderRoot>
 )
 
-export function renderRow(opts: { queued: boolean; readOnly?: boolean }): string {
-  seed(useFocusCache, { snapshot: snapshot(opts.queued), capabilities: caps(opts.readOnly), pending: null, error: null })
+export function renderRow(opts: { queued: Queued; readOnly?: boolean; pending?: boolean; completed?: boolean }): string {
+  seed(useFocusCache, { snapshot: snapshot(opts.queued), capabilities: caps(opts.readOnly),
+    pending: opts.pending ? { kind: 'pause' } : null, error: null })
   return renderToStaticMarkup(withProvider(
     <TaskItem
       task={{ id: 'row', content: 'Row task', priority: 1, completed: false, status: 'todo', source: 'local' }}
       onOpen={noop}
-      actions={<TaskRowActions task={rowTask} focusShortcut />}
+      actions={<TaskRowActions task={rowTask(opts.completed)} focusShortcut />}
     />,
   ))
 }
 
-export function renderDetail(opts: { queued: boolean; focusNowBlocked?: string }): string {
+export function renderDetail(opts: { queued: Queued; focusNowBlocked?: string; completed?: boolean }): string {
   const controls = focusTaskControls({
-    snapshot: snapshot(opts.queued), capabilities: caps(), pending: false,
-    focusNowBlocked: opts.focusNowBlocked ?? null, taskId: 'row',
+    entry: queuedEntryFor(snapshot(opts.queued), 'row'), capabilities: caps(), pending: false,
+    focusNowBlocked: opts.focusNowBlocked ?? null, completed: opts.completed ?? false,
   })
   return renderToStaticMarkup(<TaskFocusControlsView controls={controls} onToggle={noop} onFocusNow={noop} />)
 }

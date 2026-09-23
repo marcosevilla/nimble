@@ -8,7 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { build } from 'vite'
 import react from '@vitejs/plugin-react'
-import { focusTaskControls, queuedEntryFor } from '../src/lib/focusTaskEntry.ts'
+import { focusEntryErrorMessage, focusTaskControls, queuedEntryFor } from '../src/lib/focusTaskEntry.ts'
+import { shallow } from 'zustand/vanilla/shallow'
 
 const MIN = 60_000
 const config = { mode: 'count_up', budget_ms: null, work_ms: 25 * MIN, break_ms: 5 * MIN, rounds: 4 }
@@ -25,33 +26,57 @@ const WEB = 'Focus runs on the desktop app.'
 
 // ── queuedEntryFor ──
 
-test('queuedEntryFor finds the queue entry for a task, else null', () => {
-  assert.equal(queuedEntryFor(snap(), 't2')?.occurrence_id, 'o2')
+test('queuedEntryFor gives primitives for a queued task (selected or not), else null', () => {
+  assert.deepEqual(queuedEntryFor(snap(), 't2'), { occurrence_id: 'o2', selected: false })
+  assert.deepEqual(queuedEntryFor(snap(), 't1'), { occurrence_id: 'o1', selected: true })
   assert.equal(queuedEntryFor(snap(), 't9'), null)
   assert.equal(queuedEntryFor(null, 't1'), null)
 })
 
+test('queuedEntryFor is shallow-stable across heartbeat snapshots (rows do not re-render)', () => {
+  const before = snap()
+  const beat = snap({ totals: { o1: 5 * MIN }, as_of: '2026-09-22T17:00:20Z', checkpoint_at: '2026-09-22T17:00:20Z',
+    engine_revision: 10, session: { id: 's', occurrence_id: 'o1', status: 'running', phase: 'work', work_ms: 0,
+      break_ms: 0, round_work_ms: 0, round: 1, config } })
+  for (const id of ['t1', 't2', 't9']) assert.ok(shallow(queuedEntryFor(before, id), queuedEntryFor(beat, id)), id)
+})
+
 // ── Control model ──
 
-test('unqueued task: Add to focus queue + Focus now, both enabled', () => {
-  const c = focusTaskControls({ snapshot: snap(), capabilities: caps(), pending: false, focusNowBlocked: null, taskId: 't9' })
+const controls = (over = {}) => focusTaskControls({ entry: null, capabilities: caps(), pending: false,
+  focusNowBlocked: null, completed: false, ...over })
+
+test('unqueued task: Add to focus queue + Focus now, both enabled, quiet add icon', () => {
+  const c = controls()
+  assert.equal(c.visible, true)
   assert.equal(c.queued, false)
-  assert.equal(c.entry, null)
+  assert.equal(c.rowIcon, 'add')
   assert.deepEqual(c.toggle, { kind: 'enqueue', label: 'Add to focus queue', disabled: false, reason: null })
   assert.deepEqual(c.focusNow, { label: 'Focus now', disabled: false, reason: null })
 })
 
-test('queued task: In focus queue state, Remove replaces Add, Focus now stays', () => {
-  const c = focusTaskControls({ snapshot: snap(), capabilities: caps(), pending: false, focusNowBlocked: null, taskId: 't2' })
+test('queued (not selected): In focus queue, Remove replaces Add, row icon removes', () => {
+  const c = controls({ entry: queuedEntryFor(snap(), 't2') })
   assert.equal(c.queued, true)
   assert.equal(c.status, 'In focus queue')
+  assert.equal(c.rowIcon, 'remove')
   assert.deepEqual(c.toggle, { kind: 'remove', label: 'Remove from focus queue', disabled: false, reason: null, occurrence_id: 'o2' })
-  assert.equal(c.focusNow.label, 'Focus now')
   assert.equal(c.focusNow.disabled, false)
 })
 
+test('queued and selected: the row icon is a non-removing indicator; the menu still offers Remove', () => {
+  const c = controls({ entry: queuedEntryFor(snap(), 't1') })
+  assert.equal(c.rowIcon, 'open')
+  assert.equal(c.toggle.kind, 'remove')
+})
+
+test('completed task: no focus controls at all', () => {
+  assert.equal(controls({ completed: true }).visible, false)
+  assert.equal(controls({ completed: true, entry: queuedEntryFor(snap(), 't2') }).visible, false)
+})
+
 test('pending action disables every focus write with a visible reason', () => {
-  const c = focusTaskControls({ snapshot: snap(), capabilities: caps(), pending: true, focusNowBlocked: null, taskId: 't9' })
+  const c = controls({ pending: true })
   assert.equal(c.toggle.disabled, true)
   assert.equal(c.focusNow.disabled, true)
   assert.match(c.toggle.reason, /saving/i)
@@ -59,26 +84,32 @@ test('pending action disables every focus write with a visible reason', () => {
 
 test('no live timing: queueing stays enabled, Focus now is disabled with its blocked reason', () => {
   const reason = 'Timing starts once the focus companion is ready.'
-  const c = focusTaskControls({ snapshot: snap(), capabilities: caps({ live_timing: false, reason }), pending: false,
-    focusNowBlocked: reason, taskId: 't9' })
+  const c = controls({ capabilities: caps({ live_timing: false, reason }), focusNowBlocked: reason })
   assert.equal(c.toggle.disabled, false)
   assert.deepEqual(c.focusNow, { label: 'Focus now', disabled: true, reason })
 })
 
-test('read-only (web): every write is disabled with the capability reason, and writable is false', () => {
-  const c = focusTaskControls({ snapshot: snap(), capabilities: caps({ queue_write: false, live_timing: false, reason: WEB }),
-    pending: false, focusNowBlocked: WEB, taskId: 't2' })
+test('read-only (web): writable is false and every write is disabled with the capability reason', () => {
+  const c = controls({ capabilities: caps({ queue_write: false, live_timing: false, reason: WEB }), focusNowBlocked: WEB,
+    entry: queuedEntryFor(snap(), 't2') })
   assert.equal(c.writable, false)
-  assert.equal(c.queued, true) // still shows the read-only state
   assert.deepEqual([c.toggle.disabled, c.toggle.reason], [true, WEB])
   assert.deepEqual([c.focusNow.disabled, c.focusNow.reason], [true, WEB])
 })
 
 test('capabilities still loading: writes are disabled, never guessed', () => {
-  const c = focusTaskControls({ snapshot: null, capabilities: null, pending: false, focusNowBlocked: 'Focus is still loading.', taskId: 't1' })
-  assert.equal(c.queued, false)
+  const c = controls({ capabilities: null, focusNowBlocked: 'Focus is still loading.' })
   assert.equal(c.toggle.disabled, true)
   assert.equal(c.focusNow.disabled, true)
+})
+
+test('engine errors map to friendly copy, never raw engine text', () => {
+  const raw = 'completed task requires explicit still-open choice'
+  for (const code of ['stale_occurrence', 'not_found', 'conflict', 'wrong_owner', 'storage', 'invalid', 'needs_review', undefined]) {
+    const msg = focusEntryErrorMessage({ code, message: raw })
+    assert.ok(msg && !msg.includes(raw), `${code}: ${msg}`)
+  }
+  assert.equal(focusEntryErrorMessage({ code: 'unsupported', message: WEB }), WEB)
 })
 
 // ── Rendered row + detail controls ──
@@ -109,8 +140,17 @@ test('row: unqueued shows a quiet, labelled Add to focus queue icon and a More a
   assert.ok(buttonWith(html, 'More actions for Row task'))
 })
 
-test('row: queued shows a persistent In focus queue icon whose action removes', () => {
-  const html = rendered.renderRow({ queued: true })
+test('row: while a focus write is pending the hidden add icon stays quiet (aria-disabled, never native disabled)', () => {
+  const add = buttonWith(rendered.renderRow({ queued: false, pending: true }), 'Add to focus queue')
+  assert.ok(add)
+  assert.match(add, /aria-disabled="true"/)
+  assert.doesNotMatch(add, /\sdisabled(=|\s|>)/)
+  assert.doesNotMatch(add, /disabled:opacity/)
+  assert.match(add, /opacity-0/)
+})
+
+test('row: queued (not selected) shows a persistent In focus queue icon whose action removes', () => {
+  const html = rendered.renderRow({ queued: 'upcoming' })
   const queued = buttonWith(html, 'In focus queue, remove from focus queue')
   assert.ok(queued, 'queued button present')
   assert.match(queued, /aria-pressed="true"/)
@@ -118,14 +158,26 @@ test('row: queued shows a persistent In focus queue icon whose action removes', 
   assert.equal(buttonWith(html, 'Add to focus queue'), null)
 })
 
-test('row: read-only capabilities hide the write icon but keep the menu trigger', () => {
+test('row: the selected entry is a non-removing indicator that opens the queue', () => {
+  const html = rendered.renderRow({ queued: 'selected' })
+  assert.ok(buttonWith(html, 'In focus queue \\(current\\), open focus queue'))
+  assert.equal(buttonWith(html, 'In focus queue, remove from focus queue'), null)
+})
+
+test('row: read-only capabilities (web) hide the row focus actions entirely', () => {
   const html = rendered.renderRow({ queued: false, readOnly: true })
   assert.equal(buttonWith(html, 'Add to focus queue'), null)
-  assert.ok(buttonWith(html, 'More actions for Row task'))
+  assert.equal(buttonWith(html, 'More actions for Row task'), null)
+})
+
+test('row: a completed task shows no focus actions', () => {
+  const html = rendered.renderRow({ queued: 'upcoming', completed: true })
+  assert.doesNotMatch(html, /focus queue/)
+  assert.equal(buttonWith(html, 'More actions for Row task'), null)
 })
 
 test('row markup never nests a button inside a button', () => {
-  for (const html of [rendered.renderRow({ queued: false }), rendered.renderRow({ queued: true })]) {
+  for (const html of [rendered.renderRow({ queued: false }), rendered.renderRow({ queued: 'upcoming' }), rendered.renderRow({ queued: 'selected' })]) {
     assert.equal(nestedButton(html), false)
   }
 })
@@ -138,11 +190,15 @@ test('detail: unqueued shows Add to focus queue primary and Focus now secondary'
 })
 
 test('detail: queued shows In focus queue with Remove, Focus now stays', () => {
-  const html = rendered.renderDetail({ queued: true })
+  const html = rendered.renderDetail({ queued: 'upcoming' })
   assert.match(html, /In focus queue/)
   assert.match(html, /Remove from focus queue/)
   assert.match(html, /Focus now/)
   assert.doesNotMatch(html, />Add to focus queue</)
+})
+
+test('detail: a completed task renders no Focus control', () => {
+  assert.equal(rendered.renderDetail({ queued: 'upcoming', completed: true }), '')
 })
 
 test('detail: blocked Focus now is visible, disabled and explains why', () => {
