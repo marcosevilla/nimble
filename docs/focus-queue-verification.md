@@ -166,6 +166,20 @@ Launch with the steps in [native run → How to re-run](focus-native-run-2026-09
 - **H8** (F16): With a timer running, `pmset sleepnow` (or close the lid) for over a minute, then wake. It is paused with no auto-resume. Also decide checklist 21a: should ⌘H pause?
 - **H9** (F09): Put the companion over a full-screen app and across Spaces (checklist 3). Record the behaviour.
 
+### Human checklist results — 2026-09-23 (Marco, main `3524700`, profile `/private/tmp/nimble-backup-test-checklist`)
+
+| Item | Result | Notes |
+|---|---|---|
+| H1 | **FAIL** | Compact companion still clips the timer and pause button vertically. Design asks: project/section label (e.g. "Inbox") above the task title; one-line description under the title with "See more" / "See less" when it overflows. |
+| H2 | PASS | |
+| H3 | PASS | |
+| H4 | PASS (function) | Design ask: delete/Undo should be a normal toast, not inline in the queue. |
+| H5 | PASS | |
+| H6 | PASS | |
+| H7 | PASS (function) | Design ask: copy confirmation should be a toast, not inline text. |
+| H8 | PASS as specified, **behavior change requested** | Marco: sleep should NOT pause; the timer keeps running through sleep. ⌘H does not pause (unchanged). |
+| H9 | PASS (minor) | Companion height bounces between Spaces. |
+
 ### Live gates (not codeable here)
 
 Still open after this session:
