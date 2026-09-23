@@ -1377,6 +1377,11 @@ export function SettingsPage() {
   const pendingSection = useSettingsNavStore((s) => s.pendingSection)
   const clearPendingSection = useSettingsNavStore((s) => s.clearPendingSection)
   const contentRef = useRef<HTMLDivElement>(null)
+  // The active deep-link scroll pin (see the pendingSection effect below).
+  // Lives outside the effect so clearing pendingSection — which re-runs that
+  // effect — can't tear it down early; only a later real deep link or unmount
+  // does.
+  const pinRef = useRef<{ dispose: () => void } | null>(null)
 
   const backupSupported = dp.backup.supported
   const remindersSupported = dp.reminders.supported
@@ -1837,15 +1842,64 @@ export function SettingsPage() {
 
   // …unless a deep link names a section; this effect runs after the one
   // above, so the section wins. Clearing it re-runs only this effect.
+  //
+  // Async sections (Calendars feeds, Obsidian stats, reminders) can still be
+  // loading when this fires, so the page is briefly shorter than its final
+  // height and the scroll clamps short of the target. Pin the target back
+  // into place on every content resize for a bounded window, or until the
+  // user scrolls on their own — whichever comes first. The pin is stored in
+  // pinRef, not local effect state, specifically so clearPendingSection()
+  // re-running this effect (with pendingSection now null) can't dispose it
+  // early; see pinRef's declaration and the unmount effect below.
   useEffect(() => {
     if (!pendingSection) return
+    pinRef.current?.dispose()
+
     const el = document.getElementById(pendingSection)
-    if (el) {
-      el.scrollIntoView({ block: 'start' })
-      selectSection(pendingSection)
+    if (!el) {
+      clearPendingSection()
+      return
     }
+    el.scrollIntoView({ block: 'start' })
+    selectSection(pendingSection)
+
+    const scroller = contentRef.current ? findScroller(contentRef.current) : null
+    const RELEASE_EVENTS = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const
+    const release = () => dispose()
+    const resizeObserver = new ResizeObserver(() => {
+      if (!el.isConnected) {
+        dispose()
+        return
+      }
+      el.scrollIntoView({ block: 'start' })
+    })
+    if (contentRef.current) resizeObserver.observe(contentRef.current)
+    const windowTimer = window.setTimeout(dispose, 1000)
+
+    function dispose() {
+      resizeObserver.disconnect()
+      window.clearTimeout(windowTimer)
+      RELEASE_EVENTS.forEach((type) => scroller?.removeEventListener(type, release))
+      if (pinRef.current?.dispose === dispose) pinRef.current = null
+    }
+
+    RELEASE_EVENTS.forEach((type) => scroller?.addEventListener(type, release, { once: true }))
+    pinRef.current = { dispose }
     clearPendingSection()
   }, [pendingSection, page, selectSection, clearPendingSection])
+
+  // Tears the pin down on unmount only — this effect has no deps of its own,
+  // so it never re-runs (and thus never fires) while mounted. StrictMode's
+  // dev-only double-invoke calls this cleanup once synchronously right after
+  // mount, but the pendingSection effect's second setup pass (also forced by
+  // StrictMode) recreates the pin immediately after, so the net result after
+  // the double-invoke settles is still exactly one live pin.
+  useEffect(() => {
+    return () => {
+      pinRef.current?.dispose()
+      pinRef.current = null
+    }
+  }, [])
 
   const pageButtonClass = (current: boolean) =>
     cn(
