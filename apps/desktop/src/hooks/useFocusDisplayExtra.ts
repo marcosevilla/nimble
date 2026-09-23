@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  checkpointMs,
   displayBaseMs,
   displayExtraFrom,
   displayExtraMs,
@@ -15,8 +16,9 @@ const TICK_MS = 1_000
  * Display-only running time for one card (see `lib/focusDisplay.ts`). Ticks
  * about once a second only while this entry's session is running with live
  * timing and the page is visible; the value is only ever rendered. Each
- * new snapshot snaps the base; the shown total never steps backwards for
- * the same running quantity.
+ * new snapshot snaps the base; the shown total never steps backwards within
+ * one uninterrupted running stretch, and snaps to the settled total after a
+ * pause, gap-pause settle or resume.
  */
 export function useFocusDisplayExtra(snapshot: FocusSnapshot | null, entry: FocusEntry | null, liveTiming: boolean): number {
   const key = displayKey(snapshot, entry, liveTiming)
@@ -25,10 +27,15 @@ export function useFocusDisplayExtra(snapshot: FocusSnapshot | null, entry: Focu
   const [memo, setMemo] = useState<DisplayMemo | null>(null)
 
   useEffect(() => {
-    if (key == null || !snapshot) return
+    if (key == null || !snapshot) {
+      // Not running: drop the memo so a later resume starts from the snapshot.
+      setMemo(null)
+      return
+    }
+    const cp = checkpointMs(snapshot)
     const update = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
-      setMemo((prev) => nextDisplayTotal(prev, key, base, displayExtraMs(snapshot, key, Date.now())))
+      setMemo((prev) => nextDisplayTotal(prev, key, base, displayExtraMs(snapshot, key, Date.now()), cp))
     }
     const first = requestAnimationFrame(update)
     const id = setInterval(update, TICK_MS)

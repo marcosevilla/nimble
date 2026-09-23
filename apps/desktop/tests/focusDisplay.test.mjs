@@ -52,20 +52,54 @@ test('interpolation references checkpoint_at and clamps to [0, 40 s]', () => {
 test('displayed total never steps backwards for the same running quantity', () => {
   const s = snap()
   const key = displayKey(s, entry(), true)
-  let memo = nextDisplayTotal(null, key, 10 * MIN, 19_900)
+  let memo = nextDisplayTotal(null, key, 10 * MIN, 19_900, T0)
   assert.equal(memo.total, 10 * MIN + 19_900)
   // A heartbeat settles 19.8 s and moves the checkpoint: base + small extra
   // is slightly lower than what was shown, so the shown value holds.
-  memo = nextDisplayTotal(memo, key, 10 * MIN + 19_800, 50)
+  memo = nextDisplayTotal(memo, key, 10 * MIN + 19_800, 50, T0 + 19_800)
   assert.equal(memo.total, 10 * MIN + 19_900)
   assert.equal(displayExtraFrom(memo, key, 10 * MIN + 19_800), 100)
-  memo = nextDisplayTotal(memo, key, 10 * MIN + 19_800, 1_200)
+  memo = nextDisplayTotal(memo, key, 10 * MIN + 19_800, 1_200, T0 + 19_800)
   assert.equal(memo.total, 10 * MIN + 21_000)
   // A new snapshot base beyond the memo never shows less than the base.
   assert.equal(displayExtraFrom(memo, key, 11 * MIN), 0)
   // Pause (no key) or a new phase/round/session starts fresh.
   assert.equal(displayExtraFrom(memo, null, 10 * MIN), 0)
-  assert.equal(nextDisplayTotal(memo, 'other', 0, 500).total, 500)
+  assert.equal(nextDisplayTotal(memo, 'other', 0, 500, T0).total, 500)
+})
+
+test('a gap-pause settle snaps the display back to the settled total', () => {
+  const key = displayKey(snap(), entry(), true)
+  const cp = T0
+  // Running; an interval tick after wake records base + 30 s (never credited).
+  let memo = nextDisplayTotal(null, key, 10 * MIN, 30_000, cp)
+  assert.equal(memo.total, 10 * MIN + 30_000)
+  // The engine gap-pauses at the last checkpoint: no key, memo resets.
+  const paused = snap({ status: 'paused' })
+  const pausedKey = displayKey(paused, entry(), true)
+  assert.equal(pausedKey, null)
+  assert.equal(nextDisplayTotal(memo, pausedKey, 10 * MIN, 0, cp), null, 'not running clears the memo')
+  assert.equal(10 * MIN + displayExtraFrom(null, pausedKey, 10 * MIN), 10 * MIN)
+  // Same key, but a new authoritative snapshot that settled LOWER than the
+  // memo (checkpoint moved without crediting the gap) is honored.
+  const later = cp + 45_000
+  const settled = nextDisplayTotal(memo, key, 10 * MIN, 0, later)
+  assert.equal(settled.total, 10 * MIN)
+  assert.equal(displayExtraFrom(settled, key, 10 * MIN), 0)
+})
+
+test('resume after a gap-pause starts from the settled total, not the old memo', () => {
+  const key = displayKey(snap(), entry(), true)
+  const stale = nextDisplayTotal(null, key, 10 * MIN, 30_000, T0)
+  const resumedAt = T0 + 5 * MIN
+  // Even if the paused snapshot was never observed (coalesced), the resume
+  // snapshot's new checkpoint without matching credit resets the memo.
+  let memo = nextDisplayTotal(stale, key, 10 * MIN, 2_000, resumedAt)
+  assert.equal(memo.total, 10 * MIN + 2_000)
+  assert.equal(displayExtraFrom(memo, key, 10 * MIN), 2_000)
+  // After the memo was cleared by the paused snapshot, the same holds.
+  memo = nextDisplayTotal(null, key, 10 * MIN, 1_000, resumedAt)
+  assert.equal(memo.total, 10 * MIN + 1_000)
 })
 
 test('phase colors and overtime derive from the interpolated value', () => {

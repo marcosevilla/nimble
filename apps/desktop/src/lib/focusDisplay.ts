@@ -49,16 +49,52 @@ export interface DisplayMemo {
   key: string
   /** Last displayed total (settled base + extra) for this key. */
   total: number
+  /** The authoritative anchor the memo was last advanced from. */
+  baseMs: number
+  checkpointMs: number | null
+}
+
+/** Rounding slack when deciding whether a new snapshot continues the shown stretch. */
+export const DISPLAY_CONTINUITY_SLACK_MS = 1_000
+
+/** `checkpoint_at` as epoch ms, or null when absent/unparseable. */
+export function checkpointMs(snapshot: FocusSnapshot | null): number | null {
+  if (!snapshot?.checkpoint_at) return null
+  const ms = Date.parse(snapshot.checkpoint_at)
+  return Number.isFinite(ms) ? ms : null
 }
 
 /**
- * Advance the displayed total without ever going backwards for the same
- * running quantity; a new key (pause, phase/round change, new session)
- * starts fresh.
+ * Does the new authoritative anchor continue the stretch the memo was shown
+ * from? A heartbeat settles exactly through its new checkpoint, so the
+ * settled base grows by the checkpoint delta. A gap-pause, owner stall or
+ * resume moves the checkpoint without that credit: the memo then holds
+ * never-credited time and must be dropped.
  */
-export function nextDisplayTotal(prev: DisplayMemo | null, key: string, baseMs: number, extraMs: number): DisplayMemo {
+function continuesStretch(prev: DisplayMemo, baseMs: number, cp: number | null): boolean {
+  if (prev.checkpointMs === cp) return baseMs === prev.baseMs
+  if (prev.checkpointMs == null || cp == null || cp < prev.checkpointMs) return false
+  return baseMs + DISPLAY_CONTINUITY_SLACK_MS >= prev.baseMs + (cp - prev.checkpointMs)
+}
+
+/**
+ * Advance the displayed total. Within one uninterrupted running stretch it
+ * never steps backwards (heartbeat rounding). It resets to the authoritative
+ * value when nothing runs (null key -> null memo), when the key changes
+ * (phase/round/session/owner) and when a new snapshot's settled total did
+ * not credit the time the memo showed (gap-pause settle, resume).
+ */
+export function nextDisplayTotal(
+  prev: DisplayMemo | null,
+  key: string | null,
+  baseMs: number,
+  extraMs: number,
+  cp: number | null,
+): DisplayMemo | null {
+  if (key == null) return null
   const candidate = baseMs + extraMs
-  return { key, total: prev && prev.key === key ? Math.max(prev.total, candidate) : candidate }
+  const hold = prev != null && prev.key === key && continuesStretch(prev, baseMs, cp)
+  return { key, total: hold ? Math.max(prev.total, candidate) : candidate, baseMs, checkpointMs: cp }
 }
 
 /** Extra ms to add on top of the settled base for rendering. */
