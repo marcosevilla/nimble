@@ -5,20 +5,18 @@ import { useFocusTrayData } from '@/hooks/useFocusTrayData'
 import { shouldIgnoreKey } from '@/lib/keyGuard'
 import { cn } from '@/lib/utils'
 import {
-  COMPACT_MAX_WIDTH,
   COMPANION_WIDTH,
   EXPANDED_DEFAULT_HEIGHT,
-  EXPANDED_MAX_HEIGHT,
-  EXPANDED_MIN_HEIGHT,
   MACOS_TITLEBAR,
   clampFocusPosition,
+  companionGeometry,
   companionMotionMs,
   defaultFocusPosition,
-  fitExpandedWindow,
-  fitFocusWindow,
   parseStoredSize,
+  sameGeometry,
+  type CompanionPrefs,
   type FocusWindowFit,
-  type Size,
+  type NativeGeometry,
 } from '@/lib/focusWindow'
 import { useDataProvider } from '@/services/provider-context'
 import type { CompanionWindowApi } from '@/services/focusCompanionWindow'
@@ -32,12 +30,6 @@ const PREF_KEYS = {
   expandedHeight: 'focus_companion_expanded_height',
 } as const
 const SAVE_DELAY_MS = 400
-
-interface CompanionPrefs {
-  compact: boolean
-  compactWidth: number
-  expandedHeight: number
-}
 
 const reducedMotion = () =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -66,7 +58,9 @@ export function FocusCompanion({ windowApi }: { windowApi?: CompanionWindowApi }
   const [fit, setFit] = useState<FocusWindowFit | null>(null)
   const [refit, setRefit] = useState(0)
   const contentRef = useRef<HTMLDivElement>(null)
-  const applied = useRef<Size | null>(null)
+  const applied = useRef<NativeGeometry | null>(null)
+  /** Frame-to-viewport chrome, measured once before the first fit (never mid-resize). */
+  const chromeRef = useRef<number | null>(null)
   const placed = useRef(false)
 
   useEffect(() => connectFocusCache(), [])
@@ -129,46 +123,37 @@ export function FocusCompanion({ windowApi }: { windowApi?: CompanionWindowApi }
     }
   }, [])
 
-  // Compute geometry with the pure helpers and apply it natively.
+  // Compute geometry with the pure helpers and apply it natively. The chrome
+  // is read once: re-reading it while an apply is still resizing the window
+  // would feed a transient value back into the fit.
   useEffect(() => {
     if (!windowApi || !prefs || (prefs.compact && cardHeight <= 0)) return
     let cancelled = false
     void (async () => {
       const [area, chrome] = await Promise.all([
         windowApi.workArea(),
-        windowApi.chromeHeight().catch(() => MACOS_TITLEBAR),
+        chromeRef.current != null ? chromeRef.current : windowApi.chromeHeight().catch(() => MACOS_TITLEBAR),
       ])
       if (cancelled || !area) return
-      const next = prefs.compact
-        ? fitFocusWindow(prefs.compactWidth, cardHeight, chrome, area)
-        : fitExpandedWindow(prefs.expandedHeight, chrome, area)
-      const availH = Math.max(1, Math.floor(area.height - chrome))
-      const limits = prefs.compact
-        ? {
-            min_width: Math.min(COMPANION_WIDTH, next.width),
-            max_width: Math.max(next.width, Math.min(COMPACT_MAX_WIDTH, Math.floor(area.width))),
-            min_height: next.height,
-            max_height: next.height,
-          }
-        : {
-            min_width: next.width,
-            max_width: next.width,
-            min_height: Math.min(EXPANDED_MIN_HEIGHT, next.height),
-            max_height: Math.max(next.height, Math.min(EXPANDED_MAX_HEIGHT, availH)),
-          }
+      chromeRef.current = chrome
+      const next = companionGeometry(prefs, cardHeight, chrome, area)
       const current = await windowApi.position()
       if (cancelled) return
       const target = !placed.current
-        ? defaultFocusPosition(next, area)
+        ? defaultFocusPosition(next.fit, area)
         : current
-          ? clampFocusPosition(current, next, chrome, area)
+          ? clampFocusPosition(current, next.fit, chrome, area)
           : null
       placed.current = true
-      applied.current = { width: next.width, height: next.height }
-      await windowApi
-        .apply({ width: next.width, height: next.height, ...limits, x: target?.x ?? null, y: target?.y ?? null })
-        .catch(() => {})
-      if (!cancelled) setFit(next)
+      const { fit, ...limits } = next
+      const geometry = { ...limits, x: target?.x ?? null, y: target?.y ?? null }
+      // Focus/visibility refits (e.g. moving across Spaces) usually compute
+      // the same geometry: skip the native round trip instead of re-sizing.
+      if (!sameGeometry(applied.current, geometry)) {
+        applied.current = geometry
+        await windowApi.apply(geometry).catch(() => {})
+      }
+      if (!cancelled) setFit(fit)
     })()
     return () => {
       cancelled = true

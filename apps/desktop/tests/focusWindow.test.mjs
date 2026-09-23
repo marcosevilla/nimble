@@ -12,6 +12,8 @@ import {
   MACOS_TITLEBAR,
   chromeHeight,
   clampFocusPosition,
+  companionGeometry,
+  sameGeometry,
   companionMotionMs,
   defaultFocusPosition,
   fitExpandedWindow,
@@ -168,4 +170,64 @@ test('titlebar chrome is measured from the live window, with a safe fallback', (
   assert.equal(chromeHeight(100, 166), MACOS_TITLEBAR)
   assert.equal(chromeHeight(Number.NaN, 1), MACOS_TITLEBAR)
   assert.equal(MACOS_TITLEBAR, 32)
+})
+
+// ── Checklist H1 (2026-09-23): the compact card was clipped by the titlebar ──
+// Tauri's macOS "Visible" titlebar is an NSFullSizeContentView window: the
+// size Tauri sets is the whole frame, and the web viewport is that frame
+// minus the 32pt titlebar. Measured natively on a hidden compact companion:
+// applied 190, frame 190, webview frame 190, window.innerHeight 158.
+// The window must be set to card + chrome so the VIEWPORT holds the card.
+
+const big = { width: 2560, height: 1440 }
+const viewportOf = (g, chrome) => g.height - chrome
+
+test('compact native height adds the frame-to-viewport chrome so the viewport holds the card', () => {
+  const g = companionGeometry({ compact: true, compactWidth: 340, expandedHeight: 560 }, 190, 32, big)
+  assert.equal(g.height, 222)
+  assert.equal(viewportOf(g, 32), 190)
+  assert.deepEqual([g.min_height, g.max_height], [222, 222], 'height is locked to the fit')
+  assert.equal(g.fit.height, 190, 'fit stays the content (viewport) height')
+})
+
+test('compact viewport contains the whole card at 1x and every scaled width, long cards included', () => {
+  for (const chrome of [0, 28, 32]) {
+    for (const card of [166, 190, 203.23, 246.5, 318]) {
+      for (let w = 340; w <= 1020; w += 34) {
+        const g = companionGeometry({ compact: true, compactWidth: w, expandedHeight: 560 }, card, chrome, big)
+        assert.ok(viewportOf(g, chrome) >= card * g.fit.scale - 1e-6, `card ${card} @ ${w} chrome ${chrome}`)
+        assert.ok(viewportOf(g, chrome) - card * g.fit.scale < 1, 'no slack beyond one pixel')
+        assert.ok(g.height <= big.height, 'frame stays inside the work area')
+        assert.ok(g.min_width <= g.width && g.width <= g.max_width)
+      }
+    }
+  }
+})
+
+test('a too-tall compact card keeps the frame inside the work area and scrolls', () => {
+  const area = { width: 1440, height: 600 }
+  const g = companionGeometry({ compact: true, compactWidth: 340, expandedHeight: 560 }, 900, 32, area)
+  assert.equal(g.height, 600)
+  assert.equal(g.fit.overflow, true)
+})
+
+test('expanded geometry keeps its remembered height and bounds', () => {
+  const g = companionGeometry({ compact: false, compactWidth: 340, expandedHeight: 600 }, 190, 32, big)
+  assert.deepEqual([g.width, g.height, g.min_width, g.max_width], [340, 600, 340, 340])
+  assert.deepEqual([g.min_height, g.max_height], [EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT])
+})
+
+test('re-applying identical geometry is a no-op (no native churn on focus or Space changes)', () => {
+  const a = { width: 340, height: 222, min_width: 340, max_width: 1020, min_height: 222, max_height: 222, x: 10, y: 20 }
+  assert.equal(sameGeometry(a, { ...a }), true)
+  assert.equal(sameGeometry(a, { ...a, height: 223 }), false)
+  assert.equal(sameGeometry(a, { ...a, x: 11 }), false)
+  // Same size but different limits (compact vs expanded at an equal height) must still apply.
+  assert.equal(sameGeometry(a, { ...a, max_width: 340, min_height: 420, max_height: 640 }), false)
+  assert.equal(sameGeometry(null, a), false)
+})
+
+test('chrome is the native frame minus the web viewport', () => {
+  // Hidden compact companion, macOS 26: frame 190, viewport 158.
+  assert.equal(chromeHeight(190, 158), 32)
 })

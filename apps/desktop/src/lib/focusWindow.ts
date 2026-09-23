@@ -3,9 +3,13 @@
  * baseline"). Pure math in logical pixels, so it is testable without a
  * native window.
  *
- * Returned `width`/`height` are the INNER (content) size that Tauri sets.
- * `chromeHeight` is the native titlebar: it is not part of the content,
- * but content + chrome must still fit inside the monitor's work area.
+ * `fitFocusWindow`/`fitExpandedWindow` return the CONTENT (web viewport)
+ * size. `chromeHeight` is the vertical space between the native frame and
+ * that viewport. On macOS Tauri's "Visible" titlebar is an
+ * NSFullSizeContentView window: the size Tauri sets is the whole frame and
+ * the web viewport is the frame minus the titlebar (measured on macOS 26:
+ * frame 190, viewport 158). So the native size to set is content + chrome
+ * (`companionGeometry`), and content + chrome must fit the work area.
  * Nothing here starts, pauses or changes timing — it is presentation only.
  */
 
@@ -64,20 +68,24 @@ const extent = (n: number) => Math.max(1, Math.floor(finite(n, 1)))
 const cover = (n: number) => Math.ceil(n - 1e-6)
 
 /**
- * Titlebar height from the live window's outer and inner heights (logical
- * px). Anything missing or implausible falls back to `MACOS_TITLEBAR`.
+ * Chrome from the live window: its native outer (frame) height minus the web
+ * viewport height (`window.innerHeight`), in logical px. Not outer minus
+ * Tauri's inner size: with a full-size content view those are equal (the
+ * webview spans the frame) while the titlebar still hides the top of it.
+ * Anything missing or implausible falls back to `MACOS_TITLEBAR`.
  */
-export function chromeHeight(outerHeight: number | null | undefined, innerHeight: number | null | undefined): number {
-  if (outerHeight == null || innerHeight == null) return MACOS_TITLEBAR
-  const chrome = outerHeight - innerHeight
+export function chromeHeight(outerHeight: number | null | undefined, viewportHeight: number | null | undefined): number {
+  if (outerHeight == null || viewportHeight == null) return MACOS_TITLEBAR
+  const chrome = outerHeight - viewportHeight
   return Number.isFinite(chrome) && chrome >= 0 && chrome <= 200 ? chrome : MACOS_TITLEBAR
 }
 
 /**
- * Compact (card-only) geometry. `width` is the requested/remembered compact
- * width; `cardHeight` is the card's natural content height at 1x (340 wide),
- * fractional as laid out. The returned height is rounded UP so the window
- * always contains the whole scaled card.
+ * Compact (card-only) content geometry. `width` is the requested/remembered
+ * compact width; `cardHeight` is the card's natural content height at 1x
+ * (340 wide), fractional as laid out. The returned height is the viewport
+ * height, rounded UP so it always contains the whole scaled card; the native
+ * window adds `chromeHeight` on top (see `companionGeometry`).
  * The card scales proportionally from 340 up to min(1020, work area), at most
  * 3x. If the scaled card is too tall for the work area the scale drops; at 1x
  * a still-too-tall card keeps the window inside the work area and scrolls.
@@ -106,7 +114,9 @@ export function fitFocusWindow(width: number, cardHeight: number, chromeHeight: 
 
 /**
  * Expanded (card + queue) geometry: 340 wide, remembered height clamped to
- * 420–640 (560 by default), then to the work area. The queue scrolls inside.
+ * 420–640 (560 by default), then to the work area. The queue scrolls inside
+ * the viewport and the footer stays pinned, so this height is the native
+ * window height as remembered (not content + chrome).
  */
 export function fitExpandedWindow(height: number, chromeHeight: number, workArea: WorkArea): FocusWindowFit {
   const areaW = extent(workArea.width)
@@ -120,6 +130,75 @@ export function fitExpandedWindow(height: number, chromeHeight: number, workArea
     scale: 1,
     overflow: width < COMPANION_WIDTH || wanted > availH,
   }
+}
+
+export interface CompanionPrefs {
+  compact: boolean
+  compactWidth: number
+  expandedHeight: number
+}
+
+/** Native geometry for `focus_companion_apply_geometry` plus the content fit it came from. */
+export interface CompanionGeometry extends Size {
+  min_width: number
+  max_width: number
+  min_height: number
+  max_height: number
+  fit: FocusWindowFit
+}
+
+/**
+ * The native size and resize limits to apply for the current mode.
+ *
+ * Compact: the frame is the scaled card plus `chrome`, so the viewport holds
+ * the whole card (H1); the height is locked and only the width is user
+ * resizable. Expanded: the remembered height within 420–640. `chrome` must be
+ * measured once per window (see `chromeHeight`), never mid-resize, or the fit
+ * feeds back into itself.
+ */
+export function companionGeometry(prefs: CompanionPrefs, cardHeight: number, chrome: number, area: WorkArea): CompanionGeometry {
+  const c = Math.max(0, finite(chrome, 0))
+  const availH = Math.max(1, Math.floor(finite(area.height, 1) - c))
+  if (prefs.compact) {
+    const fit = fitFocusWindow(prefs.compactWidth, cardHeight, c, area)
+    const height = Math.max(1, Math.min(fit.height + Math.ceil(c), Math.floor(finite(area.height, 1))))
+    return {
+      fit,
+      width: fit.width,
+      height,
+      min_width: Math.min(COMPANION_WIDTH, fit.width),
+      max_width: Math.max(fit.width, Math.min(COMPACT_MAX_WIDTH, Math.floor(finite(area.width, 1)))),
+      min_height: height,
+      max_height: height,
+    }
+  }
+  const fit = fitExpandedWindow(prefs.expandedHeight, c, area)
+  return {
+    fit,
+    width: fit.width,
+    height: fit.height,
+    min_width: fit.width,
+    max_width: fit.width,
+    min_height: Math.min(EXPANDED_MIN_HEIGHT, fit.height),
+    max_height: Math.max(fit.height, Math.min(EXPANDED_MAX_HEIGHT, availH)),
+  }
+}
+
+/** A native geometry as sent to `focus_companion_apply_geometry`. */
+export interface NativeGeometry extends Size {
+  min_width: number
+  max_width: number
+  min_height: number
+  max_height: number
+  x: number | null
+  y: number | null
+}
+
+/** Same size, limits and position: re-applying it would only churn the window. */
+export function sameGeometry(a: NativeGeometry | null, b: NativeGeometry | null): boolean {
+  if (a == null || b == null) return false
+  const keys: (keyof NativeGeometry)[] = ['width', 'height', 'min_width', 'max_width', 'min_height', 'max_height', 'x', 'y']
+  return keys.every((k) => a[k] === b[k])
 }
 
 /**

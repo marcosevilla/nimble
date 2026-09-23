@@ -27,7 +27,11 @@ export interface CompanionWindowApi {
   position(): Promise<Point | null>
   /** Inner (content) size in logical px. */
   innerSize(): Promise<Size | null>
-  /** Titlebar height (outer minus inner) in logical px; a fallback when unknown. */
+  /**
+   * Native frame height minus the web viewport (`window.innerHeight`) in
+   * logical px; a fallback when unknown. Read it while the window is not
+   * being resized (the companion reads it once, before its first fit).
+   */
   chromeHeight(): Promise<number>
   /** User/window resizes, in logical inner px. Returns unsubscribe. */
   onResized(callback: (size: Size) => void): () => void
@@ -69,8 +73,11 @@ export function createCompanionWindow(): CompanionWindowApi {
     },
     async chromeHeight() {
       try {
-        const [outer, inner, f] = await Promise.all([win.outerSize(), win.innerSize(), win.scaleFactor()])
-        return chromeHeight(outer.height / f, inner.height / f)
+        // Not outer minus Tauri's inner: the macOS "Visible" titlebar is a
+        // full-size content view, so the webview spans the whole frame and
+        // the titlebar hides its top. The viewport is what the card gets.
+        const [outer, f] = await Promise.all([win.outerSize(), win.scaleFactor()])
+        return chromeHeight(outer.height / f, window.innerHeight)
       } catch {
         return chromeHeight(null, null)
       }
