@@ -1,6 +1,6 @@
 # Task cleanup proposal — reconcile Nimble with Todoist (2026-09-23)
 
-Status: **proposal, awaiting Marco's approval.** Fits inside C5 of `todoist-replacement-decisions.md`: it pulls C5's "sections/nesting land in first-class fields" work forward.
+Status: **approved 2026-09-23** (plan: `docs/superpowers/plans/2026-09-23-todoist-reconcile.md`). Fits inside C5 of `todoist-replacement-decisions.md`: it pulls C5's "sections/nesting land in first-class fields" work forward.
 
 ## What's actually wrong (measured 2026-09-23, read-only)
 
@@ -42,7 +42,7 @@ Then a full re-sync (sync token reset to `*`) runs as a **dry run first**. It pr
 - Optional Todoist hygiene pass first (garbage in, garbage out): "⭐️ TODAY - September 9", "‼️ Complete Today (Sep 22)", "Backlog".
 
 ### Phase 4: the path off Todoist (existing C-plan)
-- While mirroring, new Nimble tasks still push to Todoist, so there's one list and no split brain. The `origin` field keeps the "made in Nimble" fact after the push.
+- While mirroring, new Nimble tasks still push to Todoist, so there's one list and no split brain. The `nimble` label keeps the "made in Nimble" fact after the push.
 - The fixed mapper is the C5 import upgrade, so cutover becomes: stop sync, downgrade Todoist to free (D13).
 - Remaining gates: C2 phone, C3 routing, C4, the EDD recurrence exit test. Todoist has 6 recurring tasks, and recurrence doesn't round-trip (`sync_loop.rs:730-741`).
 
