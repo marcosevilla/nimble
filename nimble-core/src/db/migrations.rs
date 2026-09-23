@@ -698,10 +698,17 @@ pub async fn run_migrations_to_version(pool: &SqlitePool, target: i64) -> crate:
                 migration.description
             );
 
-            // Execute migration SQL (may contain multiple statements)
+            // One transaction per migration: its statements and its
+            // schema_version row commit together or not at all (SQLite DDL is
+            // transactional), so a crash or failure part-way leaves the
+            // previous version intact and a rerun starts cleanly. No migration
+            // uses a statement SQLite forbids inside a transaction (PRAGMA
+            // foreign_keys / journal_mode, VACUUM); one that needs it must run
+            // it outside this block explicitly.
+            let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
             for statement in migration.sql.split(';').filter(|s| !s.trim().is_empty()) {
                 sqlx::query(statement.trim())
-                    .execute(pool)
+                    .execute(&mut *tx)
                     .await
                     .map_err(|e| {
                         crate::Error::Other(format!("Migration {} failed: {}", migration.version, e))
@@ -714,8 +721,9 @@ pub async fn run_migrations_to_version(pool: &SqlitePool, target: i64) -> crate:
             )
             .bind(migration.version)
             .bind(migration.description)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
+            tx.commit().await?;
 
             log::info!("Migration {} complete", migration.version);
         }
