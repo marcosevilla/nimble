@@ -6,7 +6,7 @@
 #[path = "common/focus.rs"]
 mod fixture;
 use chrono::DateTime;
-use nimble_core::db::focus::engine::{FocusService, SLEEP_CREDIT_CAP_MS, SLEEP_WAKE_GRACE_HEARTBEATS};
+use nimble_core::db::focus::engine::{FocusService, SLEEP_CREDIT_CAP_MS, SLEEP_WAKE_GRACE_MS};
 use nimble_core::db::focus::clock::ManualClock;
 use nimble_core::focus_types::{FocusAction, FocusConfig, FocusMode, FocusSource, FocusStatus};
 
@@ -143,9 +143,10 @@ async fn sleep_without_a_wake_notice_then_relaunch_credits_nothing() {
     h.service.sleep_began().await.unwrap();
     h.clock.advance(45 * MIN);
     // The live process ticks after the gap but never sees the wake notice.
-    for _ in 0..SLEEP_WAKE_GRACE_HEARTBEATS - 1 {
+    for _ in 0..3 {
         let deferred = h.service.heartbeat().await.unwrap();
         assert_eq!(deferred.totals[&oid], 5_000, "a heartbeat never credits sleep");
+        h.clock.advance(15_000);
     }
     let relaunched = FocusService::with_clock(h.pool.clone(), "test-device".into(), std::sync::Arc::new(ManualClock::default()));
     relaunched.initialize().await.unwrap();
@@ -183,17 +184,16 @@ async fn heartbeats_between_the_notice_and_the_actual_sleep_credit_normally() {
 }
 
 #[tokio::test]
-async fn a_lost_wake_notice_falls_back_to_the_gap_rule_after_the_grace_ticks() {
+async fn a_lost_wake_notice_falls_back_to_the_gap_rule_after_the_grace_period() {
     let h = fixture::Harness::new().await;
     let oid = started(&h).await;
     h.clock.advance(5_000);
     h.service.sleep_began().await.unwrap();
     h.clock.advance(10 * MIN);
-    let mut last = None;
-    for _ in 0..SLEEP_WAKE_GRACE_HEARTBEATS {
-        last = Some(h.service.heartbeat().await.unwrap());
-    }
-    let snap = last.unwrap();
+    let first = h.service.heartbeat().await.unwrap();
+    assert_eq!(first.session.unwrap().status, FocusStatus::Running, "first gap heartbeat waits");
+    h.clock.advance(SLEEP_WAKE_GRACE_MS);
+    let snap = h.service.heartbeat().await.unwrap();
     assert_eq!(snap.totals[&oid], 5_000, "no wake observed: not credited");
     assert_eq!(snap.session.unwrap().status, FocusStatus::Paused);
     assert!(snap.recovery_reason.unwrap().contains("40 seconds"));
@@ -233,4 +233,45 @@ async fn a_command_after_an_unannounced_wake_still_follows_the_gap_rule() {
     assert_eq!(snap.session.unwrap().status, FocusStatus::Paused);
     let late = h.service.woke().await.unwrap();
     assert_eq!(late.totals[&oid], 5_000);
+}
+
+#[tokio::test]
+async fn rapid_heartbeats_after_wake_still_wait_for_the_notice() {
+    // Review 2026-09-23: boundary wakes can run heartbeats ~100 ms apart; a
+    // tick-count grace expired before the wake notice and dropped the credit.
+    let h = fixture::Harness::new().await;
+    let oid = started(&h).await;
+    h.clock.advance(5_000);
+    h.service.sleep_began().await.unwrap();
+    h.clock.advance(10 * MIN);
+    for _ in 0..20 {
+        let early = h.service.heartbeat().await.unwrap();
+        assert_eq!(early.totals[&oid], 5_000);
+        assert_eq!(early.session.unwrap().status, FocusStatus::Running);
+        h.clock.advance(100);
+    }
+    let woke = h.service.woke().await.unwrap();
+    assert_eq!(woke.totals[&oid], 5_000 + 10 * MIN + 2_000);
+    assert_eq!(woke.session.unwrap().status, FocusStatus::Running);
+}
+
+#[tokio::test]
+async fn no_boundary_wake_while_a_sleep_gap_awaits_its_notice() {
+    let h = fixture::Harness::new().await;
+    let t = h.task("Boxed").await;
+    h.send(FocusAction::Enqueue { task_ids: vec![t], source: FocusSource::Today, explicit_still_open: false })
+        .await
+        .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Configure {
+        occurrence_id: oid.clone(),
+        config: FocusConfig { mode: FocusMode::Timebox, budget_ms: Some(20 * MIN), work_ms: 25 * MIN, break_ms: 5 * MIN, rounds: 4 },
+    })
+    .await
+    .unwrap();
+    h.send(FocusAction::Start { occurrence_id: oid.clone() }).await.unwrap();
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), Some(20 * MIN));
+    h.service.sleep_began().await.unwrap();
+    h.clock.advance(25 * MIN);
+    assert_eq!(h.service.ms_until_boundary().await.unwrap(), None, "wake decides the credit");
 }

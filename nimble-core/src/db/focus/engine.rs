@@ -129,10 +129,12 @@ struct UndoEntry {
 /// Longest system sleep credited to a running session (Marco's decision,
 /// 2026-09-23): a longer sleep credits exactly this much and pauses there.
 pub const SLEEP_CREDIT_CAP_MS: u64 = 30 * 60_000;
-/// Heartbeats that see a > 40 s gap after a sleep notice wait this many ticks
-/// for the wake notice before falling back to the gap rule (no credit). The
-/// Rust heartbeat can fire just before `NSWorkspaceDidWakeNotification`.
-pub const SLEEP_WAKE_GRACE_HEARTBEATS: u8 = 3;
+/// Heartbeats that see a > 40 s gap after a sleep notice wait this long
+/// (sleep-inclusive clock, measured from the first such heartbeat) for the
+/// wake notice before falling back to the gap rule (no credit). The Rust
+/// heartbeat can fire just before `NSWorkspaceDidWakeNotification`. Time
+/// based, not tick based: boundary wakes can run heartbeats ~100 ms apart.
+pub const SLEEP_WAKE_GRACE_MS: u64 = 60_000;
 /// Recovery reason when a sleep outlasted the cap (shown after "Timer paused and saved: ").
 pub const SLEEP_CAP_REASON: &str = "the Mac slept for more than 30 minutes";
 /// A settle delta above this is a suspension gap: pause at the checkpoint.
@@ -142,7 +144,8 @@ const GAP_MS: u64 = 40_000;
 /// live process may credit the sleep. In memory only, so a crash, kill or
 /// relaunch across the sleep can never credit it.
 struct SleepMark {
-    deferred_heartbeats: u8,
+    /// Clock sample of the first heartbeat that saw the sleep gap.
+    first_deferral_ms: Option<u64>,
 }
 
 struct Anchor {
@@ -549,7 +552,7 @@ impl FocusService {
     /// process) pauses at the last durable checkpoint instead of crediting.
     ///
     /// After a sleep notice, a gap is the sleep itself: the heartbeat never
-    /// credits it and waits up to `SLEEP_WAKE_GRACE_HEARTBEATS` ticks for the
+    /// credits it and waits up to `SLEEP_WAKE_GRACE_MS` for the
     /// wake notice (`woke`), then falls back to the gap rule.
     pub async fn heartbeat(&self) -> crate::Result<FocusSnapshot> {
         let mut guard = self.lock.lock().await;
@@ -557,8 +560,8 @@ impl FocusService {
         let delta = sampled.saturating_sub(guard.sampled_ms);
         if delta > GAP_MS {
             if let Some(mark) = guard.sleep.as_mut() {
-                mark.deferred_heartbeats = mark.deferred_heartbeats.saturating_add(1);
-                if mark.deferred_heartbeats < SLEEP_WAKE_GRACE_HEARTBEATS {
+                let first = *mark.first_deferral_ms.get_or_insert(sampled);
+                if sampled.saturating_sub(first) < SLEEP_WAKE_GRACE_MS {
                     let mut conn = self.pool.acquire().await?;
                     return snapshot_tx(&mut conn).await;
                 }
@@ -578,9 +581,15 @@ impl FocusService {
     /// elapsed since the last settle; `None` when nothing live has one. The
     /// owner's heartbeat wakes at min(20 s, this) so a crossing is settled,
     /// persisted and chimed on time instead of up to one heartbeat late.
+    /// While a sleep gap awaits its wake notice the boundary is unknown (the
+    /// wake decides the credit), so this is `None` and the loop keeps its
+    /// regular cadence instead of spinning at the boundary margin.
     pub async fn ms_until_boundary(&self) -> crate::Result<Option<u64>> {
         let guard = self.lock.lock().await;
         let pending = self.clock.elapsed_ms().saturating_sub(guard.sampled_ms);
+        if guard.sleep.is_some() && pending > GAP_MS {
+            return Ok(None);
+        }
         let mut conn = self.pool.acquire().await?;
         let live: Option<String> =
             sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
@@ -774,7 +783,7 @@ impl FocusService {
         }
         guard.sampled_ms = sampled;
         if live_after.is_some() {
-            guard.sleep = Some(SleepMark { deferred_heartbeats: 0 });
+            guard.sleep = Some(SleepMark { first_deferral_ms: None });
         }
         Ok(snap)
     }
