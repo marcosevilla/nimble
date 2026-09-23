@@ -145,13 +145,14 @@ What each surface is *for*, and what "done right" looks like. Audit agents use t
 
 ### 2.7 Command Bar
 
-**Purpose:** Persistent universal entry point at the bottom of the screen.
+**Purpose:** Universal entry point, summoned from anywhere. (Amended 2026-09-23 by Marco: the built centered palette is the intended form factor, not a docked bottom bar.)
 
 **Intended behaviors:**
 - Default mode: infers intent (capture vs task vs search).
 - Explicit modes: keystroke to force a mode.
 - Search results: inline actions on found items (complete, move, AI breakdown).
-- **Cmd+K focuses the command bar.** It is not a separate palette.
+- **Cmd+K opens the command palette** (centered overlay; also reachable from the left nav's Command item). Actions-only: no vault search.
+- Capture prefixes match the Inbox field: the same `capture_routes` vocabulary (`/i`, `/q`, `/t`) and the same route pill.
 - Additive layer — does not replace pages.
 
 ### 2.8 Mobile (apps/mobile)
@@ -172,6 +173,7 @@ If an audit agent sees any of these, it's a high-priority finding.
 ### 3.1 Guilt-inducing UI
 - "Overdue" labels (use "still open" instead).
 - Streaks. "You've been away N days." Negative framing of empty states.
+  - Exception (Marco, 2026-09-23): Todoist-style karma (streaks, overdue penalty) is allowed as an **opt-in setting, off by default**. With it off, none of it appears anywhere.
 - Anything that performs urgency at the user.
 
 ### 3.2 Friction
