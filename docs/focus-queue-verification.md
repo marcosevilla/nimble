@@ -189,6 +189,17 @@ Launch with the steps in [native run → How to re-run](focus-native-run-2026-09
 - **Sleep (H8 decision):** see the spec amendment. Engine tests `nimble-core/tests/focus_sleep.rs`.
 - Not yet run natively: toasts, See more expansion refit, scaled compact, dark theme, a real sleep/wake.
 
+### Human re-test — 2026-09-23 (Marco, main `cf8d028`, profile `/private/tmp/nimble-backup-test-retest`)
+
+| Item | Result |
+|---|---|
+| H1 | **PASS** (compact fit, card label + description, themes/accents) |
+| H4 | **PASS** (delete/Undo via toast) |
+| H7 | **PASS** (copy context via toast) |
+| H8 | **PASS** (timer keeps running through a short `pmset sleepnow`; sleep credited) |
+
+Human checklist H1–H9 now all pass. Only the live gates below remain.
+
 ### Live gates (not codeable here)
 
 Still open after this session:
