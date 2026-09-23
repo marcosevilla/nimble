@@ -487,6 +487,7 @@ impl FocusService {
         let mut entries = before.queue.clone();
         let mut selected = before.selected_occurrence_id.clone();
         let mut changed_queue = false;
+        let log_ctx = focus_log_ctx_tx(&mut tx, &command.action, &before).await;
         let result = apply_action_tx(
             &mut tx,
             &command.action,
@@ -504,6 +505,10 @@ impl FocusService {
             }
             return Err(e);
         }
+        let log_rows = match &log_ctx {
+            Some(ctx) => focus_log_rows_tx(&mut tx, &command.action, ctx).await,
+            None => Vec::new(),
+        };
         queue::validate(&entries, selected.as_deref())?;
         if changed_queue {
             save_queue_tx(&mut tx, &entries, selected.as_deref(), &stamp).await?;
@@ -531,6 +536,11 @@ impl FocusService {
             return Err(e.into());
         }
         guard.sampled_ms = sampled;
+        if let Some(ctx) = &log_ctx {
+            for (action, meta) in log_rows {
+                activity::log_activity(&self.pool, action, Some(&ctx.task_id), Some(meta)).await;
+            }
+        }
         Ok(reply)
     }
     pub async fn checkpoint(
@@ -1192,6 +1202,98 @@ async fn snapshot_tx(conn: &mut SqliteConnection) -> crate::Result<FocusSnapshot
     })
 }
 
+/// What focus logging needs to know about the task before the action applies.
+struct FocusLogCtx {
+    task_id: String,
+    content: String,
+    status: String,
+    due_date: Option<String>,
+    /// The session this action ends, if one exists for this occurrence.
+    session_id: Option<String>,
+}
+
+/// Reads for activity logging only: any failure means "log nothing", never
+/// a failed command (activity is fire-and-forget).
+async fn focus_log_ctx_tx(
+    conn: &mut SqliteConnection,
+    action: &FocusAction,
+    before: &FocusSnapshot,
+) -> Option<FocusLogCtx> {
+    let occ = match action {
+        FocusAction::Start { occurrence_id } | FocusAction::Complete { occurrence_id } => {
+            occurrence_id.clone()
+        }
+        FocusAction::Stop | FocusAction::Skip => before.session.as_ref()?.occurrence_id.clone(),
+        _ => return None,
+    };
+    let task_id = before.queue.iter().find(|e| e.occurrence_id == occ)?.task_id.clone();
+    let (content, status, due_date): (String, String, Option<String>) =
+        sqlx::query_as("SELECT content, status, due_date FROM local_tasks WHERE id=?")
+            .bind(&task_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .ok()??;
+    let session_id = before
+        .session
+        .as_ref()
+        .filter(|s| s.occurrence_id == occ)
+        .map(|s| s.id.clone());
+    Some(FocusLogCtx { task_id, content, status, due_date, session_id })
+}
+
+/// The rows to write once the transaction commits: (action_type, metadata).
+/// Shapes match the pre-engine `start_focus_session` / `end_focus_session`
+/// rows the timeline already renders (re-score 1c).
+async fn focus_log_rows_tx(
+    conn: &mut SqliteConnection,
+    action: &FocusAction,
+    ctx: &FocusLogCtx,
+) -> Vec<(&'static str, serde_json::Value)> {
+    let mut out = Vec::new();
+    let duration = match &ctx.session_id {
+        Some(id) => sqlx::query_scalar::<_, i64>("SELECT work_ms FROM focus_sessions WHERE id=?")
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await
+            .ok()
+            .flatten()
+            .map(|ms| serde_json::json!({"duration_secs": ms / 1000})),
+        None => None,
+    };
+    match action {
+        FocusAction::Start { .. } => {
+            out.push(("focus_started", serde_json::json!({"task_content": ctx.content})))
+        }
+        FocusAction::Stop => out.extend(duration.map(|m| ("focus_abandoned", m))),
+        FocusAction::Skip => out.extend(duration.map(|m| ("focus_skipped", m))),
+        FocusAction::Complete { .. } => {
+            out.extend(duration.map(|m| ("focus_completed", m)));
+            let after: Option<(String, Option<String>)> =
+                sqlx::query_as("SELECT status, due_date FROM local_tasks WHERE id=?")
+                    .bind(&ctx.task_id)
+                    .fetch_optional(&mut *conn)
+                    .await
+                    .ok()
+                    .flatten();
+            if let Some((status, due)) = after {
+                let recurred = status != "complete" && due != ctx.due_date;
+                if status == "complete" || recurred {
+                    let from = ctx.due_date.clone().unwrap_or_default();
+                    let to = due.unwrap_or_default();
+                    out.push(activity::status_activity(&activity::StatusActivity {
+                        content: Some(&ctx.content),
+                        old_status: Some(&ctx.status),
+                        new_status: "complete",
+                        note: None,
+                        recurrence: recurred.then_some((from.as_str(), to.as_str())),
+                    }));
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}
 async fn recorded_total_tx(conn: &mut SqliteConnection, oid: &str) -> crate::Result<u64> {
     let values: Vec<i64> =
         sqlx::query_scalar("SELECT work_ms FROM focus_sessions WHERE occurrence_id=?")
