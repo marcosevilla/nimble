@@ -8,6 +8,8 @@ mod backup_git;
 mod backup_state;
 mod commands;
 mod focus_service;
+mod focus_sound;
+mod focus_window;
 mod selection;
 mod sync_runner;
 mod vault_runner;
@@ -22,7 +24,7 @@ use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    Emitter, Listener, Manager, WindowEvent,
+    Emitter, Listener, Manager, RunEvent, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -43,6 +45,7 @@ fn toggle_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
+            focus_window::surface_hidden(app);
         } else {
             let _ = window.show();
             let _ = window.unminimize();
@@ -62,6 +65,28 @@ struct CaptureStripPrefill {
     text: String,
     context: Option<String>,
 }
+
+/// Hold the profile owner lock for the process lifetime. A short retry
+/// covers a `dt` probe that holds a shared lock for a few microseconds.
+fn acquire_profile_owner(db_path: &std::path::Path) -> Option<nimble_core::agent_protocol::ProfileOwnerLock> {
+    for _ in 0..20 {
+        match nimble_core::agent_protocol::ProfileOwnerLock::acquire(db_path) {
+            Ok(lock) => return Some(lock),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => {
+                log::warn!("Profile owner lock unavailable: {e}");
+                return None;
+            }
+        }
+    }
+    log::warn!("Another Nimble process owns this profile; focus stays read-only here");
+    None
+}
+
+/// Keeps the profile owner lock alive in app state until the process exits.
+struct ProfileOwnerGuard(#[allow(dead_code)] nimble_core::agent_protocol::ProfileOwnerLock);
 
 /// Show and focus the quick-capture strip
 pub(crate) fn show_capture_strip(app: &tauri::AppHandle) {
@@ -152,9 +177,11 @@ fn dismiss_capture_strip(app: tauri::AppHandle, reason: Option<String>) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(
-            // Capture strip is positioned/shown programmatically — keep it out of saved state
+            // Capture strip is positioned/shown programmatically, and the focus
+            // companion stores its own compact width / expanded height and
+            // clamps them per monitor — keep both out of saved state
             tauri_plugin_window_state::Builder::new()
-                .with_denylist(&["capture"])
+                .with_denylist(&["capture", focus_window::COMPANION_LABEL])
                 .build(),
         )
         .plugin(tauri_plugin_shell::init())
@@ -318,10 +345,16 @@ pub fn run() {
 
                 // Store pool in app state
                 app_handle.manage(crate::backup_runner::BackupRuntime::new(app_dir.clone(), db_path.clone(), demo_mode, isolated_test));
-                // One process-wide focus engine. Initialization errors (e.g. a
-                // restored profile's wrong_owner) never block startup; they
-                // surface as typed capability reasons.
-                app_handle.manage(crate::focus_service::FocusRuntime::start(pool.clone()).await);
+                // One process-wide focus engine, writable only while this
+                // process holds the profile owner lock. Initialization errors
+                // (e.g. a restored profile's wrong_owner) never block startup;
+                // they surface as typed capability reasons.
+                let owner = acquire_profile_owner(&db_path);
+                let owns_profile = owner.is_some();
+                if let Some(lock) = owner {
+                    app_handle.manage(ProfileOwnerGuard(lock));
+                }
+                app_handle.manage(crate::focus_service::FocusRuntime::start(pool.clone(), owns_profile).await);
                 app_handle.manage(pool);
                 if !demo_mode {
                     match nimble_core::agent_protocol::AgentProfile::from_database(&db_path, isolated_test)
@@ -332,6 +365,10 @@ pub fn run() {
                     }
                 }
             });
+
+            // Focus heartbeat, sleep/wake and window/quit settlement. Advertises
+            // live timing only for the profile owner.
+            focus_window::wire_lifecycle(app.handle());
 
             // Persistent reminders and calendar reconciliation share one startup path.
             let lifecycle_app = app.handle().clone();
@@ -407,6 +444,11 @@ pub fn run() {
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     let _ = window.hide();
+                    // Closing one focus view keeps timing while another is
+                    // visible; hiding the last one pauses (no hidden timer).
+                    if focus_window::is_surface(window.label()) {
+                        focus_window::surface_hidden(window.app_handle());
+                    }
                 }
                 // Capture strip dismisses when it loses focus (after a short
                 // grace period — losing an activation race right at show time
@@ -558,6 +600,8 @@ pub fn run() {
             focus::focus_execute,
             focus::focus_history,
             focus::focus_open_companion,
+            focus::focus_companion_apply_geometry,
+            focus::focus_open_task_in_main,
             goals::get_goals,
             goals::get_goal,
             goals::create_goal,
@@ -590,6 +634,13 @@ pub fn run() {
             demo::demo_status,
             demo::demo_toggle,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Explicit Quit (tray, Cmd+Q, app.exit) settles focus once before
+            // the process ends; a forced quit recovers at the last checkpoint.
+            if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+                focus_window::settle_on_exit(app);
+            }
+        });
 }

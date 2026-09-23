@@ -4,6 +4,8 @@ import './index.css'
 import 'dialkit/styles.css'
 import App from './App.tsx'
 import { CaptureStrip } from '@/components/shared/CaptureStrip'
+import { FocusCompanion } from '@/components/focus/FocusCompanion'
+import { createCompanionWindow } from '@/services/focusCompanionWindow'
 import { createTauriProvider } from '@/services/tauri-provider'
 import { DataProviderRoot, setDataProvider } from '@/services/provider-context'
 import { useAppStore } from '@/stores/appStore'
@@ -26,14 +28,20 @@ const tauriProvider = createTauriProvider()
 setDataProvider(tauriProvider)
 
 // The frameless quick-capture window loads the same bundle with ?window=capture
-// and renders only the capture strip (see tauri.conf.json "capture" window)
-const isCaptureWindow =
-  new URLSearchParams(window.location.search).get('window') === 'capture'
+// and renders only the capture strip (see tauri.conf.json "capture" window).
+// The always-on-top focus companion loads ?window=focus and renders only the
+// shared focus card/queue; <DataProviderRoot> gives it the same event bridge.
+const windowKind = new URLSearchParams(window.location.search).get('window')
+
+const root =
+  windowKind === 'capture' ? <CaptureStrip />
+  : windowKind === 'focus' ? <FocusCompanion windowApi={createCompanionWindow()} />
+  : <App />
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <DataProviderRoot provider={tauriProvider}>
-      {isCaptureWindow ? <CaptureStrip /> : <App />}
+      {root}
     </DataProviderRoot>
   </StrictMode>,
 )

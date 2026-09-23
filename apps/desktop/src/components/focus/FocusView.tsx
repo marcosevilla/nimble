@@ -1,10 +1,14 @@
-import { useEffect } from 'react'
-import { Minimize2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Minimize2, PictureInPicture2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Caption } from '@/components/shared/typography'
 import { FocusQueueTray } from '@/components/focus/FocusQueueTray'
+import { FocusLoadState } from '@/components/focus/FocusLoadState'
 import { useFocusTrayData } from '@/hooks/useFocusTrayData'
 import { shouldIgnoreKey } from '@/lib/keyGuard'
-import { useFocusCache } from '@/stores/focusStore'
+import { useDataProvider } from '@/services/provider-context'
+import { FocusRequestError } from '@/services/focus-events'
+import { refreshFocus, useFocusCache } from '@/stores/focusStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
 
 function Kbd({ children }: { children: React.ReactNode }) {
@@ -29,8 +33,17 @@ function Kbd({ children }: { children: React.ReactNode }) {
 export function FocusView() {
   const snapshot = useFocusCache((s) => s.snapshot)
   const capabilities = useFocusCache((s) => s.capabilities)
+  const loadError = useFocusCache((s) => s.error)
   const setExpanded = useFocusSurface((s) => s.setExpanded)
   const data = useFocusTrayData()
+  const dp = useDataProvider()
+  const [popOutError, setPopOutError] = useState<string | null>(null)
+  const canPopOut = capabilities?.companion === true
+  const popOut = () => {
+    setPopOutError(null)
+    // A view only: opening the companion never starts or retimes anything.
+    dp.focus.openCompanion().catch((error: unknown) => setPopOutError(FocusRequestError.from(error).message))
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -59,12 +72,36 @@ export function FocusView() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [data, setExpanded])
 
-  if (!snapshot) return null
+  if (!snapshot) {
+    return (
+      <div className="flex flex-1 justify-center px-4 py-6">
+        <div className="w-full max-w-md overflow-hidden rounded-lg border border-border">
+          <FocusLoadState error={loadError} onRetry={() => void refreshFocus()} />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-1 justify-center px-4 py-6 animate-in fade-in duration-(--transition-base) motion-reduce:animate-none">
       <div className="flex w-full max-w-md flex-col gap-2">
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-1">
+          {popOutError && (
+            <Caption as="p" role="alert" className="mr-auto text-destructive">
+              {popOutError}
+            </Caption>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={popOut}
+            disabled={!canPopOut}
+            title={canPopOut ? 'Open the always-on-top focus window' : capabilities?.reason ?? undefined}
+            className="gap-1.5 text-muted-foreground"
+          >
+            <PictureInPicture2 className="size-3" aria-hidden />
+            Pop out
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => setExpanded(false)} className="gap-1.5 text-muted-foreground">
             <Minimize2 className="size-3" aria-hidden />
             Minimize

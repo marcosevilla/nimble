@@ -542,3 +542,23 @@ async fn direct_complete_with_app_closed_refuses_an_already_advanced_occurrence(
     assert_eq!(got["data"]["due_date"], advanced.as_str());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn running_owner_with_unreachable_listener_blocks_direct_writes() {
+    let root = fixture().await;
+    let (_, t) = run(&root, &["task", "create", "Owned"]);
+    let id = t["data"]["id"].as_str().unwrap().to_owned();
+    // The app holds the profile but its local listener never started.
+    let owner = nimble_core::agent_protocol::ProfileOwnerLock::acquire(&root.join("nimble.db")).unwrap();
+    let (c, v) = run(&root, &["task", "complete", &id]);
+    assert_eq!(c, 1, "{v}");
+    assert_eq!(v["error"]["code"], "app_unreachable");
+    let (_, got) = run(&root, &["task", "get", &id]);
+    assert_eq!(got["data"]["completed"], false, "no direct write behind a running owner");
+    // Once the owner exits, the direct path is available again.
+    drop(owner);
+    let (c, v) = run(&root, &["task", "complete", &id]);
+    assert_eq!(c, 0, "{v}");
+    assert_eq!(v["refresh"], "app_not_running");
+    std::fs::remove_dir_all(root).unwrap();
+}

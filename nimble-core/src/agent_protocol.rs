@@ -218,6 +218,36 @@ impl Drop for SchemaLock {
         }
     }
 }
+/// Process/profile ownership: the running desktop app holds an exclusive,
+/// non-blocking `flock` on `<profile>/.nimble-owner.lock` for its whole
+/// lifetime (the kernel drops it on any exit, including a crash or force
+/// quit). A second app process on the same profile cannot become a focus
+/// writer, and `dt` treats a held lock as "the app owns this profile" even
+/// when the app's local listener is unreachable, so it never writes
+/// directly behind a running owner.
+#[derive(Debug)]
+pub struct ProfileOwnerLock(#[allow(dead_code)] SchemaLock);
+impl ProfileOwnerLock {
+    fn path(database: &Path) -> io::Result<PathBuf> {
+        Ok(database.parent().ok_or_else(denied)?.join(".nimble-owner.lock"))
+    }
+    /// Take ownership; fails with `WouldBlock` while another process owns it.
+    pub fn acquire(database: &Path) -> io::Result<Self> {
+        SchemaLock::at(&Self::path(database)?, true).map(Self)
+    }
+    /// True while some process holds the owner lock for this profile.
+    pub fn is_held(database: &Path) -> io::Result<bool> {
+        let path = Self::path(database)?;
+        if !path.exists() {
+            return Ok(false);
+        }
+        match SchemaLock::at(&path, false) {
+            Ok(_probe) => Ok(false),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(true),
+            Err(e) => Err(e),
+        }
+    }
+}
 pub async fn read_frame<R: AsyncRead + Unpin>(reader: R) -> io::Result<Vec<u8>> {
     let mut line = Vec::new();
     let mut limited = BufReader::new(reader).take((MAX_FRAME + 1) as u64);
@@ -250,6 +280,23 @@ mod tests {
         let link = root.join("bad");
         std::os::unix::fs::symlink(root.join(".nimble-schema.lock"), &link).unwrap();
         assert!(SchemaLock::at(&link, true).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn owner_lock_is_exclusive_and_visible_to_probes() {
+        let root = std::env::temp_dir().join(format!("nimble-owner-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let db = root.join("nimble.db");
+        assert!(!ProfileOwnerLock::is_held(&db).unwrap());
+        let owner = ProfileOwnerLock::acquire(&db).unwrap();
+        assert!(ProfileOwnerLock::is_held(&db).unwrap());
+        let second = ProfileOwnerLock::acquire(&db).unwrap_err();
+        assert_eq!(second.kind(), io::ErrorKind::WouldBlock);
+        // A probe never steals or blocks ownership.
+        assert!(ProfileOwnerLock::is_held(&db).unwrap());
+        drop(owner);
+        assert!(!ProfileOwnerLock::is_held(&db).unwrap());
+        assert!(ProfileOwnerLock::acquire(&db).is_ok());
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

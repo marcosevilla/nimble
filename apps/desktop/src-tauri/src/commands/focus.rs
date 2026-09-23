@@ -5,9 +5,10 @@ use nimble_core::focus_types::{
     FocusCapabilities, FocusCommand, FocusError, FocusErrorCode, FocusHistoryPage, FocusReply,
     FocusSnapshot,
 };
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
-use crate::focus_service::{broadcast, FocusRuntime};
+use crate::focus_service::{broadcast, committed, FocusRuntime};
+use crate::focus_window::{self, CompanionGeometry};
 
 fn runtime(app: &AppHandle) -> Result<tauri::State<'_, FocusRuntime>, FocusError> {
     app.try_state::<FocusRuntime>().ok_or_else(|| FocusError {
@@ -31,10 +32,13 @@ pub async fn focus_snapshot(app: AppHandle) -> Result<FocusSnapshot, FocusError>
 pub async fn focus_execute(app: AppHandle, command: FocusCommand) -> Result<FocusReply, FocusError> {
     let rt = runtime(&app)?;
     let service = rt.writer().await?;
+    // The service, not UI gating, refuses to open a live segment unless the
+    // heartbeat/lifecycle that settles it is wired in this process.
+    rt.check_live_timing(&command.action)?;
     let command_id = command.command_id.clone();
     match service.execute(command).await {
         Ok(reply) => {
-            rt.emit(&app, &reply.snapshot, Some(command_id));
+            committed(&app, &reply.snapshot, Some(command_id)).await;
             Ok(reply)
         }
         Err(e) => {
@@ -55,11 +59,24 @@ pub async fn focus_history(
     service.history(cursor, task_id).await.map_err(|e| focus_error(&e))
 }
 
-/// The companion window arrives with Task 9 (lifecycle, geometry, ownership).
+/// Show the always-on-top companion (a view only: no session, no clock).
+/// Synchronous so the show/activation stays tied to the user's action.
 #[tauri::command]
-pub async fn focus_open_companion() -> Result<(), FocusError> {
-    Err(FocusError {
-        code: FocusErrorCode::Unsupported,
-        message: "The focus companion window is not available yet.".into(),
-    })
+pub fn focus_open_companion(app: AppHandle) -> Result<(), FocusError> {
+    focus_window::open_companion(&app)
+}
+
+/// Companion "Open details": show main and open the task there.
+#[tauri::command]
+pub fn focus_open_task_in_main(app: AppHandle, task_id: String) -> Result<(), FocusError> {
+    focus_window::open_task_in_main(&app, &task_id)
+}
+
+/// Apply geometry computed by `focusWindow.ts`; accepted only from the companion.
+#[tauri::command]
+pub fn focus_companion_apply_geometry(
+    window: WebviewWindow,
+    geometry: CompanionGeometry,
+) -> Result<(), FocusError> {
+    focus_window::apply_geometry(&window, geometry)
 }

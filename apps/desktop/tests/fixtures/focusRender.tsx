@@ -4,6 +4,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { FocusTaskCard } from '../../src/components/focus/FocusTaskCard'
 import { FocusQueueTray } from '../../src/components/focus/FocusQueueTray'
+import { FocusLoadState } from '../../src/components/focus/FocusLoadState'
 import { FocusRequestError } from '../../src/services/focus-events'
 import type { FocusTaskOps } from '../../src/lib/focusQueueIntents'
 import type {
@@ -134,4 +135,12 @@ export function renderQueueTray(opts: { compact?: boolean; empty?: boolean; sour
       ? new FocusRequestError('conflict', 'Queue changed elsewhere', { command_id: 'c-2' })
       : undefined
   return tray({ ...opts, error })
+}
+
+export function renderFocusLoading(): string {
+  return renderToStaticMarkup(<FocusLoadState error={null} onRetry={() => {}} />)
+}
+
+export function renderFocusLoadError(): string {
+  return renderToStaticMarkup(<FocusLoadState error={new FocusRequestError('storage', 'focus storage unavailable')} onRetry={() => {}} />)
 }

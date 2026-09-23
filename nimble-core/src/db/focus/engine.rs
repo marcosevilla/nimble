@@ -468,18 +468,58 @@ impl FocusService {
     ) -> crate::Result<FocusSnapshot> {
         let mut guard = self.lock.lock().await;
         let result = self
-            .checkpoint_inner(&mut guard, elapsed_ms, wall_time)
+            .checkpoint_inner(&mut guard, elapsed_ms, wall_time, None)
             .await;
         if result.as_ref().err().is_some_and(is_storage_error) {
             self.recover_storage_failure(&mut guard).await;
         }
         result
     }
+    /// The production 20-second heartbeat. Samples this service's own
+    /// monotonic (sleep-inclusive) clock under the lock, so the credited
+    /// delta is exactly the time since the last settle by ANY path (command,
+    /// task write, checkpoint) — never double-counted with a command that ran
+    /// between ticks. A delta over 40 s (sleep without a notice, a stalled
+    /// process) pauses at the last durable checkpoint instead of crediting.
+    pub async fn heartbeat(&self) -> crate::Result<FocusSnapshot> {
+        let mut guard = self.lock.lock().await;
+        let sampled = self.clock.elapsed_ms();
+        let delta = sampled.saturating_sub(guard.sampled_ms);
+        let result = self
+            .checkpoint_inner(&mut guard, delta, now(), Some(sampled))
+            .await;
+        if result.as_ref().err().is_some_and(is_storage_error) {
+            self.recover_storage_failure(&mut guard).await;
+        }
+        result
+    }
+    /// Take the pending sound token, if any. The claim is a durable
+    /// compare-and-swap (clear only if still equal to the token read), so
+    /// exactly one caller wins a given token even when several race; it is
+    /// committed BEFORE any native sound request and two windows/subscribers
+    /// can never both play it. Losing the sound after a claim (mute, audio
+    /// failure, crash) never touches accounting.
+    pub async fn claim_sound(&self) -> crate::Result<Option<String>> {
+        let pending: Option<String> =
+            sqlx::query_scalar("SELECT sound_token FROM focus_runtime WHERE id=1")
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten();
+        let Some(token) = pending else { return Ok(None) };
+        let won = sqlx::query("UPDATE focus_runtime SET sound_token=NULL WHERE id=1 AND sound_token=?")
+            .bind(&token)
+            .execute(&self.pool)
+            .await?
+            .rows_affected()
+            == 1;
+        Ok(won.then_some(token))
+    }
     async fn checkpoint_inner(
         &self,
         guard: &mut Anchor,
         elapsed_ms: u64,
         wall_time: String,
+        anchor_after: Option<u64>,
     ) -> crate::Result<FocusSnapshot> {
         if guard.frozen {
             self.recover_storage_failure(guard).await;
@@ -507,7 +547,7 @@ impl FocusService {
             guard.frozen = true;
             return Err(e.into());
         }
-        guard.sampled_ms = self.clock.elapsed_ms();
+        guard.sampled_ms = anchor_after.unwrap_or_else(|| self.clock.elapsed_ms());
         guard.frozen = false;
         Ok(snap)
     }
@@ -535,6 +575,15 @@ impl FocusService {
         let sampled = self.clock.elapsed_ms();
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         ensure_process_tx(&mut tx, guard.process_generation).await?;
+        // Nothing live: nothing to settle, and no recovery notice for a
+        // window close/quit/sleep that interrupted no timing.
+        let live: Option<String> =
+            sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if live.is_none() {
+            return snapshot_tx(&mut tx).await;
+        }
         settle_tx(&mut tx, sampled.saturating_sub(guard.sampled_ms), &now()).await?;
         pause_live_tx(&mut tx, reason, &now()).await?;
         sqlx::query("UPDATE focus_runtime SET recovery_reason=?,engine_revision=engine_revision+1 WHERE id=1")
@@ -927,7 +976,7 @@ async fn settle_tx(conn: &mut SqliteConnection, delta: u64, stamp: &str) -> crat
         {
             sqlx::query("UPDATE focus_runtime SET boundary_token=?,sound_token=? WHERE id=1")
                 .bind(format!("{oid}:timebox"))
-                .bind(id())
+                .bind(format!("chime:{}", id()))
                 .execute(&mut *conn)
                 .await?;
         }
@@ -1298,6 +1347,11 @@ async fn apply_action_tx(
             if selected.as_ref().is_some_and(|oid| affected.contains(oid)) {
                 *selected = entries.first().map(|e| e.occurrence_id.clone());
             }
+            // Committed with the completion; the owner claims and plays it once.
+            sqlx::query("UPDATE focus_runtime SET sound_token=? WHERE id=1")
+                .bind(format!("complete:{}", id()))
+                .execute(&mut *conn)
+                .await?;
         }
         FocusAction::Configure {
             occurrence_id,

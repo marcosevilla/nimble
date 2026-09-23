@@ -63,6 +63,8 @@ export interface FocusQueueTrayProps {
   initialSource?: FocusSource
   /** Card-only presentation (companion collapse); purely visual. */
   initialCompact?: boolean
+  /** Told after the card-only toggle changes (the companion refits its window). */
+  onCompactChange?: (compact: boolean) => void
   soundMuted?: boolean
   onSoundMutedChange?: (muted: boolean) => void
   /** Focus request failure to show; defaults to the shared focus cache's error. */
@@ -184,6 +186,7 @@ export function FocusQueueTray({
   taskOps,
   initialSource = { kind: 'today' },
   initialCompact = false,
+  onCompactChange,
   soundMuted = false,
   onSoundMutedChange,
   error,
@@ -339,7 +342,11 @@ export function FocusQueueTray({
           projectName={firstTask ? projectName(firstTask.project_id) : undefined}
           today={today}
           compact={compact}
-          onToggleCompact={() => setCompact((v) => !v)}
+          onToggleCompact={() => {
+            const next = !compact
+            setCompact(next)
+            onCompactChange?.(next)
+          }}
           onAction={run}
           onCompleteSubtask={(sub) => void completeSubtask(sub)}
           onMenu={(id, task, entry) => void handleMenu(id, task, entry)}

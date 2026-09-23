@@ -75,6 +75,18 @@ async fn run(cli: args::Cli) -> Result<serde_json::Value, output::CliError> {
                 open.pool.close().await;
                 return Ok(output::success(data, "acknowledged"));
             }
+            // The app holds this profile (process/profile lock) but its
+            // listener is unreachable: it may be timing live, so writing
+            // around it would bypass the one focus writer.
+            Err(ipc::NativeFailure::AppNotRunning)
+                if nimble_core::agent_protocol::ProfileOwnerLock::is_held(&open.profile.database)
+                    .unwrap_or(true) =>
+            {
+                return Err(output::CliError::new(
+                    "app_unreachable",
+                    "Nimble is running with this profile but its assistant listener is unavailable. Nothing was written. Quit and reopen Nimble, then repeat the command.",
+                ))
+            }
             Err(ipc::NativeFailure::AppNotRunning) if !retry => {}
             Err(ipc::NativeFailure::AppNotRunning) => {
                 return Err(output::CliError::new(

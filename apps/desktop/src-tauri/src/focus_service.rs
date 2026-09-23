@@ -6,24 +6,29 @@
 //! revision sequence. After each commit the app broadcasts
 //! `nimble-focus-changed` to all windows with IDs/revisions only.
 //!
-//! Not here (Task 9): process/profile lock, the 20-second heartbeat, window
-//! lifecycle and power interruption. `checkpoint(elapsed_ms, …)` stays a
-//! private Rust hook and is never exposed to the webview.
-use std::sync::Arc;
+//! Live timing is advertised only once `focus_window::wire_lifecycle` has
+//! installed the 20-second heartbeat, window/quit settlement and power
+//! interruption for a process that holds the profile owner lock
+//! (`ProfileOwnerLock`). The heartbeat stays a private Rust hook and is never
+//! exposed to the webview.
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use nimble_core::db::focus::engine::{
     focus_error, FocusService, NativeTaskAction, NativeTaskCommand,
 };
-use nimble_core::focus_types::{FocusCapabilities, FocusError, FocusErrorCode, FocusSnapshot};
+use nimble_core::focus_types::{
+    FocusAction, FocusCapabilities, FocusError, FocusErrorCode, FocusSnapshot,
+};
 use nimble_core::types::LocalTask;
 use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Flipped by Task 9 once the heartbeat and lifecycle interruption exist.
-/// Until then a running session would be gap-paused after 40 s without a
-/// checkpoint, so live timing is not advertised as available.
-const LIVE_TIMING_WIRED: bool = false;
+/// The settings key the mute toggle writes (shared with the webview).
+pub const SOUND_MUTED_KEY: &str = "focus_sound_muted";
 
 pub const FOCUS_CHANGED_EVENT: &str = "nimble-focus-changed";
 
@@ -67,6 +72,26 @@ pub struct FocusRuntime {
     pool: SqlitePool,
     state: tokio::sync::Mutex<State>,
     last_emitted: std::sync::Mutex<Option<(String, u64, u64)>>,
+    /// This process holds the profile owner lock; without it nothing here
+    /// may write focus or task state (another process may be timing live).
+    owns_profile: bool,
+    /// Heartbeat + window/quit/power lifecycle installed (see `focus_window`).
+    lifecycle_wired: AtomicBool,
+}
+
+fn not_profile_owner() -> FocusError {
+    error(
+        FocusErrorCode::WrongOwner,
+        "Another Nimble process holds this profile. Focus is read-only here.",
+    )
+}
+
+/// Actions that open a live work/break segment and so need the heartbeat.
+pub fn opens_live_segment(action: &FocusAction) -> bool {
+    matches!(
+        action,
+        FocusAction::Start { .. } | FocusAction::Resume | FocusAction::StartBreak
+    )
 }
 
 async fn open(pool: &SqlitePool) -> State {
@@ -91,17 +116,70 @@ async fn open(pool: &SqlitePool) -> State {
 impl FocusRuntime {
     /// Never fails app startup: an initialization error becomes a typed,
     /// surfaced capability reason.
-    pub async fn start(pool: SqlitePool) -> Self {
-        let state = open(&pool).await;
-        Self { pool, state: tokio::sync::Mutex::new(state), last_emitted: std::sync::Mutex::new(None) }
+    ///
+    /// `owns_profile` is whether this process acquired the profile owner
+    /// lock. A non-owner never initializes the engine (initialization
+    /// recovers running markers and bumps the process generation, which
+    /// would disturb the real owner) and stays read-only.
+    pub async fn start(pool: SqlitePool, owns_profile: bool) -> Self {
+        let state = if owns_profile {
+            open(&pool).await
+        } else {
+            match nimble_core::db::sync::get_or_create_device_id(&pool).await {
+                Ok(device) => State {
+                    service: Some(Arc::new(FocusService::new(pool.clone(), device))),
+                    blocked: Some(not_profile_owner()),
+                },
+                Err(e) => State { service: None, blocked: Some(focus_error(&e)) },
+            }
+        };
+        Self {
+            pool,
+            state: tokio::sync::Mutex::new(state),
+            last_emitted: std::sync::Mutex::new(None),
+            owns_profile,
+            lifecycle_wired: AtomicBool::new(false),
+        }
+    }
+
+    pub fn owns_profile(&self) -> bool {
+        self.owns_profile
+    }
+
+    /// Called once the heartbeat, window/quit settlement and power observers
+    /// are installed. Only an owner process can wire live timing.
+    pub fn mark_lifecycle_wired(&self) {
+        if self.owns_profile {
+            self.lifecycle_wired.store(true, Ordering::SeqCst);
+        }
+    }
+
+    pub fn lifecycle_wired(&self) -> bool {
+        self.lifecycle_wired.load(Ordering::SeqCst)
+    }
+
+    /// Service-side gate (not UI gating): Start/Resume/Start break are
+    /// rejected unless the lifecycle that settles them is wired.
+    pub fn check_live_timing(&self, action: &FocusAction) -> Result<(), FocusError> {
+        if opens_live_segment(action) && !self.lifecycle_wired() {
+            return Err(error(
+                FocusErrorCode::Unsupported,
+                "Live timing isn't connected in this window process. Nothing was started.",
+            ));
+        }
+        Ok(())
     }
 
     async fn resolve(&self, write: bool) -> Result<Arc<FocusService>, FocusError> {
+        if write && !self.owns_profile {
+            return Err(not_profile_owner());
+        }
         let mut state = self.state.lock().await;
         // Transient storage failures retry initialization; ownership errors
         // (wrong_owner) wait for an explicit activation procedure.
-        if state.service.is_none()
-            || state.blocked.as_ref().is_some_and(|e| matches!(e.code, FocusErrorCode::Storage))
+        if self.owns_profile
+            && (state.service.is_none()
+                || state.blocked.as_ref().is_some_and(|e| matches!(e.code, FocusErrorCode::Storage)))
         {
             *state = open(&self.pool).await;
         }
@@ -133,18 +211,23 @@ impl FocusRuntime {
 
     pub async fn capabilities(&self) -> FocusCapabilities {
         match self.writer().await {
-            Ok(_) => FocusCapabilities {
-                queue_read: true,
-                queue_write: true,
-                history_read: true,
-                live_timing: LIVE_TIMING_WIRED,
-                companion: false,
-                import: false,
-                reason: Some(
-                    "Live timing, the companion window and import are not connected yet."
-                        .into(),
-                ),
-            },
+            Ok(_) => {
+                let wired = self.lifecycle_wired();
+                FocusCapabilities {
+                    queue_read: true,
+                    queue_write: true,
+                    history_read: true,
+                    live_timing: wired,
+                    companion: wired,
+                    import: false,
+                    reason: Some(if wired {
+                        "Import is not connected yet.".into()
+                    } else {
+                        "Live timing and the companion window are not connected in this process."
+                            .into()
+                    }),
+                }
+            }
             Err(e) => {
                 let readable = self.reader().await.is_ok();
                 FocusCapabilities {
@@ -155,6 +238,7 @@ impl FocusRuntime {
                     companion: false,
                     import: false,
                     reason: Some(match e.code {
+                        FocusErrorCode::WrongOwner if !self.owns_profile => e.message.clone(),
                         FocusErrorCode::WrongOwner => "This profile was restored. Focus stays read-only until it is activated on this Mac.".into(),
                         _ => format!("Focus is unavailable: {}", e.message),
                     }),
@@ -181,6 +265,58 @@ impl FocusRuntime {
 
 fn runtime(app: &AppHandle) -> Option<tauri::State<'_, FocusRuntime>> {
     app.try_state::<FocusRuntime>()
+}
+
+/// After any committed focus change in the owner process: broadcast it, then
+/// claim and play a pending sound. The claim is durable and exclusive, so
+/// no second window or process can play the same sound; mute still consumes
+/// the claim. Sound can never affect accounting.
+pub async fn committed(app: &AppHandle, snapshot: &FocusSnapshot, command_id: Option<String>) {
+    let Some(rt) = runtime(app) else { return };
+    rt.emit(app, snapshot, command_id);
+    let Ok(service) = rt.writer().await else { return };
+    let token = match service.claim_sound().await {
+        Ok(Some(token)) => token,
+        Ok(None) => return,
+        Err(_) => return,
+    };
+    let Some(sound) = crate::focus_sound::FocusSound::from_token(&token) else { return };
+    let muted = nimble_core::db::settings::get_setting(&rt.pool, SOUND_MUTED_KEY)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|v| v == "true");
+    if !muted {
+        crate::focus_sound::play(app, sound);
+    }
+}
+
+/// Settle and pause live timing for a lifecycle reason (last surface
+/// closed, sleep, quit). A no-op when nothing is running.
+pub async fn interrupt(app: &AppHandle, reason: &str) {
+    let Some(rt) = runtime(app) else { return };
+    let Ok(service) = rt.writer().await else { return };
+    match service.interrupt(reason).await {
+        Ok(snapshot) => committed(app, &snapshot, None).await,
+        Err(e) => {
+            log::warn!("Focus interrupt ({reason}) failed: {:?}", focus_error(&e).code);
+            broadcast(app).await;
+        }
+    }
+}
+
+/// One heartbeat tick: checkpoint the live session from the service's own
+/// monotonic clock. Idle ticks commit nothing and emit nothing new.
+pub async fn heartbeat(app: &AppHandle) {
+    let Some(rt) = runtime(app) else { return };
+    let Ok(service) = rt.writer().await else { return };
+    match service.heartbeat().await {
+        Ok(snapshot) => committed(app, &snapshot, None).await,
+        Err(e) => {
+            log::warn!("Focus heartbeat failed: {:?}", focus_error(&e).code);
+            broadcast(app).await;
+        }
+    }
 }
 
 /// Read the committed state and broadcast it if its revision moved. Used
@@ -227,6 +363,9 @@ pub async fn execute_task(
     command_id: Option<String>,
 ) -> Result<TaskWriteOutcome, FocusError> {
     let service = match runtime(app) {
+        // Another process owns this profile and may be timing live: never
+        // write around it through the headless path.
+        Some(rt) if !rt.owns_profile() => return Err(not_profile_owner()),
         Some(rt) => rt.writer().await.ok(),
         None => None,
     };
@@ -239,9 +378,7 @@ pub async fn execute_task(
         .await;
     match result {
         Ok(reply) => {
-            if let Some(rt) = runtime(app) {
-                rt.emit(app, &reply.snapshot, Some(command_id));
-            }
+            committed(app, &reply.snapshot, Some(command_id)).await;
             Ok(TaskWriteOutcome { task: reply.task, undo_token: reply.undo_token, replayed: reply.replayed })
         }
         Err(e) => {
@@ -332,7 +469,7 @@ mod tests {
         let pool = memory_pool().await;
         let first = FocusService::new(pool.clone(), "other-device".into());
         first.initialize().await.unwrap();
-        let rt = FocusRuntime::start(pool).await;
+        let rt = FocusRuntime::start(pool, true).await;
         let e = rt.writer().await.err().unwrap();
         assert!(matches!(e.code, FocusErrorCode::WrongOwner));
         assert!(rt.reader().await.is_ok());
@@ -344,10 +481,46 @@ mod tests {
     #[tokio::test]
     async fn owner_profile_is_writable_without_advertising_unwired_timing() {
         let pool = memory_pool().await;
-        let rt = FocusRuntime::start(pool).await;
+        let rt = FocusRuntime::start(pool, true).await;
         assert!(rt.writer().await.is_ok());
         let caps = rt.capabilities().await;
         assert!(caps.queue_write && caps.queue_read && caps.history_read);
         assert!(!caps.live_timing && !caps.companion && !caps.import);
+    }
+
+    #[tokio::test]
+    async fn start_and_resume_are_rejected_by_the_service_until_lifecycle_is_wired() {
+        let pool = memory_pool().await;
+        let rt = FocusRuntime::start(pool, true).await;
+        let start = FocusAction::Start { occurrence_id: "o".into() };
+        for action in [start.clone(), FocusAction::Resume, FocusAction::StartBreak] {
+            let e = rt.check_live_timing(&action).unwrap_err();
+            assert!(matches!(e.code, FocusErrorCode::Unsupported));
+        }
+        // Actions that open no live segment stay allowed.
+        assert!(rt.check_live_timing(&FocusAction::Pause).is_ok());
+        rt.mark_lifecycle_wired();
+        assert!(rt.check_live_timing(&start).is_ok());
+        let caps = rt.capabilities().await;
+        assert!(caps.live_timing && caps.companion && !caps.import);
+    }
+
+    #[tokio::test]
+    async fn second_process_without_the_profile_lock_is_read_only_and_never_wires_timing() {
+        let pool = memory_pool().await;
+        let owner = FocusService::new(pool.clone(), "this-device".into());
+        owner.initialize().await.unwrap();
+        let generation = owner.snapshot().await.unwrap().process_generation;
+        let rt = FocusRuntime::start(pool, false).await;
+        let e = rt.writer().await.err().unwrap();
+        assert!(matches!(e.code, FocusErrorCode::WrongOwner));
+        assert!(rt.reader().await.is_ok());
+        // Starting as a non-owner must not bump the owner's generation.
+        assert_eq!(rt.reader().await.unwrap().snapshot().await.unwrap().process_generation, generation);
+        rt.mark_lifecycle_wired();
+        assert!(!rt.lifecycle_wired());
+        let caps = rt.capabilities().await;
+        assert!(caps.queue_read && !caps.queue_write && !caps.live_timing && !caps.companion);
+        assert!(caps.reason.unwrap().contains("Another Nimble process"));
     }
 }

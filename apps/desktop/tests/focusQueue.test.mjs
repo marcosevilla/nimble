@@ -299,3 +299,15 @@ test('empty queue keeps a positive empty card and Show queue in card-only mode',
   assert.match(html, /Show queue/)
   assert.doesNotMatch(html, /Add task/)
 })
+
+test('a focus surface without a snapshot shows a loading skeleton or the error, never a blank area or Start', () => {
+  const loading = rendered.renderFocusLoading()
+  assert.match(loading, /role="status"/)
+  assert.match(loading, /aria-label="Loading focus"/)
+  assert.doesNotMatch(loading, /Start/)
+  const failed = rendered.renderFocusLoadError()
+  assert.match(failed, /role="alert"/)
+  assert.match(failed, /Focus couldn(&#x27;|’|')t load: focus storage unavailable/)
+  assert.match(failed, /Try again/)
+  assert.doesNotMatch(failed, /aria-label="Start"/)
+})

@@ -874,3 +874,135 @@ async fn failed_task_write_open_recovers_without_crediting_sample() {
     h.advance(20_000).await;
     assert_eq!(h.snapshot().await.totals[&oid], 10_000);
 }
+
+// ── Task 9: production heartbeat, lifecycle interrupt and sound claims ──
+
+async fn started(h: &fixture::Harness, title: &str) -> String {
+    let t = h.task(title).await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![t],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    oid
+}
+
+#[tokio::test]
+async fn heartbeat_credits_only_time_since_the_last_settle_by_any_path() {
+    let h = fixture::Harness::new().await;
+    let oid = started(&h, "A").await;
+    h.clock.advance(10_000);
+    assert_eq!(h.service.heartbeat().await.unwrap().totals[&oid], 10_000);
+    // A command between ticks settles its own 5 s; the next tick must not
+    // re-credit them.
+    h.clock.advance(5_000);
+    let b = h.task("B").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![b],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    h.clock.advance(15_000);
+    let snap = h.service.heartbeat().await.unwrap();
+    assert_eq!(snap.totals[&oid], 30_000);
+    assert_eq!(snap.session.unwrap().status, FocusStatus::Running);
+}
+
+#[tokio::test]
+async fn heartbeat_after_an_unnoticed_sleep_pauses_at_the_last_checkpoint() {
+    let h = fixture::Harness::new().await;
+    let oid = started(&h, "A").await;
+    h.clock.advance(20_000);
+    h.service.heartbeat().await.unwrap();
+    // No sleep notice arrived; the sleep-inclusive clock shows an hour gap.
+    h.clock.advance(3_600_000);
+    let snap = h.service.heartbeat().await.unwrap();
+    assert_eq!(snap.totals[&oid], 20_000);
+    assert_eq!(snap.session.unwrap().status, FocusStatus::Paused);
+    assert!(snap.recovery_reason.unwrap().contains("40 seconds"));
+    // Wake never resumes by itself: later ticks credit nothing.
+    h.clock.advance(20_000);
+    assert_eq!(h.service.heartbeat().await.unwrap().totals[&oid], 20_000);
+}
+
+#[tokio::test]
+async fn interrupt_settles_a_running_session_and_is_silent_when_idle() {
+    let h = fixture::Harness::new().await;
+    let idle = h.snapshot().await;
+    let after = h.service.interrupt("last focus surface closed").await.unwrap();
+    assert_eq!(after.engine_revision, idle.engine_revision);
+    assert!(after.recovery_reason.is_none());
+
+    let oid = started(&h, "A").await;
+    h.clock.advance(12_000);
+    let snap = h.service.interrupt("system sleep").await.unwrap();
+    assert_eq!(snap.totals[&oid], 12_000);
+    assert_eq!(snap.session.unwrap().status, FocusStatus::Paused);
+    assert_eq!(snap.recovery_reason.as_deref(), Some("system sleep"));
+}
+
+#[tokio::test]
+async fn two_subscribers_cannot_both_claim_one_sound() {
+    let h = fixture::Harness::new().await;
+    let t = h.task("A").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![t],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Configure {
+        occurrence_id: oid.clone(),
+        config: FocusConfig {
+            mode: FocusMode::Timebox,
+            budget_ms: Some(60_000),
+            work_ms: 1_500_000,
+            break_ms: 300_000,
+            rounds: 4,
+        },
+    })
+    .await
+    .unwrap();
+    h.send(FocusAction::Start {
+        occurrence_id: oid.clone(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(h.service.claim_sound().await.unwrap(), None);
+    h.clock.advance(30_000);
+    h.service.heartbeat().await.unwrap();
+    assert_eq!(h.service.claim_sound().await.unwrap(), None, "no chime before zero");
+    h.clock.advance(30_000);
+    h.service.heartbeat().await.unwrap();
+    // Two windows/subscribers race for the zero-crossing chime.
+    let (a, b) = tokio::join!(h.service.claim_sound(), h.service.claim_sound());
+    let winners: Vec<String> = [a.unwrap(), b.unwrap()].into_iter().flatten().collect();
+    assert_eq!(winners.len(), 1, "exactly one claim wins");
+    assert!(winners[0].starts_with("chime:"));
+    // Overtime keeps counting without another chime.
+    h.clock.advance(20_000);
+    let snap = h.service.heartbeat().await.unwrap();
+    assert_eq!(snap.totals[&oid], 80_000);
+    assert_eq!(h.service.claim_sound().await.unwrap(), None, "timebox zero chimes once");
+    // Completion commits its own sound token with the completion.
+    h.send(FocusAction::Complete {
+        occurrence_id: oid,
+    })
+    .await
+    .unwrap();
+    let first = h.service.claim_sound().await.unwrap();
+    assert!(first.is_some_and(|t| t.starts_with("complete:")));
+    assert_eq!(h.service.claim_sound().await.unwrap(), None);
+}

@@ -127,6 +127,17 @@ export function Dashboard() {
     return () => { unlisten.then(fn => fn()) }
   }, [setCurrentPage, setCaptureRequested])
 
+  // The focus companion's "Open details": Rust shows this window and sends
+  // only the task ID; the detail page reads the task itself.
+  useEffect(() => {
+    const unlisten = listen<{ version?: number; task_id?: unknown }>('nimble-focus-open-task', ({ payload }) => {
+      if (payload?.version !== 1 || typeof payload.task_id !== 'string') return
+      useFocusSurface.getState().setExpanded(false)
+      useDetailStore.getState().openTask(payload.task_id)
+    })
+    return () => { unlisten.then(fn => fn()) }
+  }, [])
+
   // Global keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {

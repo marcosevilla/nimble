@@ -7,7 +7,6 @@ import { useDetailStore } from '@/stores/detailStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import { sendFocusAction, useFocusCache } from '@/stores/focusStore'
 import { completedTrayRows, completionAcknowledgement } from '@/lib/focusFlows'
-import { playCompletionSound } from '@/lib/sound'
 import { focusTaskOps, type FocusTaskOps } from '@/lib/focusQueueIntents'
 import type { FocusAction, FocusHistoryRow, FocusReply, LocalTask, Project, Section } from '@nimble/types'
 
@@ -16,7 +15,13 @@ const TOUCHES_TASKS: ReadonlySet<FocusAction['kind']> = new Set(['start', 'compl
 /** Actions whose commit changes the completed tray. */
 const TOUCHES_HISTORY: ReadonlySet<FocusAction['kind']> = new Set(['complete', 'archive_history', 'undo_delete'])
 
+/** Read by the Rust owner before it plays a focus sound (focus_service.rs). */
 const MUTE_KEY = 'focus_sound_muted'
+
+export interface FocusTrayOptions {
+  /** Where "Open details" goes; the companion routes it to the main window. */
+  openDetail?: (task: LocalTask) => void
+}
 
 export interface FocusTrayData {
   tasks: LocalTask[]
@@ -36,7 +41,7 @@ export interface FocusTrayData {
  * totals, never activity logs), native task writes, and one `onAction` that
  * routes every focus write through the engine envelope.
  */
-export function useFocusTrayData(): FocusTrayData {
+export function useFocusTrayData(options: FocusTrayOptions = {}): FocusTrayData {
   const dp = useDataProvider()
   const { tasks } = useLocalTasks()
   const { projects } = useProjects()
@@ -69,18 +74,19 @@ export function useFocusTrayData(): FocusTrayData {
     dp.settings.set(MUTE_KEY, String(muted)).catch(() => {})
   }, [dp])
 
-  // Latest values for the stable onAction below.
-  const latest = useRef({ tasks, soundMuted })
+  // Latest values for the stable callbacks below.
+  const latest = useRef({ tasks })
   useEffect(() => {
-    latest.current = { tasks, soundMuted }
-  }, [tasks, soundMuted])
+    latest.current = { tasks }
+  }, [tasks])
 
   const onAction = useCallback(async (action: FocusAction) => {
     const before = useFocusCache.getState().snapshot
     const reply = await sendFocusAction(action)
     if (action.kind === 'complete' && before) {
-      // Only after the commit: sound, then the acknowledgement (never a start).
-      if (!latest.current.soundMuted) playCompletionSound()
+      // Only after the commit: the acknowledgement (never a start). The
+      // completion sound is played once by the Rust owner from a durably
+      // claimed token, never by this (or any other) webview.
       const titleOf = (id: string) => latest.current.tasks.find((t) => t.id === id)?.content
       useFocusSurface.getState().celebrate(completionAcknowledgement(before, reply.snapshot, action.occurrence_id, titleOf))
     }
@@ -89,16 +95,18 @@ export function useFocusTrayData(): FocusTrayData {
     return reply
   }, [])
 
+  const routeDetail = options.openDetail
   const taskOps = useMemo(() => focusTaskOps(dp, {
     onChanged: emitTasksChanged,
     openDetail: (task) => {
+      if (routeDetail) return routeDetail(task)
       useFocusSurface.getState().setExpanded(false)
       useDetailStore.getState().openTask(task.id)
     },
     writeClipboard: typeof navigator !== 'undefined' && navigator.clipboard
       ? (text) => navigator.clipboard.writeText(text)
       : undefined,
-  }), [dp])
+  }), [dp, routeDetail])
 
   const completed = useMemo(() => completedTrayRows(history, today), [history, today])
 
