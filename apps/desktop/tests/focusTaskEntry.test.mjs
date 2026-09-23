@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { build } from 'vite'
 import react from '@vitejs/plugin-react'
-import { focusEntryErrorMessage, focusTaskControls, queuedEntryFor } from '../src/lib/focusTaskEntry.ts'
+import { focusEntryErrorMessage, focusTaskControls, isFocusableTask, queuedEntryFor } from '../src/lib/focusTaskEntry.ts'
 import { shallow } from 'zustand/vanilla/shallow'
 
 const MIN = 60_000
@@ -114,7 +114,7 @@ test('engine errors map to friendly copy, never raw engine text', () => {
 
 // ── Rendered row + detail controls ──
 
-let output, rendered
+let output, rendered, harness
 before(async () => {
   const root = fileURLToPath(new URL('../', import.meta.url))
   const cache = path.join(root, 'node_modules/.cache')
@@ -125,6 +125,11 @@ before(async () => {
     build: { ssr: path.join(root, 'tests/fixtures/focusEntryRender.tsx'), outDir: output, emptyOutDir: true,
       rollupOptions: { output: { entryFileNames: 'render.mjs' } } } })
   rendered = await import(pathToFileURL(path.join(output, 'render.mjs')).href)
+  await build({ root, configFile: false, logLevel: 'error', plugins: [react()],
+    resolve: { alias: { '@': path.join(root, 'src') } },
+    build: { ssr: path.join(root, 'tests/fixtures/focusEntryActionsHarness.ts'), outDir: path.join(output, 'h'), emptyOutDir: true,
+      rollupOptions: { output: { entryFileNames: 'harness.mjs' } } } })
+  harness = await import(pathToFileURL(path.join(output, 'h/harness.mjs')).href)
 })
 after(async () => { if (output) await rm(output, { recursive: true, force: true }) })
 
@@ -222,3 +227,46 @@ function nestedButton(html) {
   }
   return false
 }
+
+// ── Row `f` shortcut / command bar Focus now ──
+
+const shortcutTask = (over = {}) => ({ id: 't9', sync_policy: 'default', due_date: null, project_id: 'inbox',
+  completed: false, status: 'todo', ...over })
+
+/** Fake provider: records executes; `execute` rejects with a raw engine error. */
+function engineProvider(execute) {
+  const calls = []
+  harness.resetFocusCache()
+  harness.setDataProvider({ focus: {
+    capabilities: async () => caps(),
+    snapshot: async () => snap(),
+    execute: async (command) => { calls.push(command.action); return execute(command) },
+  } })
+  return calls
+}
+
+test('isFocusableTask: completed or status complete is not focusable', () => {
+  assert.equal(isFocusableTask({ completed: false, status: 'todo' }), true)
+  assert.equal(isFocusableTask({ completed: true, status: 'todo' }), false)
+  assert.equal(isFocusableTask({ completed: false, status: 'complete' }), false)
+})
+
+test('f on a completed row is a quiet no-op: no provider write, no toast', async () => {
+  const calls = engineProvider(() => { throw new Error('should not run') })
+  const toasts = []
+  for (const over of [{ completed: true }, { status: 'complete' }]) {
+    assert.equal(await harness.focusNowForTask(shortcutTask(over), (m) => toasts.push(m)), 'skipped')
+  }
+  assert.deepEqual(calls, [])
+  assert.deepEqual(toasts, [])
+})
+
+test('f failure toasts friendly copy, never the raw engine text', async () => {
+  const raw = 'completed task requires explicit still-open choice'
+  engineProvider(() => { throw { code: 'stale_occurrence', message: raw } })
+  const toasts = []
+  assert.equal(await harness.focusNowForTask(shortcutTask(), (m) => toasts.push(m)), 'failed')
+  assert.equal(toasts.length, 1)
+  assert.doesNotMatch(toasts[0], /still-open/)
+  assert.equal(toasts[0], focusEntryErrorMessage({ code: 'stale_occurrence' }))
+})

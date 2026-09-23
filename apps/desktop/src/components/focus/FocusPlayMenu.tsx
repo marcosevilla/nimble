@@ -5,7 +5,9 @@ import { ListPlus, Play } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { sourceForTask } from '@/lib/focusFlows'
-import { enqueueTasks, focusNow, focusNowBlockedReason, isDroppedRepeat, useFocusCache } from '@/stores/focusStore'
+import { enqueueTasks, focusNow, focusNowBlockedReason, useFocusCache } from '@/stores/focusStore'
+import { isFocusableTask } from '@/lib/focusTaskEntry'
+import { reportFocusError } from './focusEntryActions'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -19,12 +21,11 @@ interface FocusPlayMenuProps {
   onOpenChange?: (open: boolean) => void
 }
 
-const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
-
 /**
  * Command-bar focus entry: "Add to focus queue" appends (the default, starts
  * nothing); "Focus now" is the explicit Start, shown disabled with its reason
- * while live timing is unavailable. Timebox choice lives on the focus card.
+ * while live timing is unavailable. Hidden for completed tasks; failures show
+ * friendly copy. Timebox choice lives on the focus card.
  */
 export function FocusPlayMenu({ task, onOpenChange }: FocusPlayMenuProps) {
   const [open, setOpenState] = useState(false)
@@ -41,9 +42,13 @@ export function FocusPlayMenu({ task, onOpenChange }: FocusPlayMenuProps) {
     setOpen(false)
     write().then(
       () => toast(label),
-      (error) => { if (!isDroppedRepeat(error)) toast(messageOf(error)) },
+      (error) => reportFocusError(error),
     )
   }
+
+  // Completed tasks get no focus entry (the engine refuses them without an
+  // explicit still-open choice) — same rule as task rows and detail.
+  if (!isFocusableTask(task)) return null
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>

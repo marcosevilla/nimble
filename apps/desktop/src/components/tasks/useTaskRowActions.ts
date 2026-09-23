@@ -2,8 +2,7 @@ import { useMemo } from 'react'
 import { addDays, format } from 'date-fns'
 import { useDataProvider } from '@/services/provider-context'
 import { useDetailStore } from '@/stores/detailStore'
-import { focusNow, isDroppedRepeat } from '@/stores/focusStore'
-import { sourceForTask } from '@/lib/focusFlows'
+import { focusNowForTask } from '@/components/focus/focusEntryActions'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { taskToast } from '@/lib/taskToast'
 import { completeTaskWithExit } from './StatusDropdown'
@@ -18,7 +17,8 @@ import type { LocalTask } from '@nimble/types'
  * - x / Space: complete, with the same exit animation as the status menu
  * - s: snooze — due date moves to tomorrow (neutral copy, §1.1)
  * - f: Focus now — one explicit Start (appends the task first if needed);
- *   while live timing is unavailable it explains why and writes nothing
+ *   a no-op on a completed task; while live timing is unavailable it
+ *   explains why (friendly copy) and writes nothing
  */
 export function useTaskRowActions(tasks: LocalTask[]) {
   const dp = useDataProvider()
@@ -37,13 +37,10 @@ export function useTaskRowActions(tasks: LocalTask[]) {
           toast.error(`Failed to reschedule: ${e}`)
         }
       },
+      // Completed rows are a quiet no-op; failures show friendly copy.
       onFocusStart: (id: string) => {
         const task = tasks.find((t) => t.id === id)
-        if (!task) return
-        focusNow(task.id, sourceForTask(task, format(new Date(), 'yyyy-MM-dd'))).then(
-          () => emitTasksChanged(),
-          (e) => { if (!isDroppedRepeat(e)) toast(e instanceof Error ? e.message : String(e)) },
-        )
+        if (task) void focusNowForTask(task)
       },
     }),
     [dp, tasks],

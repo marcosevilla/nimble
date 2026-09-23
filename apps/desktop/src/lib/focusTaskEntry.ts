@@ -34,6 +34,11 @@ export function queuedEntryFor(snapshot: FocusSnapshot | null, taskId: string): 
   return { occurrence_id: entry.occurrence_id, selected: snapshot.selected_occurrence_id === entry.occurrence_id }
 }
 
+/** Completed tasks are not focusable from entry points (no controls, `f` is a no-op). */
+export function isFocusableTask(task: { completed: boolean; status?: string | null }): boolean {
+  return !task.completed && task.status !== 'complete'
+}
+
 export const FOCUS_ENTRY_LABELS = {
   add: 'Add to focus queue',
   remove: 'Remove from focus queue',

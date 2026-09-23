@@ -1,15 +1,12 @@
 import { format } from 'date-fns'
 import { toast } from 'sonner'
-import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { sourceForTask } from '@/lib/focusFlows'
-import { focusEntryErrorMessage, focusTaskControls, queuedEntryFor } from '@/lib/focusTaskEntry'
-import { FocusRequestError } from '@/services/focus-events'
+import { focusTaskControls, isFocusableTask, queuedEntryFor } from '@/lib/focusTaskEntry'
+import { focusNowForTask, reportFocusError } from './focusEntryActions'
 import { useShallow } from 'zustand/react/shallow'
 import {
   enqueueTasks,
-  focusNow,
   focusNowBlockedReason,
-  isDroppedRepeat,
   sendFocusAction,
   useFocusCache,
 } from '@/stores/focusStore'
@@ -23,7 +20,7 @@ import type { FocusSource, LocalTask } from '@nimble/types'
  */
 export type FocusEntryTask = Pick<LocalTask, 'id' | 'content' | 'sync_policy' | 'due_date' | 'project_id' | 'completed' | 'status'>
 
-const reportError = (error: unknown) => { if (!isDroppedRepeat(error)) toast(focusEntryErrorMessage(FocusRequestError.from(error))) }
+const reportError = (error: unknown) => reportFocusError(error)
 const openQueue = () => useFocusSurface.getState().setExpanded(true)
 
 /** Live controls for a task plus its handlers (toggle queue, Focus now, open the tray). */
@@ -37,7 +34,7 @@ export function useFocusTaskEntry(task: FocusEntryTask) {
     capabilities,
     pending,
     focusNowBlocked: focusNowBlockedReason(capabilities),
-    completed: task.completed || task.status === 'complete',
+    completed: !isFocusableTask(task),
   })
 
   const enqueue = (source: FocusSource) =>
@@ -66,7 +63,7 @@ export function useFocusTaskEntry(task: FocusEntryTask) {
 
   const start = () => {
     if (controls.focusNow.disabled) return
-    focusNow(task.id, sourceForTask(task, format(new Date(), 'yyyy-MM-dd'))).then(() => emitTasksChanged(), reportError)
+    void focusNowForTask(task)
   }
 
   return { controls, toggle, start, openQueue }
