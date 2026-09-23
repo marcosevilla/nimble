@@ -41,3 +41,25 @@ test('interactive check can be skipped for modal overlays that own every key', (
   assert.equal(shouldIgnoreKey(button, { allowInteractive: true }), false)
   assert.equal(shouldIgnoreKey(el({ tag: 'INPUT' }), { allowInteractive: true }), true)
 })
+
+import { focusViewKey, QUEUE_ROW_SELECTOR } from '../src/lib/keyGuard.ts'
+
+test('focus view: Enter and s act on the card from the page, never from an Up next row', () => {
+  const body = el({ tag: 'BODY' })
+  assert.equal(focusViewKey({ key: 'Enter', target: body }), 'complete')
+  assert.equal(focusViewKey({ key: 's', target: body }), 'stop')
+  assert.equal(focusViewKey({ key: 'Escape', target: body }), 'close')
+  const row = el({ tag: 'LI', is: [QUEUE_ROW_SELECTOR] })
+  assert.equal(focusViewKey({ key: 'Enter', target: row }), null, 'Enter on a row promotes that row instead')
+  assert.equal(focusViewKey({ key: 's', target: row }), null)
+  assert.equal(focusViewKey({ key: 'Escape', target: row }), 'close', 'Escape still closes the view')
+})
+
+test('focus view: claimed, chorded, repeated and field keys are left alone', () => {
+  const body = el({ tag: 'BODY' })
+  assert.equal(focusViewKey({ key: 'Enter', target: body, defaultPrevented: true }), null)
+  assert.equal(focusViewKey({ key: 'Enter', target: body, metaKey: true }), null)
+  assert.equal(focusViewKey({ key: 'Enter', target: body, repeat: true }), null)
+  assert.equal(focusViewKey({ key: 'Enter', target: el({ tag: 'INPUT' }) }), null)
+  assert.equal(focusViewKey({ key: 'Enter', target: el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR] }) }), null)
+})

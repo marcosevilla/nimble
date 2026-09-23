@@ -44,3 +44,33 @@ export function shouldIgnoreKey(
   }
   return false
 }
+
+/** An Up next row (the roving list owns its own keys: Enter promotes it). */
+export const QUEUE_ROW_SELECTOR = '[data-focus-entry]'
+
+export interface FocusViewKeyEvent {
+  key: string
+  target: KeyTargetLike | null | undefined
+  defaultPrevented?: boolean
+  metaKey?: boolean
+  ctrlKey?: boolean
+  altKey?: boolean
+  repeat?: boolean
+}
+
+/**
+ * The expanded focus view's window shortcuts: Escape closes, Enter completes
+ * the card's task, `s` stops. Null leaves the key alone. On an Up next row
+ * only Escape applies: there Enter means "promote this row", never
+ * "complete the card" (native fix 3 review C1).
+ */
+export function focusViewKey(e: FocusViewKeyEvent): 'close' | 'complete' | 'stop' | null {
+  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return null
+  if (shouldIgnoreKey(e.target)) return null
+  if (e.key === 'Escape') return 'close'
+  // Card shortcuts never fire from a queue row: the row is not the card.
+  if (e.target?.closest?.(QUEUE_ROW_SELECTOR)) return null
+  if (e.key === 'Enter') return 'complete'
+  if (e.key === 's') return 'stop'
+  return null
+}

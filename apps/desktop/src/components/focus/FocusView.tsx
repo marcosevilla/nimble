@@ -5,7 +5,7 @@ import { Caption } from '@/components/shared/typography'
 import { FocusQueueTray } from '@/components/focus/FocusQueueTray'
 import { FocusLoadState } from '@/components/focus/FocusLoadState'
 import { useFocusTrayData } from '@/hooks/useFocusTrayData'
-import { shouldIgnoreKey } from '@/lib/keyGuard'
+import { focusViewKey } from '@/lib/keyGuard'
 import { useDataProvider } from '@/services/provider-context'
 import { FocusRequestError } from '@/services/focus-events'
 import { refreshFocus, useFocusCache } from '@/stores/focusStore'
@@ -48,10 +48,17 @@ export function FocusView() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       // defaultPrevented: the Dashboard's g-chord already claimed this key.
-      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
-      if (shouldIgnoreKey(e.target as HTMLElement)) return
-      if (useFocusSurface.getState().celebration) return
-      if (e.key === 'Escape') {
+      const key = focusViewKey({
+        key: e.key,
+        target: e.target as HTMLElement,
+        defaultPrevented: e.defaultPrevented,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        repeat: e.repeat,
+      })
+      if (!key || useFocusSurface.getState().celebration) return
+      if (key === 'close') {
         e.preventDefault()
         e.stopPropagation()
         setExpanded(false)
@@ -60,13 +67,9 @@ export function FocusView() {
       const current = useFocusCache.getState().snapshot
       const first = current?.queue[0]
       if (!first || useFocusCache.getState().pending) return
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        void data.onAction({ kind: 'complete', occurrence_id: first.occurrence_id }).catch(() => {})
-      } else if (e.key === 's') {
-        e.preventDefault()
-        void data.onAction({ kind: 'stop' }).catch(() => {})
-      }
+      e.preventDefault()
+      if (key === 'complete') void data.onAction({ kind: 'complete', occurrence_id: first.occurrence_id }).catch(() => {})
+      else void data.onAction({ kind: 'stop' }).catch(() => {})
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)

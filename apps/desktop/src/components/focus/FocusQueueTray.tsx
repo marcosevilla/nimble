@@ -22,6 +22,8 @@ import {
   sourceLabel,
   stillOpenAction,
   undoDeleteAction,
+  reenqueueAction,
+  restoreEntryAction,
   visibleFailure,
   type FocusTaskOps,
   type TaskMenuId,
@@ -195,7 +197,12 @@ export function FocusQueueTray({
   const [compact, setCompact] = useState(initialCompact)
   const [source, setSource] = useState<FocusSource>(initialSource)
   const [renamingEntryId, setRenamingEntryId] = useState<string | null>(null)
-  const [undo, setUndo] = useState<{ token: string | null; title: string } | null>(null)
+  /** One undo slot: a deleted local task (durable token) or an Up next removal. */
+  const [undo, setUndo] = useState<
+    | { kind: 'delete'; token: string | null; title: string }
+    | { kind: 'remove'; title: string; entry: FocusEntry; index: number }
+    | null
+  >(null)
   const [ack, setAck] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const [manualCopy, setManualCopy] = useState<{ text: string; message: string } | null>(null)
@@ -256,8 +263,28 @@ export function FocusQueueTray({
       : []
 
   const focusCard = () => requestAnimationFrame(() => headingRef.current?.focus())
-  const promote = async (entry: FocusEntry) => {
-    if (await run({ kind: 'promote', occurrence_id: entry.occurrence_id })) focusCard()
+  /** `keepFocus`: a keyboard promote from Up next keeps focus in the list while rows remain. */
+  const promote = async (entry: FocusEntry, opts?: { keepFocus?: boolean }) => {
+    const ok = (await run({ kind: 'promote', occurrence_id: entry.occurrence_id })) != null
+    if (ok && (!opts?.keepFocus || rows.length <= 1)) focusCard()
+    return ok
+  }
+  /**
+   * Remove an Up next entry and offer Undo. Undo re-queues the task and puts
+   * it back at its old position; the removed occurrence's session has ended,
+   * so only queue membership and order come back (time stays in history).
+   */
+  const removeEntry = async (entry: FocusEntry) => {
+    const index = snapshot.queue.findIndex((e) => e.id === entry.id)
+    const ok = (await run({ kind: 'remove', occurrence_id: entry.occurrence_id })) != null
+    const title = byId.get(entry.task_id)?.content
+    if (ok && title && index > 0) setUndo({ kind: 'remove', title, entry, index })
+    return ok
+  }
+  const undoRemove = async (entry: FocusEntry, index: number) => {
+    const reply = await run(reenqueueAction(entry))
+    const restore = reply ? restoreEntryAction(reply.snapshot.queue, entry.task_id, index) : null
+    if (restore) await run(restore)
   }
   /** Focus now: the engine's `start` promotes and starts in one committed command. */
   const focusNow = async (entry: FocusEntry) => {
@@ -300,17 +327,20 @@ export function FocusQueueTray({
         }
         case 'move_top':
           return void (await promote(entry))
+        case 'remove':
+          if (entry.id !== first?.id) return void (await removeEntry(entry))
+          await run({ kind: 'remove', occurrence_id: entry.occurrence_id })
+          return
         case 'move_bottom':
         case 'skip':
-        case 'stop':
-        case 'remove': {
+        case 'stop': {
           const action = menuFocusAction(id, entry, snapshot.queue)
           if (action) await run(action)
           return
         }
         case 'delete': {
           const { undo_token } = await taskOps.remove(task)
-          setUndo({ token: undo_token, title: task.content })
+          setUndo({ kind: 'delete', token: undo_token, title: task.content })
           return
         }
       }
@@ -388,8 +418,23 @@ export function FocusQueueTray({
           )}
           {undo && (
             <div role="status" className="flex items-center justify-between gap-2 rounded-md bg-muted px-2.5 py-1.5 text-meta text-foreground">
-              <span className="min-w-0 truncate">{`Deleted “${undo.title}”`}</span>
-              {undo.token && (
+              <span className="min-w-0 truncate">
+                {undo.kind === 'delete' ? `Deleted “${undo.title}”` : `Removed “${undo.title}” from queue`}
+              </span>
+              {undo.kind === 'remove' && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={blocked != null || busy}
+                  onClick={() => {
+                    setUndo(null)
+                    void undoRemove(undo.entry, undo.index)
+                  }}
+                >
+                  Undo
+                </Button>
+              )}
+              {undo.kind === 'delete' && undo.token && (
                 <Button
                   size="xs"
                   variant="outline"
@@ -436,7 +481,8 @@ export function FocusQueueTray({
               rows={rows}
               today={today}
               onAction={run}
-              onPromote={(entry) => void promote(entry)}
+              onPromote={promote}
+              onRemove={removeEntry}
               onFocusNow={(entry) => void focusNow(entry)}
               busy={busy}
               onMenu={(id, task, entry) => void handleMenu(id, task, entry)}

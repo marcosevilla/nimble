@@ -217,6 +217,8 @@ export interface QueueKeyMods {
   meta?: boolean
   ctrl?: boolean
   shift?: boolean
+  /** Auto-repeat: never promotes or removes (one press, one action). */
+  repeat?: boolean
 }
 
 /**
@@ -244,13 +246,39 @@ export function queueRowKeyIntent(key: string, mods: QueueKeyMods, index: number
     case 'End':
       return { kind: 'focus', index: length - 1 }
     case 'Enter':
-      return { kind: 'promote' }
+      return mods.repeat ? null : { kind: 'promote' }
     case 'Delete':
     case 'Backspace':
-      return { kind: 'remove' }
+      return mods.repeat ? null : { kind: 'remove' }
     default:
       return null
   }
+}
+
+/**
+ * Undo of an Up next removal, step 1: put the task back in the queue with
+ * its original source and still-open flag. This restores queue membership
+ * only — the removed occurrence and its session have ended; the task comes
+ * back as a new entry (its recorded time is kept in history).
+ */
+export function reenqueueAction(entry: FocusEntry): FocusAction {
+  return { kind: 'enqueue', task_ids: [entry.task_id], source: entry.source, explicit_still_open: entry.explicit_still_open }
+}
+
+/**
+ * Undo step 2: move the re-queued task's entry back to its prior queue
+ * index. It never lands on index 0 (the card) — an Up next row was removed.
+ */
+export function restoreEntryAction(queue: FocusEntry[], taskId: string, index: number): FocusAction | null {
+  let from = -1
+  for (let i = queue.length - 1; i >= 0; i--) if (queue[i].task_id === taskId) { from = i; break }
+  if (from < 1 || queue.length < 2) return null
+  const to = Math.min(Math.max(index, 1), queue.length - 1)
+  if (to === from) return null
+  const ids = queue.map((e) => e.id)
+  const [id] = ids.splice(from, 1)
+  ids.splice(to, 0, id)
+  return { kind: 'reorder', entry_ids: ids }
 }
 
 /** A click on a row (not on one of its controls) only makes it current. */

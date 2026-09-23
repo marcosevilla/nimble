@@ -14,7 +14,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { ArrowUpToLine, GripVertical, Play } from 'lucide-react'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { Label, Meta } from '@/components/shared/typography'
@@ -47,8 +47,15 @@ interface FocusQueueListProps {
   rows: FocusQueueRow[]
   today: string
   onAction: (action: FocusAction) => Promise<unknown>
-  /** Explicit promote (Enter on the current row, "Move to top"); pauses any running task, starts nothing. */
-  onPromote: (entry: FocusEntry) => void
+  /**
+   * Explicit promote (Enter on the current row, "Move to top"); pauses any
+   * running task, starts nothing. `keepFocus`: keyboard promote keeps focus
+   * in the list (on the row now in its place) instead of moving to the card.
+   * Resolves false when the action was rejected.
+   */
+  onPromote: (entry: FocusEntry, opts?: { keepFocus?: boolean }) => unknown
+  /** Remove an Up next entry (the tray offers Undo). Resolves false when rejected. */
+  onRemove: (entry: FocusEntry) => unknown
   /** "Focus now": promote and start in one engine command (`start`). */
   onFocusNow: (entry: FocusEntry) => void
   /** A focus action is awaiting its commit: gate controls that would repeat it. */
@@ -61,7 +68,7 @@ interface FocusQueueListProps {
 
 const UNAVAILABLE = 'Task no longer available'
 /** Keys the current row answers (see `queueRowKeyIntent`). */
-const ROW_KEYS = 'ArrowUp ArrowDown Alt+ArrowUp Alt+ArrowDown Home End Enter Delete'
+const ROW_KEYS = 'ArrowUp ArrowDown Alt+ArrowUp Alt+ArrowDown Home End Enter Delete Backspace'
 
 interface RowFocus {
   id: string | null
@@ -114,12 +121,15 @@ function QueueRowItem({
   const due = task ? dueLabel(task, today) : null
   // Only the current row's controls are Tab stops; the list itself is one.
   const stop = current ? 0 : -1
+  const titleId = useId()
+  const dueId = useId()
 
   return (
     <li
       ref={setNodeRef}
       tabIndex={stop}
-      aria-label={title}
+      aria-labelledby={titleId}
+      aria-describedby={due ? dueId : undefined}
       aria-current={current || undefined}
       aria-keyshortcuts={ROW_KEYS}
       data-focus-entry={entry.id}
@@ -158,9 +168,15 @@ function QueueRowItem({
       {renaming && task && onRename && onRenameCancel ? (
         <InlineRename task={task} className="text-body" onCommit={(c) => onRename(task, c)} onCancel={onRenameCancel} />
       ) : (
-        <span className={cn('min-w-0 flex-1 truncate text-body text-foreground', !task && 'text-muted-foreground')}>{title}</span>
+        <span id={titleId} className={cn('min-w-0 flex-1 truncate text-body text-foreground', !task && 'text-muted-foreground')}>
+          {title}
+        </span>
       )}
-      {due && <Meta className="shrink-0">{due}</Meta>}
+      {due && (
+        <Meta id={dueId} className="shrink-0">
+          {due}
+        </Meta>
+      )}
       {task && (
         <button
           type="button"
@@ -230,6 +246,7 @@ export function FocusQueueList({
   today,
   onAction,
   onPromote,
+  onRemove,
   onFocusNow,
   busy = false,
   onMenu,
@@ -268,17 +285,34 @@ export function FocusQueueList({
   useEffect(() => {
     const pending = refocus.current
     if (!pending) return
+    // Only restore focus that the commit took away: if the user has moved on
+    // (clicked elsewhere, opened a field), leave focus where they put it.
+    const active = document.activeElement
+    if (active && active !== document.body && !listRef.current?.contains(active)) {
+      refocus.current = null
+      return
+    }
     const target = rowEl(queueTabStop(ids, pending))
     if (target && document.activeElement !== target) target.focus()
     if (target || ids.length === 0) refocus.current = null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.queue_revision])
 
+  /** Refocus after `result` commits; a rejected action drops the pending refocus. */
+  const refocusAfter = (focus: RowFocus, result: unknown) => {
+    refocus.current = focus
+    void Promise.resolve(result).then(
+      (ok) => {
+        if (!ok && refocus.current === focus) refocus.current = null
+      },
+      () => {
+        if (refocus.current === focus) refocus.current = null
+      },
+    )
+  }
   const move = (entryId: string, index: number, direction: 'up' | 'down') => {
     const action = moveEntryAction(snapshot.queue, entryId, direction)
-    if (!action) return
-    refocus.current = { id: entryId, index }
-    void onAction(action)
+    if (action) refocusAfter({ id: entryId, index }, onAction(action))
   }
 
   const run = (intent: QueueRowIntent, row: FocusQueueRow, index: number) => {
@@ -289,12 +323,13 @@ export function FocusQueueList({
         if (blocked == null && !busy) move(row.entry.id, index, intent.direction)
         return
       case 'promote':
-        if (blocked == null && !busy && row.task) onPromote(row.entry)
+        // The promoted row leaves Up next; focus lands on the row now in its place.
+        if (blocked == null && !busy && row.task)
+          refocusAfter({ id: row.entry.id, index }, onPromote(row.entry, { keepFocus: true }))
         return
       case 'remove':
-        if (blocked != null || busy) return
-        refocus.current = { id: row.entry.id, index }
-        return submit({ kind: 'remove', occurrence_id: row.entry.occurrence_id })
+        if (blocked == null && !busy) refocusAfter({ id: row.entry.id, index }, onRemove(row.entry))
+        return
     }
   }
 
@@ -304,7 +339,7 @@ export function FocusQueueList({
     const target = e.target as HTMLElement
     if (e.defaultPrevented || !target.dataset?.focusEntry) return
     const index = ids.indexOf(target.dataset.focusEntry)
-    const intent = queueRowKeyIntent(e.key, { alt: e.altKey, meta: e.metaKey, ctrl: e.ctrlKey, shift: e.shiftKey }, index, ids.length)
+    const intent = queueRowKeyIntent(e.key, { alt: e.altKey, meta: e.metaKey, ctrl: e.ctrlKey, shift: e.shiftKey, repeat: e.repeat }, index, ids.length)
     if (!intent) return
     e.preventDefault()
     e.stopPropagation()
@@ -340,7 +375,7 @@ export function FocusQueueList({
                 onPromote={() => onPromote(row.entry)}
                 onFocusNow={() => onFocusNow(row.entry)}
                 onMenu={(id, task) => onMenu(id, task, row.entry)}
-                onRemove={() => submit({ kind: 'remove', occurrence_id: row.entry.occurrence_id })}
+                onRemove={() => void onRemove(row.entry)}
                 renaming={renamingEntryId === row.entry.id}
                 onRename={onRename}
                 onRenameCancel={onRenameCancel}

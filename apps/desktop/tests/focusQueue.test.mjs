@@ -12,7 +12,7 @@ import {
   timerControl, controlBlockedReason, reorderAfterDrag, moveEntryAction, timeboxConfig,
   pomodoroConfig, parseCustomMinutes, planQuickAdd, runQuickAdd, taskMenuItems, failureControl,
   focusTaskOps, duplicateInput, dueLabel, localFailureMessage, visibleFailure, menuFocusAction, undoDeleteAction, stillOpenAction,
-  addToQueueLabel, sourceLabel, queueRowKeyIntent, queueRowClickIntent, queueTabStop,
+  addToQueueLabel, sourceLabel, queueRowKeyIntent, queueRowClickIntent, queueTabStop, reenqueueAction, restoreEntryAction,
 } from '../src/lib/focusQueueIntents.ts'
 
 let output, rendered
@@ -271,8 +271,15 @@ test('Up next is one Tab stop: the first row is current, named by its title, wit
   const first = rowTag(html, 'e2')
   assert.match(first, /tabindex="0"/)
   assert.match(first, /aria-current="true"/)
-  assert.match(first, /aria-label="Second task"/) // selecting, not "Move … to top"
-  assert.match(first, /aria-keyshortcuts="ArrowUp ArrowDown Alt\+ArrowUp Alt\+ArrowDown Home End Enter Delete"/)
+  // Named by its title (selecting, not "Move … to top"); the due label is its description.
+  const labelledby = first.match(/aria-labelledby="([^"]+)"/)?.[1]
+  assert.ok(labelledby)
+  assert.match(html, new RegExp(`id="${labelledby}"[^>]*>\\s*Second task\\s*<`))
+  const describedby = first.match(/aria-describedby="([^"]+)"/)?.[1]
+  assert.ok(describedby, 'due label is announced')
+  assert.match(html, new RegExp(`id="${describedby}"[^>]*>[^<]+<`))
+  assert.doesNotMatch(first, /aria-label=/)
+  assert.match(first, /aria-keyshortcuts="ArrowUp ArrowDown Alt\+ArrowUp Alt\+ArrowDown Home End Enter Delete Backspace"/)
   // Visible current-row state while the list has focus, from the task-row token.
   assert.match(first, /group-focus-within\/queue:bg-accent\/10/)
   const second = rowTag(html, 'e3')
@@ -401,4 +408,31 @@ test('a focus surface without a snapshot shows a loading skeleton or the error, 
   assert.match(failed, /Focus couldn(&#x27;|’|')t load: focus storage unavailable/)
   assert.match(failed, /Try again/)
   assert.doesNotMatch(failed, /aria-label="Start"/)
+})
+
+test('row keys: auto-repeat never promotes or removes; arrows still repeat', () => {
+  for (const key of ['Enter', 'Delete', 'Backspace']) {
+    assert.equal(queueRowKeyIntent(key, { repeat: true }, 1, 3), null, key)
+  }
+  assert.deepEqual(queueRowKeyIntent('ArrowDown', { repeat: true }, 1, 3), { kind: 'focus', index: 2 })
+  assert.deepEqual(queueRowKeyIntent('ArrowUp', { alt: true, repeat: true }, 1, 3), { kind: 'move', direction: 'up' })
+})
+
+test('undo remove: re-queues with the original source and still-open flag', () => {
+  const entry = { id: 'e3', task_id: 't3', occurrence_id: 'o3', source: { kind: 'project', project_id: 'p1' }, explicit_still_open: true }
+  assert.deepEqual(reenqueueAction(entry), {
+    kind: 'enqueue', task_ids: ['t3'], source: { kind: 'project', project_id: 'p1' }, explicit_still_open: true,
+  })
+})
+
+test('undo remove: the re-queued entry returns to its prior index, never onto the card', () => {
+  const q = (...pairs) => pairs.map(([id, task_id]) => ({ id, task_id }))
+  const after = q(['e1', 't1'], ['e2', 't2'], ['e4', 't4'], ['e9', 't3'])
+  assert.deepEqual(restoreEntryAction(after, 't3', 2), { kind: 'reorder', entry_ids: ['e1', 'e2', 'e9', 'e4'] })
+  assert.deepEqual(restoreEntryAction(after, 't3', 1), { kind: 'reorder', entry_ids: ['e1', 'e9', 'e2', 'e4'] })
+  assert.deepEqual(restoreEntryAction(after, 't3', 0), { kind: 'reorder', entry_ids: ['e1', 'e9', 'e2', 'e4'] }, 'index 0 clamps below the card')
+  assert.equal(restoreEntryAction(after, 't3', 3), null, 'already at its old index')
+  assert.equal(restoreEntryAction(after, 't3', 9), null, 'past the end clamps to the end, where it already is')
+  assert.equal(restoreEntryAction(after, 'tx', 1), null, 'not re-queued: nothing to move')
+  assert.equal(restoreEntryAction(q(['e9', 't3']), 't3', 1), null, 'alone in the queue: it is the card')
 })
