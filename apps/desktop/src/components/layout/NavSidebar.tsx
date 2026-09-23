@@ -1,10 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useAppStore } from '@/stores/appStore'
-import { useLayoutStore } from '@/stores/layoutStore'
+import { NAV_MAX_WIDTH, NAV_MIN_WIDTH, useLayoutStore, type NavTreeId } from '@/stores/layoutStore'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataProvider } from '@/services/provider-context'
 import { cn } from '@/lib/utils'
-import { Sun, CheckSquare, Inbox, FileText, Target, BookOpen, Settings, Command } from 'lucide-react'
+import { Sun, CheckSquare, Inbox, FileText, Target, BookOpen, Settings, Command, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { IconButton } from '@/components/shared/IconButton'
+import { NavDocsTree, NavTasksTree } from './NavTrees'
 import type { LucideIcon } from 'lucide-react'
 import { Icon } from '@/components/shared/Icon'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -25,9 +27,14 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
-const MIN_WIDTH = 48
-const MAX_WIDTH = 200
+const MIN_WIDTH = NAV_MIN_WIDTH
+const MAX_WIDTH = NAV_MAX_WIDTH
 const COLLAPSE_THRESHOLD = 80 // below this = icon-only mode
+const SNAP_COLLAPSE_BELOW = 120 // a drag released below this snaps to icons
+const MIN_EXPANDED = 160 // narrowest labeled nav that still fits the trees
+
+// Pages whose content tree nests under their nav button (labeled nav only)
+const NAV_TREES: Partial<Record<string, NavTreeId>> = { tasks: 'tasks', docs: 'docs' }
 
 // Icon map for nav items — lookup by page ID
 const NAV_ICONS: Record<string, LucideIcon> = {
@@ -129,6 +136,9 @@ function SortableNavItem({
     transition,
     isDragging,
   } = useSortable({ id })
+  const treeId = NAV_TREES[id]
+  const treeOpen = useLayoutStore((s) => (treeId ? s.navTrees[treeId] : false))
+  const setTreeOpen = useLayoutStore((s) => s.setNavTreeOpen)
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -148,44 +158,64 @@ function SortableNavItem({
     if (e.altKey) listeners?.onKeyDown?.(e)
   }
 
+  const showTree = expanded && !!treeId && treeOpen
+
   const content = (
     <>
       <Icon icon={icon} size="nav" />
       {expanded && (
-        <span className="text-body-strong truncate">{label}</span>
+        <span className={cn('text-body-strong truncate', treeId && 'pr-6')}>{label}</span>
       )}
     </>
   )
 
   const shared = {
-    ref: setNodeRef,
-    style,
     ...attributes,
     ...listeners,
     onKeyDown,
     'aria-label': label,
     'aria-current': isActive ? ('page' as const) : undefined,
+    'aria-expanded': expanded && treeId ? treeOpen : undefined,
     onClick,
-    className: cn(
-      navItemClasses(expanded, isActive),
-      'touch-none',
-      isDragging && 'opacity-60 shadow-md z-10',
-    ),
-  }
-
-  if (expanded) {
-    return (
-      <button type="button" {...shared}>
-        {content}
-      </button>
-    )
+    className: cn(navItemClasses(expanded, isActive), 'touch-none'),
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger {...shared}>{content}</TooltipTrigger>
-      <TooltipContent side="right">{label}</TooltipContent>
-    </Tooltip>
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn('relative flex flex-col', isDragging && 'opacity-60 shadow-md z-10')}
+    >
+      {expanded ? (
+        <button type="button" {...shared}>
+          {content}
+        </button>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger {...shared}>{content}</TooltipTrigger>
+          <TooltipContent side="right">{label}</TooltipContent>
+        </Tooltip>
+      )}
+      {/* Show/hide this page's tree — a sibling over the row, not a nested button */}
+      {expanded && treeId && (
+        <IconButton
+          onClick={() => setTreeOpen(treeId, !treeOpen)}
+          size="md"
+          tone="subtle"
+          title={treeOpen ? `Hide ${label.toLowerCase()} list` : `Show ${label.toLowerCase()} list`}
+          aria-label={treeOpen ? `Hide ${label} list` : `Show ${label} list`}
+          aria-expanded={treeOpen}
+          className="absolute right-1.5 top-1.5"
+        >
+          <ChevronRight className={cn('size-3.5 transition-transform duration-(--transition-fast)', treeOpen && 'rotate-90')} />
+        </IconButton>
+      )}
+      {showTree && (
+        <div className="mt-0.5 mb-1 pl-4" role="group" aria-label={`${label} list`}>
+          {treeId === 'tasks' ? <NavTasksTree /> : <NavDocsTree />}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -197,6 +227,17 @@ export function NavSidebar() {
   const setNavWidth = useLayoutStore((s) => s.setNavWidth)
   const navOrder = useLayoutStore((s) => s.navOrder)
   const saveNavOrder = useLayoutStore((s) => s.saveNavOrder)
+  const setNavCollapsed = useLayoutStore((s) => s.setNavCollapsed)
+  const setNavTreeOpen = useLayoutStore((s) => s.setNavTreeOpen)
+
+  // Going to Tasks opens its tree and closes Docs', and vice versa; other
+  // pages leave both as they were. The chevrons toggle them by hand.
+  useEffect(() => {
+    const tree = NAV_TREES[currentPage]
+    if (!tree) return
+    setNavTreeOpen(tree, true)
+    setNavTreeOpen(tree === 'tasks' ? 'docs' : 'tasks', false)
+  }, [currentPage, setNavTreeOpen])
 
   const [dragging, setDragging] = useState(false)
   const startX = useRef(0)
@@ -232,9 +273,9 @@ export function NavSidebar() {
       setDragging(false)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      // Snap to collapsed or expanded
+      // Snap to icons, or to the narrowest labeled width that fits the trees
       const current = useLayoutStore.getState().navWidth
-      setNavWidth(current < COLLAPSE_THRESHOLD ? MIN_WIDTH : current)
+      setNavWidth(current < SNAP_COLLAPSE_BELOW ? MIN_WIDTH : Math.max(MIN_EXPANDED, current))
     }
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
@@ -284,7 +325,7 @@ export function NavSidebar() {
 
   return (
     <nav
-      className="relative flex flex-col border-r border-secondary bg-sidebar py-3"
+      className="relative flex shrink-0 flex-col border-r border-secondary bg-sidebar py-3"
       style={{ width }}
     >
       {/* Demo mode pill — click jumps to Settings to toggle off */}
@@ -308,6 +349,19 @@ export function NavSidebar() {
         </div>
       )}
 
+      {/* Collapse to icons / expand to labels */}
+      <div className={cn('mb-1 flex', expanded ? 'justify-end px-2' : 'justify-center')}>
+        <IconButton
+          onClick={() => setNavCollapsed(expanded)}
+          size="lg"
+          tone="subtle"
+          title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+          aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
+          <Icon icon={expanded ? PanelLeftClose : PanelLeftOpen} size="nav" />
+        </IconButton>
+      </div>
+
       {/* Sortable nav items */}
       <DndContext
         sensors={sensors}
@@ -321,7 +375,7 @@ export function NavSidebar() {
         }}
       >
         <SortableContext items={navOrder} strategy={verticalListSortingStrategy}>
-          <div className={cn('flex flex-1 flex-col gap-1', expanded ? 'px-2' : 'items-center')}>
+          <div className={cn('flex flex-1 min-h-0 flex-col gap-1 overflow-y-auto overflow-x-hidden [scrollbar-width:none]', expanded ? 'px-2' : 'items-center')}>
             {navOrder.map((id) => (
               <SortableNavItem
                 key={id}
@@ -336,7 +390,7 @@ export function NavSidebar() {
       </DndContext>
 
       {/* Bottom items — pinned, not sortable */}
-      <div className={cn('mt-auto flex flex-col gap-1', expanded ? 'px-2' : 'items-center')}>
+      <div className={cn('mt-auto flex flex-col gap-1 pt-2', expanded ? 'px-2' : 'items-center')}>
         <NavButton
           label="Command"
           icon={Command}

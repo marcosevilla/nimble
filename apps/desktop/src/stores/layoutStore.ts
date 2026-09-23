@@ -1,8 +1,25 @@
 import { create } from 'zustand'
 import { getDataProvider } from '@/services/provider-context'
 
-// Nav sidebar defaults (from NavSidebar.tsx)
-const NAV_DEFAULT_WIDTH = 48 // MIN_WIDTH — starts collapsed
+// Nav sidebar defaults (from NavSidebar.tsx). Labeled by default; the
+// Tasks and Docs trees live under their nav buttons (Agentation pass 2).
+export const NAV_MIN_WIDTH = 48 // icon-only
+export const NAV_DEFAULT_WIDTH = 240
+export const NAV_MAX_WIDTH = 360
+
+// Nav trees nested under a nav button
+export type NavTreeId = 'tasks' | 'docs'
+const NAV_TREES_KEY = 'nimble.navTrees'
+
+function loadNavTrees(): Record<NavTreeId, boolean> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(NAV_TREES_KEY) ?? 'null')
+    if (saved && typeof saved === 'object') return { tasks: saved.tasks === true, docs: saved.docs === true }
+  } catch {
+    // Storage unavailable or malformed
+  }
+  return { tasks: false, docs: false }
+}
 
 // Right sidebar defaults (from RightSidebar.tsx)
 const RIGHT_DEFAULT_WIDTH = 288 // w-72
@@ -29,9 +46,13 @@ function loadRightTab(): RightTab {
 interface LayoutState {
   // Left nav sidebar
   navWidth: number
-  navCollapsed: boolean
+  /** Width to restore when the icon-only nav expands again. */
+  navExpandedWidth: number
   setNavWidth: (w: number) => void
+  /** Icon-only (true) or labeled at the last expanded width (false). */
   setNavCollapsed: (v: boolean) => void
+  navTrees: Record<NavTreeId, boolean>
+  setNavTreeOpen: (id: NavTreeId, open: boolean) => void
 
   // Nav icon ordering
   navOrder: string[]
@@ -48,19 +69,25 @@ interface LayoutState {
   setRightTab: (tab: RightTab) => void
   /** Show a tab, expanding the column if it is collapsed. */
   openRightTab: (tab: RightTab) => void
-
-  // Tasks project sidebar
-  tasksProjectSidebarWidth: number
-  tasksProjectSidebarCollapsed: boolean
-  setTasksProjectSidebarWidth: (w: number) => void
-  setTasksProjectSidebarCollapsed: (v: boolean) => void
 }
 
 export const useLayoutStore = create<LayoutState>((set) => ({
   navWidth: NAV_DEFAULT_WIDTH,
-  navCollapsed: true,
-  setNavWidth: (w) => set({ navWidth: w }),
-  setNavCollapsed: (v) => set({ navCollapsed: v }),
+  navExpandedWidth: NAV_DEFAULT_WIDTH,
+  setNavWidth: (w) => set(w > NAV_MIN_WIDTH ? { navWidth: w, navExpandedWidth: w } : { navWidth: w }),
+  setNavCollapsed: (v) =>
+    set((s) => ({ navWidth: v ? NAV_MIN_WIDTH : Math.max(s.navExpandedWidth, 160) })),
+  navTrees: loadNavTrees(),
+  setNavTreeOpen: (id, open) =>
+    set((s) => {
+      const navTrees = { ...s.navTrees, [id]: open }
+      try {
+        localStorage.setItem(NAV_TREES_KEY, JSON.stringify(navTrees))
+      } catch {
+        // Remembered for this session only
+      }
+      return { navTrees }
+    }),
 
   navOrder: [...DEFAULT_NAV_ORDER],
   setNavOrder: (order) => set({ navOrder: order }),
@@ -110,9 +137,4 @@ export const useLayoutStore = create<LayoutState>((set) => ({
     useLayoutStore.getState().setRightTab(tab)
     set({ rightCollapsed: false })
   },
-
-  tasksProjectSidebarWidth: 200,
-  tasksProjectSidebarCollapsed: false,
-  setTasksProjectSidebarWidth: (w) => set({ tasksProjectSidebarWidth: w }),
-  setTasksProjectSidebarCollapsed: (v) => set({ tasksProjectSidebarCollapsed: v }),
 }))

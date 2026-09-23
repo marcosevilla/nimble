@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useDocsStore } from '@/stores/docsStore'
 import { useDataProvider } from '@/services/provider-context'
 import { cn } from '@/lib/utils'
-import { ChevronRight, ChevronsDownUp, Plus, FolderOpen, Folder, FileText, Trash2, PanelLeftClose, Vault, Check, X } from 'lucide-react'
+import { ChevronRight, ChevronsDownUp, Plus, FolderOpen, Folder, FileText, Trash2, Vault, Check, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { IconButton } from '@/components/shared/IconButton'
 import { Button } from '@/components/ui/button'
@@ -70,9 +70,6 @@ export function FolderTree() {
   const selectedFolderId = useDocsStore((s) => s.selectedFolderId)
   const selectDoc = useDocsStore((s) => s.selectDoc)
   const createDocument = useDocsStore((s) => s.createDocument)
-  const setFolderTreeCollapsed = useDocsStore((s) => s.setFolderTreeCollapsed)
-  const folderTreeWidth = useDocsStore((s) => s.folderTreeWidth)
-  const setFolderTreeWidth = useDocsStore((s) => s.setFolderTreeWidth)
   const refresh = useDocsStore((s) => s.refresh)
   const vaultNotes = useDocsStore((s) => s.vaultNotes)
   const selectedVaultPath = useDocsStore((s) => s.selectedVaultPath)
@@ -104,9 +101,6 @@ export function FolderTree() {
   const [confirmDelete, setConfirmDelete] = useState<ConfirmTarget | null>(null)
   // Last row that held focus — the roving tab stop follows the arrow keys.
   const [focusKey, setFocusKey] = useState<string | null>(null)
-  const [dragging, setDragging] = useState(false)
-  const startX = useRef(0)
-  const startWidth = useRef(220)
   const listRef = useRef<HTMLDivElement>(null)
 
   // Load on mount
@@ -240,37 +234,6 @@ export function FolderTree() {
     })
   }, [confirmDelete])
 
-  // Resize
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    setDragging(true)
-    startX.current = e.clientX
-    startWidth.current = folderTreeWidth
-  }, [folderTreeWidth])
-
-  useEffect(() => {
-    if (!dragging) return
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    function handleMouseMove(e: MouseEvent) {
-      const delta = e.clientX - startX.current
-      setFolderTreeWidth(Math.min(400, Math.max(160, startWidth.current + delta)))
-    }
-    function handleMouseUp() {
-      setDragging(false)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-  }, [dragging, setFolderTreeWidth])
-
   const renderConfirm = (target: ConfirmTarget, indent?: boolean) => (
     <div
       className={cn('flex h-8 items-center gap-1 px-1.5', indent && 'ml-4')}
@@ -326,33 +289,7 @@ export function FolderTree() {
   }
 
   return (
-    <div
-      className="relative flex flex-col border-r border-border/20 bg-muted/10 overflow-hidden"
-      style={{ width: folderTreeWidth }}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border/20">
-        <span className="text-label text-muted-foreground">Docs</span>
-        <div className="flex items-center gap-0.5">
-          <IconButton
-            onClick={() => handleCreateDoc(selectedFolderId ?? undefined)}
-            size="sm"
-            title="New document (N)"
-            aria-label="New document"
-          >
-            <Plus className="size-3" />
-          </IconButton>
-          <IconButton
-            onClick={() => setFolderTreeCollapsed(true)}
-            size="sm"
-            title="Collapse"
-            aria-label="Collapse the folder tree"
-          >
-            <PanelLeftClose className="size-3" />
-          </IconButton>
-        </div>
-      </div>
-
+    <div className="flex flex-col">
       <DocsSearch />
 
       {/* Folder list */}
@@ -360,7 +297,7 @@ export function FolderTree() {
         ref={listRef}
         role="tree"
         aria-label="Docs and vault"
-        className="flex-1 overflow-y-auto p-1.5 space-y-0.5"
+        className="pt-1 space-y-0.5"
         onKeyDown={(e) => handleTreeKeyDown(e, expandKey, collapseKey, requestDelete)}
         onFocus={(e) => {
           const row = e.target as HTMLElement
@@ -486,6 +423,17 @@ export function FolderTree() {
           </div>
         )}
 
+        <button
+          type="button"
+          onClick={() => handleCreateDoc(selectedFolderId ?? undefined)}
+          title="New document (N)"
+          data-opens-docs
+          className="flex h-8 w-full items-center gap-1.5 rounded-md px-1.5 text-meta text-muted-foreground hover:text-foreground hover:bg-hover transition-colors duration-(--transition-fast)"
+        >
+          <Plus className="size-3" />
+          New document
+        </button>
+
         {/* New folder input */}
         {newFolderInput ? (
           <div className="px-1.5 py-1">
@@ -516,15 +464,6 @@ export function FolderTree() {
         )}
       </div>
 
-      {/* Resize handle */}
-      <div
-        onMouseDown={handleMouseDown}
-        aria-hidden="true"
-        className={cn(
-          'absolute right-0 top-0 bottom-0 z-10 w-px cursor-col-resize transition-colors bg-border/20',
-          dragging ? 'bg-accent-blue/50 w-1' : 'hover:bg-accent-blue/30 hover:w-1',
-        )}
-      />
     </div>
   )
 }

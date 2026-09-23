@@ -1,21 +1,20 @@
 import { create } from 'zustand'
 
-// One-shot navigation-target handoff into TasksPage's local selected-project
-// state. TasksPage is unmounted while a body-mode detail view is open
-// (Dashboard renders a different branch), so a cross-page "open this
-// project" click — e.g. a project segment in TaskDetailPage's breadcrumb —
-// has no live component to talk to. The caller stashes the target here
-// before navigating; TasksPage consumes it on mount (or immediately, if
-// already mounted in sidebar mode) and clears it. Not a persisted
-// selection — that stays TasksPage-local.
+// The Tasks page's selected project (null = All tasks). It lives here, not
+// in TasksPage, because the project tree is in the left nav and stays
+// mounted on every page: picking a project there, or a project segment in
+// TaskDetailPage's breadcrumb, sets it before or after TasksPage mounts.
+// Not persisted across launches.
 interface TasksNavState {
-  pendingProjectId: string | null
+  selectedProjectId: string | null
+  /** Show this project's list (null = All tasks). */
+  selectProject: (id: string | null) => void
+  /** Cross-page "open this project" (breadcrumbs); same as selectProject. */
   requestProject: (id: string) => void
-  clearPendingProject: () => void
 }
 
 export const useTasksNavStore = create<TasksNavState>((set) => ({
-  pendingProjectId: null,
-  requestProject: (id) => set({ pendingProjectId: id }),
-  clearPendingProject: () => set({ pendingProjectId: null }),
+  selectedProjectId: null,
+  selectProject: (id) => set({ selectedProjectId: id }),
+  requestProject: (id) => set({ selectedProjectId: id }),
 }))

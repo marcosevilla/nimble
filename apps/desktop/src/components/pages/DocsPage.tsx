@@ -7,16 +7,12 @@ import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { useDocsStore } from '@/stores/docsStore'
 import { shouldIgnoreKey } from '@/lib/keyGuard'
-import { FolderTree } from '@/components/docs/FolderTree'
 import { DocEditor } from '@/components/docs/DocEditor'
 import { DOCS_SEARCH_INPUT_ID } from '@/components/docs/DocsSearch'
-import { IconButton } from '@/components/shared/IconButton'
 import { PageHeader } from '@/components/shared/PageHeader'
-import { PanelLeftOpen } from 'lucide-react'
+import { NAV_MIN_WIDTH, useLayoutStore } from '@/stores/layoutStore'
 
 export function DocsPage() {
-  const folderTreeCollapsed = useDocsStore((s) => s.folderTreeCollapsed)
-  const setFolderTreeCollapsed = useDocsStore((s) => s.setFolderTreeCollapsed)
   const refresh = useDocsStore((s) => s.refresh)
   const createDocument = useDocsStore((s) => s.createDocument)
   const currentDoc = useDocsStore((s) => s.currentDoc)
@@ -54,9 +50,12 @@ export function DocsPage() {
           input?.focus()
           input?.select()
         }
-        // A collapsed tree unmounts the search box: open it, then focus next frame.
-        if (useDocsStore.getState().folderTreeCollapsed) {
-          setFolderTreeCollapsed(false)
+        // The search lives in the nav's Docs tree. A closed tree or an
+        // icon-only nav unmounts it: open both, then focus next frame.
+        const layout = useLayoutStore.getState()
+        if (!layout.navTrees.docs || layout.navWidth <= NAV_MIN_WIDTH) {
+          layout.setNavTreeOpen('docs', true)
+          layout.setNavCollapsed(false)
           requestAnimationFrame(focusSearch)
         } else {
           focusSearch()
@@ -65,29 +64,14 @@ export function DocsPage() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [createDocument, setFolderTreeCollapsed])
+  }, [createDocument])
 
   return (
     <div className="flex flex-1 h-full overflow-hidden flex-row">
-      {/* Folder tree */}
-      {folderTreeCollapsed ? (
-        <div className="flex flex-col items-center border-r border-border/20 bg-muted/10 py-2 px-1">
-          <IconButton
-            onClick={() => setFolderTreeCollapsed(false)}
-            size="lg"
-            title="Expand folder tree"
-            aria-label="Expand the folder tree"
-          >
-            <PanelLeftOpen className="size-4" />
-          </IconButton>
-        </div>
-      ) : (
-        <FolderTree />
-      )}
-
       {/* Main column: PageHeader + editor */}
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
         <PageHeader
+          width="wide"
           title="Docs"
           meta={currentVaultNote ? currentVaultNote.title : currentDoc ? currentDoc.title : undefined}
         />

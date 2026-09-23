@@ -91,7 +91,7 @@ export function DocsSearch() {
   const listId = `${DOCS_SEARCH_INPUT_ID}-results`
 
   return (
-    <div className="border-b border-border/20 px-2 py-1.5">
+    <div className="py-1">
       <div className="flex items-center gap-1.5 rounded-md bg-muted/20 px-1.5 py-1 focus-within:bg-muted/40 transition-colors duration-(--transition-fast)">
         <Search className="size-3 shrink-0 text-muted-foreground" />
         <input

@@ -8,8 +8,6 @@ interface DocsStore {
   selectedFolderId: string | null
   selectedDocId: string | null
   currentDoc: Document | null
-  folderTreeCollapsed: boolean
-  folderTreeWidth: number
 
   // Vault backend
   vaultNotes: VaultNoteSummary[]
@@ -26,8 +24,6 @@ interface DocsStore {
   /** Create "Untitled" (optionally inside a folder), refresh, and open it. Rejects on failure so the caller can toast. */
   createDocument: (folderId?: string) => Promise<void>
   setVaultExpanded: (v: boolean) => void
-  setFolderTreeCollapsed: (v: boolean) => void
-  setFolderTreeWidth: (w: number) => void
   refresh: () => Promise<void>
 }
 
@@ -37,8 +33,6 @@ export const useDocsStore = create<DocsStore>((set, get) => ({
   selectedFolderId: null,
   selectedDocId: null,
   currentDoc: null,
-  folderTreeCollapsed: false,
-  folderTreeWidth: 220,
 
   vaultNotes: [],
   selectedVaultPath: null,
@@ -116,8 +110,6 @@ export const useDocsStore = create<DocsStore>((set, get) => ({
   },
 
   setVaultExpanded: (v) => set({ vaultExpanded: v }),
-  setFolderTreeCollapsed: (v) => set({ folderTreeCollapsed: v }),
-  setFolderTreeWidth: (w) => set({ folderTreeWidth: w }),
 
   refresh: async () => {
     await get().loadFolders()

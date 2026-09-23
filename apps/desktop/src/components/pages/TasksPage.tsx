@@ -6,16 +6,12 @@ import { TaskListHeader } from '@/components/tasks/TaskListHeader'
 import { SelectionActionBar } from '@/components/tasks/SelectionActionBar'
 import { PageDragRegion } from '@/components/shared/PageDragRegion'
 import { Skeleton } from '@/components/ui/skeleton'
-import { cn } from '@/lib/utils'
-import { List, PanelLeftOpen, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useTaskNavigation } from '@/hooks/useTaskNavigation'
 import { useTaskRowActions } from '@/components/tasks/useTaskRowActions'
 import { useQuickCreateStore } from '@/stores/quickCreateStore'
-import { ProjectSidebar } from '@/components/tasks/ProjectSidebar'
 import { ProjectDetailPage } from '@/components/tasks/ProjectDetailPage'
 import { TaskDetailPage } from '@/components/detail/TaskDetailPage'
-import { IconButton } from '@/components/shared/IconButton'
-import { useLayoutStore } from '@/stores/layoutStore'
 import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataProvider } from '@/services/provider-context'
@@ -162,21 +158,10 @@ function AllTasksView({
 export function TasksPage() {
   const referenceVersion = useDataVersion('labels')
   const dp = useDataProvider()
-  const { projects, loading: projectsLoading, addProject, renameProject, updateProjectColor, removeProject } = useProjects()
+  const { projects, loading: projectsLoading } = useProjects()
   const { tasks, loading: tasksLoading, addTask, remove, refresh } = useLocalTasks()
-  // Seed from the one-shot cross-page handoff (e.g. a project breadcrumb
-  // click in TaskDetailPage) — the initializer only peeks, so it stays pure;
-  // the effect below does the consume, and also covers a request that
-  // arrives while this page is already mounted (sidebar-mode detail).
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    () => useTasksNavStore.getState().pendingProjectId,
-  )
-  const pendingProjectId = useTasksNavStore((s) => s.pendingProjectId)
-  useEffect(() => {
-    if (pendingProjectId === null) return
-    setSelectedProjectId(pendingProjectId)
-    useTasksNavStore.getState().clearPendingProject()
-  }, [pendingProjectId])
+  const selectedProjectId = useTasksNavStore((s) => s.selectedProjectId)
+  const setSelectedProjectId = useTasksNavStore((s) => s.selectProject)
   const [labels, setLabels] = useState<Label[]>([])
 
   // Task details opened while on this page render in the content area below
@@ -186,9 +171,6 @@ export function TasksPage() {
   const detailMode = useDetailStore((s) => s.mode)
   const closeDetail = useDetailStore((s) => s.close)
   const showingDetail = detailTarget?.type === 'task' && detailMode === 'body'
-
-  const sidebarCollapsed = useLayoutStore((s) => s.tasksProjectSidebarCollapsed)
-  const setSidebarCollapsed = useLayoutStore((s) => s.setTasksProjectSidebarCollapsed)
 
   const loading = projectsLoading || tasksLoading
 
@@ -218,15 +200,16 @@ export function TasksPage() {
     [tasks, addTask, refresh],
   )
 
-  // Selecting a project (from either sidebar variant) always shows that
-  // project's list — if a task detail is currently open in the content
-  // area, close it first so the list actually becomes visible.
+  // Selecting a project (breadcrumbs inside a project view) always shows
+  // that project's list — if a task detail is currently open in the
+  // content area, close it first so the list actually becomes visible.
+  // The nav's project tree does the same (NavTasksTree).
   const handleSelectProject = useCallback(
     (id: string | null) => {
       if (showingDetail) closeDetail()
       setSelectedProjectId(id)
     },
-    [showingDetail, closeDetail],
+    [showingDetail, closeDetail, setSelectedProjectId],
   )
 
   // Find the selected project object
@@ -249,43 +232,6 @@ export function TasksPage() {
 
   return (
     <div className="flex flex-1 h-full overflow-hidden">
-      {/* Project sidebar */}
-      {sidebarCollapsed ? (
-        <div className="flex flex-col items-center gap-1 border-r border-border/20 bg-muted/10 py-2 px-1">
-          {/* Collapsing the sidebar hides ProjectSidebar's own "All Tasks"
-              row — the list header dropped its old PageHeader back-link
-              (Task 5), so without this a project view has no way back to
-              All Tasks while the sidebar is collapsed. Always show it here
-              regardless of collapsed state. */}
-          <IconButton
-            onClick={() => handleSelectProject(null)}
-            size="lg"
-            title="All tasks"
-            className={cn(selectedProjectId === null && 'bg-accent/30 text-foreground')}
-          >
-            <List className="size-4" />
-          </IconButton>
-          <IconButton
-            onClick={() => setSidebarCollapsed(false)}
-            size="lg"
-            title="Expand project sidebar"
-          >
-            <PanelLeftOpen className="size-4" />
-          </IconButton>
-        </div>
-      ) : (
-        <ProjectSidebar
-          projects={projects}
-          tasks={tasks}
-          selectedProjectId={selectedProjectId}
-          onSelectProject={handleSelectProject}
-          onAddProject={addProject}
-          onRenameProject={renameProject}
-          onUpdateProjectColor={updateProjectColor}
-          onDeleteProject={removeProject}
-        />
-      )}
-
       {/* Main content */}
       {showingDetail && detailTarget ? (
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
