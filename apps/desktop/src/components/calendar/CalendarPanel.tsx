@@ -468,8 +468,8 @@ export function CalendarPanel() {
 
   return (
     <div
-      className="flex flex-col h-full outline-none"
-      tabIndex={-1}
+      className="flex flex-col h-full"
+      tabIndex={0}
       onKeyDown={handleKeyDown}
     >
       <DayNavigationHeader

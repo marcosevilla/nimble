@@ -83,8 +83,8 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Command bar', keys: 'Escape', label: 'Close' },
 
   // ── Calendar rail (CalendarPanel.tsx, while focus is in the calendar) ──
-  { section: 'Calendar', keys: '← / →', label: 'Previous / next day' },
-  { section: 'Calendar', keys: 't', label: 'Back to today' },
+  { section: 'Calendar', keys: '← / →', label: 'Previous / next day (focus the calendar first: Tab or click)' },
+  { section: 'Calendar', keys: 't', label: 'Back to today (calendar focused)' },
 
   // ── Selection ──
   { section: 'Selection', keys: 'Click', label: 'Select / deselect item' },

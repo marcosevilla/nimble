@@ -33,10 +33,14 @@ export function DocsPage() {
   // folder, `/` → the sidebar search. Both are additive and skip text entry,
   // open popovers/dialogs, nested controls other than a tree row, key
   // repeat and every modifier chord (docs P1-1, P2-10; lib/keyGuard).
+  // rowSelector is scoped to FolderTree's own tree (`aria-label="Docs and
+  // vault"`) — since Task 4 the nav project tree's rows also carry
+  // data-tree-row, so an unscoped selector let `n`/`/` fire from a focused
+  // project row too.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
-      if (shouldIgnoreKey(e.target as HTMLElement, { rowSelector: '[data-tree-row]' })) return
+      if (shouldIgnoreKey(e.target as HTMLElement, { rowSelector: '[aria-label="Docs and vault"] [data-tree-row]' })) return
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault()
         createDocument(useDocsStore.getState().selectedFolderId ?? undefined)

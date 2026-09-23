@@ -160,7 +160,11 @@ export function RightSidebar() {
               </IconButton>
             </div>
 
-            <TabsContent value="calendar" className="flex flex-1 min-h-0 flex-col p-4 pt-3">
+            {/* tabIndex={-1}: Base UI's TabsPanel defaults to tabIndex={open
+                ? 0 : -1} (the Tab stop when open), but CalendarPanel owns
+                its own tabIndex={0} root and ←/→/t handling — the panel
+                wrapper itself must stay out of the Tab order. */}
+            <TabsContent value="calendar" tabIndex={-1} className="flex flex-1 min-h-0 flex-col p-4 pt-3">
               <CalendarPanel />
             </TabsContent>
             <TabsContent value="habits" className={PANEL_CLASS}>
