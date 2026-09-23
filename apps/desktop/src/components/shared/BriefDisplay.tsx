@@ -19,7 +19,7 @@ function Section({ section }: { section: BriefSection }) {
         className="flex w-full items-center gap-2 py-2.5 text-left group"
       >
         <ChevronRight className={cn(
-          'size-3 shrink-0 text-muted-foreground transition-transform duration-150',
+          'size-3 shrink-0 text-muted-foreground transition-transform duration-(--transition-fast)',
           expanded && 'rotate-90',
         )} />
         <span className="text-label text-muted-foreground group-hover:text-muted-foreground transition-colors">
@@ -27,7 +27,7 @@ function Section({ section }: { section: BriefSection }) {
         </span>
       </button>
       {expanded && (
-        <div className="pb-3 pl-5 animate-in fade-in slide-in-from-top-1 duration-150">
+        <div className="pb-3 pl-5 animate-in fade-in slide-in-from-top-1 duration-(--transition-fast)">
           <MarkdownContent content={section.content} />
         </div>
       )}
@@ -249,7 +249,7 @@ function CollapsibleBlock({ title, content }: { title: string; content: string }
         {title}
       </button>
       {open && (
-        <div className="mt-1 pl-4 animate-in fade-in duration-150">
+        <div className="mt-1 pl-4 animate-in fade-in duration-(--transition-fast)">
           <MarkdownContent content={content} />
         </div>
       )}

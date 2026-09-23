@@ -279,7 +279,7 @@ export function ProjectSidebar({
                 <button
                   key={c}
                   className={cn(
-                    'size-4 rounded-full border-2 transition-all',
+                    'size-4 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
                     newProjectColor === c ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',
                   )}
                   style={{ backgroundColor: c }}

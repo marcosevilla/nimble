@@ -314,7 +314,10 @@ export function Dashboard() {
           ) : (
             <main
               key={currentPage}
-              className={cn('flex-1 min-w-0 flex flex-col', pageOwnsScroll && 'min-h-0')}
+              // One entrance per navigation (cross-cutting move 4): a 4px
+              // settle on --transition-base / --ease-entrance; reduced
+              // motion switches it off in index.css.
+              className={cn('page-enter flex-1 min-w-0 flex flex-col', pageOwnsScroll && 'min-h-0')}
             >
               <PageContent page={currentPage} />
             </main>

@@ -43,7 +43,7 @@ export function CollapsibleSection({
                 : 'rounded-md px-2 py-1.5 hover:bg-hover',
             )}
           >
-            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-150" />
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-(--transition-fast)" />
             {icon}
             <span className="truncate">{title}</span>
             {count !== undefined && (
@@ -57,7 +57,7 @@ export function CollapsibleSection({
           </div>
         )}
       </div>
-      <CollapsibleContent className="overflow-hidden transition-all duration-150 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0">
+      <CollapsibleContent className="overflow-hidden transition-opacity duration-(--transition-fast) data-[ending-style]:opacity-0 data-[starting-style]:opacity-0">
         <div className={cn(variant === 'nested' && 'pl-2')}>{children}</div>
       </CollapsibleContent>
     </Collapsible>

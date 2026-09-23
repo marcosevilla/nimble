@@ -74,7 +74,7 @@ export function HelpPanel() {
         aria-expanded={open}
         onClick={toggle}
         className={cn(
-          'fixed bottom-4 right-4 z-30 flex size-9 items-center justify-center rounded-full transition-all duration-200',
+          'fixed bottom-4 right-4 z-30 flex size-9 items-center justify-center rounded-full transition-[color,background-color,box-shadow] duration-(--transition-base)',
           'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-muted-foreground hover:shadow-md',
           'backdrop-blur-sm border border-border/20',
           open && 'bg-muted text-muted-foreground shadow-md',
@@ -89,7 +89,7 @@ export function HelpPanel() {
         <div
           ref={panelRef}
           className={cn(
-            'fixed bottom-16 right-4 z-30 transition-all duration-150 origin-bottom-right',
+            'fixed bottom-16 right-4 z-30 transition-[opacity,scale] duration-(--transition-fast) origin-bottom-right',
             closing
               ? 'opacity-0 scale-95'
               : 'help-panel-enter',

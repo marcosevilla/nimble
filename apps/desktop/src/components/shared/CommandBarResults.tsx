@@ -83,7 +83,7 @@ export function CommandBarResults({
   // Breakdown mode
   if (breakdownTask) {
     return (
-      <div className="animate-in fade-in slide-in-from-top-1 duration-150">
+      <div className="animate-in fade-in slide-in-from-top-1 duration-(--transition-fast)">
         <div className="rounded-xl border border-border/50 bg-popover shadow-lg overflow-hidden">
           <div className="p-3 space-y-2">
             <div className="flex items-center justify-between">
@@ -163,7 +163,7 @@ export function CommandBarResults({
   const showCaptures = mode === 'search'
 
   return (
-    <div className="animate-in fade-in slide-in-from-top-1 duration-150">
+    <div className="animate-in fade-in slide-in-from-top-1 duration-(--transition-fast)">
       <div className="rounded-xl border border-border/50 bg-popover shadow-lg overflow-hidden">
         {/* Search results */}
         {showTasks && tasks.length > 0 && (

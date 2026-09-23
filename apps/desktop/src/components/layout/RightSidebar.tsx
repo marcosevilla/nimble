@@ -57,7 +57,7 @@ export function RightSidebar() {
 
   return (
     <aside
-      className="relative flex flex-col border-l border-secondary bg-background overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+      className="relative flex flex-col border-l border-secondary bg-background overflow-hidden transition-[width] duration-(--transition-slow) ease-(--ease-entrance)"
       style={{ width: collapsed ? 36 : width }}
     >
       {/* Collapsed state — expand button */}

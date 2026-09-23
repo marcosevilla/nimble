@@ -44,7 +44,7 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
       <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
         <div
           className={cn(
-            'h-full rounded-full transition-[width] duration-500',
+            'h-full rounded-full transition-[width] duration-(--transition-slow)',
             pct === 100 ? 'bg-success' : 'bg-foreground/40',
           )}
           style={{ width: `${pct}%` }}
@@ -243,11 +243,11 @@ function BriefCard({
         action={<DateStrip briefDates={briefDates} selected={selectedDate} today={today} onSelect={select} />}
       >
         <CollapsibleTrigger className="flex items-center gap-1.5 py-1 text-left data-[panel-open]:[&>svg:first-child]:rotate-90">
-          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-150" />
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-(--transition-fast)" />
           Daily brief
         </CollapsibleTrigger>
       </SectionTitle>
-      <CollapsibleContent className="overflow-hidden transition-all duration-150 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0">
+      <CollapsibleContent className="overflow-hidden transition-opacity duration-(--transition-fast) data-[ending-style]:opacity-0 data-[starting-style]:opacity-0">
         <div className="pb-2 pt-1">
           {content === undefined ? (
             <div className="space-y-2">

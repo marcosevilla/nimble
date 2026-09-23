@@ -478,7 +478,7 @@ export function HabitsSection() {
         ))}
         <AddHabitPopover
           onCreated={loadHabits}
-          triggerClassName="size-10 rounded-full flex items-center justify-center ring-1 ring-dashed ring-border/40 text-muted-foreground hover:text-foreground hover:ring-border/70 transition-all"
+          triggerClassName="size-10 rounded-full flex items-center justify-center ring-1 ring-dashed ring-border/40 text-muted-foreground hover:text-foreground hover:ring-border/70 transition-[color,box-shadow] duration-(--transition-fast)"
         >
           <Plus className="size-4" />
         </AddHabitPopover>
@@ -548,7 +548,7 @@ function AddHabitPopover({
             <button
               key={c}
               className={cn(
-                'size-5 rounded-full border-2 transition-all',
+                'size-5 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
                 color === c ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',
               )}
               style={{ backgroundColor: c }}
@@ -665,7 +665,7 @@ function ManageHabitRow({
       />
       <button
         onClick={onDelete}
-        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
+        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-[opacity,color] duration-(--transition-fast)"
         aria-label={`Delete habit ${habit.name}`}
       >
         <Trash2 className="size-3.5" />

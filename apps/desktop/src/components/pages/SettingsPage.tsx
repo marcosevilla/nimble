@@ -487,7 +487,7 @@ function CalendarsSection() {
                   role="radio"
                   aria-checked={newColor === color}
                   aria-label={`Color ${color}`}
-                  className={`h-6 w-6 rounded-full border-2 transition-all ${
+                  className={`h-6 w-6 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast) ${
                     newColor === color
                       ? 'border-foreground scale-110'
                       : 'border-transparent hover:border-muted-foreground/50'
@@ -890,7 +890,7 @@ function CaptureRoutesSection() {
                   aria-checked={formColor === color}
                   aria-label={`Color ${color}`}
                   className={cn(
-                    'h-6 w-6 rounded-full border-2 transition-all',
+                    'h-6 w-6 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
                     formColor === color ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',
                   )}
                   style={{ backgroundColor: color }}
@@ -913,7 +913,7 @@ function CaptureRoutesSection() {
                     aria-checked={formIcon === iconName}
                     aria-label={iconName}
                     className={cn(
-                      'flex size-8 items-center justify-center rounded-md border transition-all',
+                      'flex size-8 items-center justify-center rounded-md border transition-[border-color,background-color] duration-(--transition-fast)',
                       formIcon === iconName ? 'border-foreground bg-accent' : 'border-border/30 hover:border-muted-foreground/50',
                     )}
                     onClick={() => setFormIcon(iconName)}
