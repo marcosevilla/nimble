@@ -79,6 +79,14 @@ function tray(opts: { live?: boolean; error?: FocusRequestError | null; pending?
   )
 }
 
+export function renderEmptyTray(): string {
+  return renderToStaticMarkup(
+    <FocusQueueTray snapshot={snapshot({ queue: [], selected_occurrence_id: null, totals: {} })} capabilities={caps()}
+      tasks={tasks} projects={projects} sections={[]} completed={[]} today={TODAY} onAction={never} taskOps={taskOps}
+      error={null} pending={null} />,
+  )
+}
+
 export const renderTrayWithError = (error: FocusRequestError) => tray({ error })
 export const renderPendingTray = () => tray({ live: true, pending: { kind: 'complete', occurrence_id: 'o2' } })
 export const renderQueueRows = (opts: { live: boolean }) => tray({ live: opts.live })

@@ -13,6 +13,7 @@ import { completionNextAction } from '../src/lib/focusModel.ts'
 import {
   completionSummary,
   completedTrayRows,
+  isFocusTrayShortcut,
   isStaleRefusal,
   enqueueSelectionAction,
   focusNowPlan,
@@ -73,10 +74,12 @@ test('Focus now on an unqueued task appends it, then starts the new occurrence',
   assert.equal(plan.start, null) // resolved from the committed enqueue reply, never guessed
 })
 
-test('Space only pauses or resumes an existing session; it never starts one', () => {
+test('Space only pauses a running session; it never starts or resumes one', () => {
   assert.equal(spaceKeyAction(snap()), null)
   assert.deepEqual(spaceKeyAction(snap({ session: session({ status: 'running' }) })), { kind: 'pause' })
-  assert.deepEqual(spaceKeyAction(snap({ session: session() })), { kind: 'resume' })
+  assert.deepEqual(spaceKeyAction(snap({ session: session({ status: 'running', phase: 'break' }) })), { kind: 'pause' })
+  assert.equal(spaceKeyAction(snap({ session: session() })), null, 'paused: Resume is explicit on a focus surface')
+  assert.equal(spaceKeyAction(snap({ session: session(), recovery_reason: 'heartbeat gap' })), null, 'recovered: never resumed by Space')
   assert.equal(spaceKeyAction(snap({ session: session({ phase: 'round_ready' }) })), null)
   assert.equal(spaceKeyAction(snap({ session: session({ phase: 'work_ready' }) })), null)
   assert.equal(spaceKeyAction(snap({ session: session({ status: 'ended' }) })), null)
@@ -300,4 +303,41 @@ test('task history shows exact provenance labels and nullable timestamps', () =>
   assert.match(html, /Not completed/)
   assert.match(html, /Cleared from tray/)
   assert.match(html, /35:00/)
+})
+
+// ── Fix round 1: Space on rows, and a permanent tray entry ──
+
+test('paused/recovered session from another day + Space on a row: the row opens, no focus action', async () => {
+  const recovered = snap({ session: session(), recovery_reason: 'heartbeat gap', as_of: '2026-09-19T09:00:00Z' })
+  const calls = provider({ snapshot: recovered, capabilities: caps({ live_timing: true }), execute: () => { throw new Error('must not execute') } })
+  await h.refreshFocus()
+  // TaskItem/InboxPage open the row when focusSpaceAction() is null; Dashboard sends nothing.
+  assert.equal(h.focusSpaceAction(), null)
+  assert.deepEqual(executed(calls), [])
+})
+
+test('running session + Space: pause only', async () => {
+  const running = snap({ session: session({ status: 'running' }) })
+  const calls = provider({ snapshot: running, capabilities: caps({ live_timing: true }), execute: () => reply(snap({ engine_revision: 10, session: session() })) })
+  await h.refreshFocus()
+  const action = h.focusSpaceAction()
+  assert.deepEqual(action, { kind: 'pause' })
+  await h.sendFocusAction(action)
+  assert.deepEqual(executed(calls), [{ kind: 'pause' }])
+})
+
+test('the permanent entry opens the tray with an empty queue and issues no focus action', async () => {
+  const empty = snap({ queue: [], selected_occurrence_id: null, totals: {} })
+  const calls = provider({ snapshot: empty, execute: () => { throw new Error('must not execute') } })
+  await h.refreshFocus()
+  h.useFocusSurface.setState({ expanded: false })
+  h.useFocusSurface.getState().toggleExpanded() // nav "Focus queue" button and ⇧F
+  assert.equal(h.useFocusSurface.getState().expanded, true)
+  assert.deepEqual(executed(calls), [])
+  assert.equal(isFocusTrayShortcut({ key: 'F' }), true)
+  for (const e of [{ key: 'f' }, { key: 'F', metaKey: true }, { key: 'F', altKey: true }, { key: 'F', repeat: true }]) {
+    assert.equal(isFocusTrayShortcut(e), false, JSON.stringify(e))
+  }
+  const html = r.renderEmptyTray()
+  for (const reachable of ['Queue is clear', 'Focus candidates', 'Queue these', 'Add task']) assert.match(html, new RegExp(reachable))
 })

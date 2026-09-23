@@ -22,6 +22,8 @@ interface FocusSurfaceState {
   expanded: boolean
   celebration: FocusCelebrationState | null
   setExpanded: (expanded: boolean) => void
+  /** Open/close the tray (nav entry, ⇧F). Works with an empty queue; starts nothing. */
+  toggleExpanded: () => void
   celebrate: (c: Omit<FocusCelebrationState, 'id'>) => void
   dismissCelebration: () => void
 }
@@ -32,6 +34,7 @@ export const useFocusSurface = create<FocusSurfaceState>((set) => ({
   expanded: false,
   celebration: null,
   setExpanded: (expanded) => set({ expanded }),
+  toggleExpanded: () => set((s) => ({ expanded: !s.expanded })),
   celebrate: (c) => set({ celebration: { ...c, id: nextId++ } }),
   dismissCelebration: () => set({ celebration: null }),
 }))

@@ -68,7 +68,8 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Tasks', keys: 'Enter', label: 'Open focused task' },
 
   // ── Focus (Dashboard.tsx Space; FocusCelebration.tsx) ──
-  { section: 'Focus', keys: 'Space', label: 'Pause / resume timer (never starts one)' },
+  { section: 'Focus', keys: 'Space', label: 'Pause a running timer (Resume and Start are on the focus card)' },
+  { section: 'Focus', keys: '⇧F', label: 'Open / close the focus queue (starts nothing)' },
   { section: 'Focus', keys: 'Enter / Escape', label: 'Dismiss completion note (next task waits for Start)' },
 
   // ── Command bar (CommandBar.tsx) ──

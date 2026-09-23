@@ -45,15 +45,21 @@ export function startActionFor(snapshot: FocusSnapshot, taskId: string): FocusAc
 }
 
 /**
- * Space pauses or resumes the selected occurrence's existing session.
- * It never starts a task, a break or a next round — those stay explicit.
+ * Global Space only PAUSES a session that is running right now. A paused or
+ * recovered session (possibly from another day) is never resumed from a
+ * page-level key — Resume is the explicit control on a focus surface — so
+ * rows keep Space-to-open unless something is actually running.
  */
 export function spaceKeyAction(snapshot: FocusSnapshot | null): FocusAction | null {
   const session = snapshot?.session
   const selected = snapshot?.queue[0]?.occurrence_id
-  if (!session || !selected || session.occurrence_id !== selected || session.status === 'ended') return null
-  if (session.phase !== 'work' && session.phase !== 'break') return null
-  return session.status === 'running' ? { kind: 'pause' } : { kind: 'resume' }
+  if (!session || !selected || session.occurrence_id !== selected) return null
+  return session.status === 'running' ? { kind: 'pause' } : null
+}
+
+/** Shell shortcut that opens/closes the focus tray (⇧F). Presentation only — never a FocusAction. */
+export function isFocusTrayShortcut(e: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; repeat?: boolean }): boolean {
+  return e.key === 'F' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.repeat
 }
 
 /** Provenance for a row-level entry: local-only, due today, else its project. */

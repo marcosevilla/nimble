@@ -157,7 +157,7 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget || !onOpen) return
         // Enter and Space open, like any role="button" (review I2). Space
-        // stays with Dashboard's pause/resume while a focus session runs.
+        // pauses a running focus session instead (Dashboard).
         if (e.key === 'Enter' || (e.key === ' ' && !focusSpaceAction())) {
           e.preventDefault()
           onOpen()

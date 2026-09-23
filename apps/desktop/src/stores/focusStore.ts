@@ -235,7 +235,7 @@ export async function focusNow(taskId: string, source: FocusSource): Promise<Foc
   return sendFocusAction(start as FocusAction)
 }
 
-/** What Space does right now (pause/resume the selected session), or null — Space never starts. */
+/** What Space does right now: pause a running session, else null — Space never starts or resumes. */
 export function focusSpaceAction(): FocusAction | null {
   return spaceKeyAction(useFocusCache.getState().snapshot)
 }

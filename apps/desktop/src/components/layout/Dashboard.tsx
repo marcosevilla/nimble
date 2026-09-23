@@ -28,6 +28,7 @@ import { GoalsPage } from '@/components/pages/GoalsPage'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { connectFocusCache, focusSpaceAction, isDroppedRepeat, sendFocusAction, useFocusCache } from '@/stores/focusStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
+import { isFocusTrayShortcut } from '@/lib/focusFlows'
 import { FocusView } from '@/components/focus/FocusView'
 import { FocusBanner } from '@/components/focus/FocusBanner'
 import { FocusResumeDialog } from '@/components/focus/FocusResumeDialog'
@@ -173,7 +174,14 @@ export function Dashboard() {
         return
       }
 
-      // Space — pause/resume the selected focus session (never starts one)
+      // ⇧F — open/close the focus tray (presentation only; works with an empty queue)
+      if (!isInput && isFocusTrayShortcut(e)) {
+        e.preventDefault()
+        useFocusSurface.getState().toggleExpanded()
+        return
+      }
+
+      // Space — pause a running focus session (never starts or resumes one)
       const spaceAction = e.key === ' ' && !isInput && !meta ? focusSpaceAction() : null
       if (spaceAction) {
         e.preventDefault()

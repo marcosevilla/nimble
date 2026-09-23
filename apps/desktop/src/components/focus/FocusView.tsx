@@ -23,7 +23,7 @@ function Kbd({ children }: { children: React.ReactNode }) {
  * Keys (registry: Session), through the shared key guard: Enter completes
  * the selected task (the completion acknowledgement owns Enter while it is
  * up, so a second Enter never completes the next task); Escape minimizes to
- * the banner; `s` stops (banks time, keeps the queue). Space (pause/resume)
+ * the banner; `s` stops (banks time, keeps the queue). Space (pause a running timer)
  * stays in the Dashboard handler.
  */
 export function FocusView() {

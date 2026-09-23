@@ -502,7 +502,7 @@ function InboxNoteRow({
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return
         // Enter and Space open, like any role="button" (review I2); Space
-        // stays with Dashboard's pause/resume while a focus session runs.
+        // pauses a running focus session instead (Dashboard).
         if (e.key === 'Enter' || (e.key === ' ' && !focusSpaceAction())) {
           e.preventDefault()
           open()
