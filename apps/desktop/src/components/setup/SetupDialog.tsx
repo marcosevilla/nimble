@@ -25,6 +25,7 @@ interface SetupField {
   placeholder: string
   help: string
   type?: string
+  optional?: boolean
 }
 
 const SETUP_FIELDS: SetupField[] = [
@@ -40,6 +41,7 @@ const SETUP_FIELDS: SetupField[] = [
     label: 'Google Calendar iCal URL',
     placeholder: 'https://calendar.google.com/calendar/ical/...',
     help: 'Google Calendar → Settings → Calendar → "Secret address in iCal format"',
+    optional: true,
   },
   {
     key: 'obsidian_vault_path',
@@ -64,8 +66,7 @@ export function SetupDialog({ open, onComplete }: SetupDialogProps) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Every field is required until the Rust launch check stops reading
-  // ical_feed_url (see lib/setupGate.ts); otherwise setup reappears each launch.
+  // Required keys mirror the Rust launch check (lib/setupGate.ts).
   const ready = isSetupReady(values)
 
   async function handleSave() {
@@ -107,6 +108,7 @@ export function SetupDialog({ open, onComplete }: SetupDialogProps) {
             <div key={field.key} className="space-y-1.5">
               <Label htmlFor={field.key} className="text-body-strong">
                 {field.label}
+                {field.optional && <Meta as="span"> (optional)</Meta>}
               </Label>
               <Input
                 id={field.key}

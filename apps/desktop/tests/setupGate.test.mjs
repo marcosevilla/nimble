@@ -11,7 +11,7 @@ test('setup requires exactly the keys the Rust launch check reads', () => {
   assert.ok(block, 'REQUIRED_SETTINGS not found in settings.rs')
   const rustKeys = [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort()
   assert.deepEqual([...SETUP_REQUIRED_KEYS].sort(), rustKeys)
-  assert.ok(SETUP_REQUIRED_KEYS.includes('ical_feed_url'))
+  assert.ok(!SETUP_REQUIRED_KEYS.includes('ical_feed_url'))
 })
 
 test('get started stays disabled until every required field is filled', () => {
@@ -25,6 +25,6 @@ test('get started stays disabled until every required field is filled', () => {
   assert.equal(isSetupReady({}), false)
   assert.equal(isSetupReady({ obsidian_vault_path: '~/Obsidian/marcowits' }), false)
   const { ical_feed_url: _omit, ...noIcal } = full
-  assert.equal(isSetupReady(noIcal), false)
-  assert.equal(isSetupReady({ ...full, ical_feed_url: '   ' }), false)
+  assert.equal(isSetupReady(noIcal), true, 'the calendar is optional')
+  assert.equal(isSetupReady({ ...full, anthropic_api_key: '   ' }), false)
 })
