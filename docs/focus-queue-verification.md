@@ -163,7 +163,7 @@ Launch with the steps in [native run → How to re-run](focus-native-run-2026-09
   - Mute on: a timebox end and a completion play nothing. Unmute does not replay them.
   - Pomodoro with 1-min rounds: one chime at the round end and one at the break end; the card flips to "Start break" / "Start next round"; the total excludes the break.
 - **H7** (F14): Copy assistant context from the card and paste it into a text editor. The IDs, elapsed time and route lines are correct.
-- **H8** (F16): With a timer running, `pmset sleepnow` (or close the lid) for over a minute, then wake. It is paused with no auto-resume. Also decide checklist 21a: should ⌘H pause?
+- **H8** (F16, amended 2026-09-23): With a timer running, `pmset sleepnow` (or close the lid) for a few minutes, then wake. It is still running and the total includes the sleep. Sleep longer than 30 minutes: it is paused with "the Mac slept for more than 30 minutes", exactly 30 minutes credited, no sound, no auto-resume. ⌘H does not pause (decided).
 - **H9** (F09): Put the companion over a full-screen app and across Spaces (checklist 3). Record the behaviour.
 
 ### Human checklist results — 2026-09-23 (Marco, main `3524700`, profile `/private/tmp/nimble-backup-test-checklist`)
@@ -179,6 +179,15 @@ Launch with the steps in [native run → How to re-run](focus-native-run-2026-09
 | H7 | PASS (function) | Design ask: copy confirmation should be a toast, not inline text. |
 | H8 | PASS as specified, **behavior change requested** | Marco: sleep should NOT pause; the timer keeps running through sleep. ⌘H does not pause (unchanged). |
 | H9 | PASS (minor) | Companion height bounces between Spaces. |
+
+### Checklist follow-ups — 2026-09-23 (branch `codex/focus-checklist-fixes`)
+
+- **H1 compact clipping — root cause fixed.** Tauri's macOS "Visible" titlebar is an NSFullSizeContentView window, so the size Tauri sets is the whole frame and the web viewport is the frame minus the 32pt titlebar. The compact fit set the frame to the card height and lost the bottom 32px. Measured before the fix: applied 190, frame 190, webview frame 190, `window.innerHeight` 158. The window is now card + (frame − viewport), with that chrome read once before the first fit; after the fix: card 294, frame 326, viewport 294 (long title, place label and description). Pure tests: `focusWindow.test.mjs` (`companionGeometry`).
+- **H9 Space bounce — mitigated, not natively verified.** Focus/visibility refits that compute identical geometry no longer re-apply it, so moving across Spaces causes no native resize.
+- **Card hierarchy:** project or "Project / Section" label above the title; plain-text description clamped to one line with See more / See less (main card and companion).
+- **Toasts:** Up next removal and local delete Undo (10 s), and copy assistant context, now use sonner toasts; a copy failure's "Show text" action opens the manual-copy panel. The companion mounts its own Toaster.
+- **Sleep (H8 decision):** see the spec amendment. Engine tests `nimble-core/tests/focus_sleep.rs`.
+- Not yet run natively: toasts, See more expansion refit, scaled compact, dark theme, a real sleep/wake.
 
 ### Live gates (not codeable here)
 

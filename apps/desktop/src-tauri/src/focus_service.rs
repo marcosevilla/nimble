@@ -337,7 +337,7 @@ pub async fn committed(app: &AppHandle, snapshot: &FocusSnapshot, command_id: Op
 }
 
 /// Settle and pause live timing for a lifecycle reason (last surface
-/// closed, sleep, quit). A no-op when nothing is running.
+/// closed, quit). A no-op when nothing is running.
 pub async fn interrupt(app: &AppHandle, reason: &str) {
     let Some(rt) = runtime(app) else { return };
     let Ok(service) = rt.writer().await else { return };
@@ -345,6 +345,36 @@ pub async fn interrupt(app: &AppHandle, reason: &str) {
         Ok(snapshot) => committed(app, &snapshot, None).await,
         Err(e) => {
             log::warn!("Focus interrupt ({reason}) failed: {:?}", focus_error(&e).code);
+            broadcast(app).await;
+        }
+    }
+}
+
+/// System sleep notice: a running session keeps running; the engine
+/// settles a durable sleep-start checkpoint and remembers the sleep for
+/// `woke`. Nothing running: nothing is written.
+pub async fn sleep_began(app: &AppHandle) {
+    let Some(rt) = runtime(app) else { return };
+    let Ok(service) = rt.writer().await else { return };
+    match service.sleep_began().await {
+        Ok(snapshot) => committed(app, &snapshot, None).await,
+        Err(e) => {
+            log::warn!("Focus sleep notice failed: {:?}", focus_error(&e).code);
+            broadcast(app).await;
+        }
+    }
+}
+
+/// System wake notice: credit the sleep (at most 30 minutes) to a session
+/// that was running at the sleep notice; a longer sleep pauses it at the
+/// cap. Never starts or resumes anything.
+pub async fn woke(app: &AppHandle) {
+    let Some(rt) = runtime(app) else { return };
+    let Ok(service) = rt.writer().await else { return };
+    match service.woke().await {
+        Ok(snapshot) => committed(app, &snapshot, None).await,
+        Err(e) => {
+            log::warn!("Focus wake notice failed: {:?}", focus_error(&e).code);
             broadcast(app).await;
         }
     }

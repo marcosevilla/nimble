@@ -10,9 +10,12 @@
 //!   closes a view, but hiding the LAST visible focus surface pauses,
 //! - explicit Quit settles before exit (a forced quit follows the startup
 //!   crash recovery at the last durable checkpoint),
-//! - system sleep settles at the notice; wake never resumes (explicit Resume).
-//!   Without a timely notice the heartbeat's > 40 s gap rule pauses at the
-//!   last durable checkpoint.
+//! - system sleep does not pause (Marco, 2026-09-23): the sleep notice
+//!   settles a durable checkpoint and the wake notice credits the sleep, at
+//!   most 30 minutes; a longer sleep pauses at sleep start + 30 min. Only a
+//!   wake seen by this live process credits sleep: a crash or relaunch
+//!   across it, or a gap with no sleep/wake pair, still follows the
+//!   heartbeat's > 40 s gap rule (paused at the last durable checkpoint).
 //!
 //! Live timing is advertised only after `wire_lifecycle` ran in the process
 //! that holds the profile owner lock.
@@ -35,7 +38,6 @@ const BOUNDARY_MARGIN: Duration = Duration::from_millis(50);
 const SETTLE_BUDGET: Duration = Duration::from_secs(3);
 
 pub const REASON_SURFACE_CLOSED: &str = "the last focus window was closed";
-pub const REASON_SLEEP: &str = "the Mac went to sleep";
 pub const REASON_QUIT: &str = "Nimble quit";
 
 // ── Companion window ──
@@ -274,18 +276,20 @@ fn install_power_observers(app: &AppHandle) {
 
     let sleep_app = app.clone();
     let on_sleep = RcBlock::new(move |_: NonNull<NSNotification>| {
-        // Settle at the notice, before the machine sleeps. Posted on the
-        // main thread; the service itself never needs the main thread.
+        // Checkpoint at the notice, before the machine sleeps; the session
+        // keeps running. Posted on the main thread; the service itself never
+        // needs the main thread.
         let app = sleep_app.clone();
         let _ = tauri::async_runtime::block_on(async move {
-            tokio::time::timeout(SETTLE_BUDGET, focus_service::interrupt(&app, REASON_SLEEP)).await
+            tokio::time::timeout(SETTLE_BUDGET, focus_service::sleep_began(&app)).await
         });
     });
     let wake_app = app.clone();
     let on_wake = RcBlock::new(move |_: NonNull<NSNotification>| {
-        // Wake never resumes: just let windows re-read the paused snapshot.
+        // Credit the sleep (capped) and let windows re-read the snapshot.
+        // Wake never starts or resumes a paused session.
         let app = wake_app.clone();
-        tauri::async_runtime::spawn(async move { focus_service::broadcast(&app).await });
+        tauri::async_runtime::spawn(async move { focus_service::woke(&app).await });
     });
     // SAFETY: the blocks are Send-safe (they only clone an AppHandle and
     // hand work to the async runtime); a nil queue runs them on the posting

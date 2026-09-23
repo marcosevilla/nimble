@@ -9,8 +9,9 @@ pub trait MonotonicClock: Send + Sync {
 /// `std::time::Instant` on macOS is `CLOCK_UPTIME_RAW`, which stops while the
 /// Mac sleeps — after wake a running session would see only a few seconds of
 /// delta, never cross the 40-second gap rule and silently keep running. The
-/// focus engine needs sleep to show up as a gap (spec §7: wake requires
-/// Resume), so it samples a sleep-inclusive monotonic clock instead:
+/// focus engine needs the real sleep length (spec §7: a wake credits at most
+/// 30 minutes; a sleep without an observed wake is a gap), so it samples a
+/// sleep-inclusive monotonic clock instead:
 /// `CLOCK_MONOTONIC_RAW` on Darwin (continues during sleep, not slewed) and
 /// `CLOCK_BOOTTIME` on Linux. Other targets fall back to `Instant`.
 pub struct SystemClock {
