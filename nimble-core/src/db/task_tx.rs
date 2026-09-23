@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use sqlx::SqliteConnection;
 use uuid::Uuid;
 
-use crate::db::{sync, tasks::SELECT_COLS};
+use crate::db::{origin_label, sync, tasks::SELECT_COLS};
 use crate::integrations::todoist::observer::{self, TaskMutation};
 use crate::types::{CreateTaskInput, LocalTask, UpdateTaskInput};
 
@@ -251,7 +251,21 @@ pub async fn create_task_with_id_tx(
         .bind(&input.recurrence_rule).bind(&input.section_id).bind(input.reminder_offset_minutes)
         .bind(input.google_calendar_enabled.unwrap_or(false)).bind(pos).bind(sync_policy)
         .execute(&mut *conn).await?;
-    if let Some(ids) = &input.label_ids {
+    // Auto-provenance: while Todoist sync is on, every User-created task
+    // carries the `nimble` label so it can be filtered (and seen in Todoist
+    // too) during the migration. Union it into the caller's requested labels
+    // rather than replacing them — `set_labels_tx` dedups, so this is safe
+    // even if the caller already included it.
+    let auto_label_on =
+        policy == MutationPolicy::User && origin_label::todoist_sync_on_tx(conn).await?;
+    let mut effective_label_ids = input.label_ids.clone();
+    if auto_label_on {
+        let origin_id = origin_label::origin_label_id_tx(conn).await?;
+        let mut ids = effective_label_ids.unwrap_or_default();
+        ids.push(origin_id);
+        effective_label_ids = Some(ids);
+    }
+    if let Some(ids) = &effective_label_ids {
         set_labels_tx(conn, &id, ids, policy).await?;
     }
     let task = fetch(conn, &id).await?;
@@ -260,7 +274,8 @@ pub async fn create_task_with_id_tx(
     }
     if policy == MutationPolicy::User {
         observer::on_task_mutation_tx(conn, TaskMutation::Created(&task)).await?;
-        if input.label_ids.is_some() {
+        let effective_non_empty = effective_label_ids.as_ref().is_some_and(|ids| !ids.is_empty());
+        if effective_non_empty {
             let fields = vec!["labels".to_string()];
             observer::on_task_mutation_tx(
                 conn,

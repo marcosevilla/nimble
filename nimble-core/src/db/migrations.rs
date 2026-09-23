@@ -650,9 +650,14 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             UPDATE daily_state SET focus_task_id=NULL,focus_started_at=NULL,focus_paused_at=NULL
         "#,
     },
+    Migration {
+        version: 22,
+        description: "Project archiving",
+        sql: "ALTER TABLE projects ADD COLUMN archived_at TEXT",
+    },
 ];
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 21;
+pub const CURRENT_SCHEMA_VERSION: i64 = 22;
 
 pub async fn current_schema_version(pool: &SqlitePool) -> crate::Result<i64> {
     let version = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM schema_version")

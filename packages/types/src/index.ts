@@ -90,6 +90,7 @@ export interface Project {
   external_source: string | null
   remote_updated_at: string | null
   synced_snapshot: string | null
+  archived_at: string | null
 }
 
 // ── Local Tasks ──

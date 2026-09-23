@@ -28,6 +28,8 @@ pub struct Project {
     // does set it.
     pub goal_id: Option<String>,
     pub milestone_id: Option<String>,
+    #[serde(default)]
+    pub archived_at: Option<String>,
 }
 
 // ── Local Tasks ──

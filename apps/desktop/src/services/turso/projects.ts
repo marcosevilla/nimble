@@ -19,7 +19,7 @@ import { query, num, str, strOrNull, type Row } from './client'
  * isn't projected, and dropping it from the sort would reorder projects that
  * share a `position` (which happens — `position` is not unique).
  */
-const LIST_SQL = `SELECT id, name, color, position, parent_id, external_id, external_source, remote_updated_at, synced_snapshot
+const LIST_SQL = `SELECT id, name, color, position, parent_id, external_id, external_source, remote_updated_at, synced_snapshot, archived_at
    FROM projects
    ORDER BY position, created_at`
 
@@ -35,6 +35,7 @@ function toProject(row: Row): Project {
     external_source: strOrNull(row, 'external_source'),
     remote_updated_at: strOrNull(row, 'remote_updated_at'),
     synced_snapshot: strOrNull(row, 'synced_snapshot'),
+    archived_at: strOrNull(row, 'archived_at'),
   }
 }
 

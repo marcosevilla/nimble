@@ -52,9 +52,10 @@ pub(crate) const TABLES: &[TablePolicy] = &[
 
 /// V19 remains byte-for-byte compatible. V20 adds only reviewed user intent
 /// to portable data; device-local calendar and delivery state is excluded.
+/// V22 adds `projects.archived_at` (reviewed, included).
 pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
     if version == 19 { return Some(TABLES.to_vec()); }
-    if version != 20 && version != 21 { return None; }
+    if version != 20 && version != 21 && version != 22 { return None; }
     let mut tables = TABLES.to_vec();
     for policy in &mut tables {
         match policy.name {
@@ -69,7 +70,7 @@ pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
         table!("google_calendar_links"; ["task_id","event_id","etag","base_json","operation_id","desired_json","state","retry_after"]; []; ["task_id"]),
         table!("google_calendar_conflicts"; ["task_id","reason","local_json","remote_json","created_at"]; []; ["task_id"]),
     ]);
-    if version == 21 {
+    if version >= 21 {
         for policy in &mut tables {
             match policy.name {
                 "local_tasks" => *policy = table!("local_tasks"; ["id","parent_id","content","description","project_id","priority","due_date","completed","completed_at","position","created_at","updated_at","status","linked_doc_id","external_id","external_source","remote_updated_at","synced_snapshot","due_time","duration_minutes","recurrence_rule","section_id","reminder_offset_minutes","google_calendar_enabled","sync_policy"]; ["id","parent_id","content","description","project_id","priority","due_date","completed","completed_at","position","created_at","updated_at","status","linked_doc_id","external_id","external_source","due_time","duration_minutes","recurrence_rule","section_id","reminder_offset_minutes","google_calendar_enabled","sync_policy"]),
@@ -91,6 +92,13 @@ pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
             table!("focus_undo"; ["token","original_task_id","task_snapshot_json","queue_entry_json","previous_entry_id","next_entry_id","occurrence_ids_json","issued_at","expires_at","consumed"]; []; ["token"]),
             table!("focus_replica"; ["id","writer_device_id","owner_epoch","revision","queue_revision","payload_json","as_of"]; []),
         ]);
+    }
+    if version == 22 {
+        for policy in &mut tables {
+            if policy.name == "projects" {
+                *policy = table!("projects"; ["id","name","color","position","created_at","goal_id","milestone_id","external_id","external_source","remote_updated_at","synced_snapshot","parent_id","archived_at"]; ["id","name","color","position","created_at","goal_id","milestone_id","external_id","external_source","parent_id","archived_at"]);
+            }
+        }
     }
     tables.sort_by_key(|policy| policy.name);
     Some(tables)

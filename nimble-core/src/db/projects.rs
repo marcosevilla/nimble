@@ -20,6 +20,7 @@ impl FromRow<'_, SqliteRow> for Project {
             synced_snapshot: row.try_get("synced_snapshot")?,
             goal_id: row.try_get("goal_id")?,
             milestone_id: row.try_get("milestone_id")?,
+            archived_at: row.try_get("archived_at")?,
         })
     }
 }
@@ -28,7 +29,7 @@ impl FromRow<'_, SqliteRow> for Project {
 /// `Project` uses this, mirroring `db::tasks::SELECT_COLS`. A literal copied
 /// per call site is how a new column gets missed at one of them and silently
 /// left stale on other devices (upserts only update snapshot columns).
-pub(crate) const SELECT_COLS: &str = "id, name, color, position, parent_id, external_id, external_source, remote_updated_at, synced_snapshot, goal_id, milestone_id";
+pub(crate) const SELECT_COLS: &str = "id, name, color, position, parent_id, external_id, external_source, remote_updated_at, synced_snapshot, goal_id, milestone_id, archived_at";
 
 /// Re-read a project row and append a full-snapshot sync_log entry for it.
 /// The single definition of "project snapshot" for the Todoist import/pull
@@ -167,6 +168,7 @@ pub async fn create_project(
         synced_snapshot: None,
         goal_id: None,
         milestone_id: None,
+        archived_at: None,
     };
 
     // Sync log: INSERT

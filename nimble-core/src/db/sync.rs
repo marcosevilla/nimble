@@ -372,6 +372,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             other => {
                 other?;
                 ensure_remote_v21_schema(pool, turso_url, turso_token).await?;
+                ensure_remote_v22_schema(pool, turso_url, turso_token).await?;
                 return Ok(());
             },
         }
@@ -426,7 +427,8 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             external_id TEXT,
             external_source TEXT,
             remote_updated_at TEXT,
-            synced_snapshot TEXT
+            synced_snapshot TEXT,
+            archived_at TEXT
         )",
         // captures
         "CREATE TABLE IF NOT EXISTS captures (
@@ -799,6 +801,21 @@ async fn ensure_remote_v21_schema(pool: &SqlitePool, turso_url: &str, turso_toke
     let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
     check_pipeline_statement_errors(&body, "Turso v21 schema upgrade", true)?;
     sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v21_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
+        .execute(pool).await?;
+    Ok(())
+}
+
+async fn ensure_remote_v22_schema(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='turso_schema_v22_upgraded'")
+        .fetch_optional(pool).await?;
+    if done.is_some() { return Ok(()); }
+    let requests = [
+        turso_execute("ALTER TABLE projects ADD COLUMN archived_at TEXT", vec![]),
+        serde_json::json!({"type":"close"}),
+    ];
+    let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
+    check_pipeline_statement_errors(&body, "Turso v22 schema upgrade", true)?;
+    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v22_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
         .execute(pool).await?;
     Ok(())
 }
@@ -1226,6 +1243,9 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     }
     if let Err(e) = ensure_remote_v21_schema(pool, turso_url, turso_token).await {
         log::warn!("Turso v21 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
+    if let Err(e) = ensure_remote_v22_schema(pool, turso_url, turso_token).await {
+        log::warn!("Turso v22 schema gate failed, pushing anyway (gate retries next push): {e}");
     }
 
     // Fetch all unsynced entries

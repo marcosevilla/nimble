@@ -12,6 +12,7 @@ pub mod goals;
 pub mod habits;
 pub mod labels;
 pub mod migrations;
+pub mod origin_label;
 pub mod projects;
 pub mod sections;
 pub mod settings;

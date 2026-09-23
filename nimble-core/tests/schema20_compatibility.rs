@@ -364,10 +364,11 @@ async fn failed_v21_migration_rolls_back_to_exact_v20_and_rerun_succeeds() {
         .fetch_all(&pool).await.unwrap();
     assert!(!columns.iter().any(|c| c == "sync_policy"));
 
-    // Clear the injected obstacle; the rerun applies v21 completely.
+    // Clear the injected obstacle; the rerun applies v21 (and, since
+    // `run_migrations` always builds to `CURRENT_SCHEMA_VERSION`, v22 too).
     sqlx::query("DROP TABLE focus_replica").execute(&pool).await.unwrap();
     migrations::run_migrations(&pool).await.unwrap();
-    assert_eq!(migrations::current_schema_version(&pool).await.unwrap(), 21);
+    assert_eq!(migrations::current_schema_version(&pool).await.unwrap(), 22);
     let policy: String = sqlx::query_scalar("SELECT sync_policy FROM local_tasks WHERE id='v20-task'")
         .fetch_one(&pool).await.unwrap();
     assert_eq!(policy, "default");
