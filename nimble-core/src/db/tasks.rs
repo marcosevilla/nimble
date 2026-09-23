@@ -694,6 +694,26 @@ mod tests {
     use crate::types::{CreateTaskInput, LocalTask, UpdateTaskInput};
     use super::SELECT_COLS;
 
+    /// Today's list is "due on or before today": still-open tasks from
+    /// earlier days come back with today's (brief phase 1 splits them into
+    /// a Still open group). Undated and future tasks never do.
+    #[tokio::test]
+    async fn due_date_filter_means_due_on_or_before() {
+        let pool = test_pool().await;
+        let mk = |content: &str, due: Option<&str>| CreateTaskInput {
+            content: content.into(),
+            due_date: due.map(Into::into),
+            ..Default::default()
+        };
+        for (c, d) in [("old", Some("2026-09-01")), ("today", Some("2026-09-23")),
+                       ("later", Some("2026-09-24")), ("undated", None)] {
+            super::create_local_task(&pool, mk(c, d)).await.unwrap();
+        }
+        let got: Vec<String> = super::get_local_tasks(&pool, None, Some("2026-09-23"), false)
+            .await.unwrap().into_iter().map(|t| t.content).collect();
+        assert_eq!(got, vec!["old".to_string(), "today".to_string()]);
+    }
+
     /// Task 7 Step 1: create with all new fields, read back intact (incl.
     /// `labels` populated via `get_local_tasks`'s aggregate join, not a
     /// per-task query).

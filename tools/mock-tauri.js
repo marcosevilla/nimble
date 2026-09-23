@@ -1162,7 +1162,8 @@
       var out = TASKS.slice()
       if (args) {
         if (args.projectId) out = out.filter(function (t) { return t.project_id === args.projectId })
-        if (args.dueDate) out = out.filter(function (t) { return t.due_date === args.dueDate })
+        // Matches Rust/web: "due on or before" (still-open tasks included).
+        if (args.dueDate) out = out.filter(function (t) { return t.due_date && t.due_date <= args.dueDate })
         if (!args.includeCompleted) out = out.filter(function (t) { return !t.completed })
       } else {
         out = out.filter(function (t) { return !t.completed })
