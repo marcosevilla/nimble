@@ -25,8 +25,8 @@ Status: **proposal, awaiting Marco's approval.** Fits inside C5 of `todoist-repl
 3. Outbox cleanup: drop the 4 test ops and the TEST project, keep the 2 real tasks.
 
 ### Phase 2: reconcile (~4–6h, dry run, then approve, snapshot, apply)
-Schema v22:
-- `origin` on tasks and projects (`nimble` | `todoist` | `import`), set at creation and never changed. Backfill: never linked or outbox-created → `nimble`, the 2026-04-17 batch → `import`, the rest → `todoist`.
+Schema v22 + origin label:
+- **Origin = a filterable `nimble` label** (Marco, 2026-09-23; replaces the proposed `origin` column). It's auto-applied to tasks created in Nimble while Todoist sync is on, and it syncs to Todoist too. The auto-apply stops at cutover, and then the label gets deleted. Todoist-born tasks stay unlabelled ("From Todoist" = open tasks without it). Backfill covers never-pushed native tasks only.
 - Fake section projects become `sections` rows under their real parent. Their tasks move to the parent with `section_id` set.
 - `projects.parent_id` is set from Todoist, and projects Todoist has archived or deleted get `archived_at`.
 - The two inboxes become one.
@@ -38,7 +38,7 @@ Then a full re-sync (sync token reset to `*`) runs as a **dry run first**. It pr
 ### Phase 3: Todoist-shaped sidebar (~3–4h)
 - The nav shows projects only. Child projects nest under their parent and collapse. Archived projects are hidden.
 - Sections show as headings inside the project page (`SectionedTaskList.tsx`), not in the nav.
-- Origin: a small Nimble mark on tasks born in Nimble plus a "Created in Nimble" filter. Todoist-born tasks get no mark (they're the majority, so a mark would be noise).
+- Label filter on task lists (include/hide per label) with "Made in Nimble" / "From Todoist" shortcuts.
 - Optional Todoist hygiene pass first (garbage in, garbage out): "⭐️ TODAY - September 9", "‼️ Complete Today (Sep 22)", "Backlog".
 
 ### Phase 4: the path off Todoist (existing C-plan)
