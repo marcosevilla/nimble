@@ -146,6 +146,10 @@ const GAP_MS: u64 = 40_000;
 struct SleepMark {
     /// Clock sample of the first heartbeat that saw the sleep gap.
     first_deferral_ms: Option<u64>,
+    /// Clock sample of the latest deferred heartbeat. A later one more than
+    /// `GAP_MS` after it means the Mac slept again (e.g. a DarkWake tick),
+    /// so the grace restarts instead of expiring during that sleep.
+    last_deferral_ms: Option<u64>,
 }
 
 struct Anchor {
@@ -560,6 +564,10 @@ impl FocusService {
         let delta = sampled.saturating_sub(guard.sampled_ms);
         if delta > GAP_MS {
             if let Some(mark) = guard.sleep.as_mut() {
+                if mark.last_deferral_ms.is_some_and(|last| sampled.saturating_sub(last) > GAP_MS) {
+                    mark.first_deferral_ms = None;
+                }
+                mark.last_deferral_ms = Some(sampled);
                 let first = *mark.first_deferral_ms.get_or_insert(sampled);
                 if sampled.saturating_sub(first) < SLEEP_WAKE_GRACE_MS {
                     let mut conn = self.pool.acquire().await?;
@@ -783,7 +791,7 @@ impl FocusService {
         }
         guard.sampled_ms = sampled;
         if live_after.is_some() {
-            guard.sleep = Some(SleepMark { first_deferral_ms: None });
+            guard.sleep = Some(SleepMark { first_deferral_ms: None, last_deferral_ms: None });
         }
         Ok(snap)
     }

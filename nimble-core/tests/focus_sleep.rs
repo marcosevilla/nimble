@@ -192,7 +192,13 @@ async fn a_lost_wake_notice_falls_back_to_the_gap_rule_after_the_grace_period() 
     h.clock.advance(10 * MIN);
     let first = h.service.heartbeat().await.unwrap();
     assert_eq!(first.session.unwrap().status, FocusStatus::Running, "first gap heartbeat waits");
-    h.clock.advance(SLEEP_WAKE_GRACE_MS);
+    // The live process keeps its 20 s cadence; the wake notice never comes.
+    for _ in 0..(SLEEP_WAKE_GRACE_MS / 20_000) - 1 {
+        h.clock.advance(20_000);
+        let waiting = h.service.heartbeat().await.unwrap();
+        assert_eq!(waiting.session.unwrap().status, FocusStatus::Running, "still within grace");
+    }
+    h.clock.advance(20_000);
     let snap = h.service.heartbeat().await.unwrap();
     assert_eq!(snap.totals[&oid], 5_000, "no wake observed: not credited");
     assert_eq!(snap.session.unwrap().status, FocusStatus::Paused);
@@ -298,4 +304,22 @@ async fn an_uncapped_sleep_that_crosses_a_timebox_chimes_on_wake() {
     let woke = h.service.woke().await.unwrap();
     assert_eq!(woke.totals[&oid], 25 * MIN);
     assert!(h.service.claim_sound().await.unwrap().is_some(), "the crossed boundary chimes on wake");
+}
+
+#[tokio::test]
+async fn a_dark_wake_heartbeat_does_not_use_up_the_grace() {
+    // Review minor 2026-09-23: a heartbeat during a DarkWake, then more sleep
+    // with no notice; the full wake must still find its grace.
+    let h = fixture::Harness::new().await;
+    let oid = started(&h).await;
+    h.service.sleep_began().await.unwrap();
+    h.clock.advance(10 * MIN);
+    h.service.heartbeat().await.unwrap(); // DarkWake tick, deferred
+    h.clock.advance(15 * MIN);
+    let after = h.service.heartbeat().await.unwrap();
+    assert_eq!(after.session.unwrap().status, FocusStatus::Running, "grace restarts after re-sleep");
+    let woke = h.service.woke().await.unwrap();
+    assert_eq!(woke.totals[&oid], 25 * MIN);
+    assert_eq!(woke.session.unwrap().status, FocusStatus::Running);
+    assert!(h.service.ms_until_boundary().await.unwrap().is_none(), "open-ended session has no boundary");
 }
