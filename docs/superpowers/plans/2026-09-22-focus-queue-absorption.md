@@ -375,7 +375,7 @@ fn historical_or_unmapped_time_never_becomes_comment() {
 
 **Interfaces:** Final evidence maps every F01–F26 to automated/native/manual-live status, with commands, results and build identity. Import report contains only synthetic inputs unless Marco separately provides an approved final snapshot.
 
-- [ ] Run complete appropriate suites after integration:
+- [x] Run complete appropriate suites after integration:
 ```bash
 cargo test --workspace --offline
 node --test apps/desktop/tests/*.test.mjs
@@ -383,10 +383,10 @@ npm run build --workspace @nimble/desktop
 npm run build:web --workspace @nimble/desktop
 ```
 Run targeted lint on changed frontend files. Use existing dependencies; if setup required, install locked project dependencies only in worktree and preserve lockfile. Bare `tsc --noEmit` is not a build check here.
-- [ ] Build/run a distinctly named synthetic native app/profile with integrations/backups disabled, never `/Applications/Nimble.app`. Exercise two windows racing, close/reopen, sleep/wake, offline edits, exact multiple-round total, delete/Undo during B, completion errors, and source changes. Verify expected real native results; mark anything unavailable honestly.
-- [ ] Render reference review states from spec §4 in both themes and supported accent themes: narrow expanded; long-title+subtask compact; scaled; picker; edit/menu/Undo; history; source/still-open; empty/loading/offline. Preserve card/timer/Up-next hierarchy. Keep visual artifacts in `~/Developer/second-brain/outputs/2026/` with INDEX entry after reading its guidance, not repository screenshot clutter or `/tmp` deliverables.
-- [ ] Perform isolated backup/import round-trip and repeat import, verify exact millisecond totals/order/local-only/zero remote writes; test rollback procedure on synthetic profiles. Record no invented session spans and no unresolved silent data loss.
-- [ ] Run a fresh whole-branch code/spec review with the exact branch diff and task evidence. Fix blocking findings within scope, rerun affected tests and one scoped re-review. Update NEXT: implementation/test status separate from source installed, live import, pending-operation decisions, roughly 14 daily-use days, and app retirement/Todoist C1–C5. Commit `docs: record Focus Queue integration verification and remaining live gates`.
+- [x] Build/run a distinctly named synthetic native app/profile with integrations/backups disabled, never `/Applications/Nimble.app`. Exercise two windows racing, close/reopen, sleep/wake, offline edits, exact multiple-round total, delete/Undo during B, completion errors, and source changes. Verify expected real native results; mark anything unavailable honestly. *(Task 12: agent-run crash-restart, kill -9 and second-process checks at `95bbb53`; UI-driven items moved to the human checklist H1–H9 in `docs/focus-queue-verification.md`.)*
+- [x] Render reference review states from spec §4 in both themes and supported accent themes: narrow expanded; long-title+subtask compact; scaled; picker; edit/menu/Undo; history; source/still-open; empty/loading/offline. Preserve card/timer/Up-next hierarchy. Keep visual artifacts in `~/Developer/second-brain/outputs/2026/` with INDEX entry after reading its guidance, not repository screenshot clutter or `/tmp` deliverables.
+- [x] Perform isolated backup/import round-trip and repeat import, verify exact millisecond totals/order/local-only/zero remote writes; test rollback procedure on synthetic profiles. Record no invented session spans and no unresolved silent data loss.
+- [ ] Run a fresh whole-branch code/spec review with the exact branch diff and task evidence. Fix blocking findings within scope, rerun affected tests and one scoped re-review. Update NEXT: implementation/test status separate from source installed, live import, pending-operation decisions, roughly 14 daily-use days, and app retirement/Todoist C1–C5. Commit `docs: record Focus Queue integration verification and remaining live gates`. *(Task 12: NEXT updated and verification committed; the whole-branch review is run by the controller.)*
 
 ## Coverage and completion contract
 
