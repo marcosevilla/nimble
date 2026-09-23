@@ -53,7 +53,13 @@ export interface FocusQueueTrayProps {
   capabilities: FocusCapabilities | null
   /** Native tasks (including children) the queue and candidates resolve against. */
   tasks: LocalTask[]
+  /** Active-only — feeds FocusSourcePicker (choosing which project to pull
+   * candidates from); archived projects shouldn't be offered there. */
   projects: Project[]
+  /** Every project, archived included — feeds name lookups for tasks that
+   * still belong to one (project badges, quick-add placeholder). Falls
+   * back to `projects` when omitted. */
+  allProjects?: Project[]
   /** All sections; project candidates need them for project order. */
   sections: Section[]
   /** Today's completed, non-archived tray rows. */
@@ -181,6 +187,7 @@ export function FocusQueueTray({
   capabilities,
   tasks,
   projects,
+  allProjects,
   sections,
   completed,
   today,
@@ -208,7 +215,14 @@ export function FocusQueueTray({
   const headingRef = useRef<HTMLHeadingElement>(null)
 
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
-  const projectName = useCallback((id: string) => projects.find((p) => p.id === id)?.name, [projects])
+  // Display-only lookups (task/source labels) use `allProjects` so a task
+  // still in an archived project keeps its name; `projects` (active-only)
+  // stays reserved for FocusSourcePicker's own project list below.
+  const displayProjects = allProjects ?? projects
+  const projectName = useCallback(
+    (id: string) => displayProjects.find((p) => p.id === id)?.name,
+    [displayProjects],
+  )
   const blocked = queueBlockedReason(capabilities)
   // Toast actions outlive this render: read the latest gates when clicked.
   const gates = useRef({ blocked, busy })
@@ -381,7 +395,7 @@ export function FocusQueueTray({
           entry={first ?? null}
           task={firstTask}
           subtasks={firstTask ? childrenOf(firstTask.id).filter(isOpen) : []}
-          placeLabel={firstTask ? taskPlaceLabel(firstTask, projects, sections) : null}
+          placeLabel={firstTask ? taskPlaceLabel(firstTask, displayProjects, sections) : null}
           today={today}
           compact={compact}
           onToggleCompact={() => {
@@ -465,7 +479,7 @@ export function FocusQueueTray({
             />
             <FocusQuickAdd
               source={source}
-              projects={projects}
+              projects={displayProjects}
               blockedReason={blocked}
               onSubmit={(text) => runQuickAdd(text, source, today, { create: taskOps.create, onAction })}
             />

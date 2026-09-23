@@ -80,6 +80,8 @@ export function ProjectDetailPage({
     return tasks.filter((t) => t.project_id === project.id)
   }, [tasks, project.id])
 
+  // Single label predicate — matchesLabelFilter already runs inside
+  // filterTasks (task-view.ts) against viewState.filter.labelFilter.
   const filteredTasks = useMemo(
     () => filterTasks(projectTasks, viewState.filter),
     [projectTasks, viewState.filter],

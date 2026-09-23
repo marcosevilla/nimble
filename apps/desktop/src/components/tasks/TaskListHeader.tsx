@@ -11,11 +11,13 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { STATUSES } from '@/components/tasks/StatusDropdown'
 import { labelColor } from '@/lib/labelColors'
 import { ALL_GROUP_BY, EMPTY_FILTER, type GroupBy, type TaskFilter } from '@/lib/task-view'
+import { cycleLabelInFilter } from '@/lib/labelFilter'
 
 const GROUP_BY_LABELS: Record<GroupBy, string> = {
   section: 'Section',
@@ -63,8 +65,10 @@ export function TaskListHeader({
   availableGroupBy = ALL_GROUP_BY,
 }: TaskListHeaderProps) {
   const hasBreadcrumb = !!breadcrumb && breadcrumb.length > 0
-  const activeCount = filter.statuses.length + filter.priorities.length + filter.labelIds.length
+  const activeLabelCount = filter.labelFilter.include.length + filter.labelFilter.exclude.length
+  const activeCount = filter.statuses.length + filter.priorities.length + activeLabelCount
   const groupByLabel = GROUP_BY_LABELS[groupBy] ?? groupBy
+  const nimbleLabel = labels.find((l) => l.name === 'nimble')
 
   const toggleStatus = (s: (typeof STATUSES)[number]['value']) => {
     onFilter({
@@ -84,13 +88,11 @@ export function TaskListHeader({
     })
   }
 
-  const toggleLabel = (id: string) => {
-    onFilter({
-      ...filter,
-      labelIds: filter.labelIds.includes(id)
-        ? filter.labelIds.filter((v) => v !== id)
-        : [...filter.labelIds, id],
-    })
+  // Single label predicate for the whole task list (there is no second,
+  // separate label filter anywhere in this header). Each row cycles
+  // off → include ("Only") → exclude ("Hide") → off.
+  const cycleLabel = (id: string) => {
+    onFilter({ ...filter, labelFilter: cycleLabelInFilter(filter.labelFilter, id) })
   }
 
   return (
@@ -171,20 +173,57 @@ export function TaskListHeader({
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
-                    <DropdownMenuLabel>Label</DropdownMenuLabel>
-                    {labels.map((l) => (
-                      <DropdownMenuCheckboxItem
-                        key={l.id}
-                        checked={filter.labelIds.includes(l.id)}
-                        onCheckedChange={() => toggleLabel(l.id)}
-                      >
-                        <span
-                          className="size-2 shrink-0 rounded-full"
-                          style={{ background: labelColor(l.color) }}
-                        />
-                        {l.name}
-                      </DropdownMenuCheckboxItem>
-                    ))}
+                    <DropdownMenuLabel>
+                      Label
+                      {activeLabelCount > 0 && (
+                        <span className="ml-1 text-muted-foreground/70">({activeLabelCount})</span>
+                      )}
+                    </DropdownMenuLabel>
+
+                    {/* Shortcuts against Task 1's auto-applied `nimble`
+                        label — replace the whole label predicate rather
+                        than merge with any per-label toggles below. */}
+                    {nimbleLabel && (
+                      <>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            onFilter({ ...filter, labelFilter: { include: [nimbleLabel.id], exclude: [] } })
+                          }
+                        >
+                          Made in Nimble
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            onFilter({ ...filter, labelFilter: { include: [], exclude: [nimbleLabel.id] } })
+                          }
+                        >
+                          From Todoist
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                      </>
+                    )}
+
+                    {labels.map((l) => {
+                      const included = filter.labelFilter.include.includes(l.id)
+                      const excluded = filter.labelFilter.exclude.includes(l.id)
+                      return (
+                        <DropdownMenuItem
+                          key={l.id}
+                          closeOnClick={false}
+                          onClick={() => cycleLabel(l.id)}
+                          className={cn(excluded && 'opacity-50')}
+                        >
+                          <span
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ background: labelColor(l.color) }}
+                          />
+                          <span className="flex-1 min-w-0 truncate">{l.name}</span>
+                          {(included || excluded) && (
+                            <DropdownMenuShortcut>{included ? 'Only' : 'Hide'}</DropdownMenuShortcut>
+                          )}
+                        </DropdownMenuItem>
+                      )
+                    })}
                   </DropdownMenuGroup>
                 </>
               )}

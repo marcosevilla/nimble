@@ -58,6 +58,8 @@ function AllTasksView({
     setViewState((v) => ({ ...v, filter }))
   }, [])
 
+  // Single label predicate — matchesLabelFilter already runs inside
+  // filterTasks (task-view.ts) against viewState.filter.labelFilter.
   const filteredTasks = useMemo(() => filterTasks(tasks, viewState.filter), [tasks, viewState.filter])
   const groups = useMemo(
     // `sections` is always [] — groupBy here is restricted to
@@ -158,7 +160,7 @@ function AllTasksView({
 export function TasksPage() {
   const referenceVersion = useDataVersion('labels')
   const dp = useDataProvider()
-  const { projects, loading: projectsLoading } = useProjects()
+  const { allProjects, loading: projectsLoading } = useProjects()
   const { tasks, loading: tasksLoading, addTask, remove, refresh } = useLocalTasks()
   const selectedProjectId = useTasksNavStore((s) => s.selectedProjectId)
   const setSelectedProjectId = useTasksNavStore((s) => s.selectProject)
@@ -212,11 +214,13 @@ export function TasksPage() {
     [showingDetail, closeDetail, setSelectedProjectId],
   )
 
-  // Find the selected project object
+  // Find the selected project object — looked up in `allProjects` (not the
+  // active-only `projects`) so a breadcrumb back to an archived parent
+  // still resolves instead of silently bouncing to All Tasks.
   const selectedProject = useMemo(() => {
     if (!selectedProjectId) return null
-    return projects.find((p) => p.id === selectedProjectId) ?? null
-  }, [selectedProjectId, projects])
+    return allProjects.find((p) => p.id === selectedProjectId) ?? null
+  }, [selectedProjectId, allProjects])
 
   if (loading) {
     return (
@@ -251,7 +255,7 @@ export function TasksPage() {
           key={selectedProject.id}
           project={selectedProject}
           tasks={tasks}
-          allProjects={projects}
+          allProjects={allProjects}
           onSelectProject={handleSelectProject}
           onDeleteTask={remove}
           onAddSubtask={handleAddSubtask}
@@ -260,7 +264,7 @@ export function TasksPage() {
       ) : (
         <AllTasksView
           tasks={tasks}
-          projects={projects}
+          projects={allProjects}
           visibleLabels={visibleLabels}
           onDelete={remove}
           onAddSubtask={handleAddSubtask}

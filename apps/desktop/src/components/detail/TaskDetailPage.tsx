@@ -52,7 +52,11 @@ export function TaskDetailPage() {
 
   const { task, subtasks, project, loading } = useTaskDetail(target?.id ?? null)
   const { task: parentTask } = useTaskDetail(task?.parent_id ?? null)
-  const { projects } = useProjects()
+  // `projects` (active-only) feeds the "Move to project…" picker below —
+  // archived projects shouldn't be a move target. `allProjects` feeds the
+  // breadcrumb's ancestor walk (a display-only lookup) so a chain through
+  // an archived parent still resolves instead of truncating.
+  const { projects, allProjects } = useProjects()
 
   const [breakingDown, setBreakingDown] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
@@ -283,10 +287,10 @@ export function TaskDetailPage() {
     while (current && !seen.has(current.id)) {
       chain.unshift(current)
       seen.add(current.id)
-      current = current.parent_id ? projects.find((p) => p.id === current!.parent_id) ?? null : null
+      current = current.parent_id ? allProjects.find((p) => p.id === current!.parent_id) ?? null : null
     }
     return chain
-  }, [project, projects])
+  }, [project, allProjects])
 
   interface BreadcrumbSegment { label: string; onClick: () => void }
 

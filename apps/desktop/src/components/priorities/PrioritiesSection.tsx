@@ -97,12 +97,15 @@ export function PrioritiesSection({ onGenerated, initialPriorities, initialEnerg
   const obsidianToday = useAppStore((s) => s.obsidianToday)
   const today = useLocalToday() // local date, like the Today list below (C2)
   const { tasks: tasksDueToday } = useLocalTasks({ dueDate: today, includeCompleted: false })
-  const { projects } = useProjects()
+  // Display-only lookup (resolving a task's own project name), not a
+  // picker — `allProjects` so a task still in an archived project doesn't
+  // lose its name here.
+  const { allProjects } = useProjects()
   const projectNames = useMemo(() => {
     const map: Record<string, string> = {}
-    for (const p of projects) map[p.id] = p.name
+    for (const p of allProjects) map[p.id] = p.name
     return map
-  }, [projects])
+  }, [allProjects])
 
   const [energy, setEnergy] = useState<EnergyLevel | null>(isEnergyLevel(initialEnergy) ? initialEnergy : null)
   const [priorities, setPriorities] = useState<Priority[] | null>(initialPriorities ?? null)
