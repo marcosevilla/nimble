@@ -21,6 +21,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { scrollPageToTop } from '@/lib/pageScroll'
 import { useLocalToday } from '@/hooks/useLocalToday'
 import { briefFor, pickBriefDate, resolveBriefDate } from '@/lib/briefDate'
+import { reviewEnterAction } from '@/lib/keyGuard'
 
 // ── Shared Utilities ──
 
@@ -149,14 +150,15 @@ function ReviewMode({ brief, onComplete }: { brief: string | null | undefined; o
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== 'Enter') return
-      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
-      const target = e.target as HTMLElement | null
-      if (target?.matches('input, textarea, [contenteditable="true"]')) return
+      const action = reviewEnterAction(
+        { key: e.key, target: e.target as HTMLElement | null, defaultPrevented: e.defaultPrevented, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey },
+        step,
+        priorities !== null,
+      )
+      if (!action) return
       e.preventDefault()
-      if (step === 1) setStep(2)
-      else if (step === 2 && priorities) onComplete(priorities)
-      // Step 2 also advances via PrioritiesSection's own button — leave it alone
+      if (action === 'advance') setStep(2)
+      else if (priorities) onComplete(priorities)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

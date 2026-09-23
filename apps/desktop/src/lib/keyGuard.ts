@@ -101,3 +101,20 @@ export function calendarKey(e: CalendarKeyEvent): 'prev' | 'next' | 'today' | nu
   if (e.key === 'ArrowRight') return 'next'
   return null
 }
+
+export type ReviewEnterEvent = CalendarKeyEvent
+
+/**
+ * Today review mode's page-level Enter (re-score today N-P1-1). A focused
+ * button, link, tab or field keeps Enter — the step's own Next / Ready
+ * buttons advance through their click. Null means: leave the event alone,
+ * no preventDefault.
+ */
+export function reviewEnterAction(e: ReviewEnterEvent, step: number, hasPriorities: boolean): 'advance' | 'finish' | null {
+  if (e.key !== 'Enter' || e.defaultPrevented) return null
+  if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return null
+  if (shouldIgnoreKey(e.target)) return null
+  if (step === 1) return 'advance'
+  if (step === 2 && hasPriorities) return 'finish'
+  return null
+}

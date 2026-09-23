@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { shouldIgnoreKey, calendarKey, INTERACTIVE_SELECTOR, OVERLAY_SELECTOR } from '../src/lib/keyGuard.ts'
+import { shouldIgnoreKey, calendarKey, reviewEnterAction, INTERACTIVE_SELECTOR, OVERLAY_SELECTOR } from '../src/lib/keyGuard.ts'
 
 // Minimal element stand-in: `inside` lists the selectors this element sits
 // inside (closest() hits), `is` the selectors it matches itself.
@@ -86,5 +86,29 @@ test('calendarKey leaves text entry, overlays, handled keys and chords alone (in
   assert.equal(calendarKey({ key: 't', target: el(), defaultPrevented: true }), null)
   for (const mod of ['metaKey', 'ctrlKey', 'altKey', 'shiftKey']) {
     assert.equal(calendarKey({ key: 'ArrowLeft', target: el(), [mod]: true }), null, mod)
+  }
+})
+
+test('review Enter on the page advances step 1 and finishes step 2 once priorities exist', () => {
+  const page = el({ tag: 'BODY' })
+  assert.equal(reviewEnterAction({ key: 'Enter', target: page }, 1, false), 'advance')
+  assert.equal(reviewEnterAction({ key: 'Enter', target: page }, 2, true), 'finish')
+  assert.equal(reviewEnterAction({ key: 'Enter', target: page }, 2, false), null)
+})
+
+test('review Enter leaves focused controls, fields and overlays alone (today N-P1-1)', () => {
+  const button = el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR] })
+  assert.equal(reviewEnterAction({ key: 'Enter', target: button }, 1, false), null)
+  assert.equal(reviewEnterAction({ key: 'Enter', target: button }, 2, true), null)
+  assert.equal(reviewEnterAction({ key: 'Enter', target: el({ tag: 'INPUT' }) }, 1, false), null)
+  assert.equal(reviewEnterAction({ key: 'Enter', target: el({ inside: [OVERLAY_SELECTOR] }) }, 1, false), null)
+})
+
+test('review Enter ignores other keys, chords and handled events', () => {
+  const page = el({ tag: 'BODY' })
+  assert.equal(reviewEnterAction({ key: ' ', target: page }, 1, false), null)
+  assert.equal(reviewEnterAction({ key: 'Enter', target: page, defaultPrevented: true }, 1, false), null)
+  for (const mod of ['metaKey', 'ctrlKey', 'altKey', 'shiftKey']) {
+    assert.equal(reviewEnterAction({ key: 'Enter', target: page, [mod]: true }, 1, false), null, mod)
   }
 })
