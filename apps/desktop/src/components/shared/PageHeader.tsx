@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils'
-import { ArrowLeft } from 'lucide-react'
+import { ChevronLeft } from 'lucide-react'
 import { Icon } from '@/components/shared/Icon'
 
 /** `default`/`wide` align the header with PageFrame's content column
@@ -9,8 +9,16 @@ export type PageHeaderWidth = 'default' | 'wide' | 'full'
 const WIDTH_CLASS: Record<PageHeaderWidth, string> = {
   default: 'mx-auto max-w-page px-6',
   wide: 'mx-auto max-w-page-wide px-6',
-  full: 'px-5',
+  full: 'px-6',
 }
+
+/** The one page-title recipe, shared with the Tasks list header: a 20px
+ *  display title with its controls on the right of the same row, and any
+ *  back link or breadcrumb on a small row above it. */
+export const PAGE_TITLE_ROW = 'flex items-center gap-2 min-h-8 min-w-0'
+export const PAGE_TITLE = 'text-display text-balance truncate'
+export const PAGE_CRUMB_ROW = 'flex items-center gap-1 min-h-5 min-w-0 mb-1'
+export const PAGE_CRUMB = 'truncate text-meta text-muted-foreground/70 transition-colors hover:text-foreground'
 
 interface PageHeaderProps {
   title: React.ReactNode
@@ -42,26 +50,22 @@ export function PageHeader({
       )}
       data-tauri-drag-region
     >
-      <div className={cn('w-full min-w-0', WIDTH_CLASS[width])} data-tauri-drag-region>
-        {/* Main row — drag region on the non-interactive title area */}
-        <div className={cn('flex items-center gap-2 py-2 min-h-[40px] border-b', secondary ? 'border-border/10' : 'border-border/20')}>
-          {backAction && (
-            <button
-              onClick={backAction.onClick}
-              className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 -ml-1 text-meta text-muted-foreground transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground"
-            >
-              <Icon icon={ArrowLeft} />
+      <div className={cn('w-full min-w-0 pt-6', WIDTH_CLASS[width])} data-tauri-drag-region>
+        {backAction && (
+          <div className={PAGE_CRUMB_ROW}>
+            <button onClick={backAction.onClick} className={cn('flex items-center gap-1', PAGE_CRUMB)}>
+              <Icon icon={ChevronLeft} />
               {backAction.label}
             </button>
-          )}
+          </div>
+        )}
 
-          <div
-            className="flex flex-1 items-baseline gap-2 min-w-0"
-            data-tauri-drag-region
-          >
-            <h1 className="text-title text-balance truncate">{title}</h1>
+        {/* Title row — drag region on the non-interactive title area */}
+        <div className={PAGE_TITLE_ROW}>
+          <div className="flex flex-1 items-baseline gap-2 min-w-0" data-tauri-drag-region>
+            <h1 className={PAGE_TITLE}>{title}</h1>
             {meta && (
-              <span className="text-meta text-muted-foreground relative top-px shrink-0">
+              <span className="text-meta text-muted-foreground shrink-0">
                 {meta}
               </span>
             )}
@@ -76,7 +80,7 @@ export function PageHeader({
 
         {/* Secondary row — sticks with the header (e.g. filter pills) */}
         {secondary && (
-          <div className="flex items-center gap-1 py-1.5 border-b border-border/20 flex-wrap">
+          <div className="flex items-center gap-1 pt-2 flex-wrap">
             {secondary}
           </div>
         )}

@@ -363,7 +363,7 @@ export function InboxPage() {
     >
       {/* Note input — command bar style. Never disabled: rapid capture is
           the point (inbox audit P1-4); the ring is the focus state (P2-7). */}
-      <div className="ml-4 flex h-10 items-center gap-2 surface-inset border border-transparent px-3 transition-colors focus-within:border-ring">
+      <div className="flex h-10 items-center gap-2 surface-inset border border-transparent px-3 transition-colors focus-within:border-ring">
         <Search className="size-3.5 shrink-0 text-muted-foreground" />
         <input
           ref={inputRef}

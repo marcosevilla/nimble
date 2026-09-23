@@ -89,7 +89,7 @@ function AllTasksView({
           classic 6px scrollbar appears after async content loads */}
       <div className="flex-1 overflow-y-auto min-w-0 [scrollbar-gutter:stable]">
         <div className="pb-6">
-          <div className="w-full max-w-[600px] mx-auto min-w-0">
+          <div className="w-full max-w-page mx-auto px-6 min-w-0">
             <TaskListHeader
               title="Tasks"
               groupBy={viewState.groupBy}

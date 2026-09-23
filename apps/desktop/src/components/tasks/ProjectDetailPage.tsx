@@ -137,7 +137,7 @@ export function ProjectDetailPage({
       <PageDragRegion />
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0">
         <div className="pb-6 min-w-0">
-          <div className="w-full max-w-[600px] mx-auto min-w-0">
+          <div className="w-full max-w-page mx-auto px-6 min-w-0">
             <TaskListHeader
               title={project.name}
               breadcrumb={breadcrumb}

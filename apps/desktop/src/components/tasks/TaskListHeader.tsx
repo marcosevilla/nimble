@@ -1,5 +1,6 @@
 import { ArrowUpDown, ChevronLeft, ListFilter } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PAGE_CRUMB, PAGE_CRUMB_ROW, PAGE_TITLE, PAGE_TITLE_ROW } from '@/components/shared/PageHeader'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -93,28 +94,29 @@ export function TaskListHeader({
   }
 
   return (
-    <div className="flex flex-col" data-testid="task-list-header">
-      {/* Top row — breadcrumb (left) + sort/filter controls (right) */}
-      <div className="flex items-center justify-between gap-2 min-h-6">
-        {hasBreadcrumb ? (
-          <div className="flex min-w-0 items-center gap-1">
-            <ChevronLeft className="size-3 shrink-0 text-muted-foreground/70" />
-            {breadcrumb!.map((seg, i) => (
-              <span key={i} className="flex min-w-0 items-center gap-1">
-                {i > 0 && <span className="text-meta text-muted-foreground/70">/</span>}
-                <button
-                  onClick={seg.onClick}
-                  className="truncate text-meta text-muted-foreground/70 transition-colors hover:text-foreground"
-                >
-                  {seg.label}
-                </button>
-              </span>
-            ))}
-          </div>
-        ) : (
-          <div />
-        )}
-
+    <div className="flex flex-col pb-6" data-testid="task-list-header">
+      {/* Breadcrumb row — only inside a project */}
+      {hasBreadcrumb && (
+        <div className={PAGE_CRUMB_ROW}>
+          <ChevronLeft className="size-3 shrink-0 text-muted-foreground/70" />
+          {breadcrumb!.map((seg, i) => (
+            <span key={i} className="flex min-w-0 items-center gap-1">
+              {i > 0 && <span className="text-meta text-muted-foreground/70">/</span>}
+              <button onClick={seg.onClick} className={PAGE_CRUMB}>
+                {seg.label}
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {/* Title row — title left, sort/filter right (the shared PageHeader
+          recipe). No drag region here — this header scrolls with the list,
+          so a `data-tauri-drag-region` on it would go undraggable the
+          moment the page scrolls. The window's drag surface is
+          `PageDragRegion`, rendered outside the scroll container by each
+          page shell. */}
+      <div className={PAGE_TITLE_ROW}>
+        <h1 className={cn(PAGE_TITLE, 'flex-1')}>{title}</h1>
         <div className="flex shrink-0 items-center gap-1">
           <DropdownMenu>
             <DropdownMenuTrigger className={triggerClass}>
@@ -198,15 +200,6 @@ export function TaskListHeader({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      </div>
-
-      {/* Second row — display title. No drag region here — this header
-          scrolls with the list, so a `data-tauri-drag-region` on it would
-          go undraggable the moment the page scrolls. The window's drag
-          surface is `PageDragRegion`, rendered outside the scroll
-          container by each page shell. */}
-      <div className="pt-1 pb-4">
-        <h1 className="pl-4 text-display truncate">{title}</h1>
       </div>
     </div>
   )
