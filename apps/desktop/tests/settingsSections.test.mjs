@@ -1,28 +1,80 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { SETTINGS_SECTIONS, visibleSections, activeSectionId } from '../src/lib/settingsSections.ts'
+import {
+  SETTINGS_SECTIONS,
+  SETTINGS_PAGES,
+  DEFAULT_SETTINGS_PAGE,
+  visibleSections,
+  visiblePages,
+  sectionsOnPage,
+  resolveSettingsPage,
+  settingsTarget,
+  activeSectionId,
+} from '../src/lib/settingsSections.ts'
 import { settingsFailure, settingsMessage } from '../src/lib/settingsMessage.ts'
 
 const ALL = { backup: true, reminders: true, googleCalendar: true }
 const NONE = { backup: false, reminders: false, googleCalendar: false }
 
-test('section ids are unique and labels are sentence case', () => {
+const ACRONYMS = ['API']
+function assertSentenceCase(label) {
+  assert.equal(label[0], label[0].toUpperCase(), label)
+  // "API keys" → "Api keys" before checking that nothing after the first letter is capitalised
+  const rest = ACRONYMS.reduce((s, a) => s.replaceAll(a, a[0] + a.slice(1).toLowerCase()), label).slice(1)
+  assert.equal(rest, rest.toLowerCase(), label)
+}
+
+test('section and page ids are unique; labels are sentence case', () => {
   const ids = SETTINGS_SECTIONS.map((s) => s.id)
   assert.equal(new Set(ids).size, ids.length)
-  for (const s of SETTINGS_SECTIONS) {
-    assert.equal(s.label[0], s.label[0].toUpperCase(), s.label)
-    assert.equal(s.label.slice(1), s.label.slice(1).toLowerCase(), s.label)
+  const pageIds = SETTINGS_PAGES.map((p) => p.id)
+  assert.equal(new Set(pageIds).size, pageIds.length)
+  for (const s of SETTINGS_SECTIONS) assertSentenceCase(s.label)
+  for (const p of SETTINGS_PAGES) assertSentenceCase(p.label)
+})
+
+test('five pages in the decided order, each section on the decided page', () => {
+  assert.deepEqual(
+    SETTINGS_PAGES.map((p) => [p.id, p.label]),
+    [
+      ['general', 'General'],
+      ['brief', 'Today & brief'],
+      ['tasks', 'Tasks & capture'],
+      ['connections', 'Connections'],
+      ['data', 'Data'],
+    ],
+  )
+  const byPage = Object.fromEntries(SETTINGS_PAGES.map((p) => [p.id, sectionsOnPage(SETTINGS_SECTIONS, p.id).map((s) => s.id)]))
+  assert.deepEqual(byPage, {
+    general: ['appearance', 'demo', 'about'],
+    brief: ['today-brief'],
+    tasks: ['capture-routes', 'labels', 'reminders'],
+    connections: ['integrations', 'obsidian', 'todoist-sync', 'calendars', 'google-calendar'],
+    data: ['sync', 'backups', 'maintenance'],
+  })
+  assert.equal(DEFAULT_SETTINGS_PAGE, 'general')
+  assert.equal(SETTINGS_SECTIONS.find((s) => s.id === 'integrations').label, 'API keys')
+})
+
+test('sections are grouped in page order, so render order matches the rail', () => {
+  const order = SETTINGS_PAGES.map((p) => p.id)
+  const pageIndex = SETTINGS_SECTIONS.map((s) => order.indexOf(s.page))
+  assert.ok(pageIndex.every((i) => i >= 0), 'every section names a known page')
+  assert.deepEqual(pageIndex, [...pageIndex].sort((a, b) => a - b))
+})
+
+test('no page opens on a standalone section (it would draw a stray top rule)', () => {
+  for (const p of SETTINGS_PAGES) {
+    const first = sectionsOnPage(SETTINGS_SECTIONS, p.id)[0]
+    assert.ok(first && !first.standalone, p.id)
   }
 })
 
-test('obsidian is the third section, maintenance is last, retired sections are gone', () => {
+test('retired sections stay gone', () => {
   const ids = SETTINGS_SECTIONS.map((s) => s.id)
-  assert.equal(ids[2], 'obsidian')
-  assert.equal(ids[ids.length - 1], 'maintenance')
   for (const gone of ['vault', 'status-colors', 'import-todoist', 'docs-format', 'tasks-format', 'focus']) {
     assert.ok(!ids.includes(gone), `${gone} should not be a top-level section`)
   }
-  assert.ok(ids.includes('backups'), 'backups is in the nav')
 })
 
 test('visibleSections drops capability-gated sections and keeps order', () => {
@@ -31,6 +83,27 @@ test('visibleSections drops capability-gated sections and keeps order', () => {
   const none = visibleSections(NONE).map((s) => s.id)
   for (const gated of ['backups', 'reminders', 'google-calendar']) assert.ok(!none.includes(gated), gated)
   assert.equal(none.length, all.length - 3)
+})
+
+test('visiblePages hides a page with no renderable section (web build, empty brief slot)', () => {
+  const web = visibleSections(NONE).filter((s) => s.id !== 'today-brief')
+  assert.deepEqual(visiblePages(web).map((p) => p.id), ['general', 'tasks', 'connections', 'data'])
+  assert.deepEqual(visiblePages(visibleSections(ALL)).map((p) => p.id), SETTINGS_PAGES.map((p) => p.id))
+  assert.deepEqual(visiblePages([]), [])
+})
+
+test('resolveSettingsPage keeps a visible page and falls back to the first visible one', () => {
+  const pages = visiblePages(visibleSections(ALL).filter((s) => s.id !== 'today-brief'))
+  assert.equal(resolveSettingsPage('data', pages), 'data')
+  assert.equal(resolveSettingsPage('brief', pages), 'general')
+  assert.equal(resolveSettingsPage('general', []), null)
+})
+
+test('settingsTarget maps a section to its page; unknown ids open the default page', () => {
+  assert.deepEqual(settingsTarget('todoist-sync'), { page: 'connections', section: 'todoist-sync' })
+  assert.deepEqual(settingsTarget('demo'), { page: 'general', section: 'demo' })
+  assert.deepEqual(settingsTarget('today-brief'), { page: 'brief', section: 'today-brief' })
+  assert.deepEqual(settingsTarget('no-such-section'), { page: 'general', section: null })
 })
 
 test('activeSectionId picks the last section whose top is at or above the active line', () => {
