@@ -570,16 +570,17 @@ async fn resolve_item_location_tx(
 
 /// Rows a pull applied inside its transaction, for post-commit sync_log and
 /// focus reconciliation.
-struct PulledRows {
-    logged: Vec<(String, &'static str)>,
-    label_sync_ops: Vec<(String, String, &'static str)>,
-    project_sync_ops: Vec<(String, &'static str)>,
-    section_sync_ops: Vec<(String, &'static str, Option<String>)>,
-    effects: crate::db::task_tx::TaskEffects,
+#[derive(Default)]
+pub(crate) struct PulledRows {
+    pub(crate) logged: Vec<(String, &'static str)>,
+    pub(crate) label_sync_ops: Vec<(String, String, &'static str)>,
+    pub(crate) project_sync_ops: Vec<(String, &'static str)>,
+    pub(crate) section_sync_ops: Vec<(String, &'static str, Option<String>)>,
+    pub(crate) effects: crate::db::task_tx::TaskEffects,
 }
 
 /// The local half of a pull: SQL only, on the caller's transaction.
-async fn apply_pull_tx(
+pub(crate) async fn apply_pull_tx(
     tx: &mut sqlx::SqliteConnection,
     resp: &client::SyncResponse,
     label_id_by_name: &HashMap<String, String>,
@@ -1177,7 +1178,20 @@ pub async fn apply_pull_with_focus(
         }
     };
     write.commit(&effects).await?;
+    log_pulled_rows(pool, logged, label_sync_ops, project_sync_ops, section_sync_ops).await;
+    Ok(report)
+}
 
+/// The post-commit half of a pull: sync_log for every row the transaction
+/// touched, so Turso propagates them. Fire-and-forget, matching the codebase
+/// pattern. Shared with the one-time reconcile (`reconcile::apply`).
+pub(crate) async fn log_pulled_rows(
+    pool: &SqlitePool,
+    logged: Vec<(String, &'static str)>,
+    label_sync_ops: Vec<(String, String, &'static str)>,
+    project_sync_ops: Vec<(String, &'static str)>,
+    section_sync_ops: Vec<(String, &'static str, Option<String>)>,
+) {
     // 6. after commit: sync_log so Turso propagates (fire-and-forget, matches codebase pattern)
     for (row_id, op) in logged {
         let snapshot = if op == "DELETE" {
@@ -1243,7 +1257,14 @@ pub async fn apply_pull_with_focus(
     // fired — these rows CAME from Todoist, and an observer op would echo
     // them straight back (same echo rule as labels).
     for (project_id, op) in project_sync_ops {
-        crate::db::projects::log_project_sync(pool, &project_id, op).await;
+        if op == "DELETE" {
+            // No row left to snapshot (only the one-time reconcile emits this).
+            crate::db::sync::append_sync_log(pool, "projects", &project_id, op, None, None)
+                .await
+                .ok();
+        } else {
+            crate::db::projects::log_project_sync(pool, &project_id, op).await;
+        }
     }
 
     // 9. after commit: sections sync_log, the same rows `db::sections`
@@ -1272,7 +1293,6 @@ pub async fn apply_pull_with_focus(
             .await
             .ok();
     }
-    Ok(report)
 }
 
 pub async fn run_sync(pool: &SqlitePool) -> crate::Result<SyncReport> {

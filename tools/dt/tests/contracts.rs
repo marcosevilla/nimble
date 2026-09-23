@@ -567,3 +567,24 @@ async fn running_owner_with_unreachable_listener_blocks_direct_writes() {
     assert_eq!(v["refresh"], "app_not_running");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn reconcile_without_a_token_fails_before_any_fetch_or_write() {
+    let root = fixture().await;
+    for args in [&["sync", "reconcile"][..], &["sync", "reconcile", "--apply"][..]] {
+        let (code, out) = run(&root, args);
+        assert_eq!(code, 1, "{out}");
+        assert_eq!(out["ok"], false);
+        assert_eq!(out["error"]["code"], "reconcile_failed");
+        assert!(
+            out["error"]["message"].as_str().unwrap().contains("todoist_api_token"),
+            "{out}"
+        );
+    }
+    let reports = std::fs::read_dir(&root)
+        .unwrap()
+        .filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with("reconcile-"))
+        .count();
+    assert_eq!(reports, 0, "no report without a fetch");
+    std::fs::remove_dir_all(&root).ok();
+}

@@ -111,6 +111,46 @@ pub async fn sync(token: &str, body: &serde_json::Value) -> crate::Result<SyncRe
         .map_err(|e| crate::Error::Api(format!("Todoist sync parse error: {}", e)))
 }
 
+/// One task's remote state, for the one-time reconcile. 404 means deleted
+/// (probed live: completed → `checked: true`, deleted → `is_deleted: true`,
+/// task in an archived project → both false plus its `project_id`).
+pub async fn get_task_status(
+    token: &str,
+    id: &str,
+) -> crate::Result<crate::integrations::todoist::reconcile::RemoteStatus> {
+    use crate::integrations::todoist::reconcile::{classify_task_json, RemoteStatus};
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let client = CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_default()
+    });
+    let mut url = reqwest::Url::parse("https://api.todoist.com/api/v1/tasks/")
+        .map_err(|e| crate::Error::Api(format!("todoist task lookup url: {e}")))?;
+    url.path_segments_mut()
+        .map_err(|_| crate::Error::Api("todoist task lookup url".into()))?
+        .pop_if_empty()
+        .push(id);
+    let resp = client
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| crate::Error::Api(format!("todoist task lookup: {e}")))?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(RemoteStatus::Deleted);
+    }
+    if !resp.status().is_success() {
+        return Err(crate::Error::Api(format!("todoist task lookup HTTP {}", resp.status())));
+    }
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| crate::Error::Api(format!("todoist task lookup parse: {e}")))?;
+    Ok(classify_task_json(&v))
+}
+
 pub const TODOIST_SYNC_URL: &str = "https://api.todoist.com/api/v1/sync";
 
 /// Outcome of one `/sync` command request, classified by what it proves about

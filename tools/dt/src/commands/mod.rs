@@ -589,9 +589,146 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
             )),
         },
         Command::Sync(Sync::Status) => result(db::sync::get_sync_status(pool).await?, vec![]),
+        Command::Sync(Sync::Reconcile { .. }) => Err(CliError::new(
+            "internal",
+            "Reconcile is handled before direct commands.",
+        )),
         Command::Backup(_) | Command::Sync(Sync::Now) => Err(CliError::new(
             "app_required",
             "This operation requires the running Nimble app.",
         )),
     }
+}
+
+fn reconcile_error(e: nimble_core::Error) -> CliError {
+    CliError::new("reconcile_failed", e.to_string())
+}
+
+fn first_titles(out: &mut String, heading: &str, rows: &[(String, String)]) {
+    use std::fmt::Write;
+    if rows.is_empty() {
+        return;
+    }
+    let shown = rows.len().min(10);
+    let _ = writeln!(out, "\n{heading} ({shown} of {}):", rows.len());
+    for (_, title) in rows.iter().take(10) {
+        let _ = writeln!(out, "  - {title}");
+    }
+}
+
+fn reconcile_text(
+    plan: &nimble_core::integrations::todoist::reconcile::ReconcilePlan,
+    applied: Option<&nimble_core::integrations::todoist::reconcile::ApplyOutcome>,
+    report: &std::path::Path,
+) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Todoist reconcile: {}\n",
+        if applied.is_some() { "applied." } else { "dry run, nothing written." }
+    );
+    let converted_tasks: usize = plan.fake_sections_converted.iter().map(|c| c.2).sum();
+    let rows: [(&str, String); 9] = [
+        (
+            "Fake section projects -> real sections",
+            format!("{}  ({converted_tasks} tasks move)", plan.fake_sections_converted.len()),
+        ),
+        ("Fake section projects archived", plan.fake_sections_archived.len().to_string()),
+        (
+            "Duplicate Inbox merged",
+            match &plan.inbox_merge {
+                Some((_, n)) => format!("1  ({n} tasks move)"),
+                None => "0".into(),
+            },
+        ),
+        ("Projects archived", plan.projects_archived.len().to_string()),
+        ("Tasks to complete", plan.to_complete.len().to_string()),
+        ("Tasks to delete", plan.to_delete.len().to_string()),
+        ("Kept (in archived projects)", plan.kept_in_archived_project.len().to_string()),
+        ("Missing tasks to create", plan.missing_to_create.to_string()),
+        ("Status lookups that failed", plan.lookup_errors.len().to_string()),
+    ];
+    for (label, value) in rows {
+        let _ = writeln!(out, "  {label:<40} {value}");
+    }
+    first_titles(&mut out, "Tasks to complete", &plan.to_complete);
+    first_titles(&mut out, "Tasks to delete", &plan.to_delete);
+    first_titles(&mut out, "Kept in archived projects", &plan.kept_in_archived_project);
+    first_titles(&mut out, "Status lookups that failed", &plan.lookup_errors);
+    if let Some(done) = applied {
+        let _ = writeln!(
+            out,
+            "\nFull pull: {} created, {} updated, {} deleted, {} projects added. `nimble` label added to {} tasks.",
+            done.pull.created, done.pull.updated, done.pull.deleted, done.pull.projects_upserted, done.origin_labeled
+        );
+    }
+    let _ = writeln!(out, "\nReport: {}", report.display());
+    if applied.is_none() {
+        let _ = writeln!(
+            out,
+            "To write these changes: dt sync reconcile --apply (backs up through the running Nimble app first)."
+        );
+    }
+    out
+}
+
+/// `dt sync reconcile [--apply]`. Returns the JSON data and the human text.
+pub async fn reconcile(
+    pool: &SqlitePool,
+    profile: &nimble_core::agent_protocol::AgentProfile,
+    apply: bool,
+    show_progress: bool,
+) -> Result<(Value, String), CliError> {
+    use nimble_core::integrations::todoist::reconcile as rc;
+    if apply {
+        // Fail before any network work if the apply could never run.
+        rc::preflight_apply(pool).await.map_err(reconcile_error)?;
+    }
+    let rc::Prepared { full, plan } = rc::prepare(pool, |done, total| {
+        if show_progress && (done == total || done % 25 == 0) {
+            eprintln!("Checked {done} of {total} tasks in Todoist");
+        }
+    })
+    .await
+    .map_err(reconcile_error)?;
+    let dir = profile
+        .database
+        .parent()
+        .ok_or_else(|| CliError::new("unavailable", "Cannot resolve the profile directory."))?;
+    let report = rc::report_path(dir, chrono::Local::now().naive_local());
+    rc::write_report(&report, if apply { "apply_planned" } else { "dry_run" }, &plan, None)
+        .map_err(reconcile_error)?;
+
+    let mut applied = None;
+    if apply {
+        rc::require_complete(&plan).map_err(reconcile_error)?;
+        // Same code path as `dt backup now`; no backup, no apply.
+        crate::ipc::request(profile, nimble_core::agent_protocol::AgentOperation::BackupNow)
+            .await
+            .map_err(|e| {
+                CliError::new(e.code, format!("Backup failed, so nothing was applied. {}", e.message))
+            })?;
+        rc::preflight_apply(pool).await.map_err(reconcile_error)?;
+        let outcome = rc::apply(pool, &full, &plan).await.map_err(reconcile_error)?;
+        rc::write_report(&report, "applied", &plan, Some(&outcome)).map_err(reconcile_error)?;
+        // Refresh the open app; best-effort, the data is already committed.
+        let _ = crate::ipc::request(
+            profile,
+            nimble_core::agent_protocol::AgentOperation::Invalidate {
+                domains: vec![Domain::Tasks, Domain::Projects, Domain::Sections, Domain::Labels],
+                ids: vec![],
+            },
+        )
+        .await;
+        applied = Some(outcome);
+    }
+    let text = reconcile_text(&plan, applied.as_ref(), &report);
+    let data = json!({
+        "mode": if apply { "applied" } else { "dry_run" },
+        "report": report.display().to_string(),
+        "plan": plan,
+        "applied": applied,
+    });
+    Ok((data, text))
 }

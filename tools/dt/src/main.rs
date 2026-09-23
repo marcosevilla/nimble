@@ -32,9 +32,11 @@ async fn main() {
         }
     };
     match run(cli).await {
-        Ok(value) => {
+        Ok((value, text)) => {
             if json_mode {
                 println!("{value}")
+            } else if let Some(text) = text {
+                print!("{text}");
             } else {
                 println!("{}", serde_json::to_string_pretty(&value).unwrap());
             }
@@ -49,12 +51,19 @@ async fn main() {
         }
     }
 }
-async fn run(cli: args::Cli) -> Result<serde_json::Value, output::CliError> {
+/// The output envelope, plus human-readable text for commands that have one.
+async fn run(cli: args::Cli) -> Result<(serde_json::Value, Option<String>), output::CliError> {
     let open = profile::open(cli.profile.as_deref()).await?;
+    if let args::Command::Sync(args::Sync::Reconcile { apply }) = &cli.command {
+        let outcome = commands::reconcile(&open.pool, &open.profile, *apply, !cli.json).await;
+        open.pool.close().await;
+        let (data, text) = outcome?;
+        return Ok((output::success(data, "not_required"), Some(text)));
+    }
     if let Some(operation) = commands::app_operation(&cli.command) {
         let data = ipc::request(&open.profile, operation).await?;
         open.pool.close().await;
-        return Ok(output::success(data, "not_required"));
+        return Ok((output::success(data, "not_required"), None));
     }
     // App-handled task writes: route through the running app's FocusService
     // with one retry identity. Only a definitely-absent app permits the direct
@@ -73,7 +82,7 @@ async fn run(cli: args::Cli) -> Result<serde_json::Value, output::CliError> {
             Ok(data) => {
                 let data = commands::native_output(&open.pool, &write, data).await?;
                 open.pool.close().await;
-                return Ok(output::success(data, "acknowledged"));
+                return Ok((output::success(data, "acknowledged"), None));
             }
             // The app holds this profile (process/profile lock) but its
             // listener is unreachable: it may be timing live, so writing
@@ -112,5 +121,5 @@ async fn run(cli: args::Cli) -> Result<serde_json::Value, output::CliError> {
     let result = commands::execute(&open.pool, cli.command).await?;
     let refresh = ipc::notify(&open.profile, &result).await;
     open.pool.close().await;
-    Ok(output::success(result.data, refresh))
+    Ok((output::success(result.data, refresh), None))
 }
