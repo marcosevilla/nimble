@@ -37,8 +37,9 @@ export function RightSidebar() {
   const openTab = useLayoutStore((s) => s.openRightTab)
 
   // Today's habit count on the Habits tab, so it's visible from Calendar
-  // (re-score goals N-P1-1). The tab panel loads habits too; the store
-  // gates overlapping loads.
+  // (re-score goals N-P1-1). The tab panel loads habits too; the store's
+  // load gate only ever applies the latest reload, so the duplicate call
+  // is safe.
   const habits = useGoalsStore((s) => s.habits)
   const loadHabits = useGoalsStore((s) => s.loadHabits)
   useEffect(() => { loadHabits() }, [loadHabits])
@@ -141,8 +142,9 @@ export function RightSidebar() {
                     <Icon icon={TAB_META[id].icon} />
                     <span className={cn(id === tab ? 'inline' : 'sr-only')}>{TAB_META[id].label}</span>
                     {id === 'habits' && habitCount.total > 0 && (
-                      <span className="text-label tabular-nums text-muted-foreground" aria-label={`${habitCount.done} of ${habitCount.total} done today`}>
-                        {habitCount.done}/{habitCount.total}
+                      <span className="text-label tabular-nums text-muted-foreground">
+                        <span aria-hidden="true">{habitCount.done}/{habitCount.total}</span>
+                        <span className="sr-only">{habitCount.done} of {habitCount.total} done today</span>
                       </span>
                     )}
                   </TabsTrigger>

@@ -46,15 +46,18 @@ export function toggleFocusQueue(): void {
 /**
  * ⇧H: show today's habits in the right column, or hide the column if the
  * Habits tab is already showing. Where the column isn't on screen it is
- * brought back first: Settings / Session go to Today, and an open detail
- * sidebar closes (as Escape would).
+ * brought back first: Settings / Session switch to Today — syncing the
+ * detail store to that switch (as Dashboard.tsx's own page-change effect
+ * does) so a sidebar-mode detail saved for Today is seen and closed below
+ * instead of rendering over the tab on the next page-change effect — and
+ * an open detail sidebar closes (as Escape would).
  */
 export function toggleHabits(): void {
   const layout = useLayoutStore.getState()
-  if (pageHidesRightRail(useAppStore.getState().currentPage)) {
+  const hidden = pageHidesRightRail(useAppStore.getState().currentPage)
+  if (hidden) {
     useAppStore.getState().setCurrentPage('today')
-    layout.openRightTab('habits')
-    return
+    useDetailStore.getState().syncToPage('today')
   }
   const detail = useDetailStore.getState()
   if (detail.target && detail.mode === 'sidebar') {
@@ -62,7 +65,7 @@ export function toggleHabits(): void {
     layout.openRightTab('habits')
     return
   }
-  if (layout.rightTab === 'habits' && !layout.rightCollapsed) {
+  if (!hidden && layout.rightTab === 'habits' && !layout.rightCollapsed) {
     layout.setRightCollapsed(true)
     return
   }
