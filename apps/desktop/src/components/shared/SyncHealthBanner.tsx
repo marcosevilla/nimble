@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useDataProvider } from '@/services/provider-context'
-import { useAppStore } from '@/stores/appStore'
+import { openSettings } from '@/stores/settingsNavStore'
 import { syncHealth, type SyncHealthInput } from '@/lib/syncHealth'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -40,16 +40,7 @@ export function SyncHealthBanner() {
 
   const isError = health === 'error'
 
-  const openSettings = () => {
-    useAppStore.getState().setCurrentPage('settings')
-    // Settings mounts on the next render; wait two frames so the section
-    // exists before scrolling to it (no client router to key off of here).
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        document.getElementById('todoist-sync')?.scrollIntoView({ block: 'start' })
-      })
-    })
-  }
+  const openTodoistSettings = () => openSettings('todoist-sync')
 
   const syncNow = async () => {
     setSyncing(true)
@@ -77,7 +68,7 @@ export function SyncHealthBanner() {
           : "Todoist hasn't synced in over an hour."}
       </span>
       {isError ? (
-        <Button variant="secondary" size="sm" onClick={openSettings}>
+        <Button variant="secondary" size="sm" onClick={openTodoistSettings}>
           Open settings
         </Button>
       ) : (
