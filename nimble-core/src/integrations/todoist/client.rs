@@ -50,6 +50,8 @@ pub struct TodoistProject {
     pub id: String,
     pub name: String,
     #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
     pub is_deleted: Option<bool>,
     #[serde(default)]
     pub is_archived: Option<bool>,

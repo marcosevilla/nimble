@@ -70,14 +70,20 @@ pub fn item_to_snapshot(item: &TodoistItem) -> TaskSnapshot {
             .and_then(parse_due_time),
         duration_minutes: item.duration.as_ref().and_then(duration_to_minutes),
         priority: item.priority.unwrap_or(1),
-        project_external_id: item
-            .section_id
-            .as_ref()
-            .map(|s| format!("section:{s}"))
-            .or_else(|| item.project_id.clone()),
+        project_external_id: project_ref_for_task(item.project_id.clone(), item.section_id.clone()),
         parent_external_id: item.parent_id.clone(),
         checked: item.checked.unwrap_or(false),
         labels,
+    }
+}
+
+/// The Todoist-side location key for a task: "section:{id}" when the task sits
+/// in a synced section, else the project's external id. Kept identical to the
+/// pre-v22 snapshot format so stored `synced_snapshot`s still compare equal.
+pub fn project_ref_for_task(project_ext: Option<String>, section_ext: Option<String>) -> Option<String> {
+    match section_ext {
+        Some(s) => Some(format!("section:{s}")),
+        None => project_ext,
     }
 }
 

@@ -488,12 +488,93 @@ async fn find_task_by_external(
     .await
 }
 
+/// Resolves a Todoist-side location key to a local `(project_id, section_id)`.
+/// `"section:{id}"` → the synced section's parent project and the section
+/// itself; a plain id → the synced project with no section. `None` when the
+/// referenced row isn't known locally.
+pub(crate) async fn resolve_remote_ref_tx(
+    tx: &mut sqlx::SqliteConnection,
+    ext: &str,
+) -> crate::Result<Option<(String, Option<String>)>> {
+    if let Some(section_ext) = ext.strip_prefix("section:") {
+        let row: Option<(String, String)> = sqlx::query_as(
+            "SELECT project_id, id FROM sections WHERE external_source = 'todoist' AND external_id = ?",
+        )
+        .bind(section_ext)
+        .fetch_optional(&mut *tx)
+        .await?;
+        return Ok(row.map(|(p, s)| (p, Some(s))));
+    }
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?",
+    )
+    .bind(ext)
+    .fetch_optional(&mut *tx)
+    .await?;
+    Ok(row.map(|(p,)| (p, None)))
+}
+
+/// The task's current Todoist-side location key (section-aware), in the same
+/// format `item_to_snapshot` produces, so pull merge and push no-op detection
+/// compare like with like.
+pub(crate) async fn local_project_ref_tx(
+    tx: &mut sqlx::SqliteConnection,
+    task: &crate::types::LocalTask,
+) -> crate::Result<Option<String>> {
+    let project_ext: Option<String> = sqlx::query_scalar("SELECT external_id FROM projects WHERE id = ?")
+        .bind(&task.project_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .flatten();
+    let section_ext: Option<String> = match &task.section_id {
+        Some(sid) => sqlx::query_scalar("SELECT external_id FROM sections WHERE id = ?")
+            .bind(sid)
+            .fetch_optional(&mut *tx)
+            .await?
+            .flatten(),
+        None => None,
+    };
+    Ok(mappers::project_ref_for_task(project_ext, section_ext))
+}
+
+/// Where a pulled item should live locally. `resolve_remote_ref_tx` first;
+/// when a `"section:{id}"` ref isn't a known section, fall back to a
+/// pre-v22 flattened pseudo-project carrying that same external id (until the
+/// one-time reconcile converts it), then to the item's own project. `None`
+/// means nothing matched (callers use the inbox).
+async fn resolve_item_location_tx(
+    tx: &mut sqlx::SqliteConnection,
+    ext: &str,
+    item_project_ext: Option<&str>,
+) -> crate::Result<Option<(String, Option<String>)>> {
+    if let Some(found) = resolve_remote_ref_tx(&mut *tx, ext).await? {
+        return Ok(Some(found));
+    }
+    if !ext.starts_with("section:") {
+        return Ok(None);
+    }
+    let legacy: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?",
+    )
+    .bind(ext)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(project_id) = legacy {
+        return Ok(Some((project_id, None)));
+    }
+    match item_project_ext {
+        Some(project_ext) => resolve_remote_ref_tx(&mut *tx, project_ext).await,
+        None => Ok(None),
+    }
+}
+
 /// Rows a pull applied inside its transaction, for post-commit sync_log and
 /// focus reconciliation.
 struct PulledRows {
     logged: Vec<(String, &'static str)>,
     label_sync_ops: Vec<(String, String, &'static str)>,
     project_sync_ops: Vec<(String, &'static str)>,
+    section_sync_ops: Vec<(String, &'static str, Option<String>)>,
     effects: crate::db::task_tx::TaskEffects,
 }
 
@@ -517,12 +598,18 @@ async fn apply_pull_tx(
     // db::projects CRUD that feeds sync_log), so they never reached Turso —
     // measured 2026-08-15 as 34 of 52 projects missing remotely.
     let mut project_sync_ops: Vec<(String, &'static str)> = Vec::new();
+    // (section_id, op, changed_columns) to sync_log AFTER commit, mirroring
+    // what `db::sections::create_section`/`rename_section` emit.
+    let mut section_sync_ops: Vec<(String, &'static str, Option<String>)> = Vec::new();
 
-    // 1. projects
+    // 1. projects. Archived projects are kept and marked (`archived_at`), not
+    // skipped: their tasks still exist remotely and the payload is the only
+    // place the archive/unarchive signal arrives.
     for p in &resp.projects {
-        if p.is_deleted.unwrap_or(false) || p.is_archived.unwrap_or(false) {
+        if p.is_deleted.unwrap_or(false) {
             continue; // keep local project; tasks were reassigned/removed via item deltas
         }
+        let archived = p.is_archived.unwrap_or(false);
         let existing: Option<(String,)> = sqlx::query_as(
             "SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?",
         )
@@ -531,9 +618,20 @@ async fn apply_pull_tx(
         .await?;
         match existing {
             Some((local_id,)) => {
-                let res = sqlx::query("UPDATE projects SET name = ? WHERE id = ? AND name != ?")
-                    .bind(&p.name).bind(&local_id).bind(&p.name)
-                    .execute(&mut *tx).await?;
+                // `(archived_at IS NULL) = ?` is true exactly when the stored
+                // archive state disagrees with the payload's.
+                let res = sqlx::query(
+                    "UPDATE projects SET name = ?,
+                        archived_at = CASE WHEN ? THEN COALESCE(archived_at, datetime('now','localtime')) ELSE NULL END
+                     WHERE id = ? AND (name != ? OR (archived_at IS NULL) = ?)",
+                )
+                .bind(&p.name)
+                .bind(archived)
+                .bind(&local_id)
+                .bind(&p.name)
+                .bind(archived)
+                .execute(&mut *tx)
+                .await?;
                 if res.rows_affected() > 0 {
                     project_sync_ops.push((local_id, "UPDATE"));
                 } else {
@@ -566,41 +664,159 @@ async fn apply_pull_tx(
                 let max: (i64,) = sqlx::query_as("SELECT COALESCE(MAX(position), 0) + 1 FROM projects")
                     .fetch_one(&mut *tx).await?;
                 let new_id = uuid::Uuid::new_v4().to_string();
-                sqlx::query("INSERT INTO projects (id, name, color, position, external_id, external_source) VALUES (?, ?, '#8b8b8b', ?, ?, 'todoist')")
-                    .bind(&new_id)
-                    .bind(&p.name)
-                    .bind(max.0)
-                    .bind(&p.id)
-                    .execute(&mut *tx).await?;
+                sqlx::query(
+                    "INSERT INTO projects (id, name, color, position, external_id, external_source, archived_at)
+                     VALUES (?, ?, '#8b8b8b', ?, ?, 'todoist', CASE WHEN ? THEN datetime('now','localtime') ELSE NULL END)",
+                )
+                .bind(&new_id)
+                .bind(&p.name)
+                .bind(max.0)
+                .bind(&p.id)
+                .bind(archived)
+                .execute(&mut *tx)
+                .await?;
                 project_sync_ops.push((new_id, "INSERT"));
                 report.projects_upserted += 1;
             }
         }
     }
 
-    // 2. sections -> pseudo-projects "Parent / Section"
+    // 1b. project nesting, as a second pass so a child listed before its
+    // parent still links. The payload is authoritative for every project it
+    // contains: a null (or locally unknown) parent makes the project top-level.
+    for p in &resp.projects {
+        if p.is_deleted.unwrap_or(false) {
+            continue;
+        }
+        let local: Option<(String, Option<String>)> = sqlx::query_as(
+            "SELECT id, parent_id FROM projects WHERE external_source = 'todoist' AND external_id = ?",
+        )
+        .bind(&p.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((local_id, current_parent)) = local else { continue };
+        let target_parent: Option<String> = match &p.parent_id {
+            Some(parent_ext) => sqlx::query_scalar(
+                "SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?",
+            )
+            .bind(parent_ext)
+            .fetch_optional(&mut *tx)
+            .await?,
+            None => None,
+        };
+        if target_parent == current_parent || target_parent.as_deref() == Some(local_id.as_str()) {
+            continue;
+        }
+        sqlx::query("UPDATE projects SET parent_id = ? WHERE id = ?")
+            .bind(&target_parent)
+            .bind(&local_id)
+            .execute(&mut *tx)
+            .await?;
+        // A row already queued (e.g. just INSERTed) is snapshotted after
+        // commit, so its one sync_log entry already carries the parent.
+        if !project_sync_ops.iter().any(|(id, _)| id == &local_id) {
+            project_sync_ops.push((local_id, "UPDATE"));
+        }
+    }
+
+    // 2. sections -> real `sections` rows under their parent project, keyed
+    // by (external_source='todoist', external_id). Direct SQL, never
+    // `db::sections` CRUD, and no observer: these rows came FROM Todoist.
     for s in &resp.sections {
-        if s.is_deleted.unwrap_or(false) { continue; }
-        let pseudo_ext = format!("section:{}", s.id);
-        let exists: Option<(String,)> = sqlx::query_as(
+        let existing: Option<(String, String, String)> = sqlx::query_as(
+            "SELECT id, project_id, name FROM sections WHERE external_source = 'todoist' AND external_id = ?",
+        )
+        .bind(&s.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if s.is_deleted.unwrap_or(false) {
+            // Only drop an empty section: tasks still pointing at it are
+            // moved/removed by their own item deltas, and `section_id` has no
+            // FK to clean up after us.
+            if let Some((section_id, _, _)) = existing {
+                let in_use: Option<i64> = sqlx::query_scalar(
+                    "SELECT 1 FROM local_tasks WHERE section_id = ? LIMIT 1",
+                )
+                .bind(&section_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+                if in_use.is_none() {
+                    sqlx::query("DELETE FROM sections WHERE id = ?")
+                        .bind(&section_id)
+                        .execute(&mut *tx)
+                        .await?;
+                    section_sync_ops.push((section_id, "DELETE", None));
+                }
+            }
+            continue;
+        }
+        let parent: Option<String> = sqlx::query_scalar(
             "SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?",
-        ).bind(&pseudo_ext).fetch_optional(&mut *tx).await?;
-        if exists.is_none() {
-            let parent_name: Option<(String,)> = sqlx::query_as(
-                "SELECT name FROM projects WHERE external_source = 'todoist' AND external_id = ?",
-            ).bind(&s.project_id).fetch_optional(&mut *tx).await?;
-            let name = match parent_name {
-                Some((p,)) => format!("{p} / {}", s.name),
-                None => s.name.clone(),
-            };
-            let max: (i64,) = sqlx::query_as("SELECT COALESCE(MAX(position), 0) + 1 FROM projects")
-                .fetch_one(&mut *tx).await?;
-            let new_id = uuid::Uuid::new_v4().to_string();
-            sqlx::query("INSERT INTO projects (id, name, color, position, external_id, external_source) VALUES (?, ?, '#8b8b8b', ?, ?, 'todoist')")
-                .bind(&new_id).bind(&name).bind(max.0).bind(&pseudo_ext)
-                .execute(&mut *tx).await?;
-            project_sync_ops.push((new_id, "INSERT"));
-            report.projects_upserted += 1;
+        )
+        .bind(&s.project_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(project_id) = parent else { continue }; // parent unknown locally
+        match existing {
+            Some((section_id, current_project, current_name)) => {
+                let mut changed: Vec<&str> = Vec::new();
+                if current_name != s.name {
+                    changed.push("name");
+                }
+                if current_project != project_id {
+                    changed.push("project_id");
+                }
+                if changed.is_empty() {
+                    continue;
+                }
+                sqlx::query("UPDATE sections SET name = ?, project_id = ? WHERE id = ?")
+                    .bind(&s.name)
+                    .bind(&project_id)
+                    .bind(&section_id)
+                    .execute(&mut *tx)
+                    .await?;
+                if current_project != project_id {
+                    // A section moved between projects carries its tasks: keep
+                    // them in the section's project. Their snapshots still say
+                    // "section:{id}", so the item merge would never move them.
+                    let moved: Vec<String> = sqlx::query_scalar(
+                        "SELECT id FROM local_tasks WHERE section_id = ? AND project_id != ?",
+                    )
+                    .bind(&section_id)
+                    .bind(&project_id)
+                    .fetch_all(&mut *tx)
+                    .await?;
+                    for task_id in moved {
+                        sqlx::query("UPDATE local_tasks SET project_id = ? WHERE id = ?")
+                            .bind(&project_id)
+                            .bind(&task_id)
+                            .execute(&mut *tx)
+                            .await?;
+                        logged.push((task_id, "UPDATE"));
+                    }
+                }
+                section_sync_ops.push((section_id, "UPDATE", Some(serde_json::json!(changed).to_string())));
+            }
+            None => {
+                let position: i64 = sqlx::query_scalar(
+                    "SELECT COALESCE(MAX(position), -1) + 1 FROM sections WHERE project_id = ?",
+                )
+                .bind(&project_id)
+                .fetch_one(&mut *tx)
+                .await?;
+                let new_id = uuid::Uuid::new_v4().to_string();
+                sqlx::query(
+                    "INSERT INTO sections (id, project_id, name, position, external_id, external_source) VALUES (?, ?, ?, ?, ?, 'todoist')",
+                )
+                .bind(&new_id)
+                .bind(&project_id)
+                .bind(&s.name)
+                .bind(position)
+                .bind(&s.id)
+                .execute(&mut *tx)
+                .await?;
+                section_sync_ops.push((new_id, "INSERT", None));
+            }
         }
     }
 
@@ -640,23 +856,23 @@ async fn apply_pull_tx(
         match local {
             None => {
                 if remote.checked { continue; } // don't resurrect completed history
-                let project_local: Option<(String,)> = match &remote.project_external_id {
-                    Some(ext) => sqlx::query_as("SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?")
-                        .bind(ext).fetch_optional(&mut *tx).await?,
+                let location = match &remote.project_external_id {
+                    Some(ext) => resolve_item_location_tx(&mut *tx, ext, item.project_id.as_deref()).await?,
                     None => None,
                 };
-                let project_id = project_local.map(|(id,)| id).unwrap_or_else(|| "inbox".to_string());
+                let (project_id, section_id) = location.unwrap_or_else(|| ("inbox".to_string(), None));
                 let max: (i64,) = sqlx::query_as("SELECT COALESCE(MAX(position), 0) + 1 FROM local_tasks WHERE project_id = ?")
                     .bind(&project_id).fetch_one(&mut *tx).await?;
                 let new_id = uuid::Uuid::new_v4().to_string();
                 sqlx::query(
-                    "INSERT INTO local_tasks (id, content, description, project_id, priority, due_date, due_time, duration_minutes, completed, status, position, external_id, external_source, remote_updated_at, synced_snapshot)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'todo', ?, ?, 'todoist', ?, ?)",
+                    "INSERT INTO local_tasks (id, content, description, project_id, section_id, priority, due_date, due_time, duration_minutes, completed, status, position, external_id, external_source, remote_updated_at, synced_snapshot)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'todo', ?, ?, 'todoist', ?, ?)",
                 )
                 .bind(&new_id)
                 .bind(&remote.content)
                 .bind(if remote.description.is_empty() { None } else { Some(remote.description.clone()) })
                 .bind(&project_id)
+                .bind(&section_id)
                 .bind(remote.priority)
                 .bind(&remote.due_date)
                 .bind(&remote.due_time)
@@ -689,13 +905,7 @@ async fn apply_pull_tx(
                     .as_deref()
                     .and_then(|s| serde_json::from_str(s).ok());
                 if base.as_ref() == Some(&remote) { continue; } // echo
-                let project_ext_of_local: Option<String> = sqlx::query_as::<_, (Option<String>,)>(
-                    "SELECT external_id FROM projects WHERE id = ?",
-                )
-                .bind(&local_task.project_id)
-                .fetch_optional(&mut *tx)
-                .await?
-                .and_then(|(e,)| e);
+                let project_ext_of_local = local_project_ref_tx(&mut *tx, &local_task).await?;
                 let local_label_ids: Vec<String> = sqlx::query_as::<_, (String,)>(
                     "SELECT label_id FROM task_labels WHERE task_id = ?",
                 )
@@ -791,10 +1001,14 @@ async fn apply_pull_tx(
                     }
                 }
                 if let Some(ext) = &plan.project_external_id {
-                    let target: Option<(String,)> = sqlx::query_as("SELECT id FROM projects WHERE external_source = 'todoist' AND external_id = ?")
-                        .bind(ext).fetch_optional(&mut *tx).await?;
-                    if let Some((pid,)) = target {
-                        sqlx::query("UPDATE local_tasks SET project_id = ? WHERE id = ?").bind(&pid).bind(&local_task.id).execute(&mut *tx).await?;
+                    let target = resolve_item_location_tx(&mut *tx, ext, item.project_id.as_deref()).await?;
+                    if let Some((pid, sid)) = target {
+                        sqlx::query("UPDATE local_tasks SET project_id = ?, section_id = ? WHERE id = ?")
+                            .bind(&pid)
+                            .bind(&sid)
+                            .bind(&local_task.id)
+                            .execute(&mut *tx)
+                            .await?;
                     }
                 }
                 // Reparenting isn't part of MergePlan (parent linking is
@@ -897,10 +1111,11 @@ async fn apply_pull_tx(
             effects.changed.push(task);
         }
     }
-    Ok(PulledRows { logged, label_sync_ops, project_sync_ops, effects })
+    Ok(PulledRows { logged, label_sync_ops, project_sync_ops, section_sync_ops, effects })
 }
 
-/// Transactional pull apply: projects -> sections (pseudo-projects) -> items
+/// Transactional pull apply: projects (+ nesting, archive state) -> sections
+/// (real `sections` rows) -> items
 /// (two-pass, so a child that arrives before its parent still links up), then
 /// persists the new sync_token in the SAME transaction as the applied deltas.
 /// All writes here are direct SQL against `local_tasks`/`projects` — never the
@@ -952,7 +1167,7 @@ pub async fn apply_pull_with_focus(
 
     let mut write = crate::db::focus::task_write::TaskWrite::begin(pool, focus).await?;
     let applied = apply_pull_tx(write.conn(), resp, &label_id_by_name, &label_name_by_id, &mut report).await;
-    let PulledRows { logged, label_sync_ops, project_sync_ops, effects } = match applied {
+    let PulledRows { logged, label_sync_ops, project_sync_ops, section_sync_ops, effects } = match applied {
         Ok(rows) => rows,
         Err(e) => {
             // Roll back every row and the sync token together; the focus
@@ -1029,6 +1244,33 @@ pub async fn apply_pull_with_focus(
     // them straight back (same echo rule as labels).
     for (project_id, op) in project_sync_ops {
         crate::db::projects::log_project_sync(pool, &project_id, op).await;
+    }
+
+    // 9. after commit: sections sync_log, the same rows `db::sections`
+    // CRUD emits (full-row snapshot; DELETE carries none). Observer NOT
+    // fired, same echo rule as projects above.
+    for (section_id, op, changed) in section_sync_ops {
+        let snapshot = if op == "DELETE" {
+            None
+        } else {
+            sqlx::query_as::<_, crate::types::Section>(&format!(
+                "SELECT {} FROM sections WHERE id = ?",
+                crate::db::sections::SECTION_COLS
+            ))
+            .bind(&section_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|section| serde_json::to_string(&section).unwrap_or_default())
+        };
+        if op != "DELETE" && snapshot.is_none() {
+            log::warn!("apply_pull: section {section_id} not found for {op} sync_log");
+            continue;
+        }
+        crate::db::sync::append_sync_log(pool, "sections", &section_id, op, changed.as_deref(), snapshot.as_deref())
+            .await
+            .ok();
     }
     Ok(report)
 }
@@ -1673,7 +1915,10 @@ mod pull_tests {
     }
 
     #[tokio::test]
-    async fn section_delta_creates_pseudo_project() {
+    async fn section_delta_creates_real_section_not_pseudo_project() {
+        // Pre-v22 this asserted a fake "Work / Soon" project with external_id
+        // "section:S1". Sections are now real `sections` rows under their
+        // parent project.
         let pool = test_pool().await;
         apply_pull(&pool, &resp(json!({
             "sync_token": "T1",
@@ -1681,8 +1926,232 @@ mod pull_tests {
             "sections": [{"id": "S1", "project_id": "P1", "name": "Soon"}]
         }))).await.unwrap();
         let projects = crate::db::projects::get_projects(&pool).await.unwrap();
-        let pseudo = projects.iter().find(|p| p.external_id.as_deref() == Some("section:S1")).unwrap();
-        assert_eq!(pseudo.name, "Work / Soon");
+        assert!(!projects.iter().any(|p| p.external_id.as_deref() == Some("section:S1")));
+        let work = projects.iter().find(|p| p.external_id.as_deref() == Some("P1")).unwrap();
+        let sections = crate::db::sections::list_sections(&pool, &work.id).await.unwrap();
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].name, "Soon");
+        assert_eq!(sections[0].external_source.as_deref(), Some("todoist"));
+    }
+
+    #[tokio::test]
+    async fn pull_nests_projects_and_stores_sections_as_sections() {
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({
+            "sync_token": "T1",
+            "projects": [
+                {"id": "P", "name": "Personal"},
+                {"id": "C", "name": "Finance", "parent_id": "P"}
+            ],
+            "sections": [{"id": "S", "project_id": "C", "name": "Receivables"}],
+            "items": [{"id": "R1", "content": "Invoice", "project_id": "C", "section_id": "S", "checked": false, "is_deleted": false}]
+        }))).await.unwrap();
+
+        let projects = crate::db::projects::get_projects(&pool).await.unwrap();
+        let p = projects.iter().find(|p| p.external_id.as_deref() == Some("P")).unwrap();
+        let c = projects.iter().find(|p| p.external_id.as_deref() == Some("C")).unwrap();
+        assert_eq!(c.parent_id.as_deref(), Some(p.id.as_str()));
+        assert!(projects.iter().all(|p| !p.external_id.as_deref().unwrap_or("").starts_with("section:")),
+            "no fake section projects");
+
+        let sections = crate::db::sections::list_sections(&pool, &c.id).await.unwrap();
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].external_id.as_deref(), Some("S"));
+
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let t = tasks.iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert_eq!(t.project_id, c.id);
+        assert_eq!(t.section_id.as_deref(), Some(sections[0].id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn pull_renames_and_archives_projects_and_renames_sections() {
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Old"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Lane"}]}))).await.unwrap();
+        apply_pull(&pool, &resp(json!({"sync_token": "T2",
+            "projects": [{"id": "P", "name": "New", "is_archived": true}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Lane 2"}]}))).await.unwrap();
+        let p = crate::db::projects::get_projects(&pool).await.unwrap().into_iter().find(|p| p.external_id.as_deref() == Some("P")).unwrap();
+        assert_eq!(p.name, "New");
+        assert!(p.archived_at.is_some());
+        let s = crate::db::sections::list_sections(&pool, &p.id).await.unwrap();
+        assert_eq!(s[0].name, "Lane 2");
+        // unarchive
+        apply_pull(&pool, &resp(json!({"sync_token": "T3", "projects": [{"id": "P", "name": "New", "is_archived": false}]}))).await.unwrap();
+        let p = crate::db::projects::get_projects(&pool).await.unwrap().into_iter().find(|p| p.external_id.as_deref() == Some("P")).unwrap();
+        assert!(p.archived_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn section_task_local_content_edit_does_not_look_like_a_move() {
+        // Review Focus #1
+        let pool = test_pool().await;
+        let first = json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Lane"}],
+            "items": [{"id": "R1", "content": "A", "project_id": "P", "section_id": "S", "checked": false, "is_deleted": false, "updated_at": "2026-09-01T00:00:00Z"}]});
+        apply_pull(&pool, &resp(first)).await.unwrap();
+        let before = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap().into_iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        // Remote-only content change, same section:
+        apply_pull(&pool, &resp(json!({"sync_token": "T2",
+            "items": [{"id": "R1", "content": "B", "project_id": "P", "section_id": "S", "checked": false, "is_deleted": false, "updated_at": "2026-09-02T00:00:00Z"}]}))).await.unwrap();
+        let after = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap().into_iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert_eq!(after.content, "B");
+        assert_eq!(after.project_id, before.project_id);
+        assert_eq!(after.section_id, before.section_id);
+        let snap: crate::integrations::todoist::mappers::TaskSnapshot = serde_json::from_str(after.synced_snapshot.as_deref().unwrap()).unwrap();
+        assert_eq!(snap.project_external_id.as_deref(), Some("section:S"));
+    }
+
+    #[tokio::test]
+    async fn remote_section_move_updates_project_and_section() {
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}, {"id": "Q", "name": "Home"}],
+            "sections": [{"id": "S", "project_id": "Q", "name": "Chores"}],
+            "items": [{"id": "R1", "content": "A", "project_id": "P", "checked": false, "is_deleted": false, "updated_at": "2026-09-01T00:00:00Z"}]}))).await.unwrap();
+        apply_pull(&pool, &resp(json!({"sync_token": "T2",
+            "items": [{"id": "R1", "content": "A", "project_id": "Q", "section_id": "S", "checked": false, "is_deleted": false, "updated_at": "2026-09-02T00:00:00Z"}]}))).await.unwrap();
+        let projects = crate::db::projects::get_projects(&pool).await.unwrap();
+        let q = projects.iter().find(|p| p.external_id.as_deref() == Some("Q")).unwrap();
+        let t = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap().into_iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert_eq!(t.project_id, q.id);
+        assert!(t.section_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn remote_move_out_of_section_clears_section() {
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Lane"}],
+            "items": [{"id": "R1", "content": "A", "project_id": "P", "section_id": "S", "checked": false, "is_deleted": false, "updated_at": "2026-09-01T00:00:00Z"}]}))).await.unwrap();
+        apply_pull(&pool, &resp(json!({"sync_token": "T2",
+            "items": [{"id": "R1", "content": "A", "project_id": "P", "section_id": null, "checked": false, "is_deleted": false, "updated_at": "2026-09-02T00:00:00Z"}]}))).await.unwrap();
+        let t = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap().into_iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert!(t.section_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn pulled_sections_get_sync_log_rows_without_outbox_echo_and_repull_is_idempotent() {
+        let pool = test_pool().await;
+        crate::integrations::ensure_state(&pool, "todoist").await.unwrap();
+        crate::db::settings::set_setting(&pool, "todoist_api_token", "tok").await.unwrap();
+        let payload = json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}, {"id": "C", "name": "Child", "parent_id": "P"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Lane"}]});
+        apply_pull(&pool, &resp(payload.clone())).await.unwrap();
+        // Identical re-pull (Task 4's reconcile relies on this): no new rows, no new logs.
+        apply_pull(&pool, &resp(payload)).await.unwrap();
+
+        let sections: Vec<(String,)> = sqlx::query_as("SELECT id FROM sections WHERE external_id = 'S'")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(sections.len(), 1);
+        let ops: Vec<(String, String)> = sqlx::query_as(
+            "SELECT operation, snapshot FROM sync_log WHERE table_name = 'sections' AND row_id = ?",
+        ).bind(&sections[0].0).fetch_all(&pool).await.unwrap();
+        assert_eq!(ops.len(), 1, "exactly one sync_log row for the pulled section");
+        assert_eq!(ops[0].0, "INSERT");
+        let v: serde_json::Value = serde_json::from_str(&ops[0].1).unwrap();
+        assert_eq!(v["name"], "Lane");
+        assert_eq!(v["external_id"], "S");
+
+        let child_id: String = sqlx::query_scalar("SELECT id FROM projects WHERE external_id = 'C'")
+            .fetch_one(&pool).await.unwrap();
+        let child_ops: Vec<String> = sqlx::query_scalar(
+            "SELECT operation FROM sync_log WHERE table_name = 'projects' AND row_id = ?",
+        ).bind(&child_id).fetch_all(&pool).await.unwrap();
+        assert_eq!(child_ops, vec!["INSERT".to_string()], "nested insert logs once, carrying parent_id");
+
+        // Rename logs one UPDATE.
+        apply_pull(&pool, &resp(json!({"sync_token": "T2",
+            "sections": [{"id": "S", "project_id": "P", "name": "Lane 2"}]}))).await.unwrap();
+        let ops: Vec<String> = sqlx::query_scalar(
+            "SELECT operation FROM sync_log WHERE table_name = 'sections' AND row_id = ?",
+        ).bind(&sections[0].0).fetch_all(&pool).await.unwrap();
+        assert_eq!(ops, vec!["INSERT".to_string(), "UPDATE".to_string()]);
+
+        assert!(outbox::pending_batch(&pool, 100).await.unwrap().is_empty(),
+            "sections/projects applied from a pull must never enqueue outbox ops");
+    }
+
+    #[tokio::test]
+    async fn deleted_section_is_removed_only_when_empty() {
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Busy"}, {"id": "E", "project_id": "P", "name": "Empty"}],
+            "items": [{"id": "R1", "content": "A", "project_id": "P", "section_id": "S", "checked": false, "is_deleted": false}]}))).await.unwrap();
+        apply_pull(&pool, &resp(json!({"sync_token": "T2",
+            "sections": [{"id": "S", "project_id": "P", "name": "Busy", "is_deleted": true},
+                         {"id": "E", "project_id": "P", "name": "Empty", "is_deleted": true}]}))).await.unwrap();
+        let names: Vec<String> = sqlx::query_scalar("SELECT name FROM sections ORDER BY name")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(names, vec!["Busy".to_string()], "a section still holding tasks is kept");
+        let deletes: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'sections' AND operation = 'DELETE'",
+        ).fetch_one(&pool).await.unwrap();
+        assert_eq!(deletes, 1);
+    }
+
+    #[tokio::test]
+    async fn section_moved_to_another_project_carries_its_tasks() {
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}, {"id": "Q", "name": "Home"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Lane"}],
+            "items": [{"id": "R1", "content": "A", "project_id": "P", "section_id": "S", "checked": false, "is_deleted": false}]}))).await.unwrap();
+        // Todoist moves the whole section; the item's location key stays "section:S".
+        apply_pull(&pool, &resp(json!({"sync_token": "T2",
+            "sections": [{"id": "S", "project_id": "Q", "name": "Lane"}]}))).await.unwrap();
+        let q_id: String = sqlx::query_scalar("SELECT id FROM projects WHERE external_id = 'Q'")
+            .fetch_one(&pool).await.unwrap();
+        let t = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap().into_iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert_eq!(t.project_id, q_id);
+        let section_project: String = sqlx::query_scalar("SELECT project_id FROM sections WHERE external_id = 'S'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(section_project, q_id);
+    }
+
+    #[tokio::test]
+    async fn unknown_section_falls_back_to_legacy_pseudo_project_then_item_project() {
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}]}))).await.unwrap();
+        // A pre-v22 flattened section the reconcile hasn't converted yet.
+        sqlx::query("INSERT INTO projects (id, name, color, position, external_id, external_source) VALUES ('legacy', 'Work / Old', '#8b8b8b', 99, 'section:OLD', 'todoist')")
+            .execute(&pool).await.unwrap();
+        apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [
+            {"id": "R1", "content": "old lane", "project_id": "P", "section_id": "OLD", "checked": false, "is_deleted": false},
+            {"id": "R2", "content": "unseen lane", "project_id": "P", "section_id": "GHOST", "checked": false, "is_deleted": false}
+        ]}))).await.unwrap();
+        let p_id: String = sqlx::query_scalar("SELECT id FROM projects WHERE external_id = 'P'")
+            .fetch_one(&pool).await.unwrap();
+        let tasks = crate::db::tasks::get_local_tasks(&pool, None, None, false).await.unwrap();
+        let r1 = tasks.iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert_eq!(r1.project_id, "legacy");
+        assert!(r1.section_id.is_none());
+        let r2 = tasks.iter().find(|t| t.external_id.as_deref() == Some("R2")).unwrap();
+        assert_eq!(r2.project_id, p_id, "unknown section lands in the item's project, not the inbox");
+        assert!(r2.section_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn resolve_remote_ref_tx_maps_sections_and_projects() {
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Lane"}]}))).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        let (pid, sid) = resolve_remote_ref_tx(&mut conn, "section:S").await.unwrap().unwrap();
+        let (pid2, sid2) = resolve_remote_ref_tx(&mut conn, "P").await.unwrap().unwrap();
+        assert_eq!(pid, pid2);
+        assert!(sid.is_some());
+        assert!(sid2.is_none());
+        assert!(resolve_remote_ref_tx(&mut conn, "section:NOPE").await.unwrap().is_none());
+        assert!(resolve_remote_ref_tx(&mut conn, "NOPE").await.unwrap().is_none());
     }
 
     #[tokio::test]

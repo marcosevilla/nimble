@@ -5,7 +5,7 @@ use crate::db::sync;
 use crate::db::tasks::SELECT_COLS;
 use crate::types::{LocalTask, Section};
 
-const SECTION_COLS: &str = "id, project_id, name, position, external_id, external_source, created_at";
+pub(crate) const SECTION_COLS: &str = "id, project_id, name, position, external_id, external_source, created_at";
 
 pub async fn list_sections(pool: &SqlitePool, project_id: &str) -> crate::Result<Vec<Section>> {
     let rows: Vec<Section> = sqlx::query_as::<_, Section>(&format!(
