@@ -18,6 +18,7 @@ import type {
   FocusSource,
   LocalTask,
   Project,
+  Section,
 } from '@nimble/types'
 import { format, parse, parseISO } from 'date-fns'
 import { timerPresentation, type TimerPresentation } from './focusModel.ts'
@@ -42,6 +43,32 @@ export function dueLabel(task: LocalTask, today: string): string | null {
 
 /** Tasks that live only in Nimble (never pushed to Todoist). */
 export const NIMBLE_ONLY = 'Nimble only'
+
+/**
+ * Where the focused task lives, shown above its title: the project name, or
+ * "Project / Section". A task whose project isn't known shows nothing.
+ */
+export function taskPlaceLabel(
+  task: Pick<LocalTask, 'project_id' | 'section_id'>,
+  projects: Pick<Project, 'id' | 'name'>[],
+  sections: Pick<Section, 'id' | 'project_id' | 'name'>[],
+): string | null {
+  const project = task.project_id ? projects.find((p) => p.id === task.project_id) : undefined
+  if (!project) return null
+  const section = task.section_id
+    ? sections.find((s) => s.id === task.section_id && s.project_id === project.id)
+    : undefined
+  return section ? `${project.name} / ${section.name}` : project.name
+}
+
+/**
+ * A one-line-clamped description overflows when its content box is larger
+ * than the clamped box (taller: more lines; wider: an unbreakable run).
+ * Sub-pixel differences are layout noise, not overflow.
+ */
+export function descriptionOverflows(box: { scrollHeight: number; clientHeight: number; scrollWidth: number; clientWidth: number }): boolean {
+  return box.scrollHeight - box.clientHeight >= 1 || box.scrollWidth - box.clientWidth >= 1
+}
 
 export function sourceLabel(source: FocusSource, projects: Project[]): string {
   if (source.kind === 'today') return 'Today'

@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection, SqlitePool};
 use tokio::sync::Mutex;
@@ -126,10 +126,48 @@ struct UndoEntry {
     next_entry_id: Option<String>,
 }
 
+/// Longest system sleep credited to a running session (Marco's decision,
+/// 2026-09-23): a longer sleep credits exactly this much and pauses there.
+pub const SLEEP_CREDIT_CAP_MS: u64 = 30 * 60_000;
+/// Heartbeats that see a > 40 s gap after a sleep notice wait this long
+/// (sleep-inclusive clock, measured from the first such heartbeat) for the
+/// wake notice before falling back to the gap rule (no credit). The Rust
+/// heartbeat can fire just before `NSWorkspaceDidWakeNotification`. Time
+/// based, not tick based: boundary wakes can run heartbeats ~100 ms apart.
+pub const SLEEP_WAKE_GRACE_MS: u64 = 60_000;
+/// Recovery reason when a sleep outlasted the cap (shown after "Timer paused and saved: ").
+pub const SLEEP_CAP_REASON: &str = "the Mac slept for more than 30 minutes";
+/// A settle delta above this is a suspension gap: pause at the checkpoint.
+const GAP_MS: u64 = 40_000;
+
+/// Set by `sleep_began` while a session is running; only `woke` in the same
+/// live process may credit the sleep. In memory only, so a crash, kill or
+/// relaunch across the sleep can never credit it.
+struct SleepMark {
+    /// Clock sample of the first heartbeat that saw the sleep gap.
+    first_deferral_ms: Option<u64>,
+    /// Clock sample of the latest deferred heartbeat. A later one more than
+    /// `GAP_MS` after it means the Mac slept again (e.g. a DarkWake tick),
+    /// so the grace restarts instead of expiring during that sleep.
+    last_deferral_ms: Option<u64>,
+}
+
 struct Anchor {
     sampled_ms: u64,
     frozen: bool,
     process_generation: u64,
+    sleep: Option<SleepMark>,
+}
+impl Anchor {
+    /// A settle by any path other than the wake notice: a gap means the
+    /// sleep was not observed by a wake, so the mark no longer applies and
+    /// the gap rule decides. Small deltas (between the notice and the actual
+    /// sleep) settle normally and keep the mark.
+    fn settling(&mut self, delta: u64) {
+        if delta > GAP_MS {
+            self.sleep = None;
+        }
+    }
 }
 pub struct FocusService {
     pool: SqlitePool,
@@ -207,6 +245,7 @@ impl FocusService {
                 sampled_ms,
                 frozen: false,
                 process_generation: 0,
+                sleep: None,
             }),
         }
     }
@@ -259,6 +298,7 @@ impl FocusService {
         tx.commit().await?;
         guard.sampled_ms = self.clock.elapsed_ms();
         guard.frozen = false;
+        guard.sleep = None;
         guard.process_generation =
             sqlx::query_scalar::<_, i64>("SELECT process_generation FROM focus_runtime WHERE id=1")
                 .fetch_one(&self.pool)
@@ -301,6 +341,8 @@ impl FocusService {
             ));
         }
         let sampled_ms = self.clock.elapsed_ms();
+        let pending = sampled_ms.saturating_sub(anchor.sampled_ms);
+        anchor.settling(pending);
         let mut tx = match self.pool.begin_with("BEGIN IMMEDIATE").await {
             Ok(tx) => tx,
             Err(e) => {
@@ -422,12 +464,13 @@ impl FocusService {
         }
         let sampled = self.clock.elapsed_ms();
         let delta = sampled.saturating_sub(guard.sampled_ms);
+        guard.settling(delta);
         let stamp = now();
         if let Err(e) = settle_tx(&mut tx, delta, &stamp).await {
             guard.frozen = true;
             return Err(e);
         }
-        if delta > 40_000
+        if delta > GAP_MS
             && before
                 .session
                 .as_ref()
@@ -496,6 +539,7 @@ impl FocusService {
         wall_time: String,
     ) -> crate::Result<FocusSnapshot> {
         let mut guard = self.lock.lock().await;
+        guard.settling(elapsed_ms);
         let result = self
             .checkpoint_inner(&mut guard, elapsed_ms, wall_time, None)
             .await;
@@ -510,10 +554,28 @@ impl FocusService {
     /// task write, checkpoint) — never double-counted with a command that ran
     /// between ticks. A delta over 40 s (sleep without a notice, a stalled
     /// process) pauses at the last durable checkpoint instead of crediting.
+    ///
+    /// After a sleep notice, a gap is the sleep itself: the heartbeat never
+    /// credits it and waits up to `SLEEP_WAKE_GRACE_MS` for the
+    /// wake notice (`woke`), then falls back to the gap rule.
     pub async fn heartbeat(&self) -> crate::Result<FocusSnapshot> {
         let mut guard = self.lock.lock().await;
         let sampled = self.clock.elapsed_ms();
         let delta = sampled.saturating_sub(guard.sampled_ms);
+        if delta > GAP_MS {
+            if let Some(mark) = guard.sleep.as_mut() {
+                if mark.last_deferral_ms.is_some_and(|last| sampled.saturating_sub(last) > GAP_MS) {
+                    mark.first_deferral_ms = None;
+                }
+                mark.last_deferral_ms = Some(sampled);
+                let first = *mark.first_deferral_ms.get_or_insert(sampled);
+                if sampled.saturating_sub(first) < SLEEP_WAKE_GRACE_MS {
+                    let mut conn = self.pool.acquire().await?;
+                    return snapshot_tx(&mut conn).await;
+                }
+            }
+        }
+        guard.settling(delta);
         let result = self
             .checkpoint_inner(&mut guard, delta, now(), Some(sampled))
             .await;
@@ -527,9 +589,15 @@ impl FocusService {
     /// elapsed since the last settle; `None` when nothing live has one. The
     /// owner's heartbeat wakes at min(20 s, this) so a crossing is settled,
     /// persisted and chimed on time instead of up to one heartbeat late.
+    /// While a sleep gap awaits its wake notice the boundary is unknown (the
+    /// wake decides the credit), so this is `None` and the loop keeps its
+    /// regular cadence instead of spinning at the boundary margin.
     pub async fn ms_until_boundary(&self) -> crate::Result<Option<u64>> {
         let guard = self.lock.lock().await;
         let pending = self.clock.elapsed_ms().saturating_sub(guard.sampled_ms);
+        if guard.sleep.is_some() && pending > GAP_MS {
+            return Ok(None);
+        }
         let mut conn = self.pool.acquire().await?;
         let live: Option<String> =
             sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
@@ -648,6 +716,8 @@ impl FocusService {
             return snapshot_tx(&mut conn).await;
         }
         let sampled = self.clock.elapsed_ms();
+        // Quit or a closed last surface ends any pending sleep credit.
+        guard.sleep = None;
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         ensure_process_tx(&mut tx, guard.process_generation).await?;
         // Nothing live: nothing to settle, and no recovery notice for a
@@ -666,6 +736,141 @@ impl FocusService {
         replica::publish_focus_replica_tx(&mut tx).await?;
         let snap = snapshot_tx(&mut tx).await?;
         tx.commit().await?;
+        guard.sampled_ms = sampled;
+        Ok(snap)
+    }
+    /// System sleep notice. Sleep does not pause: a running session is
+    /// settled to a durable checkpoint (the sleep start) and marked, so the
+    /// matching `woke` in this live process can credit the sleep. Nothing
+    /// running (idle, paused, a second sleep): nothing is written.
+    pub async fn sleep_began(&self) -> crate::Result<FocusSnapshot> {
+        let mut guard = self.lock.lock().await;
+        let result = self.sleep_began_inner(&mut guard).await;
+        if result.as_ref().err().is_some_and(is_storage_error) {
+            self.recover_storage_failure(&mut guard).await;
+        }
+        result
+    }
+    async fn sleep_began_inner(&self, guard: &mut Anchor) -> crate::Result<FocusSnapshot> {
+        guard.sleep = None;
+        if guard.frozen {
+            self.recover_storage_failure(guard).await;
+            if guard.frozen {
+                return Err(err("storage", "focus recovery persistence unavailable"));
+            }
+            let mut conn = self.pool.acquire().await?;
+            return snapshot_tx(&mut conn).await;
+        }
+        let sampled = self.clock.elapsed_ms();
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        ensure_process_tx(&mut tx, guard.process_generation).await?;
+        let live: Option<String> =
+            sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if live.is_none() {
+            return snapshot_tx(&mut tx).await;
+        }
+        // The time before the notice follows the normal rules (a stalled
+        // process before the notice is still a gap).
+        if let Err(e) = settle_tx(&mut tx, sampled.saturating_sub(guard.sampled_ms), &now()).await {
+            guard.frozen = true;
+            return Err(e);
+        }
+        let live_after: Option<String> =
+            sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if live_after.is_none() {
+            replica::publish_focus_replica_tx(&mut tx).await?;
+        }
+        let snap = snapshot_tx(&mut tx).await?;
+        if let Err(e) = tx.commit().await {
+            guard.frozen = true;
+            return Err(e.into());
+        }
+        guard.sampled_ms = sampled;
+        if live_after.is_some() {
+            guard.sleep = Some(SleepMark { first_deferral_ms: None, last_deferral_ms: None });
+        }
+        Ok(snap)
+    }
+    /// System wake notice. Credits the sleep since the sleep-start checkpoint
+    /// to a session that is still running, capped at `SLEEP_CREDIT_CAP_MS`.
+    /// Up to the cap it keeps running; past it the session pauses at sleep
+    /// start + cap with `SLEEP_CAP_REASON` and no sound. Without a matching
+    /// sleep notice in this process it changes nothing.
+    pub async fn woke(&self) -> crate::Result<FocusSnapshot> {
+        let mut guard = self.lock.lock().await;
+        let result = self.woke_inner(&mut guard).await;
+        if result.as_ref().err().is_some_and(is_storage_error) {
+            self.recover_storage_failure(&mut guard).await;
+        }
+        result
+    }
+    async fn woke_inner(&self, guard: &mut Anchor) -> crate::Result<FocusSnapshot> {
+        if guard.sleep.take().is_none() || guard.frozen {
+            let mut conn = self.pool.acquire().await?;
+            return snapshot_tx(&mut conn).await;
+        }
+        let sampled = self.clock.elapsed_ms();
+        let slept = sampled.saturating_sub(guard.sampled_ms);
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        ensure_process_tx(&mut tx, guard.process_generation).await?;
+        let (live, sleep_start, sound_before): (Option<String>, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT live_session_id,checkpoint_at,sound_token FROM focus_runtime WHERE id=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if live.is_none() {
+            return snapshot_tx(&mut tx).await;
+        }
+        let capped = slept > SLEEP_CREDIT_CAP_MS;
+        let stamp = if capped {
+            sleep_start
+                .as_deref()
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|start| start.with_timezone(&Utc))
+                .unwrap_or_else(Utc::now)
+                + chrono::Duration::milliseconds(SLEEP_CREDIT_CAP_MS as i64)
+        } else {
+            Utc::now()
+        }
+        .to_rfc3339();
+        if let Err(e) = credit_live_tx(&mut tx, slept.min(SLEEP_CREDIT_CAP_MS), &stamp).await {
+            guard.frozen = true;
+            return Err(e);
+        }
+        let still_live: Option<String> =
+            sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if capped {
+            // Past the cap nothing chimes: not the pause, not a boundary the
+            // credited half hour happened to cross.
+            sqlx::query("UPDATE focus_runtime SET sound_token=? WHERE id=1")
+                .bind(&sound_before)
+                .execute(&mut *tx)
+                .await?;
+            if still_live.is_some() {
+                pause_live_tx(&mut tx, "sleep_cap", &stamp).await?;
+                sqlx::query("UPDATE focus_runtime SET recovery_reason=?,engine_revision=engine_revision+1 WHERE id=1")
+                    .bind(SLEEP_CAP_REASON)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        let live_after: Option<String> =
+            sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if live_after.is_none() {
+            replica::publish_focus_replica_tx(&mut tx).await?;
+        }
+        let snap = snapshot_tx(&mut tx).await?;
+        if let Err(e) = tx.commit().await {
+            guard.frozen = true;
+            return Err(e.into());
+        }
         guard.sampled_ms = sampled;
         Ok(snap)
     }
@@ -1061,12 +1266,26 @@ async fn settle_tx(conn: &mut SqliteConnection, delta: u64, stamp: &str) -> crat
         sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
             .fetch_one(&mut *conn)
             .await?;
-    let Some(sid) = live else { return Ok(()) };
-    if delta > 40_000 {
+    if live.is_none() {
+        return Ok(());
+    }
+    if delta > GAP_MS {
         pause_live_tx(conn, "suspension_gap", stamp).await?;
         sqlx::query("UPDATE focus_runtime SET recovery_reason='gap exceeded 40 seconds; paused at checkpoint',engine_revision=engine_revision+1 WHERE id=1").execute(&mut *conn).await?;
         return Ok(());
     }
+    credit_live_tx(conn, delta, stamp).await
+}
+
+/// Credit `delta` to the live segment at `stamp` (timebox chime, Pomodoro
+/// boundary pause), with no gap rule: callers decide whether the time is
+/// creditable (`settle_tx` for ordinary settles, `woke` for a capped sleep).
+async fn credit_live_tx(conn: &mut SqliteConnection, delta: u64, stamp: &str) -> crate::Result<()> {
+    let live: Option<String> =
+        sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+            .fetch_one(&mut *conn)
+            .await?;
+    let Some(sid) = live else { return Ok(()) };
     let row=sqlx::query("SELECT phase,work_ms,break_ms,round_break_ms,round_work_ms,round,config_json,occurrence_id FROM focus_sessions WHERE id=?")
         .bind(&sid).fetch_one(&mut *conn).await?;
     let phase: String = row.get("phase");

@@ -55,6 +55,7 @@ impl Harness {
             .await
     }
 
+    #[allow(dead_code)] // Not every focused test binary checkpoints explicitly.
     pub async fn advance(&self, ms: u64) {
         self.service
             .checkpoint(ms, chrono::Utc::now().to_rfc3339())

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type Ref } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type Ref } from 'react'
 import { Check, ChevronDown, ChevronUp, ClipboardCopy, MoreHorizontal, Pause, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -10,12 +10,13 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { IconButton } from '@/components/shared/IconButton'
 import { PriorityBars } from '@/components/shared/PriorityBars'
-import { Caption, Meta } from '@/components/shared/typography'
+import { Caption, Label, Meta } from '@/components/shared/typography'
 import { FocusTimeboxPicker } from '@/components/focus/FocusTimeboxPicker'
 import { cn } from '@/lib/utils'
 import {
   cardTiming,
   controlBlockedReason,
+  descriptionOverflows,
   dueLabel,
   isLocalOnly,
   NIMBLE_ONLY,
@@ -168,6 +169,52 @@ export function InlineRename({
   )
 }
 
+/**
+ * The task description under the card title, as plain text (React escapes
+ * it; markdown stays literal). Clamped to one line; "See more" appears only
+ * when the clamped text actually overflows and expands it in place. The
+ * expansion is this card view's state only (the parent keys it by task).
+ */
+export function FocusTaskDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const [overflows, setOverflows] = useState(false)
+  const ref = useRef<HTMLParagraphElement>(null)
+  const id = useId()
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || expanded) return
+    const measure = () => setOverflows(descriptionOverflows(el))
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [text, expanded])
+  return (
+    <div className="mt-0.5 min-w-0">
+      <p
+        ref={ref}
+        id={id}
+        data-slot="focus-description"
+        className={cn('text-meta break-words text-muted-foreground', expanded ? 'whitespace-pre-wrap' : 'line-clamp-1')}
+      >
+        {text}
+      </p>
+      {(overflows || expanded) && (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={id}
+          onClick={() => setExpanded((v) => !v)}
+          className="rounded-sm text-meta text-muted-foreground underline-offset-2 transition-colors duration-(--transition-fast) hover:text-foreground hover:underline focus-ring"
+        >
+          {expanded ? 'See less' : 'See more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── The focused-task card ──
 
 export interface FocusTaskCardProps {
@@ -178,7 +225,8 @@ export interface FocusTaskCardProps {
   task: LocalTask | null
   /** Open children, completable inline. */
   subtasks: LocalTask[]
-  projectName?: string
+  /** Where the task lives ("Project" or "Project / Section"), shown above the title. */
+  placeLabel?: string | null
   today: string
   /** Card-only (companion/compact) presentation: the queue is hidden. */
   compact: boolean
@@ -205,7 +253,7 @@ export function FocusTaskCard({
   entry,
   task,
   subtasks,
-  projectName,
+  placeLabel,
   today,
   compact,
   onToggleCompact,
@@ -279,7 +327,8 @@ export function FocusTaskCard({
   const timing = cardTiming(snapshot, entry, displayExtra)
   const running = control.label === 'Pause' || control.label === 'End break'
   const due = dueLabel(task, today)
-  const meta = [projectName, isLocalOnly(task) ? NIMBLE_ONLY : null, due].filter(Boolean).join(' · ')
+  const meta = [isLocalOnly(task) ? NIMBLE_ONLY : null, due].filter(Boolean).join(' · ')
+  const description = task.description?.trim() ?? ''
 
   return (
     <section aria-label="Focused task" className="border-b border-border px-4 pt-4 pb-3">
@@ -294,6 +343,11 @@ export function FocusTaskCard({
           />
         </div>
         <div className="min-w-0 flex-1">
+          {placeLabel && (
+            <Label as="p" data-slot="focus-place" className="block truncate">
+              {placeLabel}
+            </Label>
+          )}
           <div className="flex items-start gap-1.5">
             {renaming && onRename && onRenameCancel ? (
               <InlineRename task={task} className="text-title" onCommit={(c) => onRename(task, c)} onCancel={onRenameCancel} />
@@ -316,6 +370,7 @@ export function FocusTaskCard({
               {toggle}
             </div>
           </div>
+          {description && <FocusTaskDescription key={task.id} text={description} />}
           <div className="mt-1 flex min-w-0 items-center gap-1.5">
             <PriorityBars priority={task.priority} />
             {meta && <Meta className="truncate">{meta}</Meta>}

@@ -84,8 +84,12 @@ It has no fs, shell, clipboard, show/hide/size/position or start-dragging permis
 
 ## Sleep and wake
 
-25. With a running timer, choose Apple menu → Sleep. Wait more than a minute, then wake. The timer is paused with the reason "the Mac went to sleep", and the total covers only time up to the sleep notice. Nothing resumes on wake; Resume is explicit.
-26. **Lid-close or no-notice fallback:** if a sleep happens without the notice being delivered, the next heartbeat after wake pauses at the last checkpoint, with the reason "gap exceeded 40 seconds". Verify with `pmset sleepnow` as well.
+Amended 2026-09-23 (Marco's decision): sleep keeps the timer running, crediting at most 30 minutes.
+
+25. With a running timer, choose Apple menu → Sleep (or `pmset sleepnow`). Wait a few minutes (under 30), then wake. The timer is still running, and the total includes the sleep. No recovery message.
+25a. **Long sleep:** sleep for more than 30 minutes with a running timer, then wake. The timer is paused with the reason "the Mac slept for more than 30 minutes", the total includes exactly 30 minutes of the sleep, and no sound plays. Nothing resumes; Resume is explicit.
+26. **Lid-close or no-notice fallback:** if a sleep happens without the sleep/wake notices being delivered, the heartbeat after wake pauses at the last checkpoint, with the reason "gap exceeded 40 seconds", and credits none of the sleep.
+26a. **Crash across a sleep:** with a running timer, `kill -9` the dev process, sleep the Mac, wake and relaunch. It is paused at the last checkpoint and none of the sleep is credited. A crash while asleep follows the same rule, because the sleep mark lives only in the running process (engine test `crash_during_sleep_credits_nothing_on_relaunch`).
 27. Idle sleep/wake with nothing running shows no recovery message.
 
 ## Sound
