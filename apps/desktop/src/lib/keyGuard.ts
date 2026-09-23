@@ -74,3 +74,30 @@ export function focusViewKey(e: FocusViewKeyEvent): 'close' | 'complete' | 'stop
   if (e.key === 's') return 'stop'
   return null
 }
+
+export interface CalendarKeyEvent {
+  key: string
+  target: KeyTargetLike | null | undefined
+  defaultPrevented?: boolean
+  metaKey?: boolean
+  ctrlKey?: boolean
+  altKey?: boolean
+  shiftKey?: boolean
+}
+
+/**
+ * The calendar rail's day keys: ← previous day, → next day, t today. The
+ * panel only listens while focus is inside it (re-score inbox N-P1-1);
+ * this still leaves text entry, open overlays, chords and keys another
+ * handler already took alone. `T` is Shift+t, so it is matched by key,
+ * before the shift check.
+ */
+export function calendarKey(e: CalendarKeyEvent): 'prev' | 'next' | 'today' | null {
+  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return null
+  if (shouldIgnoreKey(e.target, { allowInteractive: true })) return null
+  if (e.key === 't' || e.key === 'T') return 'today'
+  if (e.shiftKey) return null
+  if (e.key === 'ArrowLeft') return 'prev'
+  if (e.key === 'ArrowRight') return 'next'
+  return null
+}

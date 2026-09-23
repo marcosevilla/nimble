@@ -82,7 +82,7 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Command bar', keys: '/search', label: 'Force search mode' },
   { section: 'Command bar', keys: 'Escape', label: 'Close' },
 
-  // ── Calendar rail (CalendarPanel.tsx, while the rail is hovered) ──
+  // ── Calendar rail (CalendarPanel.tsx, while focus is in the calendar) ──
   { section: 'Calendar', keys: '← / →', label: 'Previous / next day' },
   { section: 'Calendar', keys: 't', label: 'Back to today' },
 

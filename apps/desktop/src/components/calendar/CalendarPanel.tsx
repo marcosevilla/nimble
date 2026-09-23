@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useCalendar } from '@/hooks/useCalendar'
 import { cn } from '@/lib/utils'
+import { calendarKey } from '@/lib/keyGuard'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDataProvider } from '@/services/provider-context'
@@ -439,41 +440,37 @@ export function CalendarPanel() {
     refresh,
   } = useCalendar()
 
-  // Keyboard shortcuts when panel is focused/hovered
-  const panelRef = useRef<HTMLDivElement>(null)
-  const [focused, setFocused] = useState(false)
-
+  // ← → t while focus is inside the calendar (re-score inbox N-P1-1). A
+  // React handler on the panel, not a document listener gated on hover:
+  // typing elsewhere with the pointer over the rail is never touched.
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (!focused) return
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault()
-        goPrev()
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault()
-        goNext()
-      } else if (e.key === 't' || e.key === 'T') {
-        e.preventDefault()
-        goToToday()
-      }
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const action = calendarKey({
+        key: e.key,
+        target: e.target as HTMLElement,
+        defaultPrevented: e.defaultPrevented,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+      })
+      if (!action) return
+      e.preventDefault()
+      if (action === 'prev') goPrev()
+      else if (action === 'next') goNext()
+      else goToToday()
     },
-    [focused, goPrev, goNext, goToToday],
+    [goPrev, goNext, goToToday],
   )
-
-  useEffect(() => {
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [handleKeyDown])
 
   const allDayEvents = events.filter((e) => e.all_day)
   const timedEvents = events.filter((e) => !e.all_day)
 
   return (
     <div
-      ref={panelRef}
-      className="flex flex-col h-full"
-      onMouseEnter={() => setFocused(true)}
-      onMouseLeave={() => setFocused(false)}
+      className="flex flex-col h-full outline-none"
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
     >
       <DayNavigationHeader
         selectedDate={selectedDate}

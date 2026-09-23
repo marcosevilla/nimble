@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { shouldIgnoreKey, INTERACTIVE_SELECTOR, OVERLAY_SELECTOR } from '../src/lib/keyGuard.ts'
+import { shouldIgnoreKey, calendarKey, INTERACTIVE_SELECTOR, OVERLAY_SELECTOR } from '../src/lib/keyGuard.ts'
 
 // Minimal element stand-in: `inside` lists the selectors this element sits
 // inside (closest() hits), `is` the selectors it matches itself.
@@ -62,4 +62,29 @@ test('focus view: claimed, chorded, repeated and field keys are left alone', () 
   assert.equal(focusViewKey({ key: 'Enter', target: body, repeat: true }), null)
   assert.equal(focusViewKey({ key: 'Enter', target: el({ tag: 'INPUT' }) }), null)
   assert.equal(focusViewKey({ key: 'Enter', target: el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR] }) }), null)
+})
+
+test('calendarKey maps ← → t on calendar content', () => {
+  const cell = el({ tag: 'DIV' })
+  assert.equal(calendarKey({ key: 'ArrowLeft', target: cell }), 'prev')
+  assert.equal(calendarKey({ key: 'ArrowRight', target: cell }), 'next')
+  assert.equal(calendarKey({ key: 't', target: cell }), 'today')
+  assert.equal(calendarKey({ key: 'T', target: cell }), 'today')
+  assert.equal(calendarKey({ key: 'x', target: cell }), null)
+})
+
+test('calendarKey also works from the calendar’s own buttons', () => {
+  const prevButton = el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR] })
+  assert.equal(calendarKey({ key: 'ArrowRight', target: prevButton }), 'next')
+})
+
+test('calendarKey leaves text entry, overlays, handled keys and chords alone (inbox N-P1-1)', () => {
+  assert.equal(calendarKey({ key: 't', target: el({ tag: 'INPUT' }) }), null)
+  assert.equal(calendarKey({ key: 'ArrowLeft', target: el({ tag: 'TEXTAREA' }) }), null)
+  assert.equal(calendarKey({ key: 't', target: el({ editable: true }) }), null)
+  assert.equal(calendarKey({ key: 't', target: el({ inside: [OVERLAY_SELECTOR] }) }), null)
+  assert.equal(calendarKey({ key: 't', target: el(), defaultPrevented: true }), null)
+  for (const mod of ['metaKey', 'ctrlKey', 'altKey', 'shiftKey']) {
+    assert.equal(calendarKey({ key: 'ArrowLeft', target: el(), [mod]: true }), null, mod)
+  }
 })
