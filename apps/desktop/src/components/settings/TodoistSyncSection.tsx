@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
+import { formatDistanceToNow } from 'date-fns'
 import { useDataProvider } from '@/services/provider-context'
 import type { TodoistSyncStatus } from '@nimble/types'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Meta } from '@/components/shared/typography'
 import { toast } from 'sonner'
+
+/** SQLite localtime "YYYY-MM-DD HH:MM:SS" → "5 minutes ago". */
+function relativeSyncTime(lastSyncAt: string): string {
+  const d = new Date(lastSyncAt.replace(' ', 'T'))
+  if (Number.isNaN(d.getTime())) return lastSyncAt
+  return formatDistanceToNow(d, { addSuffix: true })
+}
 
 export function TodoistSyncSection() {
   const dp = useDataProvider()
@@ -49,7 +57,7 @@ export function TodoistSyncSection() {
   if (!status) return null
 
   const statusLine = [
-    status.last_sync_at ? `Last synced ${status.last_sync_at}` : 'Not synced yet',
+    status.last_sync_at ? `Last synced ${relativeSyncTime(status.last_sync_at)}` : 'Not synced yet',
     status.pending_ops > 0
       ? `${status.pending_ops} change${status.pending_ops === 1 ? '' : 's'} waiting`
       : null,
@@ -71,16 +79,21 @@ export function TodoistSyncSection() {
       )}
 
       {status.connected && (
-        <div className="flex items-center gap-3">
-          <Meta as="p">{statusLine}</Meta>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={syncing || !status.enabled}
-            onClick={syncNow}
-          >
-            {syncing ? 'Syncing…' : 'Sync now'}
-          </Button>
+        <div className="space-y-1">
+          <div className="flex items-center gap-3">
+            <Meta as="p">{statusLine}</Meta>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={syncing || !status.enabled}
+              onClick={syncNow}
+            >
+              {syncing ? 'Syncing…' : 'Sync now'}
+            </Button>
+          </div>
+          {status.last_error && (
+            <Meta as="p" className="text-muted-foreground">{status.last_error}</Meta>
+          )}
         </div>
       )}
 

@@ -33,6 +33,7 @@ import { pageHidesRightRail, toggleFocusQueue } from '@/lib/rightRail'
 import { FocusView } from '@/components/focus/FocusView'
 import { FocusBanner } from '@/components/focus/FocusBanner'
 import { FocusResumeDialog } from '@/components/focus/FocusResumeDialog'
+import { SyncHealthBanner } from '@/components/shared/SyncHealthBanner'
 import { useDetailStore } from '@/stores/detailStore'
 import { TaskDetailPage } from '@/components/detail/TaskDetailPage'
 import { CaptureDetailPage } from '@/components/detail/CaptureDetailPage'
@@ -287,6 +288,10 @@ export function Dashboard() {
 
       {/* Center: Main content area */}
       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+        {/* Sync health: mounted once for every page, renders nothing while
+            Todoist sync is off or healthy (Task 5). */}
+        <SyncHealthBanner />
+
         {/* Focus banner: coexists with shell navigation while anything is queued */}
         {focusQueued && !focusExpanded && <FocusBanner />}
 
