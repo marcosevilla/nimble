@@ -41,11 +41,17 @@ export function useLocalTasks(opts?: { projectId?: string; dueDate?: string; inc
   const refresh = useCallback(async () => {
     try {
       setError(null)
-      const data = await dp.tasks.list({
-        projectId: opts?.projectId,
-        dueDate: opts?.dueDate,
-        includeCompleted: opts?.includeCompleted ?? true,
-      })
+      const [listed, projects] = await Promise.all([
+        dp.tasks.list({
+          projectId: opts?.projectId,
+          dueDate: opts?.dueDate,
+          includeCompleted: opts?.includeCompleted ?? true,
+        }),
+        opts?.projectId ? Promise.resolve([]) : dp.projects.list().catch(() => []),
+      ])
+      // Tasks in an archived project are hidden everywhere, as in Todoist.
+      const archived = new Set(projects.filter((p) => p.archived_at).map((p) => p.id))
+      const data = archived.size ? listed.filter((t) => !archived.has(t.project_id)) : listed
       rememberDisplayedTasks(data)
       setTasks(data)
     } catch (e) {
