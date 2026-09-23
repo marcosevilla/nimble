@@ -1,5 +1,6 @@
-use chrono::{Local, NaiveDate, NaiveDateTime};
+use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use ical::parser::ical::component::IcalCalendar;
+use ical::property::Property;
 use ical::IcalParser;
 use serde::{Deserialize, Serialize};
 use std::io::BufReader;
@@ -24,6 +25,11 @@ pub fn parse_ical_for_today(ical_content: &str) -> Vec<CalendarEvent> {
 
 /// Parse an iCal feed string into calendar events for a specific date
 pub fn parse_ical_for_date(ical_content: &str, target_date: NaiveDate) -> Vec<CalendarEvent> {
+    parse_ical_for_date_in(ical_content, target_date, &Local)
+}
+
+/// Parse an iCal feed string into calendar events for a specific date in `zone`
+pub fn parse_ical_for_date_in<Z: TimeZone>(ical_content: &str, target_date: NaiveDate, zone: &Z) -> Vec<CalendarEvent> {
     let reader = BufReader::new(ical_content.as_bytes());
     let parser = IcalParser::new(reader);
 
@@ -42,6 +48,8 @@ pub fn parse_ical_for_date(ical_content: &str, target_date: NaiveDate) -> Vec<Ca
             let mut location: Option<String> = None;
             let mut dtstart: Option<String> = None;
             let mut dtend: Option<String> = None;
+            let mut start_tzid: Option<String> = None;
+            let mut end_tzid: Option<String> = None;
 
             for prop in &event.properties {
                 match prop.name.as_str() {
@@ -49,14 +57,23 @@ pub fn parse_ical_for_date(ical_content: &str, target_date: NaiveDate) -> Vec<Ca
                     "SUMMARY" => summary = prop.value.clone().unwrap_or_default(),
                     "DESCRIPTION" => description = prop.value.clone(),
                     "LOCATION" => location = prop.value.clone(),
-                    "DTSTART" => dtstart = prop.value.clone(),
-                    "DTEND" => dtend = prop.value.clone(),
+                    "DTSTART" => {
+                        dtstart = prop.value.clone();
+                        start_tzid = tzid(prop);
+                    }
+                    "DTEND" => {
+                        dtend = prop.value.clone();
+                        end_tzid = tzid(prop);
+                    }
                     _ => {}
                 }
             }
 
             let Some(start_raw) = dtstart else { continue };
-            let end_raw = dtend.unwrap_or_else(|| start_raw.clone());
+            let (end_raw, end_tzid) = match dtend {
+                Some(end) => (end, end_tzid),
+                None => (start_raw.clone(), start_tzid.clone()),
+            };
 
             let all_day = start_raw.len() <= 10 || !start_raw.contains('T');
 
@@ -65,7 +82,7 @@ pub fn parse_ical_for_date(ical_content: &str, target_date: NaiveDate) -> Vec<Ca
                     .map(|d| d == target_date)
                     .unwrap_or(false)
             } else {
-                parse_ical_datetime(&start_raw)
+                parse_ical_datetime(&start_raw, start_tzid.as_deref(), zone)
                     .map(|dt| dt.date() == target_date)
                     .unwrap_or(false)
             };
@@ -77,10 +94,10 @@ pub fn parse_ical_for_date(ical_content: &str, target_date: NaiveDate) -> Vec<Ca
             let (start_time, end_time) = if all_day {
                 (start_raw.clone(), end_raw.clone())
             } else {
-                let start_fmt = parse_ical_datetime(&start_raw)
+                let start_fmt = parse_ical_datetime(&start_raw, start_tzid.as_deref(), zone)
                     .map(|dt| dt.format("%H:%M").to_string())
                     .unwrap_or(start_raw.clone());
-                let end_fmt = parse_ical_datetime(&end_raw)
+                let end_fmt = parse_ical_datetime(&end_raw, end_tzid.as_deref(), zone)
                     .map(|dt| dt.format("%H:%M").to_string())
                     .unwrap_or(end_raw.clone());
                 (start_fmt, end_fmt)
@@ -115,11 +132,32 @@ fn parse_ical_date(s: &str) -> Option<NaiveDate> {
         .ok()
 }
 
-fn parse_ical_datetime(s: &str) -> Option<NaiveDateTime> {
-    let clean = s.trim().trim_end_matches('Z');
-    NaiveDateTime::parse_from_str(clean, "%Y%m%dT%H%M%S")
+fn tzid(prop: &Property) -> Option<String> {
+    prop.params.as_ref()?.iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("TZID"))
+        .and_then(|(_, values)| values.first())
+        .map(|v| v.trim_matches('"').to_string())
+}
+
+/// Parse a DATE-TIME into wall-clock time in `zone`. UTC (`Z`) and known
+/// TZID values are converted; floating times and unknown TZIDs (e.g. Windows
+/// zone names) are taken as already being in `zone`.
+fn parse_ical_datetime<Z: TimeZone>(s: &str, tzid: Option<&str>, zone: &Z) -> Option<NaiveDateTime> {
+    let trimmed = s.trim();
+    let clean = trimmed.trim_end_matches('Z');
+    let naive = NaiveDateTime::parse_from_str(clean, "%Y%m%dT%H%M%S")
         .or_else(|_| NaiveDateTime::parse_from_str(clean, "%Y-%m-%dT%H:%M:%S"))
-        .ok()
+        .ok()?;
+    if trimmed.ends_with('Z') {
+        return Some(Utc.from_utc_datetime(&naive).with_timezone(zone).naive_local());
+    }
+    match tzid.and_then(|id| id.parse::<chrono_tz::Tz>().ok()) {
+        Some(source) => Some(match source.from_local_datetime(&naive).earliest() {
+            Some(dt) => dt.with_timezone(zone).naive_local(),
+            None => naive, // inside a DST gap; keep the written time
+        }),
+        None => Some(naive),
+    }
 }
 
 fn extract_meeting_url(description: &str, location: &str) -> Option<String> {

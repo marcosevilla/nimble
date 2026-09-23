@@ -2,6 +2,12 @@
 
 Updated 2026-09-23 (agentation-1 merged + installed at `0ad4bd5`). Before that 2026-09-22 (Focus Queue: all 12 plan tasks implemented, Task 12 verification recorded; awaiting final whole-branch review + Marco's 30-min human checklist; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
 
+## Calendar feed timezone fix (2026-09-23)
+
+- [x] **Bug:** calendar events showed 7h late (e.g. Covered CA 10:00 PDT displayed as 17:00). Root cause: `parsers/ical.rs` stripped the `Z` from UTC `DTSTART`s (1,405 of Google's feed lines) and treated them as local; `TZID` zones other than local were also read as local, and events were bucketed by their UTC date. Fixed to convert UTC/`TZID` times into the local zone before date-matching and formatting; floating and unknown (Windows) TZIDs stay as written. Tests: `nimble-core/tests/ical_timezones.rs`; verified against the live feed.
+- [ ] Install the fix (`npm run update-app`). Cached rows refresh within 15 min of launch.
+- [ ] Separate, not fixed: the iCal parser doesn't expand `RRULE` recurring events, so only the first occurrence of a series shows.
+
 ## Task cleanup — reconcile with Todoist (2026-09-23, approved)
 
 Proposal: [docs/2026-09-23-task-cleanup-proposal.md](docs/2026-09-23-task-cleanup-proposal.md). Marco approved plan B. Decisions: stale tasks **close** (match Todoist: completed → completed, deleted → deleted, backup first); new Nimble tasks **keep pushing to Todoist** until cutover; the 2 real queued tasks were moved out of the TEST project.
