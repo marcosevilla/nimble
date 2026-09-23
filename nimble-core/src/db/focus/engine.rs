@@ -1089,10 +1089,15 @@ impl FocusService {
             NativeTaskAction::SetStatus {
                 id, status, note, ..
             } => {
-                if let Some(recurrence) = &effects.recurrence {
-                    activity::log_activity(&self.pool,"task_recurred",Some(&id),Some(serde_json::json!({"from":recurrence.before_due,"to":recurrence.after_due}))).await;
-                } else if !effects.changed.is_empty() {
-                    activity::log_activity(&self.pool,"status_changed",Some(&id),Some(serde_json::json!({"old_status":effects.previous_status,"new_status":status,"note":note}))).await;
+                if effects.recurrence.is_some() || !effects.changed.is_empty() {
+                    let content = effects.changed.iter().find(|t| t.id == id).map(|t| t.content.as_str());
+                    activity::log_task_status(&self.pool, &id, activity::StatusActivity {
+                        content,
+                        old_status: effects.previous_status.as_deref(),
+                        new_status: &status,
+                        note: note.as_deref(),
+                        recurrence: effects.recurrence.as_ref().map(|r| (r.before_due.as_str(), r.after_due.as_str())),
+                    }).await;
                 }
             }
             NativeTaskAction::Delete { id } => {

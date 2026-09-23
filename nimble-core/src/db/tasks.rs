@@ -361,14 +361,15 @@ async fn update_task_status_inner(
     let effects = crate::db::task_tx::set_status_tx(&mut tx, id, status, today, crate::db::task_tx::MutationPolicy::User).await?;
     crate::db::focus::engine::reconcile_task_effects_tx(&mut tx, &effects).await?;
     tx.commit().await?;
-    if let Some(recurrence) = effects.recurrence {
-        activity::log_activity(pool, "task_recurred", Some(id),
-            Some(serde_json::json!({"from":recurrence.before_due,"to":recurrence.after_due}))).await;
-    } else if !effects.changed.is_empty() {
-        let mut meta = serde_json::json!({"old_status":effects.previous_status.unwrap_or_default(),"new_status":status});
-        if let Some(note) = note { meta["note"] = serde_json::Value::String(note.to_owned()); }
-        activity::log_activity(pool, "status_changed", Some(id),
-            Some(meta)).await;
+    if effects.recurrence.is_some() || !effects.changed.is_empty() {
+        let content = effects.changed.iter().find(|t| t.id == id).map(|t| t.content.as_str());
+        activity::log_task_status(pool, id, activity::StatusActivity {
+            content,
+            old_status: effects.previous_status.as_deref(),
+            new_status: status,
+            note,
+            recurrence: effects.recurrence.as_ref().map(|r| (r.before_due.as_str(), r.after_due.as_str())),
+        }).await;
     }
     Ok(())
 }
@@ -693,6 +694,41 @@ mod tests {
     use crate::test_util::test_pool;
     use crate::types::{CreateTaskInput, LocalTask, UpdateTaskInput};
     use super::SELECT_COLS;
+
+    async fn last_activity(pool: &sqlx::SqlitePool, id: &str) -> (String, serde_json::Value) {
+        let (a, m): (String, Option<String>) = sqlx::query_as(
+            "SELECT action_type, metadata FROM activity_log WHERE target_id=? ORDER BY rowid DESC LIMIT 1")
+            .bind(id).fetch_one(pool).await.unwrap();
+        (a, serde_json::from_str(&m.unwrap()).unwrap())
+    }
+
+    #[tokio::test]
+    async fn completing_logs_task_completed_with_the_title() {
+        let pool = test_pool().await;
+        let t = super::create_local_task(&pool, CreateTaskInput { content: "Pay taxes".into(), ..Default::default() }).await.unwrap();
+        super::update_task_status(&pool, &t.id, "complete", None).await.unwrap();
+        let (a, m) = last_activity(&pool, &t.id).await;
+        assert_eq!(a, "task_completed");
+        assert_eq!(m["content"], "Pay taxes");
+        super::update_task_status(&pool, &t.id, "todo", None).await.unwrap();
+        assert_eq!(last_activity(&pool, &t.id).await.0, "task_uncompleted");
+    }
+
+    #[tokio::test]
+    async fn completing_a_repeat_logs_task_recurred_with_the_title() {
+        let pool = test_pool().await;
+        let t = super::create_local_task(&pool, CreateTaskInput {
+            content: "Water plants".into(), due_date: Some("2026-09-01".into()),
+            recurrence_rule: Some("every day".into()), ..Default::default()
+        }).await.unwrap();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+        super::update_task_status_at(&pool, &t.id, "complete", None, today).await.unwrap();
+        let (a, m) = last_activity(&pool, &t.id).await;
+        assert_eq!(a, "task_recurred");
+        assert_eq!(m["content"], "Water plants");
+        assert_eq!(m["from"], "2026-09-01");
+        assert_ne!(m["to"], m["from"]);
+    }
 
     /// Today's list is "due on or before today": still-open tasks from
     /// earlier days come back with today's (brief phase 1 splits them into

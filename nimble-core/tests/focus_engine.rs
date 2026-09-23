@@ -381,3 +381,19 @@ async fn switching_tasks_banks_a_and_runs_only_b() {
     assert_eq!(s.selected_occurrence_id, Some(q[1].occurrence_id.clone()));
     assert_eq!(s.session.unwrap().status, FocusStatus::Running);
 }
+
+#[tokio::test]
+async fn native_completion_logs_a_named_task_completed() {
+    let h = fixture::Harness::new().await;
+    let id = h.task("Ship batch").await;
+    h.service.execute_native_task(NativeTaskCommand {
+        command_id: uuid::Uuid::new_v4().to_string(),
+        action: NativeTaskAction::SetStatus { id: id.clone(), status: "complete".into(), note: None, expected_due_date: None },
+    }).await.unwrap();
+    let (a, m): (String, Option<String>) = sqlx::query_as(
+        "SELECT action_type, metadata FROM activity_log WHERE target_id=? ORDER BY rowid DESC LIMIT 1")
+        .bind(&id).fetch_one(&h.pool).await.unwrap();
+    let m: serde_json::Value = serde_json::from_str(&m.unwrap()).unwrap();
+    assert_eq!(a, "task_completed");
+    assert_eq!(m["content"], "Ship batch");
+}

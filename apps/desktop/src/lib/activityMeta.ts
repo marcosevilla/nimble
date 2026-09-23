@@ -33,6 +33,7 @@ const { done, removed, moved, neutral } = ACTIVITY_COLORS
 export const ACTION_META: Record<string, ActionMeta> = {
   task_created: { label: 'Created task', shortLabel: 'Created', icon: Plus, color: done },
   task_completed: { label: 'Completed task', shortLabel: 'Completed', icon: Check, color: done },
+  task_recurred: { label: 'Completed (repeats)', shortLabel: 'Completed', icon: Check, color: done },
   task_uncompleted: { label: 'Reopened task', shortLabel: 'Reopened', icon: ArrowRightLeft, color: neutral },
   task_deleted: { label: 'Deleted task', shortLabel: 'Deleted', icon: Trash2, color: removed },
   task_updated: { label: 'Updated task', shortLabel: 'Updated', icon: Pencil, color: neutral },

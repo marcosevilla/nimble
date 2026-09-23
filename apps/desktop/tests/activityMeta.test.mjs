@@ -29,6 +29,8 @@ test('created/completed are success, deleted is destructive, focus starts and mo
     if (k.endsWith('_deleted')) assert.equal(ACTION_META[k].color, 'text-destructive', k)
     else if (k.endsWith('_created') || k.endsWith('_completed')) assert.equal(ACTION_META[k].color, 'text-success', k)
   }
+  // Completing a repeat is still a completion (Rust logs task_recurred, 1c).
+  assert.equal(ACTION_META.task_recurred.color, 'text-success')
   for (const k of ['focus_started', 'focus_resumed', 'task_moved', 'capture_converted', 'capture_routed', 'todoist_migrated', 'vault_import']) {
     assert.equal(ACTION_META[k].color, 'text-accent-blue', k)
   }
@@ -38,7 +40,7 @@ test('created/completed are success, deleted is destructive, focus starts and mo
 })
 
 test('task-detail short labels exist for the task-scoped actions', () => {
-  for (const k of ['task_created', 'task_completed', 'task_deleted', 'focus_started', 'task_breakdown_applied']) {
+  for (const k of ['task_created', 'task_completed', 'task_recurred', 'task_deleted', 'focus_started', 'task_breakdown_applied']) {
     assert.equal(typeof ACTION_META[k].shortLabel, 'string', k)
   }
 })

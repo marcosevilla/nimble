@@ -100,7 +100,7 @@ nimble/
 - Default for new tasks: `todo`
 - Focus mode auto-sets `in_progress` on start, `complete` on finish
 - Blocked status prompts for reason (logged to activity)
-- Status changes logged as `status_changed` activity events
+- Status changes log `task_completed` / `task_uncompleted` / `status_changed` (via `activity::log_task_status`), each carrying the task title as `content`
 - Completing a recurring task (a parseable `recurrence_rule` plus a `due_date`) doesn't move it to `complete` — it reschedules `due_date` to the next occurrence and resets `status` to `todo`, logged as a `task_recurred` activity event instead of `status_changed`. A task with an unparseable rule, or no due date, falls through and completes normally — the rule is inert in that case.
 
 ## Style Guide

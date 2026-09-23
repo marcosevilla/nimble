@@ -955,7 +955,7 @@
   var ACTIVITY_LOG = [
     { id: 'act-01', action_type: 'task_completed', target_id: 'task-13', metadata: { content: 'Pay quarterly estimated taxes' }, created_at: iso('2026-07-31', '11:05:00') },
     { id: 'act-02', action_type: 'task_completed', target_id: 'task-11', metadata: { content: 'Reply to Fillmore photo pass email' }, created_at: iso('2026-07-31', '16:22:00') },
-    { id: 'act-03', action_type: 'status_changed', target_id: 'task-01', metadata: { from: 'todo', to: 'in_progress' }, created_at: iso(TODAY, '09:12:00') },
+    { id: 'act-03', action_type: 'status_changed', target_id: 'task-01', metadata: { content: 'Refresh portfolio case study: Canary check-in redesign', old_status: 'todo', new_status: 'in_progress' }, created_at: iso(TODAY, '09:12:00') },
     { id: 'act-04', action_type: 'capture_created', target_id: 'cap-01', metadata: null, created_at: iso(TODAY, '08:41:00') },
     { id: 'act-05', action_type: 'habit_logged', target_id: 'habit-walk', metadata: { date: TODAY }, created_at: iso(TODAY, '09:20:00') },
     { id: 'act-06', action_type: 'task_created', target_id: 'task-15', metadata: { content: 'Prototype AI priorities reveal animation' }, created_at: iso('2026-07-30', '14:55:00') },
