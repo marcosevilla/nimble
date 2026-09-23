@@ -34,6 +34,8 @@ pub struct Project {
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct LocalTask {
+    #[serde(default = "default_sync_policy")]
+    pub sync_policy: String,
     pub id: String,
     pub parent_id: Option<String>,
     pub content: String,
@@ -66,8 +68,9 @@ pub struct LocalTask {
 
 /// Input for `db::tasks::create_local_task`. Struct form lets later tasks add
 /// fields without touching every caller.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CreateTaskInput {
+    pub sync_policy: Option<String>,
     pub content: String,
     pub project_id: Option<String>,
     pub parent_id: Option<String>,
@@ -85,8 +88,9 @@ pub struct CreateTaskInput {
 
 /// Input for `db::tasks::update_local_task`. Struct form lets later tasks add
 /// fields without touching every caller.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct UpdateTaskInput {
+    pub sync_policy: Option<String>,
     pub content: Option<String>,
     pub description: Option<String>,
     pub project_id: Option<String>,
@@ -107,6 +111,8 @@ pub struct UpdateTaskInput {
     pub google_calendar_enabled: Option<bool>,
     pub clear_reminder: bool,
 }
+
+pub fn default_sync_policy() -> String { "default".into() }
 
 // ── Labels ──
 
@@ -215,15 +221,6 @@ pub struct DocNote {
     pub content: String,
     pub position: i64,
     pub created_at: String,
-}
-
-// ── Focus ──
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FocusState {
-    pub task_id: Option<String>,
-    pub started_at: Option<String>,
-    pub paused_at: Option<String>,
 }
 
 // ── Goals ──

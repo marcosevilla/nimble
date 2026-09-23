@@ -25,6 +25,8 @@ import { TaskItem, type TaskItemData } from '@/components/tasks/TaskItem'
 import { labelColor } from '@/lib/labelColors'
 import { DetailBreadcrumbs } from './DetailBreadcrumbs'
 import { TaskActivityLog } from './TaskActivityLog'
+import { FocusTaskHistory } from '@/components/focus/FocusTaskHistory'
+import { TaskFocusControls } from '@/components/focus/FocusTaskEntry'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -414,8 +416,8 @@ export function TaskDetailPage() {
     <>
     {deleteDialog}
     <div className="mx-auto w-full max-w-[600px] pt-[30px] flex flex-col gap-6">
-      {/* Top row: breadcrumb (left) + gear trigger (right) — no paperclip
-          (Decision 13), no other actions in the right cluster. */}
+      {/* Top row: breadcrumb (left) + Focus control and gear trigger
+          (right) — no paperclip (Decision 13). */}
       <div className="flex items-center justify-between gap-2 min-h-6">
         {breadcrumbSegments.length > 0 ? (
           <div className="flex min-w-0 items-center gap-1">
@@ -437,6 +439,8 @@ export function TaskDetailPage() {
           <div />
         )}
 
+        <div className="flex shrink-0 items-center gap-2">
+        <TaskFocusControls task={task} />
         <DropdownMenu>
           <DropdownMenuTrigger
             aria-label="Task actions"
@@ -469,13 +473,14 @@ export function TaskDetailPage() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
 
       {/* Status + Title — status icon matches the row size (StatusDropdown's
           default `sm`, same as TaskItem) and is vertically centered against
           the title's line via items-center, not a manual mt- nudge. */}
       <div className="flex items-center gap-2">
-        <StatusDropdown taskId={task.id} status={task.status ?? 'todo'} onComplete={handleTaskCompleted} />
+        <StatusDropdown taskId={task.id} status={task.status ?? 'todo'} dueDate={task.due_date} onComplete={handleTaskCompleted} />
         <div className="flex-1 min-w-0">
           <InlineTitle
             value={task.content}
@@ -608,6 +613,9 @@ export function TaskDetailPage() {
             </div>
           )}
         </div>
+
+        {/* Focus time from the engine's history (not the activity log) */}
+        <FocusTaskHistory taskId={task.id} />
       </div>
 
       {/* Activity log — moved off the page body into the gear menu's "View

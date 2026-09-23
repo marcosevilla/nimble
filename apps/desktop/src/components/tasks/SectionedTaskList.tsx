@@ -88,6 +88,8 @@ function TaskLane({
       onAddSubtask,
       focused: focusedId === id,
       onFocusRow: onFocusRow ? () => onFocusRow(id) : undefined,
+      // Only All Tasks and project lists render this list; both bind `f`.
+      focusShortcut: true,
     }
 
     return [

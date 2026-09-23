@@ -117,6 +117,100 @@ async fn validate(pool: &SqlitePool) -> crate::Result<()> {
     super::export::validate_schema(pool).await
 }
 
+/// Activation safety is applied only to a verified, separate v21 output copy.
+/// Canonical source/copy and portable equality checks must happen first.
+pub async fn normalize_focus_restore(pool: &SqlitePool) -> crate::Result<()> {
+    let version: i64 = sqlx::query_scalar("SELECT MAX(version) FROM schema_version").fetch_one(pool).await?;
+    if version < 21 { return Ok(()); }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('restored_activation_required','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value='1',updated_at=datetime('now')")
+        .execute(&mut *tx).await?;
+    let work: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT occurrence_id,work_ms FROM focus_sessions").fetch_all(&mut *tx).await?;
+    let imported: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT occurrence_id,duration_ms FROM focus_import_totals WHERE inclusion='included' AND occurrence_id IS NOT NULL")
+        .fetch_all(&mut *tx).await?;
+    let mut totals = std::collections::HashMap::<String, u64>::new();
+    for (occurrence_id, duration) in work.into_iter().chain(imported) {
+        if duration < 0 { return Err(invalid("negative_focus_total")); }
+        let total = totals.entry(occurrence_id).or_default();
+        *total = total.checked_add(duration as u64).filter(|sum| *sum <= crate::focus_types::MAX_SAFE_INTEGER)
+            .ok_or_else(|| invalid("focus_total_overflow"))?;
+    }
+    sqlx::query("UPDATE focus_segments SET closed_at=checkpoint_at,close_reason='restored' WHERE closed_at IS NULL")
+        .execute(&mut *tx).await?;
+    sqlx::query("UPDATE focus_sessions SET status='paused' WHERE status='running'")
+        .execute(&mut *tx).await?;
+    sqlx::query("UPDATE focus_queue_state SET writer_device_id='' WHERE id=1")
+        .execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO focus_runtime(id,owner_epoch,process_generation,engine_revision,recovery_reason) VALUES(1,'',0,0,'restore requires explicit activation') ON CONFLICT(id) DO UPDATE SET live_session_id=NULL,owner_epoch='',process_generation=0,sound_token=NULL,boundary_token=NULL,recovery_reason='restore requires explicit activation'")
+        .execute(&mut *tx).await?;
+    sqlx::query("UPDATE focus_delivery SET state='needs-review',next_attempt_at=NULL,last_error='restored; delivery quarantined' WHERE state IN ('pending','sending','retryable-error')")
+        .execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM focus_undo").execute(&mut *tx).await?;
+    sqlx::query("UPDATE daily_state SET focus_task_id=NULL,focus_started_at=NULL,focus_paused_at=NULL")
+        .execute(&mut *tx).await?;
+    tx.commit().await?;
+    validate(pool).await
+}
+
+/// A restored v21 profile remains inert until a separate, explicit activation
+/// procedure clears this marker. Runners and direct network entrypoints share it.
+pub async fn require_activation_clear(pool: &SqlitePool) -> crate::Result<()> {
+    let marker: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM settings WHERE key='restored_activation_required'")
+        .fetch_optional(pool).await?;
+    if marker.as_deref() == Some("1") {
+        return Err(invalid("restore_activation_required"));
+    }
+    Ok(())
+}
+
+/// The explicit activation a restored v21 profile needs before it may sync,
+/// back up, remind or write focus: clears the restore marker and makes
+/// `device_id` the focus writer under a fresh owner epoch, in one
+/// transaction. Nothing starts — restored sessions stay paused at their
+/// exact totals and quarantined deliveries stay in review. Returns `false`
+/// when the profile is already active for this device (idempotent). Refuses
+/// (`wrong_owner`) a queue another device owns. The caller must hold the
+/// profile owner lock and re-initialize its focus service afterwards.
+pub async fn activate_restored_profile(pool: &SqlitePool, device_id: &str) -> crate::Result<bool> {
+    if device_id.is_empty() {
+        return Err(crate::Error::Other("invalid: empty device id".into()));
+    }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let marker: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM settings WHERE key='restored_activation_required'")
+        .fetch_optional(&mut *tx).await?;
+    let writer: Option<String> = sqlx::query_scalar(
+        "SELECT writer_device_id FROM focus_queue_state WHERE id=1")
+        .fetch_optional(&mut *tx).await?;
+    let restored = marker.as_deref() == Some("1");
+    match writer.as_deref() {
+        Some(w) if !w.is_empty() && w != device_id => {
+            return Err(crate::Error::Other(
+                "wrong_owner: another device owns this focus queue".into(),
+            ));
+        }
+        Some(w) if w == device_id && !restored => return Ok(false),
+        None if !restored => return Ok(false),
+        _ => {}
+    }
+    sqlx::query("DELETE FROM settings WHERE key='restored_activation_required'")
+        .execute(&mut *tx).await?;
+    if writer.is_some() {
+        let epoch = uuid::Uuid::new_v4().to_string();
+        sqlx::query("UPDATE focus_queue_state SET writer_device_id=?,owner_epoch=?,updated_at=? WHERE id=1")
+            .bind(device_id).bind(&epoch).bind(chrono::Utc::now().to_rfc3339())
+            .execute(&mut *tx).await?;
+        sqlx::query("UPDATE focus_runtime SET owner_epoch=?,live_session_id=NULL,recovery_reason=NULL,engine_revision=engine_revision+1 WHERE id=1")
+            .bind(&epoch).execute(&mut *tx).await?;
+        crate::db::focus::replica::publish_focus_replica_tx(&mut tx).await?;
+    }
+    tx.commit().await?;
+    Ok(true)
+}
+
 pub async fn restore_snapshot(source: &Path, dest: &Path) -> crate::Result<RecoveryReport> {
     let dest = destination(dest, None)?;
     let verified = backup::verify_generation(source).await?;
@@ -143,6 +237,12 @@ pub async fn restore_snapshot(source: &Path, dest: &Path) -> crate::Result<Recov
     original.close().await;
     restored.close().await;
     result?;
+    if verified.manifest().schema_version >= 21 {
+        let activation = open(&path, false).await?;
+        let normalization = normalize_focus_restore(&activation).await;
+        activation.close().await;
+        normalization?;
+    }
     stage.publish(&dest)
 }
 
@@ -218,6 +318,12 @@ pub async fn restore_export(source: &Path, dest: &Path) -> crate::Result<Recover
     }.await;
     pool.close().await;
     result?;
+    if version >= 21 {
+        let activation = open(&path, false).await?;
+        let normalization = normalize_focus_restore(&activation).await;
+        activation.close().await;
+        normalization?;
+    }
     stage.publish(&dest)
 }
 

@@ -40,3 +40,90 @@ pub async fn notify(profile: &AgentProfile, result: &CommandResult) -> &'static 
         Err(_) => "unavailable",
     }
 }
+
+/// Outcome classes for an app-handled task write. Only `AppNotRunning`
+/// permits the direct database path; anything after the request may have
+/// been sent is `Uncertain` and must be retried with the same command id.
+pub enum NativeFailure {
+    AppNotRunning,
+    NotSent(CliError),
+    Uncertain,
+    Rejected { code: &'static str, message: String },
+}
+
+fn focus_code(code: &str) -> &'static str {
+    match code {
+        "conflict" => "conflict",
+        "wrong_owner" => "wrong_owner",
+        "stale_occurrence" => "stale_occurrence",
+        "not_found" => "not_found",
+        "invalid" => "validation",
+        "unsupported" => "unsupported",
+        "needs_review" => "needs_review",
+        _ => "storage",
+    }
+}
+
+pub async fn native_task(
+    profile: &AgentProfile,
+    command: nimble_core::db::focus::engine::NativeTaskCommand,
+) -> Result<serde_json::Value, NativeFailure> {
+    use std::io::ErrorKind;
+    match profile.validate_socket() {
+        Ok(()) => {}
+        Err(e) if e.kind() == ErrorKind::NotFound => return Err(NativeFailure::AppNotRunning),
+        Err(e) => return Err(NativeFailure::NotSent(e.into())),
+    }
+    let mut socket = match UnixStream::connect(&profile.socket).await {
+        Ok(s) => s,
+        Err(e) if matches!(e.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound) => {
+            return Err(NativeFailure::AppNotRunning)
+        }
+        Err(e) => return Err(NativeFailure::NotSent(e.into())),
+    };
+    match socket.peer_cred() {
+        Ok(cred) if cred.uid() == effective_uid() => {}
+        _ => return Err(NativeFailure::NotSent(CliError::new("unavailable", "Local endpoint owner mismatch."))),
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let message = AgentRequest {
+        version: VERSION,
+        request_id: id.clone(),
+        profile_id: profile.profile_id.clone(),
+        operation: AgentOperation::NativeTask { command },
+    };
+    let mut bytes = serde_json::to_vec(&message)
+        .map_err(|_| NativeFailure::NotSent(CliError::new("internal", "Cannot encode local request.")))?;
+    bytes.push(b'\n');
+    if bytes.len() > MAX_FRAME {
+        return Err(NativeFailure::NotSent(CliError::validation("Local request exceeds size limit.")));
+    }
+    // From here on the app may have committed the write.
+    let exchange = async {
+        socket.write_all(&bytes).await.ok()?;
+        let frame = read_frame(socket).await.ok()?;
+        serde_json::from_slice::<AgentResponse>(&frame).ok()
+    };
+    let response = tokio::time::timeout(std::time::Duration::from_secs(15), exchange)
+        .await
+        .ok()
+        .flatten()
+        .ok_or(NativeFailure::Uncertain)?;
+    if response.version != VERSION || response.request_id != id {
+        return Err(NativeFailure::Uncertain);
+    }
+    if response.ok {
+        return Ok(response.data.unwrap_or(serde_json::Value::Null));
+    }
+    match (response.error.as_deref(), response.data) {
+        (Some("rejected"), Some(data)) => Err(NativeFailure::Rejected {
+            code: focus_code(data.get("code").and_then(|c| c.as_str()).unwrap_or("")),
+            message: data
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Nimble rejected this task write.")
+                .to_owned(),
+        }),
+        _ => Err(NativeFailure::Uncertain),
+    }
+}

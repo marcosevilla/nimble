@@ -1,3 +1,4 @@
+import { displayedDueDate } from '@/lib/displayedTasks'
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import { X } from 'lucide-react'
@@ -78,7 +79,7 @@ export function SelectionActionBar() {
     let successCount = 0
     for (const id of ids) {
       try {
-        await dp.tasks.complete(id)
+        await dp.tasks.complete(id, displayedDueDate(id) ?? null)
         successCount++
       } catch {
         /* counted as failed below */

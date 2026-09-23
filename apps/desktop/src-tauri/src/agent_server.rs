@@ -125,7 +125,16 @@ async fn serve(
             data: Some(data),
             error: None,
         },
-        Err(_) => AgentResponse {
+        // A typed focus rejection is a definite outcome (nothing committed),
+        // so the caller can report it instead of treating it as uncertain.
+        Err(Failure::Focus(e)) => AgentResponse {
+            version: VERSION,
+            request_id: request.request_id,
+            ok: false,
+            data: serde_json::to_value(&e).ok(),
+            error: Some("rejected".into()),
+        },
+        Err(Failure::Generic) => AgentResponse {
             version: VERSION,
             request_id: request.request_id,
             ok: false,
@@ -141,12 +150,54 @@ async fn serve(
     let _ = tokio::time::timeout(Duration::from_secs(2), stream.write_all(&bytes)).await;
     Ok(())
 }
+/// Generic failures stay opaque on the wire ("operation_failed"), as before.
+enum Failure {
+    Generic,
+    Focus(nimble_core::focus_types::FocusError),
+}
+impl From<&str> for Failure {
+    fn from(_: &str) -> Self {
+        Self::Generic
+    }
+}
+impl From<String> for Failure {
+    fn from(_: String) -> Self {
+        Self::Generic
+    }
+}
 async fn dispatch(
     app: &AppHandle,
     profile: &AgentProfile,
     operation: &AgentOperation,
-) -> Result<Value, String> {
+) -> Result<Value, Failure> {
     match operation {
+        AgentOperation::NativeTask { command } => {
+            let outcome = crate::focus_service::execute_task(
+                app,
+                command.action.clone(),
+                Some(command.command_id.clone()),
+            )
+            .await
+            .map_err(Failure::Focus)?;
+            let ids: Vec<String> = outcome
+                .task
+                .as_ref()
+                .map(|t| vec![t.id.clone()])
+                .unwrap_or_default();
+            let _ = app.emit(
+                "nimble-data-changed",
+                DataChanged {
+                    version: VERSION,
+                    domains: vec![Domain::Tasks, Domain::Activity],
+                    ids,
+                },
+            );
+            Ok(json!({
+                "task": outcome.task,
+                "replayed": outcome.replayed,
+                "undo_token": outcome.undo_token,
+            }))
+        }
         AgentOperation::Invalidate { domains, ids } => {
             app.emit(
                 "nimble-data-changed",
@@ -177,6 +228,12 @@ async fn dispatch(
                 .map_err(|_| "verification failed")?;
             Ok(json!({"verified":true}))
         }
+        AgentOperation::RestoreActivate => {
+            let activated = crate::focus_service::activate_restored(app)
+                .await
+                .map_err(Failure::Focus)?;
+            Ok(json!({"activated": activated}))
+        }
         AgentOperation::SyncStatus => {
             let pool = app.state::<sqlx::SqlitePool>();
             serde_json::to_value(
@@ -192,7 +249,7 @@ async fn dispatch(
                     json!({"todoist":{"state":"disabled_test_profile"},"turso":{"state":"disabled_test_profile"}}),
                 );
             }
-            crate::sync_runner::run_agent_sync(app).await
+            Ok(crate::sync_runner::run_agent_sync(app).await?)
         }
     }
 }

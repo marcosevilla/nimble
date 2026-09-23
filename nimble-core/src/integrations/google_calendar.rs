@@ -87,7 +87,14 @@ pub struct ReconcileResult { pub changed_task_ids: Vec<String>, pub error_code: 
 
 /// A cycle stages local intent before any HTTP mutation. An incremental sync
 /// token is acknowledged only after every page and mapped event is handled.
-pub async fn run_once<T: crate::api::google_calendar::CalendarApi>(pool: &sqlx::SqlitePool, transport: &T, _now: DateTime<Utc>) -> crate::Result<ReconcileResult> {
+pub async fn run_once<T: crate::api::google_calendar::CalendarApi>(pool: &sqlx::SqlitePool, transport: &T, now: DateTime<Utc>) -> crate::Result<ReconcileResult> {
+    run_once_with_focus(pool, transport, now, None).await
+}
+
+/// One reconcile cycle. Calendar HTTP calls happen outside any focus guard;
+/// only each conditional local task edit enters it.
+pub async fn run_once_with_focus<T: crate::api::google_calendar::CalendarApi>(pool: &sqlx::SqlitePool, transport: &T, _now: DateTime<Utc>, focus: Option<&crate::db::focus::engine::FocusService>) -> crate::Result<ReconcileResult> {
+    crate::db::recovery::require_activation_clear(pool).await?;
     use crate::api::google_calendar::{parse_event, CalendarApiError};
     use crate::db::google_calendar as db;
     use std::collections::HashMap;
@@ -205,12 +212,12 @@ pub async fn run_once<T: crate::api::google_calendar::CalendarApi>(pool: &sqlx::
                     MergeDecision::Unchanged => db::acknowledge_upsert(pool,&task_id,event.etag.as_deref(),local_p).await?,
                     MergeDecision::Conflict => db::conflict(pool,&task_id,"divergent_edit",local_p,Some(remote_p)).await?,
                     MergeDecision::Pull(p) => {
-                        if apply_remote_if_unchanged(pool,local_p,&p).await? {
+                        if apply_remote_if_unchanged_with_focus(pool,focus,local_p,&p).await? {
                             db::acknowledge_upsert(pool,&task_id,event.etag.as_deref(),&p).await?; changed.push(task_id.clone());
                         } else { db::conflict(pool,&task_id,"local_changed_during_sync",local_p,Some(&p)).await?; }
                     }
                     MergeDecision::Push(p) | MergeDecision::Merged(p) => {
-                        if p!=*local_p && !apply_remote_if_unchanged(pool,local_p,&p).await? {
+                        if p!=*local_p && !apply_remote_if_unchanged_with_focus(pool,focus,local_p,&p).await? {
                             db::conflict(pool,&task_id,"local_changed_during_sync",local_p,Some(remote_p)).await?; continue;
                         }
                         match transport.update(&calendar_id,&link.event_id,&p,event.etag.as_deref().unwrap_or(""),raw).await {
@@ -279,6 +286,11 @@ async fn fail_cycle(pool:&sqlx::SqlitePool,e:&crate::api::google_calendar::Calen
 }
 
 pub async fn apply_remote_if_unchanged(pool:&sqlx::SqlitePool,expected:&CalendarProjection,new:&CalendarProjection)->crate::Result<bool> {
+    apply_remote_if_unchanged_with_focus(pool,None,expected,new).await
+}
+
+/// Conditional Google edit, applied under the live focus service guard when given.
+pub async fn apply_remote_if_unchanged_with_focus(pool:&sqlx::SqlitePool,focus:Option<&crate::db::focus::engine::FocusService>,expected:&CalendarProjection,new:&CalendarProjection)->crate::Result<bool> {
     let tasks=crate::db::tasks::get_local_tasks(pool,None,None,false).await?;
     let Some(task)=tasks.into_iter().find(|t|t.id==expected.task_id) else { return Ok(false) };
     if project(&task,&expected.timezone)?.as_ref()!=Some(expected) { return Ok(false) }
@@ -295,5 +307,5 @@ pub async fn apply_remote_if_unchanged(pool:&sqlx::SqlitePool,expected:&Calendar
         duration_minutes:Some(duration), reminder_offset_minutes:Some(new.reminder_offset_minutes),
         ..Default::default()
     };
-    Ok(crate::db::tasks::update_local_task_if_unchanged(pool,&expected.task_id,&task,update).await?.is_some())
+    Ok(crate::db::tasks::update_local_task_if_unchanged_with_focus(pool,focus,&expected.task_id,&task,update).await?.is_some())
 }

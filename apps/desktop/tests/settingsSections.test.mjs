@@ -19,7 +19,7 @@ test('obsidian is the third section, maintenance is last, retired sections are g
   const ids = SETTINGS_SECTIONS.map((s) => s.id)
   assert.equal(ids[2], 'obsidian')
   assert.equal(ids[ids.length - 1], 'maintenance')
-  for (const gone of ['vault', 'status-colors', 'import-todoist', 'docs-format', 'tasks-format']) {
+  for (const gone of ['vault', 'status-colors', 'import-todoist', 'docs-format', 'tasks-format', 'focus']) {
     assert.ok(!ids.includes(gone), `${gone} should not be a top-level section`)
   }
   assert.ok(ids.includes('backups'), 'backups is in the nav')

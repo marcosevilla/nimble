@@ -47,7 +47,6 @@ import type {
   VaultScanReport,
   VaultStatus,
   VaultSaveResult,
-  FocusState,
   Goal,
   GoalWithProgress,
   GoalStatus,
@@ -63,6 +62,16 @@ import type {
   TodoistMigrationResult,
   SyncReport,
   TodoistSyncStatus,
+  FocusCapabilities,
+  FocusSnapshot,
+  FocusCommand,
+  FocusReply,
+  FocusHistoryPage,
+  FocusImportPreview,
+  FocusImportResult,
+  LegacyFocusFiles,
+  FocusDeliveryReviewItem,
+  FocusDeliveryResolution,
 } from './index'
 
 export interface DataProvider {
@@ -174,6 +183,8 @@ export interface DataProvider {
       recurrenceRule?: string
       sectionId?: string
       labelIds?: string[]
+      /** 'local_only' creates an unbound task (never exported). Omitted = 'default'. */
+      syncPolicy?: 'default' | 'local_only'
     }): Promise<LocalTask>
     update(opts: {
       id: string
@@ -197,10 +208,20 @@ export interface DataProvider {
       clearSection?: boolean
       clearDuration?: boolean
     }): Promise<LocalTask>
-    updateStatus(id: string, status: TaskStatus, note?: string): Promise<void>
-    complete(id: string): Promise<void>
+    /**
+     * `expectedDueDate` is the due date the user SAW on the task (null when it
+     * had none). Completing a recurring task is refused as `stale_occurrence`
+     * if it no longer matches, so a sync that already advanced the date can't
+     * be advanced twice. Pass it for every completion.
+     */
+    updateStatus(id: string, status: TaskStatus, note?: string, expectedDueDate?: string | null): Promise<void>
+    complete(id: string, expectedDueDate: string | null): Promise<void>
     uncomplete(id: string): Promise<void>
-    delete(id: string): Promise<void>
+    /**
+     * `undo_token` redeems the delete through the focus `undo_delete` action
+     * for 10 seconds (null when no focus owner ran the write).
+     */
+    delete(id: string): Promise<{ undo_token: string | null }>
     reorder(taskIds: string[]): Promise<void>
     previewMarkdownMigration(): Promise<TasksMdPreview>
     migrateToMarkdown(): Promise<TasksMdResult>
@@ -250,10 +271,41 @@ export interface DataProvider {
     getSummary(date: string): Promise<ActivitySummary[]>
   }
 
+  /**
+   * One revisioned focus engine. Desktop owns it (single writer); web reads
+   * the settled replica and rejects every write with a typed `unsupported`
+   * FocusError. Failures reject with `{ code, message }` (FocusErrorCode).
+   */
   focus: {
-    startSession(taskId: string, taskContent: string): Promise<void>
-    endSession(taskId: string, outcome: string, durationSecs: number): Promise<void>
-    getActive(): Promise<FocusState>
+    capabilities(): Promise<FocusCapabilities>
+    snapshot(): Promise<FocusSnapshot>
+    execute(command: FocusCommand): Promise<FocusReply>
+    history(opts?: { cursor?: string; task_id?: string }): Promise<FocusHistoryPage>
+    openCompanion(): Promise<void>
+    /**
+     * Desktop only. Validate user-chosen frozen Focus Queue files and
+     * propose every decision; writes nothing. Web rejects `unsupported`.
+     */
+    previewImport(files: LegacyFocusFiles): Promise<FocusImportPreview>
+    /**
+     * Desktop only. Commit exactly the previewed decisions, or nothing: a
+     * changed file or destination rejects (`conflict`) and needs a fresh
+     * preview. `commandId` is reused on retry after an uncertain response.
+     * Performs no remote calls and arms no outbound intent.
+     */
+    commitImport(files: LegacyFocusFiles, previewToken: string, commandId: string): Promise<FocusImportResult>
+    /**
+     * Desktop only. Optional Todoist time comments and imported old pending
+     * sends, each with its own state and evidence. Reading sends nothing.
+     */
+    deliveries(): Promise<FocusDeliveryReviewItem[]>
+    /**
+     * Desktop only. An explicit, recorded decision: acknowledge (verified
+     * delivered) or archive (with a reason) never send; adopt re-arms only an
+     * operation verified as undelivered, keeping its operation key. `evidence`
+     * (what was checked) is required.
+     */
+    resolveDelivery(id: string, resolution: FocusDeliveryResolution, evidence: string): Promise<FocusDeliveryReviewItem>
   }
 
   dailyState: {

@@ -39,10 +39,12 @@ pub async fn sync_configure(
 
 #[tauri::command]
 pub async fn sync_test_connection(
-    _app: AppHandle,
+    app: AppHandle,
     turso_url: String,
     turso_token: String,
 ) -> Result<(), String> {
+    nimble_core::db::recovery::require_activation_clear(app.state::<SqlitePool>().inner())
+        .await.map_err(|_| "restore_activation_required")?;
     // Test connection without needing saved settings
     nimble_core::db::sync::test_connection(&turso_url, &turso_token)
         .await

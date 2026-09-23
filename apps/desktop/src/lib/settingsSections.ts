@@ -26,7 +26,6 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'integrations', label: 'Integrations' },
   { id: 'obsidian', label: 'Obsidian' },
   { id: 'todoist-sync', label: 'Todoist sync' },
-  { id: 'focus', label: 'Focus mode' },
   { id: 'capture-routes', label: 'Capture routes' },
   { id: 'labels', label: 'Labels' },
   { id: 'calendars', label: 'Calendars' },

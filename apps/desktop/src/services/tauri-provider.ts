@@ -24,6 +24,7 @@ export function createTauriProvider(): DataProvider {
       verifyLatest: tauri.backupVerifyLatest,
       openFolder: tauri.backupOpenFolder,
       configureRemote: tauri.backupConfigureRemote,
+      activateRestoredProfile: tauri.backupActivateRestoredProfile,
     },
     settings: {
       checkSetupComplete: tauri.checkSetupComplete,
@@ -145,9 +146,15 @@ export function createTauriProvider(): DataProvider {
     },
 
     focus: {
-      startSession: tauri.startFocusSession,
-      endSession: tauri.endFocusSession,
-      getActive: tauri.getActiveFocus,
+      capabilities: tauri.focusCapabilities,
+      snapshot: tauri.focusSnapshot,
+      execute: tauri.focusExecute,
+      history: tauri.focusHistory,
+      openCompanion: tauri.focusOpenCompanion,
+      previewImport: tauri.focusPreviewImport,
+      commitImport: tauri.focusCommitImport,
+      deliveries: tauri.focusDeliveries,
+      resolveDelivery: tauri.focusResolveDelivery,
     },
 
     dailyState: {

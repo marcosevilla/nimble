@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 // eslint-disable-next-line no-restricted-imports
 import { listen } from '@tauri-apps/api/event'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import { useAppStore } from '@/stores/appStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { NavSidebar } from './NavSidebar'
@@ -25,11 +26,11 @@ import { SettingsPage } from '@/components/pages/SettingsPage'
 import { DocsPage } from '@/components/pages/DocsPage'
 import { GoalsPage } from '@/components/pages/GoalsPage'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
-import { useFocusTimer } from '@/hooks/useFocusTimer'
-import { useFocusStore } from '@/stores/focusStore'
+import { connectFocusCache, focusSpaceAction, isDroppedRepeat, sendFocusAction, useFocusCache } from '@/stores/focusStore'
+import { useFocusSurface } from '@/stores/focusSurfaceStore'
+import { isFocusTrayShortcut } from '@/lib/focusFlows'
 import { FocusView } from '@/components/focus/FocusView'
 import { FocusBanner } from '@/components/focus/FocusBanner'
-import { FocusCelebration } from '@/components/focus/FocusCelebration'
 import { FocusResumeDialog } from '@/components/focus/FocusResumeDialog'
 import { useDetailStore } from '@/stores/detailStore'
 import { TaskDetailPage } from '@/components/detail/TaskDetailPage'
@@ -71,11 +72,11 @@ export function Dashboard() {
     loadNavOrder()
   }, [loadNavOrder])
 
-  // Focus mode
-  useFocusTimer()
-  const focusActive = useFocusStore((s) => s.isActive)
-  const focusCompact = useFocusStore((s) => s.isCompact)
-  const showCelebration = useFocusStore((s) => s.showCelebration)
+  // Focus: a render cache of the engine's snapshots. Subscribes before the
+  // first read; no interval or clock runs here.
+  useEffect(() => connectFocusCache(), [])
+  const focusQueued = useFocusCache((s) => (s.snapshot?.queue.length ?? 0) > 0)
+  const focusExpanded = useFocusSurface((s) => s.expanded)
 
   // Detail view
   const detailTarget = useDetailStore((s) => s.target)
@@ -99,9 +100,9 @@ export function Dashboard() {
     // Changing page while a session is expanded collapses it to the banner
     // instead of leaving the timer over a page the nav says has changed
     // (session P2-1, §2.4 "doesn't lock navigation").
-    const focus = useFocusStore.getState()
-    if (focus.isActive && !focus.isCompact && previousPageRef.current !== currentPage) {
-      focus.setCompact(true)
+    const surface = useFocusSurface.getState()
+    if (surface.expanded && previousPageRef.current !== currentPage) {
+      surface.setExpanded(false)
     }
 
     if (scrollRef.current && previousPageRef.current !== currentPage) {
@@ -125,6 +126,17 @@ export function Dashboard() {
     })
     return () => { unlisten.then(fn => fn()) }
   }, [setCurrentPage, setCaptureRequested])
+
+  // The focus companion's "Open details": Rust shows this window and sends
+  // only the task ID; the detail page reads the task itself.
+  useEffect(() => {
+    const unlisten = listen<{ version?: number; task_id?: unknown }>('nimble-focus-open-task', ({ payload }) => {
+      if (payload?.version !== 1 || typeof payload.task_id !== 'string') return
+      useFocusSurface.getState().setExpanded(false)
+      useDetailStore.getState().openTask(payload.task_id)
+    })
+    return () => { unlisten.then(fn => fn()) }
+  }, [])
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -173,12 +185,22 @@ export function Dashboard() {
         return
       }
 
-      // Space — pause/resume focus (only when focus active and not in input)
-      if (e.key === ' ' && !isInput && !meta && focusActive) {
+      // ⇧F — open/close the focus tray (presentation only; works with an empty queue)
+      if (!isInput && isFocusTrayShortcut(e)) {
         e.preventDefault()
-        const store = useFocusStore.getState()
-        if (store.pausedAt) store.resumeFocus()
-        else store.pauseFocus()
+        useFocusSurface.getState().toggleExpanded()
+        return
+      }
+
+      // Space — pause a running focus session (never starts or resumes one)
+      const spaceAction = e.key === ' ' && !isInput && !meta ? focusSpaceAction() : null
+      if (spaceAction) {
+        e.preventDefault()
+        if (!e.repeat) {
+          sendFocusAction(spaceAction).catch((error: unknown) => {
+            if (!isDroppedRepeat(error)) toast(error instanceof Error ? error.message : String(error))
+          })
+        }
         return
       }
 
@@ -211,7 +233,7 @@ export function Dashboard() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [setCurrentPage, detailTarget, closeDetail, focusActive])
+  }, [setCurrentPage, detailTarget, closeDetail])
 
   // G-prefix navigation (§1.5, shell P1-5): `g` then t/k/i/d/g/s/, within
   // 600ms. Registered in the capture phase so the second key never reaches
@@ -262,15 +284,15 @@ export function Dashboard() {
 
       {/* Center: Main content area */}
       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
-        {/* Focus banner (compact mode) */}
-        {focusActive && focusCompact && <FocusBanner />}
+        {/* Focus banner: coexists with shell navigation while anything is queued */}
+        {focusQueued && !focusExpanded && <FocusBanner />}
 
         {/* Page content / Focus view / Detail view.
             Each page now renders its own <PageHeader> — there's no longer
             a separate Dashboard title bar. The PageHeader provides the
             Tauri drag region for every page. */}
         <div ref={scrollRef} className="flex flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
-          {focusActive && !focusCompact ? (
+          {focusExpanded ? (
             <FocusView />
           ) : detailTarget && detailMode === 'body' && !(currentPage === 'tasks' && detailTarget.type === 'task') ? (
             // Task details opened while ON the Tasks page render INSIDE
@@ -319,8 +341,7 @@ export function Dashboard() {
       {/* Command bar overlay */}
       <CommandBar />
 
-      {/* Focus mode overlays */}
-      {showCelebration && <FocusCelebration />}
+      {/* Focus recovery notice (shows a paused total; never starts) */}
       <FocusResumeDialog />
     </div>
   )

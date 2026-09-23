@@ -9,28 +9,34 @@ use nimble_core::{
 
 #[tokio::test]
 async fn v20_intent_exports_and_local_ledgers_stay_private() {
-    let (pool, path) = nimble_core::test_util::file_pool().await;
+    let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1)
+        .connect("sqlite::memory:").await.unwrap();
+    migrations::run_migrations_to_version(&pool, 20).await.unwrap();
     assert_eq!(migrations::current_schema_version(&pool).await.unwrap(), 20);
-    let task = create_local_task(
-        &pool,
-        CreateTaskInput {
-            content: "Review".into(),
-            due_date: Some("2026-09-22".into()),
-            due_time: Some("09:00".into()),
-            reminder_offset_minutes: Some(15),
-            google_calendar_enabled: Some(true),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(task.reminder_offset_minutes, Some(15));
-    assert!(task.google_calendar_enabled);
+    sqlx::query("INSERT INTO local_tasks(id,content,due_date,due_time,reminder_offset_minutes,google_calendar_enabled) VALUES('v20-task','Review','2026-09-22','09:00',15,1)")
+        .execute(&pool).await.unwrap();
     let export = export_portable(&pool).await.unwrap();
     let data: serde_json::Value = serde_json::from_slice(&export.data).unwrap();
     let format: serde_json::Value = serde_json::from_slice(&export.format).unwrap();
     assert_eq!(format["schema_version"], 20);
     assert_eq!(data["local_tasks"][0]["reminder_offset_minutes"], 15);
+    let root = std::env::temp_dir().canonicalize().unwrap()
+        .join(format!("nimble-v20-compat-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let source = root.join("portable");
+    std::fs::create_dir(&source).unwrap();
+    std::fs::write(source.join("data.json"), &export.data).unwrap();
+    std::fs::write(source.join("format.json"), &export.format).unwrap();
+    let restored = nimble_core::db::recovery::restore_export(&source, &root.join("restored"))
+        .await.unwrap();
+    let copy = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new().filename(restored.output).read_only(true)
+    ).await.unwrap();
+    let round_trip = export_portable(&copy).await.unwrap();
+    assert_eq!(round_trip.data, export.data);
+    assert_eq!(round_trip.format, export.format);
+    copy.close().await;
+    std::fs::remove_dir_all(root).unwrap();
     for private in [
         "reminder_deliveries",
         "google_calendar_state",
@@ -40,20 +46,12 @@ async fn v20_intent_exports_and_local_ledgers_stay_private() {
         assert!(data.get(private).is_none());
         assert!(format["excluded"].get(private).is_some());
     }
-    let cleared = update_local_task(
-        &pool,
-        &task.id,
-        UpdateTaskInput {
-            clear_due_time: true,
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(cleared.reminder_offset_minutes, None);
-    assert!(!cleared.google_calendar_enabled);
+    sqlx::query("UPDATE local_tasks SET due_time=NULL,reminder_offset_minutes=NULL,google_calendar_enabled=0 WHERE id='v20-task'")
+        .execute(&pool).await.unwrap();
+    let cleared: (Option<i64>, i64) = sqlx::query_as("SELECT reminder_offset_minutes,google_calendar_enabled FROM local_tasks WHERE id='v20-task'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(cleared, (None, 0));
     pool.close().await;
-    std::fs::remove_file(path).unwrap();
 }
 
 #[tokio::test]
@@ -332,4 +330,47 @@ async fn project_move_clears_retained_section_but_accepts_explicit_destination_s
     assert_eq!(explicit.section_id.as_deref(), Some(first_section.id.as_str()));
     pool.close().await;
     std::fs::remove_file(path).unwrap();
+}
+
+/// Final review I3: a failure part-way through v21 must leave a populated
+/// v20 database exactly v20 (no partial columns/tables), and a rerun succeeds.
+#[tokio::test]
+async fn failed_v21_migration_rolls_back_to_exact_v20_and_rerun_succeeds() {
+    let root = std::env::temp_dir().canonicalize().unwrap()
+        .join(format!("nimble-v21-atomic-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(root.join("nimble.db")).create_if_missing(true);
+    let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1)
+        .connect_with(options).await.unwrap();
+    migrations::run_migrations_to_version(&pool, 20).await.unwrap();
+    sqlx::query("INSERT INTO local_tasks(id,content,due_date) VALUES('v20-task','Review','2026-09-22')")
+        .execute(&pool).await.unwrap();
+    // Injected failure: v21's LAST table already exists, so the migration
+    // fails after its ALTER TABLE and earlier CREATEs have run.
+    sqlx::query("CREATE TABLE focus_replica(x)").execute(&pool).await.unwrap();
+    let schema_before: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT name, sql FROM sqlite_master ORDER BY name")
+            .fetch_all(&pool).await.unwrap();
+
+    let failed = migrations::run_migrations(&pool).await;
+    assert!(failed.is_err(), "injected failure must surface");
+    assert_eq!(migrations::current_schema_version(&pool).await.unwrap(), 20);
+    let schema_after: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT name, sql FROM sqlite_master ORDER BY name")
+            .fetch_all(&pool).await.unwrap();
+    assert_eq!(schema_after, schema_before, "no partial v21 objects or columns");
+    let columns: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('local_tasks')")
+        .fetch_all(&pool).await.unwrap();
+    assert!(!columns.iter().any(|c| c == "sync_policy"));
+
+    // Clear the injected obstacle; the rerun applies v21 completely.
+    sqlx::query("DROP TABLE focus_replica").execute(&pool).await.unwrap();
+    migrations::run_migrations(&pool).await.unwrap();
+    assert_eq!(migrations::current_schema_version(&pool).await.unwrap(), 21);
+    let policy: String = sqlx::query_scalar("SELECT sync_policy FROM local_tasks WHERE id='v20-task'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(policy, "default");
+    pool.close().await;
+    std::fs::remove_dir_all(root).unwrap();
 }

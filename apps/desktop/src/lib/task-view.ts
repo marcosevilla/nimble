@@ -10,6 +10,7 @@ import {
 } from 'date-fns'
 import { STATUSES } from '@/components/tasks/StatusDropdown'
 import type { LocalTask, Section, TaskStatus } from '@nimble/types'
+import { UNSECTIONED, laneKeyOf, orderedSections } from './sectionLanes'
 
 // ── Grouping ─────────────────────────────────────────────────────────────
 
@@ -30,10 +31,8 @@ export interface TaskGroup {
   tasks: LocalTask[]
 }
 
-// Sentinel container id for tasks with no section — shared with
-// SectionedTaskList, which special-cases this key to skip rendering a
-// section header (an unlabeled top lane, matching pre-Task-5 behavior).
-export const UNSECTIONED = '__unsectioned__'
+// Lane order lives in sectionLanes.ts, shared with Focus project candidates.
+export { UNSECTIONED } from './sectionLanes'
 
 const PRIORITY_GROUPS: { value: number; title: string }[] = [
   { value: 4, title: 'Urgent' },
@@ -72,15 +71,12 @@ function dueBucketKey(task: LocalTask): string {
 }
 
 function groupBySection(topLevel: LocalTask[], sections: Section[]): TaskGroup[] {
-  const sorted = [...sections].sort((a, b) => a.position - b.position)
   const groups: TaskGroup[] = [{ key: UNSECTIONED, title: 'No section', tasks: [] }]
-  for (const s of sorted) groups.push({ key: s.id, title: s.name, tasks: [] })
+  for (const s of orderedSections(sections)) groups.push({ key: s.id, title: s.name, tasks: [] })
 
   const byKey = new Map(groups.map((g) => [g.key, g]))
-  for (const t of topLevel) {
-    const key = t.section_id && byKey.has(t.section_id) ? t.section_id : UNSECTIONED
-    byKey.get(key)!.tasks.push(t)
-  }
+  const known = new Set(sections.map((s) => s.id))
+  for (const t of topLevel) byKey.get(laneKeyOf(t, known))!.tasks.push(t)
   return groups
 }
 

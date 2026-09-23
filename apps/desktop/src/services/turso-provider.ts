@@ -42,6 +42,11 @@ import { listProjects } from '@/services/turso/projects'
 import { createCapture, listCaptures } from '@/services/turso/captures'
 import { listLabels } from '@/services/turso/labels'
 import { listSections } from '@/services/turso/sections'
+import { readFocusHistory, readFocusSnapshot } from '@/services/turso/focus'
+import { focusUnsupported } from '@/services/focus-events'
+
+const WEB_FOCUS_REASON =
+  'The web shows the settled focus queue and history. Start, reorder, timing and import happen in the desktop app.'
 
 /** Thrown (as a rejection) by every not-yet-implemented provider method. */
 export class WebNotImplementedError extends Error {
@@ -86,6 +91,7 @@ export function createTursoProvider(): DataProvider {
       verifyLatest: ni('backup.verifyLatest'),
       openFolder: ni('backup.openFolder'),
       configureRemote: ni('backup.configureRemote'),
+      activateRestoredProfile: ni('backup.activateRestoredProfile'),
     },
     settings: {
       // See note 2 in the file header — deliberately resolves.
@@ -175,8 +181,8 @@ export function createTursoProvider(): DataProvider {
       // `note` is accepted and ignored: it exists only to be written to
       // activity_log, which web does not write yet. Dropping it changes no task
       // state — the status transition itself is applied in full.
-      updateStatus: (id, status) => setTaskStatus(id, status),
-      complete: (id) => setTaskStatus(id, 'complete'),
+      updateStatus: (id, status, _note, expectedDueDate) => setTaskStatus(id, status, expectedDueDate),
+      complete: (id, expectedDueDate) => setTaskStatus(id, 'complete', expectedDueDate),
       uncomplete: (id) => setTaskStatus(id, 'todo'),
       delete: ni('tasks.delete'),
       reorder: ni('tasks.reorder'),
@@ -227,11 +233,28 @@ export function createTursoProvider(): DataProvider {
       getSummary: ni('activity.getSummary'),
     },
 
-    // Out of v1: a timer you would run at your desk (§5).
+    // Read-only settled replica. The desktop is the single focus writer; web
+    // never starts, reorders, imports or times anything, and every write is a
+    // typed `unsupported` rejection that keeps the caller's command — never a
+    // fake success.
     focus: {
-      startSession: ni('focus.startSession'),
-      endSession: ni('focus.endSession'),
-      getActive: ni('focus.getActive'),
+      capabilities: async () => ({
+        queue_read: true,
+        queue_write: false,
+        history_read: true,
+        live_timing: false,
+        companion: false,
+        import: false,
+        reason: WEB_FOCUS_REASON,
+      }),
+      snapshot: readFocusSnapshot,
+      execute: (command) => focusUnsupported(WEB_FOCUS_REASON, command),
+      history: readFocusHistory,
+      openCompanion: () => focusUnsupported(WEB_FOCUS_REASON),
+      previewImport: () => focusUnsupported(WEB_FOCUS_REASON),
+      commitImport: () => focusUnsupported(WEB_FOCUS_REASON),
+      deliveries: () => focusUnsupported(WEB_FOCUS_REASON),
+      resolveDelivery: () => focusUnsupported(WEB_FOCUS_REASON),
     },
 
     // Out of v1: the Today page needs AI priorities + calendar + the daily

@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input'
 import { useDetailStore } from '@/stores/detailStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { TaskItem } from './TaskItem'
+import { TaskRowActions } from '@/components/focus/FocusTaskEntry'
 import { getDataProvider } from '@/services/provider-context'
 import { labelColor } from '@/lib/labelColors'
 import type { LocalTask, Label } from '@nimble/types'
@@ -104,6 +105,8 @@ interface LocalTaskRowProps {
   /** Threaded straight through to TaskItem — see its doc comment. Defaults
    * to true so other call sites are unaffected. */
   showGrip?: boolean
+  /** The list binds `f` (Focus now) — the row menu shows the hint. */
+  focusShortcut?: boolean
 }
 
 export function LocalTaskRow({
@@ -118,6 +121,7 @@ export function LocalTaskRow({
   subtaskStats,
   dragHandleProps,
   showGrip = true,
+  focusShortcut = false,
 }: LocalTaskRowProps) {
   const addingSubtaskTo = useSelectionStore((s) => s.addingSubtaskTo)
   const setAddingSubtaskTo = useSelectionStore((s) => s.setAddingSubtaskTo)
@@ -173,6 +177,7 @@ export function LocalTaskRow({
         onFocusRow={onFocusRow}
         dragHandleProps={dragHandleProps}
         showGrip={showGrip}
+        actions={<TaskRowActions task={task} focusShortcut={focusShortcut} />}
       />
 
       {showSubInput && onAddSubtask && (

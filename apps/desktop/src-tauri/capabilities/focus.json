@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "focus-companion",
+  "description": "Always-on-top focus companion: event bridge plus read-only window geometry. Resizing, showing and opening tasks go through validated app commands; no fs, shell, clipboard or window-mutation permissions.",
+  "windows": ["focus"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-current-monitor",
+    "core:window:allow-primary-monitor",
+    "core:window:allow-outer-position",
+    "core:window:allow-inner-size",
+    "core:window:allow-outer-size",
+    "core:window:allow-scale-factor"
+  ]
+}

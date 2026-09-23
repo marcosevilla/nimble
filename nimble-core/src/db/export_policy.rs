@@ -54,7 +54,7 @@ pub(crate) const TABLES: &[TablePolicy] = &[
 /// to portable data; device-local calendar and delivery state is excluded.
 pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
     if version == 19 { return Some(TABLES.to_vec()); }
-    if version != 20 { return None; }
+    if version != 20 && version != 21 { return None; }
     let mut tables = TABLES.to_vec();
     for policy in &mut tables {
         match policy.name {
@@ -69,6 +69,29 @@ pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
         table!("google_calendar_links"; ["task_id","event_id","etag","base_json","operation_id","desired_json","state","retry_after"]; []; ["task_id"]),
         table!("google_calendar_conflicts"; ["task_id","reason","local_json","remote_json","created_at"]; []; ["task_id"]),
     ]);
+    if version == 21 {
+        for policy in &mut tables {
+            match policy.name {
+                "local_tasks" => *policy = table!("local_tasks"; ["id","parent_id","content","description","project_id","priority","due_date","completed","completed_at","position","created_at","updated_at","status","linked_doc_id","external_id","external_source","remote_updated_at","synced_snapshot","due_time","duration_minutes","recurrence_rule","section_id","reminder_offset_minutes","google_calendar_enabled","sync_policy"]; ["id","parent_id","content","description","project_id","priority","due_date","completed","completed_at","position","created_at","updated_at","status","linked_doc_id","external_id","external_source","due_time","duration_minutes","recurrence_rule","section_id","reminder_offset_minutes","google_calendar_enabled","sync_policy"]),
+                "daily_state" => *policy = table!("daily_state"; ["date","energy_level","top_priorities","first_opened_at","last_saved_at","focus_task_id","focus_started_at","focus_paused_at"]; ["date","energy_level","top_priorities","first_opened_at","last_saved_at"]; ["date"]),
+                _ => {},
+            }
+        }
+        tables.extend([
+            table!("focus_queue_state"; ["id","queue_id","writer_device_id","owner_epoch","revision","entries_json","selected_occurrence_id","updated_at"]; ["id","queue_id","writer_device_id","owner_epoch","revision","entries_json","selected_occurrence_id","updated_at"]),
+            table!("focus_occurrences"; ["id","task_id","original_task_id","title_snapshot","project_snapshot","scheduling_identity","generation","state","created_at","completed_at","completion_reason","archived"]; ["id","task_id","original_task_id","title_snapshot","project_snapshot","scheduling_identity","generation","state","created_at","completed_at","completion_reason","archived"]),
+            table!("focus_sessions"; ["id","occurrence_id","owner_device_id","owner_epoch","status","phase","mode","config_json","work_ms","break_ms","round_break_ms","round_work_ms","round","started_at","checkpoint_at","ended_at","session_revision","end_reason","timezone_offset_minutes"]; ["id","occurrence_id","owner_device_id","owner_epoch","status","phase","mode","config_json","work_ms","break_ms","round_break_ms","round_work_ms","round","started_at","checkpoint_at","ended_at","session_revision","end_reason","timezone_offset_minutes"]),
+            table!("focus_segments"; ["id","session_id","kind","started_at","checkpoint_at","duration_ms","closed_at","close_reason"]; ["id","session_id","kind","started_at","checkpoint_at","duration_ms","closed_at","close_reason"]),
+            table!("focus_runtime"; ["id","live_session_id","owner_epoch","process_generation","engine_revision","heartbeat_sequence","checkpoint_at","sound_token","boundary_token","recovery_reason"]; []),
+            table!("focus_import_batches"; ["id","source_namespace","schema_version","file_hashes_json","preview_hash","mappings_json","created_at","committed_at"]; ["id","source_namespace","schema_version","file_hashes_json","preview_hash","mappings_json","created_at","committed_at"]),
+            table!("focus_import_records"; ["id","batch_id","source_namespace","record_key","fingerprint","status","mapping_json","decision_json","raw_evidence_json"]; ["id","batch_id","source_namespace","record_key","fingerprint","status","mapping_json","decision_json","raw_evidence_json"]),
+            table!("focus_import_totals"; ["id","source_namespace","record_key","occurrence_id","unresolved_task_id","duration_ms","completed_at","source_kind","batch_id","inclusion"]; ["id","source_namespace","record_key","occurrence_id","unresolved_task_id","duration_ms","completed_at","source_kind","batch_id","inclusion"]),
+            table!("focus_command_receipts"; ["command_id","request_hash","result_json","committed_revision","affected_ids_json","committed_at"]; ["command_id","request_hash","result_json","committed_revision","affected_ids_json","committed_at"]; ["command_id"]),
+            table!("focus_delivery"; ["id","occurrence_id","purpose","native_task_id","external_id","payload_json","idempotency_key","temp_id","state","attempts","next_attempt_at","last_error","remote_receipt","created_at","import_record_id","resolution_json","updated_at"]; ["id","occurrence_id","purpose","native_task_id","external_id","payload_json","idempotency_key","temp_id","state","attempts","next_attempt_at","last_error","remote_receipt","created_at","import_record_id","resolution_json","updated_at"]),
+            table!("focus_undo"; ["token","original_task_id","task_snapshot_json","queue_entry_json","previous_entry_id","next_entry_id","occurrence_ids_json","issued_at","expires_at","consumed"]; []; ["token"]),
+            table!("focus_replica"; ["id","writer_device_id","owner_epoch","revision","queue_revision","payload_json","as_of"]; []),
+        ]);
+    }
     tables.sort_by_key(|policy| policy.name);
     Some(tables)
 }

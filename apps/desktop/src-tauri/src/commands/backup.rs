@@ -35,3 +35,15 @@ pub async fn backup_verify_latest(app: AppHandle) -> Result<Verification, String
         .map(|()| Verification { verified: true })
         .map_err(public_error)
 }
+/// Explicitly activate a restored profile on this Mac (clears the restore
+/// marker, re-initializes focus ownership; starts nothing). Idempotent.
+#[tauri::command]
+pub async fn backup_activate_restored_profile(app: AppHandle) -> Result<BackupStatus, String> {
+    crate::focus_service::activate_restored(&app)
+        .await
+        .map_err(|e| match e.code {
+            nimble_core::focus_types::FocusErrorCode::WrongOwner => "restore_activation_refused".to_string(),
+            _ => "backup_action_failed".to_string(),
+        })?;
+    backup_runner::read_status(&app).await.map_err(public_error)
+}

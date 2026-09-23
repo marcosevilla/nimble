@@ -33,8 +33,16 @@ pub enum AgentOperation {
     BackupStatus,
     BackupNow,
     BackupVerify,
+    /// Explicit activation of a restored profile by the running owner app.
+    RestoreActivate,
     SyncStatus,
     SyncNow,
+    /// A task write the running app executes through its one FocusService.
+    /// `command.command_id` is the retry identity: a caller whose previous
+    /// attempt had an uncertain outcome must resend the identical command.
+    NativeTask {
+        command: crate::db::focus::engine::NativeTaskCommand,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -212,6 +220,36 @@ impl Drop for SchemaLock {
         }
     }
 }
+/// Process/profile ownership: the running desktop app holds an exclusive,
+/// non-blocking `flock` on `<profile>/.nimble-owner.lock` for its whole
+/// lifetime (the kernel drops it on any exit, including a crash or force
+/// quit). A second app process on the same profile cannot become a focus
+/// writer, and `dt` treats a held lock as "the app owns this profile" even
+/// when the app's local listener is unreachable, so it never writes
+/// directly behind a running owner.
+#[derive(Debug)]
+pub struct ProfileOwnerLock(#[allow(dead_code)] SchemaLock);
+impl ProfileOwnerLock {
+    fn path(database: &Path) -> io::Result<PathBuf> {
+        Ok(database.parent().ok_or_else(denied)?.join(".nimble-owner.lock"))
+    }
+    /// Take ownership; fails with `WouldBlock` while another process owns it.
+    pub fn acquire(database: &Path) -> io::Result<Self> {
+        SchemaLock::at(&Self::path(database)?, true).map(Self)
+    }
+    /// True while some process holds the owner lock for this profile.
+    pub fn is_held(database: &Path) -> io::Result<bool> {
+        let path = Self::path(database)?;
+        if !path.exists() {
+            return Ok(false);
+        }
+        match SchemaLock::at(&path, false) {
+            Ok(_probe) => Ok(false),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(true),
+            Err(e) => Err(e),
+        }
+    }
+}
 pub async fn read_frame<R: AsyncRead + Unpin>(reader: R) -> io::Result<Vec<u8>> {
     let mut line = Vec::new();
     let mut limited = BufReader::new(reader).take((MAX_FRAME + 1) as u64);
@@ -245,6 +283,32 @@ mod tests {
         std::os::unix::fs::symlink(root.join(".nimble-schema.lock"), &link).unwrap();
         assert!(SchemaLock::at(&link, true).is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn owner_lock_is_exclusive_and_visible_to_probes() {
+        let root = std::env::temp_dir().join(format!("nimble-owner-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let db = root.join("nimble.db");
+        assert!(!ProfileOwnerLock::is_held(&db).unwrap());
+        let owner = ProfileOwnerLock::acquire(&db).unwrap();
+        assert!(ProfileOwnerLock::is_held(&db).unwrap());
+        let second = ProfileOwnerLock::acquire(&db).unwrap_err();
+        assert_eq!(second.kind(), io::ErrorKind::WouldBlock);
+        // A probe never steals or blocks ownership.
+        assert!(ProfileOwnerLock::is_held(&db).unwrap());
+        drop(owner);
+        assert!(!ProfileOwnerLock::is_held(&db).unwrap());
+        assert!(ProfileOwnerLock::acquire(&db).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn native_task_operation_round_trips_its_command_id() {
+        let json = r#"{"kind":"native_task","command":{"command_id":"c1","action":{"kind":"delete","id":"t1"}}}"#;
+        let op: AgentOperation = serde_json::from_str(json).unwrap();
+        match op {
+            AgentOperation::NativeTask { command } => assert_eq!(command.command_id, "c1"),
+            _ => panic!("wrong variant"),
+        }
     }
     #[test]
     fn protocol_rejects_unknown_operations() {

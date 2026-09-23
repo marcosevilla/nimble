@@ -1,5 +1,7 @@
 # Focus Queue Absorption Implementation Plan
 
+**Execution status (2026-09-22):** Tasks 1–4 implemented and independently reviewed; paused at Marco’s request before Task 5. Continue in `codex/focus-absorption`; see [verification](../../focus-queue-verification.md) and the worktree’s SDD ledger. Tasks 5–12 and whole-branch/native acceptance remain open.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Absorb shipped Focus Queue tracking into Nimble with its familiar card/queue interactions, durable shared timing, safe import and reviewable retirement readiness.
@@ -99,7 +101,7 @@ Test harness created with Task 3 in `nimble-core/tests/common/focus.rs`: `Harnes
 
 **Interfaces:** Produce the DTOs above and new focus tables from spec §5. Existing `FocusState` remains compatibility-only until Task 8 removes old consumers. Expose `db::focus::schema::validate_config(&FocusConfig) -> Result<()>` and export FocusService later from `db::focus`.
 
-- [ ] Write migration tests before adding schema. Use the existing test pool and exact invariants:
+- [x] Write migration tests before adding schema. Use the existing test pool and exact invariants:
 ```rust
 #[tokio::test]
 async fn focus_schema_is_present() {
@@ -110,16 +112,16 @@ async fn focus_schema_is_present() {
  }
 }
 ```
-- [ ] Run `cargo test -p nimble-core --offline --test focus_schema`; expect missing-table assertion before implementation.
-- [ ] Add the next free migration (currently after 20). Implement fields in spec §5 with explicit CHECK constraints for nonnegative times/revisions, unique imported record keys, unique receipt IDs and retained historical IDs. Queue is ONE JSON aggregate row; sessions and segment durations are separate audit/total representations. No SQL trigger bodies (migration runner splits on semicolons).
+- [x] Run `cargo test -p nimble-core --offline --test focus_schema`; expect missing-table assertion before implementation.
+- [x] Add the next free migration (currently after 20). Implement fields in spec §5 with explicit CHECK constraints for nonnegative times/revisions, unique imported record keys, unique receipt IDs and retained historical IDs. Queue is ONE JSON aggregate row; sessions and segment durations are separate audit/total representations. No SQL trigger bodies (migration runner splits on semicolons).
 ```sql
 CREATE UNIQUE INDEX focus_one_open_segment ON focus_segments((1)) WHERE closed_at IS NULL;
 CREATE UNIQUE INDEX focus_one_occurrence_generation ON focus_occurrences(original_task_id, generation);
 CREATE UNIQUE INDEX focus_import_record_key ON focus_import_records(source_namespace, record_key);
 ```
 Add persistent `local_tasks.sync_policy` values `default`/`local_only`, default `default` for existing tasks; preserve it in Rust/TS task DTOs and ordinary create/update. `NULL external_id` alone cannot encode local-only. References to historical task IDs must survive deletion (nullable current task reference plus immutable original ID).
-- [ ] Implement config validation: all times safe integer ms, budget null for count-up, positive 1–1,440 whole-minute budget for timebox, Pomodoro work/break positive whole minutes and rounds 1–100. Mirror shape exports; no scheduling field coupling.
-- [ ] Run schema tests and existing migration tests. Assert repeated migration is a no-op and old data unchanged. Commit owned schema/types/tests as `feat: persist focus queue and timing domain`.
+- [x] Implement config validation: all times safe integer ms, budget null for count-up, positive 1–1,440 whole-minute budget for timebox, Pomodoro work/break positive whole minutes and rounds 1–100. Mirror shape exports; no scheduling field coupling.
+- [x] Run schema tests and existing migration tests. Assert repeated migration is a no-op and old data unchanged. Commit owned schema/types/tests as `feat: persist focus queue and timing domain`.
 
 ### Task 2: Make native task mutations transaction-composable
 
@@ -127,7 +129,7 @@ Add persistent `local_tasks.sync_policy` values `default`/`local_only`, default 
 
 **Interfaces:** Internal functions consume `&mut sqlx::SqliteConnection`, not a pool: `create_task_tx(conn, input: CreateTaskInput, policy: MutationPolicy) -> Result<LocalTask>`, `update_task_tx(conn, id: &str, input: UpdateTaskInput, policy) -> Result<LocalTask>`, `set_status_tx(conn, id: &str, status: &str, today: NaiveDate, policy) -> Result<TaskEffects>`, `delete_task_tx(conn, id: &str, policy) -> Result<TaskEffects>`. `MutationPolicy` = User/Remote/Import. `TaskEffects` owns changed/deleted task snapshots and recurrence before/after due identity. Public task APIs retain signatures and wrap these operations; observers enqueue through the same connection. Activity remains post-commit best-effort.
 
-- [ ] Add a rollback test using real native create/status logic in an explicit transaction:
+- [x] Add a rollback test using real native create/status logic in an explicit transaction:
 ```rust
 #[tokio::test]
 async fn task_and_delivery_intent_rollback_together() {
@@ -144,17 +146,17 @@ async fn task_and_delivery_intent_rollback_together() {
 }
 ```
 Add an active-adapter synthetic fixture to assert the in-transaction outbox insert also rolls back. Add deterministic fault injection after native status change and before receipt commit to prove rollback (Task 3 adds receipt integration).
-- [ ] Run `cargo test -p nimble-core --offline --test focus_task_tx`; initially fail on missing transaction API. Preserve existing task hierarchy, labels, reminder and Calendar behavior through their existing suites.
-- [ ] Move mutation internals into connection-taking helpers without nested BEGIN or post-commit mandatory enqueue. Snapshot mutation policy and adapter activation before transaction; avoid a credentials/network lookup under lock. User required intents fail the local transaction on enqueue error. Remote/Import never echo outbound changes. Native task APIs call focus reconciliation in the same transaction once Task 3 supplies it.
+- [x] Run `cargo test -p nimble-core --offline --test focus_task_tx`; initially fail on missing transaction API. Preserve existing task hierarchy, labels, reminder and Calendar behavior through their existing suites.
+- [x] Move mutation internals into connection-taking helpers without nested BEGIN or post-commit mandatory enqueue. Snapshot mutation policy and adapter activation before transaction; avoid a credentials/network lookup under lock. User required intents fail the local transaction on enqueue error. Remote/Import never echo outbound changes. Native task APIs call focus reconciliation in the same transaction once Task 3 supplies it.
 ```rust
 let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
 let effects = set_status_tx(&mut tx, id, status, today, MutationPolicy::User).await?;
 tx.commit().await?;
 // Activity/invalidation occurs after successful commit only.
 ```
-- [ ] Test `local_only` suppression on create, update, pull-observer and `seed_outbox_for_unlinked`, not only import. A duplicate local task remains local. Preserve existing normal task export behavior.
-- [ ] Pin recurrence effects: ordinary native recurring completion advances local due date through existing recurrence logic and produces **one due-update intent, not a due-update plus close**. Record old occurrence completion independently; the time-comment bridge can report the work. This preserves current native adapter behavior; legacy pending recurring closes require reconciliation. Add a twice-complete test with old generation retry and no double advance.
-- [ ] Run relevant existing task/Todoist tests plus new transaction suite; commit as `refactor: compose native task mutations with focus transactions`.
+- [x] Test `local_only` suppression on create, update, pull-observer and `seed_outbox_for_unlinked`, not only import. A duplicate local task remains local. Preserve existing normal task export behavior.
+- [x] Pin recurrence effects: ordinary native recurring completion advances local due date through existing recurrence logic and produces **one due-update intent, not a due-update plus close**. Record old occurrence completion independently; the time-comment bridge can report the work. This preserves current native adapter behavior; legacy pending recurring closes require reconciliation. Add a twice-complete test with old generation retry and no double advance.
+- [x] Run relevant existing task/Todoist tests plus new transaction suite; commit as `refactor: compose native task mutations with focus transactions`.
 
 ### Task 3: Build serialized queue and timer execution
 
@@ -162,7 +164,7 @@ tx.commit().await?;
 
 **Interfaces:** Produce `FocusService` contract above. `reconcile_task_effects_tx(conn, effects: &TaskEffects) -> Result<()>` settles/removes affected occurrences using current persisted checkpoint and advances revisions. Normal focus command handling settles elapsed just before acquiring its transaction; source task operations must share the service's monotonic clock/serialization on desktop. DB writes outside desktop service must pause at persisted checkpoint, never guess elapsed.
 
-- [ ] Write executable scenario tests with the real Harness; the first failing case is time preservation:
+- [x] Write executable scenario tests with the real Harness; the first failing case is time preservation:
 ```rust
 #[tokio::test]
 async fn paused_time_survives_switch_and_next_requires_start() {
@@ -179,8 +181,8 @@ async fn paused_time_survives_switch_and_next_requires_start() {
  assert_eq!(h.snapshot().await.queue.len(),1);
 }
 ```
-- [ ] Run `cargo test -p nimble-core --offline --test focus_engine`; expect missing service/behavior failure. Add harness methods by calling actual service/native CRUD, not reimplementing state transitions.
-- [ ] Implement receipt-first command execution, serialized revisions and invariant checks:
+- [x] Run `cargo test -p nimble-core --offline --test focus_engine`; expect missing service/behavior failure. Add harness methods by calling actual service/native CRUD, not reimplementing state transitions.
+- [x] Implement receipt-first command execution, serialized revisions and invariant checks:
 ```text
 lock service -> hash canonical request -> read matching receipt
 if same ID/body exists: return old result plus current snapshot, replayed=true
@@ -190,9 +192,9 @@ settle clock delta -> apply queue/task/session effects -> persist receipt + publ
 commit -> update monotonic anchor -> broadcast IDs/revisions
 ```
 Implement every FocusAction, duplicate enqueue no-op, full-set reorder conflict, promote pause, Start switch atomic, Stop retains first, Skip moves bottom, direct upcoming completion preserves unrelated running session. Undo restores behind active entry. Completion/recurrence freezes generation; new occurrence not autoqueued.
-- [ ] Implement segmented accumulation and recovery; checkpoints accept <=40,000ms, longer gaps freeze/pause at prior checkpoint. Work/break accounted separately; Pomodoro rounds cap at work boundary and wait; paused break resumes same phase. Boundaries have durable sound tokens. Never sum segment audit plus session accumulator. Test 3 work rounds + breaks, Stop/Resume, budget changes and 60-second gap.
-- [ ] Add tests for same command replay after restart/stale revisions, mismatched body, simultaneous Start/reorder, disk error rollback, parent cascade, remote completion and delete/Undo while B runs. Use integer exact totals, no sleeps. Restart increments process generation but retains owner epoch; running marker normalizes paused across dates.
-- [ ] Run engine/recovery/task suites, commit as `feat: serialize durable focus queue and timer commands`.
+- [x] Implement segmented accumulation and recovery; checkpoints accept <=40,000ms, longer gaps freeze/pause at prior checkpoint. Work/break accounted separately; Pomodoro rounds cap at work boundary and wait; paused break resumes same phase. Boundaries have durable sound tokens. Never sum segment audit plus session accumulator. Test 3 work rounds + breaks, Stop/Resume, budget changes and 60-second gap.
+- [x] Add tests for same command replay after restart/stale revisions, mismatched body, simultaneous Start/reorder, disk error rollback, parent cascade, remote completion and delete/Undo while B runs. Use integer exact totals, no sleeps. Restart increments process generation but retains owner epoch; running marker normalizes paused across dates.
+- [x] Run engine/recovery/task suites, commit as `feat: serialize durable focus queue and timer commands`.
 
 ### Task 4: Preserve focus through backup and ordered replication
 
@@ -200,7 +202,7 @@ Implement every FocusAction, duplicate enqueue no-op, full-set reorder conflict,
 
 **Interfaces:** `apply_focus_replica_tx(conn, payload: FocusReplica) -> Result<bool>` accepts only recognized writer/epoch and strictly newer revision; `FocusReplica { writer_device_id, owner_epoch, revision, queue, occurrences, sessions, totals, as_of }` contains settled data only. `normalize_focus_restore(conn) -> Result<()>` clears authority/live segments and quarantines pending delivery. Existing archive versions remain readable; bump export format compatibly.
 
-- [ ] Write backup test using Task 3 Harness, pause after 20,000ms, invoke existing export and isolated restore helpers, assert total/order equality and no running/armed intent. Use existing frozen C1 archive fixtures unchanged.
+- [x] Write backup test using Task 3 Harness, pause after 20,000ms, invoke existing export and isolated restore helpers, assert total/order equality and no running/armed intent. Use existing frozen C1 archive fixtures unchanged.
 ```rust
 #[test]
 fn stale_replica_revision_is_rejected() {
@@ -211,10 +213,10 @@ fn stale_replica_revision_is_rejected() {
 }
 ```
 Expose the pure `accept_revision(writer: &str, epoch: &str, revision: u64, incoming_writer: &str, incoming_epoch: &str, incoming_revision: u64) -> bool` used by real apply.
-- [ ] Run `cargo test -p nimble-core --offline --test focus_backup --test focus_replica`; expect schema/export omissions initially.
-- [ ] Extend every enumerated export table/column policy with spec §8 categories. Restore receipts/import keys, preserve unresolved references, normalize running to paused, reset ownership to disabled, quarantine external intents and invalidate Undo. Do not infer durations from legacy daily_state/activity. Preserve existing source-versus-restored equality verification first, then normalize a separate activation copy before publication; do not alter evidence before equality checks.
-- [ ] Extend remote schema creation/upgrades, sanitizer, seed and pull handlers; publish queue as one aggregate, never separate row positions. Local authority ignores pulled focus writes; web sees settled snapshots with as_of. Missing task bodies show unavailable references. Mirror schema only in dormant mobile; do not revive mobile UI/provider.
-- [ ] Run focus backup/replica tests and existing export/recovery suite; commit as `feat: back up and replicate settled focus state safely`.
+- [x] Run `cargo test -p nimble-core --offline --test focus_backup --test focus_replica`; expect schema/export omissions initially.
+- [x] Extend every enumerated export table/column policy with spec §8 categories. Restore receipts/import keys, preserve unresolved references, normalize running to paused, reset ownership to disabled, quarantine external intents and invalidate Undo. Do not infer durations from legacy daily_state/activity. Preserve existing source-versus-restored equality verification first, then normalize a separate activation copy before publication; do not alter evidence before equality checks.
+- [x] Extend remote schema creation/upgrades, sanitizer, seed and pull handlers; publish queue as one aggregate, never separate row positions. Local authority ignores pulled focus writes; web sees settled snapshots with as_of. Missing task bodies show unavailable references. Mirror schema only in dormant mobile; do not revive mobile UI/provider.
+- [x] Run focus backup/replica tests and existing export/recovery suite; commit as `feat: back up and replicate settled focus state safely`.
 
 ### Task 5: Expose one service to providers and all windows
 
@@ -373,7 +375,7 @@ fn historical_or_unmapped_time_never_becomes_comment() {
 
 **Interfaces:** Final evidence maps every F01–F26 to automated/native/manual-live status, with commands, results and build identity. Import report contains only synthetic inputs unless Marco separately provides an approved final snapshot.
 
-- [ ] Run complete appropriate suites after integration:
+- [x] Run complete appropriate suites after integration:
 ```bash
 cargo test --workspace --offline
 node --test apps/desktop/tests/*.test.mjs
@@ -381,10 +383,10 @@ npm run build --workspace @nimble/desktop
 npm run build:web --workspace @nimble/desktop
 ```
 Run targeted lint on changed frontend files. Use existing dependencies; if setup required, install locked project dependencies only in worktree and preserve lockfile. Bare `tsc --noEmit` is not a build check here.
-- [ ] Build/run a distinctly named synthetic native app/profile with integrations/backups disabled, never `/Applications/Nimble.app`. Exercise two windows racing, close/reopen, sleep/wake, offline edits, exact multiple-round total, delete/Undo during B, completion errors, and source changes. Verify expected real native results; mark anything unavailable honestly.
-- [ ] Render reference review states from spec §4 in both themes and supported accent themes: narrow expanded; long-title+subtask compact; scaled; picker; edit/menu/Undo; history; source/still-open; empty/loading/offline. Preserve card/timer/Up-next hierarchy. Keep visual artifacts in `~/Developer/second-brain/outputs/2026/` with INDEX entry after reading its guidance, not repository screenshot clutter or `/tmp` deliverables.
-- [ ] Perform isolated backup/import round-trip and repeat import, verify exact millisecond totals/order/local-only/zero remote writes; test rollback procedure on synthetic profiles. Record no invented session spans and no unresolved silent data loss.
-- [ ] Run a fresh whole-branch code/spec review with the exact branch diff and task evidence. Fix blocking findings within scope, rerun affected tests and one scoped re-review. Update NEXT: implementation/test status separate from source installed, live import, pending-operation decisions, roughly 14 daily-use days, and app retirement/Todoist C1–C5. Commit `docs: record Focus Queue integration verification and remaining live gates`.
+- [x] Build/run a distinctly named synthetic native app/profile with integrations/backups disabled, never `/Applications/Nimble.app`. Exercise two windows racing, close/reopen, sleep/wake, offline edits, exact multiple-round total, delete/Undo during B, completion errors, and source changes. Verify expected real native results; mark anything unavailable honestly. *(Task 12: agent-run crash-restart, kill -9 and second-process checks at `95bbb53`; UI-driven items moved to the human checklist H1–H9 in `docs/focus-queue-verification.md`.)*
+- [x] Render reference review states from spec §4 in both themes and supported accent themes: narrow expanded; long-title+subtask compact; scaled; picker; edit/menu/Undo; history; source/still-open; empty/loading/offline. Preserve card/timer/Up-next hierarchy. Keep visual artifacts in `~/Developer/second-brain/outputs/2026/` with INDEX entry after reading its guidance, not repository screenshot clutter or `/tmp` deliverables.
+- [x] Perform isolated backup/import round-trip and repeat import, verify exact millisecond totals/order/local-only/zero remote writes; test rollback procedure on synthetic profiles. Record no invented session spans and no unresolved silent data loss.
+- [ ] Run a fresh whole-branch code/spec review with the exact branch diff and task evidence. Fix blocking findings within scope, rerun affected tests and one scoped re-review. Update NEXT: implementation/test status separate from source installed, live import, pending-operation decisions, roughly 14 daily-use days, and app retirement/Todoist C1–C5. Commit `docs: record Focus Queue integration verification and remaining live gates`. *(Task 12: NEXT updated and verification committed; the whole-branch review is run by the controller.)*
 
 ## Coverage and completion contract
 

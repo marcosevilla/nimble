@@ -25,6 +25,23 @@
         "visible": true
       },
       {
+        "label": "focus",
+        "title": "Focus",
+        "url": "/?window=focus",
+        "width": 340,
+        "height": 560,
+        "minWidth": 340,
+        "minHeight": 420,
+        "maxWidth": 340,
+        "maxHeight": 640,
+        "resizable": true,
+        "maximizable": false,
+        "fullscreen": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "focus": false
+      },
+      {
         "label": "capture",
         "title": "Quick Capture",
         "url": "/?window=capture",

@@ -10,7 +10,7 @@ import { useLocalTasks } from '@/hooks/useLocalTasks'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { useDetailStore } from '@/stores/detailStore'
 import { useSelectionStore } from '@/stores/selectionStore'
-import { useFocusStore } from '@/stores/focusStore'
+import { focusSpaceAction } from '@/stores/focusStore'
 import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { useDataProvider } from '@/services/provider-context'
 import type { CaptureRoute } from '@nimble/types'
@@ -502,8 +502,8 @@ function InboxNoteRow({
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return
         // Enter and Space open, like any role="button" (review I2); Space
-        // stays with Dashboard's pause/resume while a focus session runs.
-        if (e.key === 'Enter' || (e.key === ' ' && !useFocusStore.getState().isActive)) {
+        // pauses a running focus session instead (Dashboard).
+        if (e.key === 'Enter' || (e.key === ' ' && !focusSpaceAction())) {
           e.preventDefault()
           open()
         }

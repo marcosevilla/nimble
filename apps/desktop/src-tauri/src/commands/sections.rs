@@ -1,6 +1,8 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
+use crate::data_events::{after_commit, SECTIONS, TASKS_AND_SECTIONS};
+
 pub use nimble_core::types::Section;
 
 #[tauri::command]
@@ -18,31 +20,35 @@ pub async fn create_section(
     name: String,
 ) -> Result<Section, String> {
     let pool = app.state::<SqlitePool>();
-    nimble_core::db::sections::create_section(pool.inner(), &project_id, &name)
+    let result = nimble_core::db::sections::create_section(pool.inner(), &project_id, &name)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    after_commit(&app, result, SECTIONS, |section| vec![section.id.clone()])
 }
 
 #[tauri::command]
 pub async fn rename_section(app: AppHandle, id: String, name: String) -> Result<Section, String> {
     let pool = app.state::<SqlitePool>();
-    nimble_core::db::sections::rename_section(pool.inner(), &id, &name)
+    let result = nimble_core::db::sections::rename_section(pool.inner(), &id, &name)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    after_commit(&app, result, SECTIONS, |section| vec![section.id.clone()])
 }
 
 #[tauri::command]
 pub async fn delete_section(app: AppHandle, id: String) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    nimble_core::db::sections::delete_section(pool.inner(), &id)
+    let result = nimble_core::db::sections::delete_section(pool.inner(), &id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    after_commit(&app, result, TASKS_AND_SECTIONS, |_| vec![id.clone()])
 }
 
 #[tauri::command]
 pub async fn reorder_sections(app: AppHandle, section_ids: Vec<String>) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    nimble_core::db::sections::reorder_sections(pool.inner(), &section_ids)
+    let result = nimble_core::db::sections::reorder_sections(pool.inner(), &section_ids)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    after_commit(&app, result, SECTIONS, |_| section_ids.clone())
 }

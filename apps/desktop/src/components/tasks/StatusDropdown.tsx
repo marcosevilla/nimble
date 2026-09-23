@@ -1,3 +1,4 @@
+import { displayedDueDate } from '@/lib/displayedTasks'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { Circle, CircleDot, Loader, Ban, CheckCircle2 } from 'lucide-react'
@@ -38,13 +39,13 @@ export function getStatusConfig(status: TaskStatus): StatusConfig {
  * animation first, then fire the mutation as the row finishes sliding out.
  * Shared with the `x` row shortcut (tasks audit P1-1) so keyboard and mouse
  * completion look identical. */
-export function completeTaskWithExit(dp: DataProvider, taskId: string) {
+export function completeTaskWithExit(dp: DataProvider, taskId: string, dueDate?: string | null) {
   const store = useSelectionStore.getState()
   playCompletionSound()
   store.markTaskCompleting(taskId)
   setTimeout(async () => {
     try {
-      await dp.tasks.updateStatus(taskId, 'complete')
+      await dp.tasks.updateStatus(taskId, 'complete', undefined, dueDate !== undefined ? dueDate : displayedDueDate(taskId))
       emitTasksChanged()
     } catch (e) {
       toast.error(`Failed to update status: ${e}`)
@@ -63,9 +64,12 @@ interface StatusDropdownProps {
    * recurring (Task 13's ↻ affordance) show a "Rescheduled to <date>" toast
    * without needing this component to know anything about recurrence. */
   onComplete?: () => void
+  /** The due date shown with this task (null = none) — the recurring
+   * occurrence identity sent with completion. */
+  dueDate?: string | null
 }
 
-export function StatusDropdown({ taskId, status, size = 'sm', onComplete }: StatusDropdownProps) {
+export function StatusDropdown({ taskId, status, size = 'sm', onComplete, dueDate }: StatusDropdownProps) {
   const dp = useDataProvider()
   const markTaskCompleting = useSelectionStore((s) => s.markTaskCompleting)
   const clearTaskCompleting = useSelectionStore((s) => s.clearTaskCompleting)
@@ -107,7 +111,7 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete }: Stat
       markTaskCompleting(taskId)
       setTimeout(async () => {
         try {
-          await dp.tasks.updateStatus(taskId, newStatus)
+          await dp.tasks.updateStatus(taskId, newStatus, undefined, dueDate !== undefined ? dueDate : displayedDueDate(taskId))
           emitTasksChanged()
         } catch (e) {
           toast.error(`Failed to update status: ${e}`)
@@ -124,7 +128,7 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete }: Stat
     } catch (e) {
       toast.error(`Failed to update status: ${e}`)
     }
-  }, [taskId, status, dp, markTaskCompleting, clearTaskCompleting, onComplete])
+  }, [taskId, status, dp, markTaskCompleting, clearTaskCompleting, onComplete, dueDate])
 
   const handleBlockedSubmit = useCallback(async () => {
     try {

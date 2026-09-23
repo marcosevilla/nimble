@@ -1001,12 +1001,14 @@
     turso_pending: backupScenario === 'unavailable' ? null : 0,
     todoist_pending: backupScenario === 'unavailable' ? null : 0,
     todoist_failed: backupScenario === 'unavailable' ? null : 0,
+    restore_activation_required: backupScenario === 'restored',
     error: backupScenario === 'error' ? { stage: 'publish', code: 'offline', at: '2026-09-21T09:00:00Z' } : null,
   }
   var commands = {
     backup_get_status: function () { return Object.assign({}, backupMock) },
     backup_run_now: function () { backupMock.last_local_success_at = new Date().toISOString(); return Object.assign({}, backupMock) },
     backup_verify_latest: function () { return { verified: true } },
+    backup_activate_restored_profile: function () { backupMock.restore_activation_required = false; return Object.assign({}, backupMock) },
     backup_open_folder: function () { return null },
     backup_configure_remote: function (args) { backupMock.remote_configured = true; backupMock.remote_name = args.ownerRepo; return Object.assign({}, backupMock) },
     // Settings
@@ -1407,12 +1409,17 @@
     delete_doc_note: function () { return null },
     reorder_doc_notes: function () { return null },
 
-    // Focus
-    start_focus_session: function () { return null },
-    end_focus_session: function () { return null },
-    get_active_focus: function () {
-      return { task_id: null, started_at: null, paused_at: null }
+    // Focus (durable engine): an empty, read-only queue in the harness.
+    focus_capabilities: function () {
+      return { queue_read: true, queue_write: false, history_read: true, live_timing: false,
+        companion: false, import: false, reason: 'Focus is read-only in the browser harness.' }
     },
+    focus_snapshot: function () {
+      return { queue_revision: 0, engine_revision: 0, owner_epoch: 'mock', process_generation: 1,
+        writer_device_id: 'mock', queue: [], selected_occurrence_id: null, session: null, totals: {},
+        as_of: new Date().toISOString(), checkpoint_at: null, recovery_reason: null, replica: false }
+    },
+    focus_history: function () { return { rows: [], next_cursor: null } },
 
     // Goals
     get_goals: function () { return GOALS },

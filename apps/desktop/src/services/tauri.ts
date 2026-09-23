@@ -1,5 +1,18 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { BackupStatus } from '@nimble/types'
+import type {
+  BackupStatus,
+  FocusCapabilities,
+  FocusCommand,
+  FocusDeliveryResolution,
+  FocusDeliveryReviewItem,
+  FocusHistoryPage,
+  FocusImportPreview,
+  FocusImportResult,
+  LegacyFocusFiles,
+  FocusReply,
+  FocusSnapshot,
+} from '@nimble/types'
+import { FocusRequestError } from './focus-events'
 
 // Re-export all types from the shared package so existing imports continue to work
 export type {
@@ -36,7 +49,6 @@ export type {
   VaultScanReport,
   VaultStatus,
   VaultSaveResult,
-  FocusState,
   GoalStatus,
   Goal,
   GoalWithProgress,
@@ -89,7 +101,6 @@ import type {
   VaultScanReport,
   VaultStatus,
   VaultSaveResult,
-  FocusState,
   GoalStatus,
   Goal,
   GoalWithProgress,
@@ -302,6 +313,7 @@ export async function createLocalTask(opts: {
   recurrenceRule?: string
   sectionId?: string
   labelIds?: string[]
+  syncPolicy?: 'default' | 'local_only'
 }): Promise<LocalTask> {
   return invoke<LocalTask>('create_local_task', {
     content: opts.content,
@@ -317,6 +329,7 @@ export async function createLocalTask(opts: {
     recurrenceRule: opts.recurrenceRule,
     sectionId: opts.sectionId,
     labelIds: opts.labelIds,
+    syncPolicy: opts.syncPolicy,
   })
 }
 
@@ -345,20 +358,24 @@ export async function updateLocalTask(opts: {
   return invoke<LocalTask>('update_local_task', opts)
 }
 
-export async function updateTaskStatus(id: string, status: TaskStatus, note?: string): Promise<void> {
-  return invoke<void>('update_task_status', { id, status, note })
+/** `expectedDueDate`: the due date the user saw (null = none). Required for
+ * recurring completion — the focus service refuses a changed occurrence. */
+export async function updateTaskStatus(id: string, status: TaskStatus, note?: string, expectedDueDate?: string | null): Promise<void> {
+  return invoke<void>('update_task_status', { id, status, note, expectedDueDate })
 }
 
-export async function completeLocalTask(id: string): Promise<void> {
-  return invoke<void>('complete_local_task', { id })
+export async function completeLocalTask(id: string, expectedDueDate: string | null): Promise<void> {
+  return invoke<void>('complete_local_task', { id, expectedDueDate })
 }
 
 export async function uncompleteLocalTask(id: string): Promise<void> {
   return invoke<void>('uncomplete_local_task', { id })
 }
 
-export async function deleteLocalTask(id: string): Promise<void> {
-  return invoke<void>('delete_local_task', { id })
+/** `undo_token`: the focus service's 10-second delete undo (see `undo_delete`). */
+export async function deleteLocalTask(id: string): Promise<{ undo_token: string | null }> {
+  const result = await invoke<{ undo_token?: string | null }>('delete_local_task', { id })
+  return { undo_token: result?.undo_token ?? null }
 }
 
 export async function reorderLocalTasks(taskIds: string[]): Promise<void> {
@@ -652,18 +669,52 @@ export async function breakDownTask(taskContent: string, taskDescription?: strin
   return invoke<string[]>('break_down_task', { taskContent, taskDescription })
 }
 
-// ── Focus Mode ──
+// ── Focus Queue (one revisioned service) ──
+// Rust rejects with a FocusError `{code,message}`; these wrappers rethrow it
+// as FocusRequestError, keeping the command so a retry reuses its command_id.
 
-export async function startFocusSession(taskId: string, taskContent: string): Promise<void> {
-  return invoke<void>('start_focus_session', { taskId, taskContent })
+async function focusInvoke<T>(cmd: string, args?: Record<string, unknown>, command?: FocusCommand): Promise<T> {
+  try {
+    return await invoke<T>(cmd, args)
+  } catch (error) {
+    throw FocusRequestError.from(error, command)
+  }
 }
 
-export async function endFocusSession(taskId: string, outcome: string, durationSecs: number): Promise<void> {
-  return invoke<void>('end_focus_session', { taskId, outcome, durationSecs: Math.floor(durationSecs) })
+export function focusCapabilities(): Promise<FocusCapabilities> {
+  return focusInvoke<FocusCapabilities>('focus_capabilities')
 }
 
-export async function getActiveFocus(): Promise<FocusState> {
-  return invoke<FocusState>('get_active_focus')
+export function focusSnapshot(): Promise<FocusSnapshot> {
+  return focusInvoke<FocusSnapshot>('focus_snapshot')
+}
+
+export function focusExecute(command: FocusCommand): Promise<FocusReply> {
+  return focusInvoke<FocusReply>('focus_execute', { command }, command)
+}
+
+export function focusHistory(opts?: { cursor?: string; task_id?: string }): Promise<FocusHistoryPage> {
+  return focusInvoke<FocusHistoryPage>('focus_history', { cursor: opts?.cursor, taskId: opts?.task_id })
+}
+
+export function focusOpenCompanion(): Promise<void> {
+  return focusInvoke<void>('focus_open_companion')
+}
+
+export function focusPreviewImport(files: LegacyFocusFiles): Promise<FocusImportPreview> {
+  return focusInvoke<FocusImportPreview>('focus_preview_import', { files })
+}
+
+export function focusCommitImport(files: LegacyFocusFiles, previewToken: string, commandId: string): Promise<FocusImportResult> {
+  return focusInvoke<FocusImportResult>('focus_commit_import', { files, previewToken, commandId })
+}
+
+export function focusDeliveries(): Promise<FocusDeliveryReviewItem[]> {
+  return focusInvoke<FocusDeliveryReviewItem[]>('focus_delivery_review')
+}
+
+export function focusResolveDelivery(id: string, resolution: FocusDeliveryResolution, evidence: string): Promise<FocusDeliveryReviewItem> {
+  return focusInvoke<FocusDeliveryReviewItem>('focus_resolve_delivery', { id, resolution, evidence })
 }
 
 // ── Goals ──
@@ -915,6 +966,7 @@ export const backupGetStatus = () => invoke<BackupStatus>('backup_get_status')
 export const backupRunNow = () => invoke<BackupStatus>('backup_run_now')
 export const backupVerifyLatest = () => invoke<{ verified: boolean }>('backup_verify_latest')
 export const backupOpenFolder = () => invoke<void>('backup_open_folder')
+export const backupActivateRestoredProfile = () => invoke<BackupStatus>('backup_activate_restored_profile')
 export const backupConfigureRemote = (ownerRepo: string) =>
   invoke<BackupStatus>('backup_configure_remote', { ownerRepo })
 

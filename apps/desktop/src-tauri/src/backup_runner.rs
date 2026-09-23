@@ -37,11 +37,15 @@ pub struct BackupStatus {
     turso_pending: Option<i64>,
     todoist_pending: Option<i64>,
     todoist_failed: Option<i64>,
+    /// A restored profile stays inert until explicitly activated.
+    restore_activation_required: bool,
     error: Option<StageError>,
 }
 /// Stable allowlisted codes only. Never return process output or database error details.
 pub fn public_error_code(error: &Error) -> &'static str {
     match error.to_string().as_str() {
+        "backup_recovery_restore_activation_required" => "restore_activation_required",
+        "restore_activation_refused" => "restore_activation_refused",
         "backup_busy" => "backup_busy",
         "backup_disabled" => "backup_disabled",
         "backup_tool_unavailable" => "backup_tool_unavailable",
@@ -277,6 +281,9 @@ pub async fn read_status(app: &AppHandle) -> Result<BackupStatus> {
         turso_pending,
         todoist_pending,
         todoist_failed,
+        restore_activation_required: nimble_core::db::recovery::require_activation_clear(pool.inner())
+            .await
+            .is_err(),
         error: state_error.or(state.stage_error),
     })
 }
@@ -305,6 +312,7 @@ async fn execute_job(
     local: DateTime<FixedOffset>,
 ) -> Result<()> {
     runtime.enabled()?;
+    nimble_core::db::recovery::require_activation_clear(pool).await?;
     let Ok(_mutex) = runtime.job.try_lock() else {
         return if manual { Err(err("busy")) } else { Ok(()) };
     };
@@ -444,6 +452,7 @@ pub async fn run_now(app: &AppHandle) -> Result<BackupStatus> {
 pub async fn configure_remote(app: &AppHandle, owner_repo: &str) -> Result<BackupStatus> {
     let runtime = app.state::<BackupRuntime>();
     runtime.enabled()?;
+    nimble_core::db::recovery::require_activation_clear(app.state::<SqlitePool>().inner()).await?;
     if runtime.test_mode {
         return Err(err("test_profile_upload_disabled"));
     }

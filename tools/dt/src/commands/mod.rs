@@ -1,7 +1,7 @@
 use crate::{args::*, output::CliError};
 use nimble_core::{
     agent_protocol::{AgentOperation, Domain},
-    db,
+    db::{self, focus::engine::NativeTaskAction},
     types::{CreateTaskInput, UpdateTaskInput},
 };
 use serde::Serialize;
@@ -123,11 +123,201 @@ async fn section_exists(pool: &SqlitePool, id: &str) -> Result<(), CliError> {
 fn task_domains() -> Vec<Domain> {
     vec![Domain::Tasks, Domain::Activity]
 }
+/// A task write the running app should execute through its FocusService.
+pub struct NativeWrite {
+    pub action: NativeTaskAction,
+    /// Flags a retry must repeat so the request body is byte-identical.
+    pub retry_flags: String,
+    /// Task to re-read for output after a status change (the app committed it).
+    pub read_back: Option<String>,
+}
+
+fn expected_due(
+    flag: &Option<String>,
+    current: &nimble_core::types::LocalTask,
+) -> Result<Option<String>, CliError> {
+    match flag.as_deref() {
+        None => Ok(current.due_date.clone()),
+        Some("none") => Ok(None),
+        Some(d) => {
+            date(d)?;
+            Ok(Some(d.to_owned()))
+        }
+    }
+}
+/// Direct (app closed) status write with the same recurring occurrence
+/// identity check the app's focus service applies.
+async fn checked_status(
+    pool: &SqlitePool,
+    id: &str,
+    status: &str,
+    note: Option<&str>,
+    expected_due_date: Option<&str>,
+) -> Result<(), CliError> {
+    db::tasks::update_task_status_expected(pool, id, status, note, expected_due_date)
+        .await
+        .map_err(|e| match &e {
+            nimble_core::Error::Other(m) if m.starts_with("stale_occurrence") => CliError::new(
+                "stale_occurrence",
+                "The task's due date changed since it was read. Inspect it before completing again.",
+            ),
+            _ => e.into(),
+        })
+}
+fn due_flag(value: &Option<String>) -> String {
+    format!(" --expected-due {}", value.as_deref().unwrap_or("none"))
+}
+
+fn create_input(content: String, parent: Option<String>, f: Fields) -> CreateTaskInput {
+    CreateTaskInput {
+        sync_policy: None,
+        content,
+        parent_id: parent,
+        project_id: f.project,
+        description: f.description,
+        priority: f.priority,
+        due_date: f.due,
+        due_time: f.time,
+        duration_minutes: f.duration,
+        recurrence_rule: f.recurrence,
+        section_id: f.section,
+        label_ids: f.labels,
+        reminder_offset_minutes: f.reminder_offset,
+        google_calendar_enabled: f.google_calendar_enabled,
+    }
+}
+fn update_input(content: Option<String>, linked_doc: Option<String>, f: Fields) -> UpdateTaskInput {
+    UpdateTaskInput {
+        content,
+        description: f.description,
+        project_id: f.project,
+        priority: f.priority,
+        due_date: f.due,
+        clear_due_date: f.clear_due_date,
+        linked_doc_id: linked_doc,
+        due_time: f.time,
+        duration_minutes: f.duration,
+        recurrence_rule: f.recurrence,
+        section_id: f.section,
+        label_ids: if f.clear_labels { Some(vec![]) } else { f.labels },
+        clear_due_time: f.clear_due_time,
+        clear_recurrence: f.clear_recurrence,
+        clear_section: f.clear_section,
+        clear_duration: f.clear_duration,
+        reminder_offset_minutes: f.reminder_offset,
+        google_calendar_enabled: f.google_calendar_enabled,
+        clear_reminder: f.clear_reminder,
+        ..Default::default()
+    }
+}
+fn reject_clear_flags(f: &Fields) -> Result<(), CliError> {
+    if f.clear_due_date
+        || f.clear_due_time
+        || f.clear_duration
+        || f.clear_recurrence
+        || f.clear_section
+        || f.clear_labels
+        || f.clear_reminder
+    {
+        return Err(CliError::validation("Clear flags apply only to task update."));
+    }
+    Ok(())
+}
+
+/// Validate a task write exactly as the direct path does, then describe it
+/// as a NativeTaskAction for the running app. `None` = not a task write.
+pub async fn native_write(pool: &SqlitePool, command: Command) -> Result<Option<NativeWrite>, CliError> {
+    let Command::Task(command) = command else { return Ok(None) };
+    Ok(Some(match command {
+        Task::Create { content, parent, fields: f } => {
+            nonempty(&content)?;
+            validate_fields(&f)?;
+            reject_clear_flags(&f)?;
+            if let Some(id) = &parent {
+                task(pool, id).await?;
+            }
+            NativeWrite {
+                action: NativeTaskAction::Create { input: create_input(content, parent, f) },
+                retry_flags: String::new(),
+                read_back: None,
+            }
+        }
+        Task::Update { id, content, linked_doc, fields: f } => {
+            validate_fields(&f)?;
+            if let Some(c) = &content {
+                nonempty(c)?;
+            }
+            task(pool, &id).await?;
+            NativeWrite {
+                action: NativeTaskAction::Update { id, input: update_input(content, linked_doc, f) },
+                retry_flags: String::new(),
+                read_back: None,
+            }
+        }
+        Task::Complete { id, expected_due: flag } => {
+            let current = task(pool, &id).await?;
+            let due = expected_due(&flag, &current)?;
+            NativeWrite {
+                retry_flags: due_flag(&due),
+                read_back: Some(id.clone()),
+                action: NativeTaskAction::SetStatus {
+                    id, status: "complete".into(), note: None, expected_due_date: due,
+                },
+            }
+        }
+        Task::Reopen { id } => {
+            task(pool, &id).await?;
+            NativeWrite {
+                read_back: Some(id.clone()),
+                retry_flags: String::new(),
+                action: NativeTaskAction::SetStatus {
+                    id, status: "todo".into(), note: None, expected_due_date: None,
+                },
+            }
+        }
+        Task::Status { id, status, reason, expected_due: flag } => {
+            let current = task(pool, &id).await?;
+            let due = if status == "complete" { expected_due(&flag, &current)? } else { None };
+            NativeWrite {
+                retry_flags: if status == "complete" { due_flag(&due) } else { String::new() },
+                read_back: Some(id.clone()),
+                action: NativeTaskAction::SetStatus { id, status, note: reason, expected_due_date: due },
+            }
+        }
+        Task::Delete { id } => {
+            task(pool, &id).await?;
+            NativeWrite {
+                read_back: None,
+                retry_flags: String::new(),
+                action: NativeTaskAction::Delete { id },
+            }
+        }
+        _ => return Ok(None),
+    }))
+}
+
+/// Shape the app's reply like the direct path's output.
+pub async fn native_output(
+    pool: &SqlitePool,
+    write: &NativeWrite,
+    data: Value,
+) -> Result<Value, CliError> {
+    if let Some(id) = &write.read_back {
+        return Ok(serde_json::to_value(task(pool, id).await?)
+            .map_err(|_| CliError::new("internal", "Cannot encode result."))?);
+    }
+    if let NativeTaskAction::Delete { id } = &write.action {
+        return Ok(json!({"id": id}));
+    }
+    Ok(data.get("task").cloned().unwrap_or(Value::Null))
+}
+
 pub fn app_operation(command: &Command) -> Option<AgentOperation> {
     match command {
         Command::Backup(Backup::Status) => Some(AgentOperation::BackupStatus),
         Command::Backup(Backup::Now) => Some(AgentOperation::BackupNow),
         Command::Backup(Backup::Verify) => Some(AgentOperation::BackupVerify),
+        Command::Backup(Backup::Activate) => Some(AgentOperation::RestoreActivate),
         Command::Sync(Sync::Now) => Some(AgentOperation::SyncNow),
         _ => None,
     }
@@ -162,41 +352,12 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
             } => {
                 nonempty(&content)?;
                 validate_fields(&f)?;
-                if f.clear_due_date
-                    || f.clear_due_time
-                    || f.clear_duration
-                    || f.clear_recurrence
-                    || f.clear_section
-                    || f.clear_labels
-                    || f.clear_reminder
-                {
-                    return Err(CliError::validation(
-                        "Clear flags apply only to task update.",
-                    ));
-                }
+                reject_clear_flags(&f)?;
                 if let Some(id) = &parent {
                     task(pool, id).await?;
                 }
                 result(
-                    db::tasks::create_local_task(
-                        pool,
-                        CreateTaskInput {
-                            content,
-                            parent_id: parent,
-                            project_id: f.project,
-                            description: f.description,
-                            priority: f.priority,
-                            due_date: f.due,
-                            due_time: f.time,
-                            duration_minutes: f.duration,
-                            recurrence_rule: f.recurrence,
-                            section_id: f.section,
-                            label_ids: f.labels,
-                            reminder_offset_minutes: f.reminder_offset,
-                            google_calendar_enabled: f.google_calendar_enabled,
-                        },
-                    )
-                    .await?,
+                    db::tasks::create_local_task(pool, create_input(content, parent, f)).await?,
                     task_domains(),
                 )
             }
@@ -212,43 +373,15 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
                 }
                 task(pool, &id).await?;
                 result(
-                    db::tasks::update_local_task(
-                        pool,
-                        &id,
-                        UpdateTaskInput {
-                            content,
-                            description: f.description,
-                            project_id: f.project,
-                            priority: f.priority,
-                            due_date: f.due,
-                            clear_due_date: f.clear_due_date,
-                            linked_doc_id: linked_doc,
-                            due_time: f.time,
-                            duration_minutes: f.duration,
-                            recurrence_rule: f.recurrence,
-                            section_id: f.section,
-                            label_ids: if f.clear_labels {
-                                Some(vec![])
-                            } else {
-                                f.labels
-                            },
-                            clear_due_time: f.clear_due_time,
-                            clear_recurrence: f.clear_recurrence,
-                            clear_section: f.clear_section,
-                            clear_duration: f.clear_duration,
-                            reminder_offset_minutes: f.reminder_offset,
-                            google_calendar_enabled: f.google_calendar_enabled,
-                            clear_reminder: f.clear_reminder,
-                            ..Default::default()
-                        },
-                    )
-                    .await?,
+                    db::tasks::update_local_task(pool, &id, update_input(content, linked_doc, f))
+                        .await?,
                     task_domains(),
                 )
             }
-            Task::Complete { id } => {
-                task(pool, &id).await?;
-                db::tasks::update_task_status(pool, &id, "complete", None).await?;
+            Task::Complete { id, expected_due: flag } => {
+                let current = task(pool, &id).await?;
+                let due = expected_due(&flag, &current)?;
+                checked_status(pool, &id, "complete", None, due.as_deref()).await?;
                 result(task(pool, &id).await?, task_domains())
             }
             Task::Reopen { id } => {
@@ -256,9 +389,10 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
                 db::tasks::update_task_status(pool, &id, "todo", None).await?;
                 result(task(pool, &id).await?, task_domains())
             }
-            Task::Status { id, status, reason } => {
-                task(pool, &id).await?;
-                db::tasks::update_task_status(pool, &id, &status, reason.as_deref()).await?;
+            Task::Status { id, status, reason, expected_due: flag } => {
+                let current = task(pool, &id).await?;
+                let due = if status == "complete" { expected_due(&flag, &current)? } else { None };
+                checked_status(pool, &id, &status, reason.as_deref(), due.as_deref()).await?;
                 result(task(pool, &id).await?, task_domains())
             }
             Task::Delete { id } => {

@@ -2,49 +2,16 @@ use std::collections::HashMap;
 
 use sqlx::sqlite::SqliteRow;
 use sqlx::{FromRow, Row, SqlitePool};
-use uuid::Uuid;
 
 use crate::db::activity;
-use crate::db::labels;
 use crate::db::sync;
 use crate::parsers::html_to_md::{html_to_markdown, scan_unknown_tags};
 use crate::types::{CreateTaskInput, LocalTask, UpdateTaskInput};
 
-/// True if `section_id` names a real section belonging to `project_id`.
-/// `local_tasks.section_id` carries no foreign key (v19 migration), so this
-/// app-level check is what stops a task from pointing at a section in a
-/// different project or one that doesn't exist at all — same pattern as
-/// `db::sections::create_section`'s project-existence check.
-async fn section_belongs_to_project(
-    pool: &SqlitePool,
-    section_id: &str,
-    project_id: &str,
-) -> crate::Result<bool> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT id FROM sections WHERE id = ? AND project_id = ?")
-            .bind(section_id)
-            .bind(project_id)
-            .fetch_optional(pool)
-            .await?;
-    Ok(row.is_some())
-}
-
-fn validate_reminder(offset: Option<i64>, google_enabled: bool, due_date: Option<&str>, due_time: Option<&str>) -> crate::Result<()> {
-    if offset.is_some_and(|value| !(0..=40320).contains(&value)) {
-        return Err(crate::Error::Other("reminder offset must be 0–40320 minutes".into()));
-    }
-    if (offset.is_some() || google_enabled) && (due_date.is_none() || due_time.is_none()) {
-        return Err(crate::Error::Other("a reminder requires a due date and time".into()));
-    }
-    if google_enabled && offset.is_none() {
-        return Err(crate::Error::Other("a phone alert requires a reminder offset".into()));
-    }
-    Ok(())
-}
-
 impl FromRow<'_, SqliteRow> for LocalTask {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
         Ok(LocalTask {
+            sync_policy: row.try_get("sync_policy")?,
             id: row.try_get("id")?,
             parent_id: row.try_get("parent_id")?,
             content: row.try_get("content")?,
@@ -74,7 +41,7 @@ impl FromRow<'_, SqliteRow> for LocalTask {
     }
 }
 
-pub(crate) const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, reminder_offset_minutes, google_calendar_enabled, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot";
+pub(crate) const SELECT_COLS: &str = "id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, reminder_offset_minutes, google_calendar_enabled, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot, sync_policy";
 
 /// Snapshot a task row and append its sync_log entry, warning on failure —
 /// sync_log IS the retry mechanism, so a silently swallowed append can leave
@@ -209,359 +176,53 @@ pub async fn get_local_tasks(
 }
 
 pub async fn create_local_task(pool: &SqlitePool, input: CreateTaskInput) -> crate::Result<LocalTask> {
-    let CreateTaskInput {
-        content,
-        project_id,
-        parent_id,
-        description,
-        priority,
-        due_date,
-        due_time,
-        duration_minutes,
-        recurrence_rule,
-        section_id,
-        label_ids,
-        reminder_offset_minutes,
-        google_calendar_enabled,
-    } = input;
-    let content = content.as_str();
-    let project_id = project_id.as_deref();
-    let parent_id = parent_id.as_deref();
-    let description = description.as_deref();
-    let due_date = due_date.as_deref();
-    let due_time = due_time.as_deref();
-    let recurrence_rule = recurrence_rule.as_deref();
-    let section_id = section_id.as_deref();
-
-    validate_reminder(reminder_offset_minutes, google_calendar_enabled.unwrap_or(false), due_date, due_time)?;
-    let id = Uuid::new_v4().to_string();
-    let project_id = project_id.unwrap_or("inbox");
-    let priority = priority.unwrap_or(1);
-
-    // No FK on local_tasks.section_id — validate app-side that the section
-    // actually belongs to this task's project before writing it.
-    if let Some(sec_id) = section_id {
-        if !section_belongs_to_project(pool, sec_id, project_id).await? {
-            return Err(crate::Error::Other(format!(
-                "create_local_task: section '{sec_id}' does not belong to project '{project_id}'"
-            )));
-        }
-    }
-
-    // Get next position within the parent/project scope
-    let max_pos: i64 = if let Some(pid) = parent_id {
-        sqlx::query_scalar("SELECT COALESCE(MAX(position), -1) FROM local_tasks WHERE parent_id = ?")
-            .bind(pid)
-            .fetch_one(pool)
-            .await?
-    } else {
-        sqlx::query_scalar(
-            "SELECT COALESCE(MAX(position), -1) FROM local_tasks WHERE project_id = ? AND parent_id IS NULL",
-        )
-        .bind(project_id)
-        .fetch_one(pool)
-        .await?
-    };
-
-    sqlx::query(
-        "INSERT INTO local_tasks (id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, reminder_offset_minutes, google_calendar_enabled, position)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(&id)
-    .bind(parent_id)
-    .bind(content)
-    .bind(description)
-    .bind(project_id)
-    .bind(priority)
-    .bind(due_date)
-    .bind(due_time)
-    .bind(duration_minutes)
-    .bind(recurrence_rule)
-    .bind(section_id)
-    .bind(reminder_offset_minutes)
-    .bind(google_calendar_enabled.unwrap_or(false))
-    .bind(max_pos + 1)
-    .execute(pool)
-    .await?;
-
-    // Log activity
-    activity::log_activity(
-        pool,
-        "task_created",
-        Some(&id),
-        Some(serde_json::json!({
-            "content": content,
-            "project_id": project_id,
-        })),
-    )
-    .await;
-
-    // Fetch and return the created task
-    let task: LocalTask = sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
-        .bind(&id)
-        .fetch_one(pool)
-        .await?;
-
-    // Sync log: INSERT
-    let snapshot = sync::task_sync_snapshot(&task);
-    sync::append_sync_log(pool, "local_tasks", &task.id, "INSERT", None, Some(&snapshot)).await.ok();
-
-    // Todoist mutation observer: best-effort, enqueues an outbox create op if adapter active
-    crate::integrations::todoist::observer::on_task_mutation(
-        pool,
-        crate::integrations::todoist::observer::TaskMutation::Created(&task),
-    )
-    .await;
-
-    // `label_ids` delegates to `set_task_labels`, which does its own
-    // transactional assignment + sync_log/observer firing (fields_changed =
-    // ["labels"]) and returns the task with `labels` populated — a brand new
-    // task otherwise has no `task_labels` rows, so there's nothing to query
-    // for when this is absent.
-    if let Some(ids) = label_ids {
-        return labels::set_task_labels(pool, &task.id, &ids).await;
-    }
-
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let task = crate::db::task_tx::create_task_tx(&mut tx, input, crate::db::task_tx::MutationPolicy::User).await?;
+    tx.commit().await?;
+    activity::log_activity(pool, "task_created", Some(&task.id),
+        Some(serde_json::json!({"content":task.content,"project_id":task.project_id}))).await;
     Ok(task)
 }
 
-pub async fn update_local_task(
-    pool: &SqlitePool,
-    id: &str,
-    input: UpdateTaskInput,
-) -> crate::Result<LocalTask> {
-    let UpdateTaskInput {
-        content,
-        description,
-        project_id,
-        priority,
-        due_date,
-        clear_due_date,
-        linked_doc_id,
-        due_time,
-        duration_minutes,
-        recurrence_rule,
-        section_id,
-        label_ids,
-        clear_due_time,
-        clear_recurrence,
-        clear_section,
-        clear_duration,
-        reminder_offset_minutes,
-        google_calendar_enabled,
-        clear_reminder,
-    } = input;
-    let content = content.as_deref();
-    let description = description.as_deref();
-    let project_id = project_id.as_deref();
-    let due_date = due_date.as_deref();
-    let linked_doc_id = linked_doc_id.as_deref();
-    let due_time = due_time.as_deref();
-    let recurrence_rule = recurrence_rule.as_deref();
-    let section_id = section_id.as_deref();
-
-    // Serialize the read, validation, and write across app/CLI connections.
-    // `BEGIN IMMEDIATE` obtains SQLite's writer lock before the read; the
-    // sqlx Transaction rolls back if this future is cancelled or any query fails.
+pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInput) -> crate::Result<LocalTask> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let mut next: LocalTask = sqlx::query_as(&format!(
-        "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
-    ))
-    .bind(id)
-    .fetch_one(&mut *tx)
-    .await?;
-    let implicit_section_clear = project_id.is_some_and(|target| target != next.project_id.as_str())
-        && section_id.is_none()
-        && next.section_id.is_some();
-    if let Some(value) = content {
-        next.content = value.to_owned();
-    }
-    if let Some(value) = description {
-        next.description = Some(value.to_owned());
-    }
-    if let Some(value) = project_id {
-        next.project_id = value.to_owned();
-    }
-    if implicit_section_clear {
-        next.section_id = None;
-    }
-    if let Some(value) = priority {
-        next.priority = value;
-    }
-    if let Some(value) = linked_doc_id {
-        next.linked_doc_id = Some(value.to_owned());
-    }
-    if let Some(value) = due_date {
-        next.due_date = Some(value.to_owned());
-    }
-    if let Some(value) = due_time {
-        next.due_time = Some(value.to_owned());
-    }
-    if let Some(value) = duration_minutes {
-        next.duration_minutes = Some(value);
-    }
-    if let Some(value) = recurrence_rule {
-        next.recurrence_rule = Some(value.to_owned());
-    }
-    if let Some(value) = section_id {
-        next.section_id = Some(value.to_owned());
-    }
-    if let Some(value) = reminder_offset_minutes {
-        next.reminder_offset_minutes = Some(value);
-    }
-    if let Some(value) = google_calendar_enabled {
-        next.google_calendar_enabled = value;
-    }
-    // Clears win over sets, matching the existing task input contract.
-    if clear_due_date {
-        next.due_date = None;
-    }
-    if clear_due_time {
-        next.due_time = None;
-        next.duration_minutes = None;
-    }
-    if clear_duration {
-        next.duration_minutes = None;
-    }
-    if clear_recurrence {
-        next.recurrence_rule = None;
-    }
-    if clear_section {
-        next.section_id = None;
-    }
-    if clear_reminder || clear_due_date || clear_due_time {
-        next.reminder_offset_minutes = None;
-        next.google_calendar_enabled = false;
-    }
-    if let Some(sec_id) = next.section_id.as_deref() {
-        let exists: Option<String> =
-            sqlx::query_scalar("SELECT id FROM sections WHERE id = ? AND project_id = ?")
-                .bind(sec_id)
-                .bind(&next.project_id)
-                .fetch_optional(&mut *tx)
-                .await?;
-        if exists.is_none() {
-            return Err(crate::Error::Other(format!(
-                "update_local_task: section '{sec_id}' does not belong to project '{}'",
-                next.project_id
-            )));
-        }
-    }
-    validate_reminder(
-        next.reminder_offset_minutes,
-        next.google_calendar_enabled,
-        next.due_date.as_deref(),
-        next.due_time.as_deref(),
-    )?;
-    sqlx::query("UPDATE local_tasks SET content=?,description=?,project_id=?,priority=?,due_date=?,due_time=?,duration_minutes=?,recurrence_rule=?,section_id=?,linked_doc_id=?,reminder_offset_minutes=?,google_calendar_enabled=?,updated_at=datetime('now') WHERE id=?")
-        .bind(&next.content).bind(&next.description).bind(&next.project_id).bind(next.priority)
-        .bind(&next.due_date).bind(&next.due_time).bind(next.duration_minutes)
-        .bind(&next.recurrence_rule).bind(&next.section_id).bind(&next.linked_doc_id)
-        .bind(next.reminder_offset_minutes).bind(next.google_calendar_enabled).bind(id)
-        .execute(&mut *tx).await?;
-    let mut task: LocalTask = sqlx::query_as(&format!(
-        "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
-    ))
-    .bind(id)
-    .fetch_one(&mut *tx)
-    .await?;
+    let old: LocalTask = sqlx::query_as(&format!("SELECT {SELECT_COLS} FROM local_tasks WHERE id=?"))
+        .bind(id).fetch_one(&mut *tx).await?;
+    let fields_changed = activity_fields(&input, &old);
+    let task = crate::db::task_tx::update_task_tx(&mut tx, id, input, crate::db::task_tx::MutationPolicy::User).await?;
+    let rescheduled = if old.due_date != task.due_date { vec![task.id.clone()] } else { Vec::new() };
+    crate::db::focus::engine::reconcile_task_effects_tx(&mut tx, &crate::db::task_tx::TaskEffects {
+        changed: vec![task.clone()], rescheduled, ..Default::default()
+    }).await?;
     tx.commit().await?;
-
-    // Log activity with changed fields
-    let mut fields_changed = Vec::new();
-    if content.is_some() {
-        fields_changed.push("content");
-    }
-    if description.is_some() {
-        fields_changed.push("description");
-    }
-    if project_id.is_some() {
-        fields_changed.push("project_id");
-    }
-    if priority.is_some() {
-        fields_changed.push("priority");
-    }
-    if linked_doc_id.is_some() {
-        fields_changed.push("linked_doc_id");
-    }
-    if due_date.is_some() || clear_due_date {
-        fields_changed.push("due_date");
-    }
-    if due_time.is_some() || clear_due_time {
-        fields_changed.push("due_time");
-    }
-    if duration_minutes.is_some() || clear_due_time || clear_duration {
-        fields_changed.push("duration_minutes");
-    }
-    if recurrence_rule.is_some() || clear_recurrence {
-        fields_changed.push("recurrence_rule");
-    }
-    if section_id.is_some() || clear_section || implicit_section_clear {
-        fields_changed.push("section_id");
-    }
-    if reminder_offset_minutes.is_some() || clear_reminder || clear_due_date || clear_due_time {
-        fields_changed.push("reminder_offset_minutes");
-    }
-    if google_calendar_enabled.is_some() || clear_reminder || clear_due_date || clear_due_time {
-        fields_changed.push("google_calendar_enabled");
-    }
     if !fields_changed.is_empty() {
-        let action = if fields_changed == vec!["project_id"] {
-            "task_moved"
-        } else {
-            "task_updated"
-        };
-        activity::log_activity(
-            pool,
-            action,
-            Some(id),
-            Some(serde_json::json!({ "fields_changed": fields_changed })),
-        )
-        .await;
+        let action = if fields_changed == ["project_id"] { "task_moved" } else { "task_updated" };
+        activity::log_activity(pool, action, Some(id),
+            Some(serde_json::json!({"fields_changed":fields_changed}))).await;
     }
-
-    // Every task-returning fn carries `labels` — populate it here even when
-    // this update didn't touch them, so a plain content/date edit doesn't
-    // silently report the task as label-less.
-    task.labels = labels::labels_for_task(pool, id).await.unwrap_or_default();
-
-    // Sync log: UPDATE with changed columns
-    if !fields_changed.is_empty() {
-        let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
-        let snapshot = sync::task_sync_snapshot(&task);
-        sync::append_sync_log(
-            pool,
-            "local_tasks",
-            id,
-            "UPDATE",
-            Some(&changed),
-            Some(&snapshot),
-        )
-        .await
-        .ok();
-
-        // Todoist mutation observer: best-effort
-        let fields_changed_owned: Vec<String> =
-            fields_changed.iter().map(|f| f.to_string()).collect();
-        crate::integrations::todoist::observer::on_task_mutation(
-            pool,
-            crate::integrations::todoist::observer::TaskMutation::Updated {
-                task: &task,
-                fields_changed: &fields_changed_owned,
-            },
-        )
-        .await;
-    }
-
-    // `label_ids` delegates to `set_task_labels`, which does its own
-    // transactional replace + sync_log/observer firing (fields_changed =
-    // ["labels"]) and returns the task with `labels` populated — runs last so
-    // its re-fetch reflects every other field update above.
-    if let Some(ids) = label_ids {
-        return labels::set_task_labels(pool, id, &ids).await;
-    }
-
     Ok(task)
+}
+
+/// Field names an update touches, for the `task_updated`/`task_moved` activity.
+pub(crate) fn activity_fields(input: &UpdateTaskInput, old: &LocalTask) -> Vec<&'static str> {
+    let mut fields = Vec::new();
+    if input.sync_policy.is_some() { fields.push("sync_policy"); }
+    if input.content.is_some() { fields.push("content"); }
+    if input.description.is_some() { fields.push("description"); }
+    if input.project_id.is_some() { fields.push("project_id"); }
+    if input.priority.is_some() { fields.push("priority"); }
+    if input.linked_doc_id.is_some() { fields.push("linked_doc_id"); }
+    if input.due_date.is_some() || input.clear_due_date { fields.push("due_date"); }
+    if input.due_time.is_some() || input.clear_due_time { fields.push("due_time"); }
+    if input.duration_minutes.is_some() || input.clear_due_time || input.clear_duration { fields.push("duration_minutes"); }
+    if input.recurrence_rule.is_some() || input.clear_recurrence { fields.push("recurrence_rule"); }
+    let implicit_section_clear = input.project_id.as_deref().is_some_and(|target| target != old.project_id)
+        && input.section_id.is_none() && old.section_id.is_some();
+    if input.section_id.is_some() || input.clear_section || implicit_section_clear { fields.push("section_id"); }
+    if input.reminder_offset_minutes.is_some() || input.clear_reminder || input.clear_due_date || input.clear_due_time { fields.push("reminder_offset_minutes"); }
+    if input.google_calendar_enabled.is_some() || input.clear_reminder || input.clear_due_date || input.clear_due_time { fields.push("google_calendar_enabled"); }
+    if input.label_ids.is_some() { fields.push("labels"); }
+    fields
 }
 
 /// Apply a Google-originated edit only if the complete persisted task row still
@@ -570,6 +231,19 @@ pub async fn update_local_task(
 /// `None` means the caller must re-fetch and reconcile instead of retrying.
 pub async fn update_local_task_if_unchanged(
     pool: &SqlitePool,
+    id: &str,
+    expected: &LocalTask,
+    input: UpdateTaskInput,
+) -> crate::Result<Option<LocalTask>> {
+    update_local_task_if_unchanged_with_focus(pool, None, id, expected, input).await
+}
+
+/// Same conditional apply, under the desktop's live focus service guard when
+/// given (the calendar fetch has already finished). A refused comparison
+/// rolls back without touching the queue or the focus clock anchor.
+pub async fn update_local_task_if_unchanged_with_focus(
+    pool: &SqlitePool,
+    focus: Option<&crate::db::focus::engine::FocusService>,
     id: &str,
     expected: &LocalTask,
     input: UpdateTaskInput,
@@ -587,82 +261,46 @@ pub async fn update_local_task_if_unchanged(
             "calendar update contains unsupported fields".into(),
         ));
     }
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let current: Option<LocalTask> = sqlx::query_as(&format!(
-        "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
-    ))
-    .bind(id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(current) = current else {
-        return Ok(None);
-    };
-    if sync::task_sync_snapshot(&current) != sync::task_sync_snapshot(expected) {
-        return Ok(None);
+    let mut write = crate::db::focus::task_write::TaskWrite::begin(pool, focus).await?;
+    let applied = async {
+        let tx = write.conn();
+        let current: Option<LocalTask> = sqlx::query_as(&format!(
+            "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
+        ))
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if !current
+            .as_ref()
+            .is_some_and(|c| sync::task_sync_snapshot(c) == sync::task_sync_snapshot(expected))
+        {
+            return Ok(None);
+        }
+        crate::db::task_tx::update_task_tx(tx, id, input,
+            crate::db::task_tx::MutationPolicy::User).await.map(Some)
     }
-    let due_date = if input.clear_due_date {
-        None
-    } else {
-        input.due_date.as_deref().or(current.due_date.as_deref())
+    .await;
+    let updated = match applied {
+        Ok(Some(updated)) => updated,
+        // Refused comparison or failed edit: nothing is kept, and the live
+        // focus clock is settled rather than frozen.
+        Ok(None) => {
+            write.abandon().await?;
+            return Ok(None);
+        }
+        Err(e) => {
+            write.abandon().await?;
+            return Err(e);
+        }
     };
-    let due_time = if input.clear_due_time {
-        None
-    } else {
-        input.due_time.as_deref().or(current.due_time.as_deref())
-    };
-    let duration = if input.clear_duration || input.clear_due_time {
-        None
-    } else {
-        input.duration_minutes.or(current.duration_minutes)
-    };
-    let offset = if input.clear_reminder || input.clear_due_date || input.clear_due_time {
-        None
-    } else {
-        input
-            .reminder_offset_minutes
-            .or(current.reminder_offset_minutes)
-    };
-    let calendar = !(input.clear_reminder || input.clear_due_date || input.clear_due_time)
-        && input
-            .google_calendar_enabled
-            .unwrap_or(current.google_calendar_enabled);
-    validate_reminder(offset, calendar, due_date, due_time)?;
-    sqlx::query("UPDATE local_tasks SET content=?,description=?,due_date=?,due_time=?,duration_minutes=?,reminder_offset_minutes=?,google_calendar_enabled=?,updated_at=datetime('now') WHERE id=?")
-            .bind(input.content.as_deref().unwrap_or(&current.content))
-            .bind(input.description.as_deref().or(current.description.as_deref()))
-            .bind(due_date).bind(due_time).bind(duration).bind(offset).bind(calendar).bind(id)
-            .execute(&mut *tx).await?;
-    let mut updated: LocalTask = sqlx::query_as(&format!(
-        "SELECT {SELECT_COLS} FROM local_tasks WHERE id = ?"
-    ))
-    .bind(id)
-    .fetch_one(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    updated.labels = labels::labels_for_task(pool, id).await.unwrap_or_default();
+    write.commit(&crate::db::task_tx::TaskEffects {
+        changed: vec![updated.clone()], ..Default::default()
+    }).await?;
     activity::log_activity(
         pool,
         "task_updated",
         Some(id),
         Some(serde_json::json!({"source":"google_calendar"})),
-    )
-    .await;
-    let snapshot = sync::task_sync_snapshot(&updated);
-    sync::append_sync_log(pool, "local_tasks", id, "UPDATE", None, Some(&snapshot))
-        .await
-        .ok();
-    crate::integrations::todoist::observer::on_task_mutation(
-        pool,
-        crate::integrations::todoist::observer::TaskMutation::Updated {
-            task: &updated,
-            fields_changed: &[
-                "content".into(),
-                "description".into(),
-                "due_date".into(),
-                "due_time".into(),
-                "duration_minutes".into(),
-            ],
-        },
     )
     .await;
     Ok(Some(updated))
@@ -690,286 +328,57 @@ pub async fn update_task_status_at(
     note: Option<&str>,
     today: chrono::NaiveDate,
 ) -> crate::Result<()> {
-    // Get old status for logging
-    let old_status: Option<(String,)> = sqlx::query_as(
-        "SELECT status FROM local_tasks WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
-    let old = old_status.map(|r| r.0).unwrap_or_default();
+    update_task_status_inner(pool, id, status, note, today, None).await
+}
 
-    // Capture completed flag before mutation, for the observer's close/reopen decision
-    let was_completed: bool = sqlx::query_scalar::<_, i64>(
-        "SELECT completed FROM local_tasks WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?
-    .map(|c| c != 0)
-    .unwrap_or(false);
+/// `update_task_status` that first enforces the recurring occurrence identity
+/// (`task_tx::ensure_expected_due_tx`) in the same transaction. Used where no
+/// focus service owns the write: the desktop headless path and `dt` with the
+/// app closed.
+pub async fn update_task_status_expected(
+    pool: &SqlitePool,
+    id: &str,
+    status: &str,
+    note: Option<&str>,
+    expected_due_date: Option<&str>,
+) -> crate::Result<()> {
+    update_task_status_inner(pool, id, status, note, chrono::Local::now().date_naive(),
+        Some(expected_due_date)).await
+}
 
-    // Update status + completed flag
-    let is_complete = status == "complete";
-
-    // Re-completing an already-complete task is a no-op. Without this, a
-    // bulk-complete over a selection containing a completed task re-stamps
-    // its completed_at AND emits a fresh-timestamped sync_log snapshot —
-    // which LWW-outranks (and silently reverts) a reopen made on another
-    // device that hasn't pulled here yet. The `old == "complete"` half keeps
-    // the repair path open for rows stuck at completed=1/status!='complete'.
-    if is_complete && was_completed && old == "complete" {
-        return Ok(());
+async fn update_task_status_inner(
+    pool: &SqlitePool,
+    id: &str,
+    status: &str,
+    note: Option<&str>,
+    today: chrono::NaiveDate,
+    expected_due_date: Option<Option<&str>>,
+) -> crate::Result<()> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    if let Some(expected) = expected_due_date {
+        crate::db::task_tx::ensure_expected_due_tx(&mut tx, id, status, expected).await?;
     }
-
-    // Subtasks the completion cascade below actually changes — captured so the
-    // sync_log write at the bottom can log each one. Logging only the parent
-    // left subtask completions invisible to Turso: the Mac showed them
-    // complete, every other device still showed them open.
-    let mut cascaded_subtasks: Vec<LocalTask> = Vec::new();
-    if is_complete {
-        // Recurrence check, ahead of the normal completion path: a recurring
-        // task (rule parses AND has a due date) reschedules instead of
-        // completing. An unparseable rule or a missing due date falls
-        // through below and completes normally (rule is inert).
-        let recur_row: Option<(Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT recurrence_rule, due_date, due_time FROM local_tasks WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
-
-        if let Some((Some(rule_str), Some(due_date_str), existing_due_time)) = recur_row {
-            if let Some(rule) = crate::recurrence::parse_rule(&rule_str) {
-                if let Ok(current_due) =
-                    chrono::NaiveDate::parse_from_str(&due_date_str, "%Y-%m-%d")
-                {
-                    let next_due = crate::recurrence::next_occurrence(&rule, current_due, today);
-                    let next_due_str = next_due.format("%Y-%m-%d").to_string();
-                    let new_due_time = rule.time.clone().or(existing_due_time);
-
-                    // `completed = 0, completed_at = NULL` matters for the
-                    // zombie state completed=1/status='todo' (reachable when
-                    // the completion cascade marks a RECURRING subtask
-                    // complete and it is later re-completed): without the
-                    // reset, the row would claim to be open while every
-                    // open-task list (all filter completed = 0) hides it.
-                    sqlx::query(
-                        "UPDATE local_tasks SET due_date = ?, due_time = ?, status = 'todo', completed = 0, completed_at = NULL, updated_at = datetime('now', 'localtime') WHERE id = ?",
-                    )
-                    .bind(&next_due_str)
-                    .bind(&new_due_time)
-                    .bind(id)
-                    .execute(pool)
-                    .await?;
-
-                    activity::log_activity(
-                        pool,
-                        "task_recurred",
-                        Some(id),
-                        Some(serde_json::json!({ "from": due_date_str, "to": &next_due_str })),
-                    )
-                    .await;
-
-                    let row: Option<LocalTask> = sqlx::query_as::<_, LocalTask>(&format!(
-                        "SELECT {} FROM local_tasks WHERE id = ?",
-                        SELECT_COLS
-                    ))
-                    .bind(id)
-                    .fetch_optional(pool)
-                    .await
-                    .ok()
-                    .flatten();
-
-                    if let Some(task) = &row {
-                        let fields_changed: Vec<String> = vec![
-                            "due_date".to_string(),
-                            "due_time".to_string(),
-                            "status".to_string(),
-                            "completed".to_string(),
-                            "completed_at".to_string(),
-                        ];
-                        let changed = serde_json::to_string(&fields_changed).unwrap_or_default();
-                        let snapshot = sync::task_sync_snapshot(task);
-                        sync::append_sync_log(
-                            pool,
-                            "local_tasks",
-                            id,
-                            "UPDATE",
-                            Some(&changed),
-                            Some(&snapshot),
-                        )
-                        .await
-                        .ok();
-
-                        crate::integrations::todoist::observer::on_task_mutation(
-                            pool,
-                            crate::integrations::todoist::observer::TaskMutation::Updated {
-                                task,
-                                fields_changed: &fields_changed,
-                            },
-                        )
-                        .await;
-                    }
-
-                    return Ok(());
-                }
-            }
-        }
-
-        sqlx::query(
-            "UPDATE local_tasks SET status = ?, completed = 1, completed_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime') WHERE id = ?",
-        )
-        .bind(status)
-        .bind(id)
-        .execute(pool)
-        .await?;
-
-        // Also complete all still-open subtasks. `completed = 0` matches the
-        // web client's cascade (turso/tasks.ts `setTaskStatus`): re-completing
-        // a parent must not re-stamp `completed_at` on already-complete
-        // children, and it keeps the sync_log entries below scoped to rows
-        // that actually changed. RETURNING the full row makes capture and
-        // mutation one statement — a subtask inserted between a separate
-        // SELECT and this UPDATE would be completed without ever being
-        // logged — and it returns the post-update state, so no re-read.
-        cascaded_subtasks = sqlx::query_as::<_, LocalTask>(&format!(
-            "UPDATE local_tasks SET status = 'complete', completed = 1, completed_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime') WHERE parent_id = ? AND completed = 0 RETURNING {}",
-            SELECT_COLS
-        ))
-        .bind(id)
-        .fetch_all(pool)
-        .await?;
-    } else {
-        sqlx::query(
-            "UPDATE local_tasks SET status = ?, completed = 0, completed_at = NULL, updated_at = datetime('now', 'localtime') WHERE id = ?",
-        )
-        .bind(status)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    let effects = crate::db::task_tx::set_status_tx(&mut tx, id, status, today, crate::db::task_tx::MutationPolicy::User).await?;
+    crate::db::focus::engine::reconcile_task_effects_tx(&mut tx, &effects).await?;
+    tx.commit().await?;
+    if let Some(recurrence) = effects.recurrence {
+        activity::log_activity(pool, "task_recurred", Some(id),
+            Some(serde_json::json!({"from":recurrence.before_due,"to":recurrence.after_due}))).await;
+    } else if !effects.changed.is_empty() {
+        let mut meta = serde_json::json!({"old_status":effects.previous_status.unwrap_or_default(),"new_status":status});
+        if let Some(note) = note { meta["note"] = serde_json::Value::String(note.to_owned()); }
+        activity::log_activity(pool, "status_changed", Some(id),
+            Some(meta)).await;
     }
-
-    // Build metadata
-    let mut meta = serde_json::json!({ "old_status": &old, "new_status": status });
-    if let Some(n) = note {
-        meta["note"] = serde_json::Value::String(n.to_string());
-    }
-
-    activity::log_activity(
-        pool,
-        "status_changed",
-        Some(id),
-        Some(meta),
-    )
-    .await;
-
-    // Sync log: UPDATE for status change
-    let row: Option<LocalTask> =
-        sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
-            .bind(id)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten();
-    if let Some(task) = &row {
-        let changed = serde_json::json!(["status", "completed", "completed_at"]).to_string();
-        let snapshot = sync::task_sync_snapshot(task);
-        sync::append_sync_log(pool, "local_tasks", id, "UPDATE", Some(&changed), Some(&snapshot)).await.ok();
-    }
-
-    // Sync log: one UPDATE per subtask the completion cascade changed, with a
-    // full post-update snapshot each (receivers upsert whole rows, so a
-    // partial snapshot would blank the other columns). Mirrors the web
-    // client's `setTaskStatus`, which was doing this before desktop did. The
-    // Todoist observer is deliberately NOT fired per subtask — Todoist
-    // cascades a parent completion to its subtasks server-side, so per-child
-    // ops would be redundant echoes.
-    let changed = serde_json::json!(["status", "completed", "completed_at"]).to_string();
-    for sub in &cascaded_subtasks {
-        log_task_sync(pool, sub, "UPDATE", Some(&changed)).await;
-    }
-
-    // Todoist mutation observer: best-effort
-    if let Some(task) = &row {
-        crate::integrations::todoist::observer::on_task_mutation(
-            pool,
-            crate::integrations::todoist::observer::TaskMutation::StatusChanged { task, was_completed },
-        )
-        .await;
-    }
-
     Ok(())
 }
 
 pub async fn delete_local_task(pool: &SqlitePool, id: &str) -> crate::Result<()> {
-    // Fetch the full task before deleting, so the observer can enqueue a delete op
-    // (and read external_id) after the row is gone.
-    let pre_delete_task: Option<LocalTask> =
-        sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE id = ?", SELECT_COLS))
-            .bind(id)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten();
-
-    // Fetch full subtask rows (not just ids) before the cascade, so the
-    // Todoist observer can fire for each child exactly as it does for the
-    // parent — otherwise a child's pending 'create' op survives the cascade
-    // and resurrects the deleted subtask remotely, then locally on the next
-    // pull (I2).
-    let subtasks: Vec<LocalTask> =
-        sqlx::query_as::<_, LocalTask>(&format!("SELECT {} FROM local_tasks WHERE parent_id = ?", SELECT_COLS))
-            .bind(id)
-            .fetch_all(pool)
-            .await
-            .unwrap_or_default();
-
-    // Log sync for subtask deletes
-    for task in &subtasks {
-        sync::append_sync_log(pool, "local_tasks", &task.id, "DELETE", None, None).await.ok();
-    }
-
-    // Delete subtasks first
-    sqlx::query("DELETE FROM local_tasks WHERE parent_id = ?")
-        .bind(id)
-        .execute(pool)
-        .await?;
-
-    sqlx::query("DELETE FROM local_tasks WHERE id = ?")
-        .bind(id)
-        .execute(pool)
-        .await?;
-
-    // Sync log: DELETE
-    sync::append_sync_log(pool, "local_tasks", id, "DELETE", None, None).await.ok();
-
-    activity::log_activity(
-        pool,
-        "task_deleted",
-        Some(id),
-        None,
-    )
-    .await;
-
-    // Todoist mutation observer: best-effort — fire for the parent and every
-    // cascaded child so each gets its outbox cleanup (pending creates
-    // cancelled, pending updates replaced with a delete op).
-    if let Some(task) = &pre_delete_task {
-        crate::integrations::todoist::observer::on_task_mutation(
-            pool,
-            crate::integrations::todoist::observer::TaskMutation::Deleted { task },
-        )
-        .await;
-    }
-    for task in &subtasks {
-        crate::integrations::todoist::observer::on_task_mutation(
-            pool,
-            crate::integrations::todoist::observer::TaskMutation::Deleted { task },
-        )
-        .await;
-    }
-
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let effects = crate::db::task_tx::delete_task_tx(&mut tx, id, crate::db::task_tx::MutationPolicy::User).await?;
+    crate::db::focus::engine::reconcile_task_effects_tx(&mut tx, &effects).await?;
+    tx.commit().await?;
+    activity::log_activity(pool, "task_deleted", Some(id), None).await;
     Ok(())
 }
 

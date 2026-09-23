@@ -12,10 +12,14 @@ pub struct Cli {
     /// Marked synthetic profile in the OS temporary directory; never creates a database.
     #[arg(long, global = true)]
     pub profile: Option<PathBuf>,
+    /// Retry identity for a task write handled by the running app. After an
+    /// uncertain result, repeat the exact command with the SAME value.
+    #[arg(long, global = true)]
+    pub command_id: Option<String>,
     #[command(subcommand)]
     pub command: Command,
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Command {
     #[command(subcommand)]
     Task(Task),
@@ -35,7 +39,7 @@ pub enum Command {
     Sync(Sync),
     Gap(Gap),
 }
-#[derive(Args, Debug, Default)]
+#[derive(Args, Debug, Default, Clone)]
 pub struct Fields {
     #[arg(long)]
     pub project: Option<String>,
@@ -74,7 +78,7 @@ pub struct Fields {
     #[arg(long,action=clap::ArgAction::Set)]
     pub google_calendar_enabled: Option<bool>,
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Task {
     List {
         #[arg(long)]
@@ -105,6 +109,10 @@ pub enum Task {
     },
     Complete {
         id: String,
+        /// Due date the task had when you decided to complete it
+        /// (YYYY-MM-DD, or "none"). Defaults to the current value.
+        #[arg(long)]
+        expected_due: Option<String>,
     },
     Reopen {
         id: String,
@@ -115,6 +123,9 @@ pub enum Task {
         status: String,
         #[arg(long)]
         reason: Option<String>,
+        /// For status "complete": see `task complete --expected-due`.
+        #[arg(long)]
+        expected_due: Option<String>,
     },
     Delete {
         id: String,
@@ -132,7 +143,7 @@ pub enum Task {
         clear: bool,
     },
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Project {
     List,
     Create {
@@ -157,7 +168,7 @@ pub enum Project {
         id: String,
     },
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Section {
     List {
         #[arg(long)]
@@ -180,7 +191,7 @@ pub enum Section {
         ids: Vec<String>,
     },
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Label {
     List,
     Create {
@@ -199,7 +210,7 @@ pub enum Label {
         id: String,
     },
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Capture {
     List {
         #[arg(long,default_value_t=100,value_parser=clap::value_parser!(i64).range(1..=10000))]
@@ -216,14 +227,14 @@ pub enum Capture {
         id: String,
     },
 }
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct DateRange {
     #[arg(long)]
     pub from: String,
     #[arg(long)]
     pub to: String,
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Activity {
     List {
         #[command(flatten)]
@@ -240,24 +251,26 @@ pub enum Activity {
         date: String,
     },
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Backup {
     Status,
     Now,
     Verify,
+    /// Explicitly activate a restored profile on this Mac (running app only).
+    Activate,
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Sync {
     Status,
     Now,
 }
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct Gap {
     pub reason: Option<String>,
     #[command(subcommand)]
     pub command: Option<GapCommand>,
 }
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum GapCommand {
     List {
         #[command(flatten)]

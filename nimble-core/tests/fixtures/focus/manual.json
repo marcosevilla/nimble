@@ -1,0 +1,34 @@
+{
+  "tasks": {
+    "manual:m1": {
+      "id": "manual:m1",
+      "content": "Synthetic finished manual task",
+      "description": "",
+      "projectId": "manual",
+      "parentId": null,
+      "priority": 1,
+      "due": null,
+      "duration": null,
+      "dayOrder": 0,
+      "childOrder": 0
+    },
+    "manual:m2": {
+      "id": "manual:m2",
+      "content": "Synthetic open manual task",
+      "description": "Fixture body",
+      "projectId": "manual",
+      "parentId": null,
+      "priority": 3,
+      "due": null,
+      "duration": null,
+      "dayOrder": 0,
+      "childOrder": 1,
+      "legacyColor": "teal"
+    }
+  },
+  "order": ["manual:m2"],
+  "completed": [
+    { "id": "manual:m1", "spentMs": 12345, "completedAt": 1758542400000 }
+  ],
+  "showCompleted": true
+}

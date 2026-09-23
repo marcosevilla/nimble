@@ -109,6 +109,104 @@ pub async fn sync(token: &str, body: &serde_json::Value) -> crate::Result<SyncRe
         .map_err(|e| crate::Error::Api(format!("Todoist sync parse error: {}", e)))
 }
 
+pub const TODOIST_SYNC_URL: &str = "https://api.todoist.com/api/v1/sync";
+
+/// Outcome of one `/sync` command request, classified by what it proves about
+/// delivery. `NotSent` means the request never left (safe to retry);
+/// `Uncertain` means the server may have processed it (timeout after send,
+/// unreadable success body, a gateway error) and must not be retried blindly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransportError {
+    NotSent(String),
+    Uncertain(String),
+    Auth,
+    RateLimited(Option<u64>),
+    /// Server explicitly declined before processing (503); retry later.
+    Transient(Option<u64>),
+    Gone,
+    Rejected(String),
+}
+
+/// Command transport seam for the focus delivery dispatcher. Production uses
+/// `HttpSyncTransport`; tests use scripted mocks or a loopback server.
+#[allow(async_fn_in_trait)]
+pub trait SyncTransport {
+    /// Stable, non-secret identity of the credential in use, so an auth pause
+    /// lasts until the user reconnects with a different token.
+    fn credential_fingerprint(&self) -> String;
+    async fn send_commands(&self, commands: &[serde_json::Value]) -> Result<SyncResponse, TransportError>;
+}
+
+#[derive(Clone)]
+pub struct HttpSyncTransport {
+    client: reqwest::Client,
+    url: reqwest::Url,
+    token: String,
+}
+
+impl HttpSyncTransport {
+    /// `url` must be https, or loopback for tests.
+    pub fn new(client: reqwest::Client, url: &str, token: String) -> crate::Result<Self> {
+        let url = reqwest::Url::parse(url).map_err(|e| crate::Error::Other(format!("invalid: sync url {e}")))?;
+        if url.scheme() != "https" && !matches!(url.host_str(), Some("127.0.0.1" | "localhost")) {
+            return Err(crate::Error::Other("invalid: sync url must be https".into()));
+        }
+        Ok(Self { client, url, token })
+    }
+
+    pub fn todoist(token: String) -> crate::Result<Self> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| crate::Error::Api(format!("Todoist client: {e}")))?;
+        Self::new(client, TODOIST_SYNC_URL, token)
+    }
+}
+
+impl SyncTransport for HttpSyncTransport {
+    fn credential_fingerprint(&self) -> String {
+        blake3::hash(self.token.as_bytes()).to_hex()[..16].to_string()
+    }
+
+    async fn send_commands(&self, commands: &[serde_json::Value]) -> Result<SyncResponse, TransportError> {
+        let response = self
+            .client
+            .post(self.url.clone())
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({ "commands": commands }))
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_connect() || e.is_builder() {
+                    TransportError::NotSent(e.to_string())
+                } else {
+                    TransportError::Uncertain(e.to_string())
+                }
+            })?;
+        let status = response.status();
+        if !status.is_success() {
+            let retry_after = response
+                .headers()
+                .get("Retry-After")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok());
+            let body = response.text().await.unwrap_or_default();
+            return Err(match status.as_u16() {
+                401 | 403 => TransportError::Auth,
+                429 => TransportError::RateLimited(retry_after),
+                503 => TransportError::Transient(retry_after),
+                404 | 410 => TransportError::Gone,
+                s if s >= 500 => TransportError::Uncertain(format!("HTTP {s}")),
+                s => TransportError::Rejected(format!("HTTP {s}: {}", body.chars().take(200).collect::<String>())),
+            });
+        }
+        response
+            .json::<SyncResponse>()
+            .await
+            .map_err(|e| TransportError::Uncertain(format!("unreadable success response: {e}")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

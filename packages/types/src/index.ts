@@ -9,6 +9,7 @@
 // The one cross-client data-access contract. Lives in its own module so the
 // domain types below stay importable without pulling in the interface.
 export type { DataProvider } from './data-provider'
+export type * from './focus'
 
 // ── Settings ──
 
@@ -96,6 +97,7 @@ export interface Project {
 export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'blocked' | 'complete'
 
 export interface LocalTask {
+  sync_policy: 'default' | 'local_only'
   reminder_offset_minutes: number | null
   google_calendar_enabled: boolean
   id: string
@@ -334,6 +336,11 @@ export type VaultSaveResult =
 
 // ── Focus Mode ──
 
+/**
+ * @deprecated The legacy single-task focus marker. The desktop and web no
+ * longer read it (the durable focus engine owns timing); kept only for the
+ * dormant mobile provider copy.
+ */
 export interface FocusState {
   task_id: string | null
   started_at: string | null
@@ -499,6 +506,8 @@ export interface BackupStatus {
   turso_pending: number | null
   todoist_pending: number | null
   todoist_failed: number | null
+  /** A restored profile: sync, backups, reminders and focus writes stay off until activated. */
+  restore_activation_required: boolean
   error: { stage: string; code: string; at: string } | null
 }
 export interface BackupCapability {
@@ -508,6 +517,8 @@ export interface BackupCapability {
   verifyLatest(): Promise<{ verified: boolean }>
   openFolder(): Promise<void>
   configureRemote(ownerRepo: string): Promise<BackupStatus>
+  /** Explicitly activate a restored profile on this Mac. Idempotent; starts nothing. */
+  activateRestoredProfile(): Promise<BackupStatus>
 }
 
 export interface ReminderStatus { permission: 'granted' | 'denied' | 'unknown'; timezone: string; errorCode: string | null }

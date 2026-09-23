@@ -5,8 +5,9 @@
  * Zustand stores / plain modules: use `getDataProvider()` (initialized at app startup)
  */
 
-import { createContext, useContext } from 'react'
+import { createContext, useContext, useEffect } from 'react'
 import type { DataProvider } from './data-provider'
+import { connectProviderEvents } from './provider-events'
 
 // ── React Context ──
 
@@ -19,6 +20,8 @@ export function DataProviderRoot({
   provider: DataProvider
   children: React.ReactNode
 }) {
+  // Every window root shares one event bridge (data + focus invalidations).
+  useEffect(() => connectProviderEvents(), [])
   return (
     <DataProviderContext.Provider value={provider}>
       {children}

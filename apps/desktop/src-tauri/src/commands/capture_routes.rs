@@ -105,6 +105,8 @@ pub async fn route_capture(
             None,
             None,
             None,
+            None,
+            None, // sync_policy: default
         )
         .await?;
         task.id

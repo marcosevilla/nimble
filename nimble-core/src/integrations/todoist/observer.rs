@@ -1,6 +1,6 @@
 use crate::integrations::todoist::outbox;
 use crate::types::{LocalTask, Project};
-use sqlx::SqlitePool;
+use sqlx::{SqlitePool, SqliteConnection};
 
 pub enum TaskMutation<'a> {
     Created(&'a LocalTask),
@@ -34,6 +34,10 @@ async fn active(pool: &SqlitePool) -> bool {
 
 /// Best-effort: logs and swallows errors, never fails the caller.
 pub async fn on_task_mutation(pool: &SqlitePool, m: TaskMutation<'_>) {
+    if match &m {
+        TaskMutation::Created(t) | TaskMutation::Deleted { task: t } |
+        TaskMutation::StatusChanged { task: t, .. } | TaskMutation::Updated { task: t, .. } => t.sync_policy == "local_only",
+    } { return; }
     if !active(pool).await {
         return;
     }
@@ -100,6 +104,65 @@ pub async fn on_task_mutation(pool: &SqlitePool, m: TaskMutation<'_>) {
     }
 }
 
+pub async fn on_task_mutation_tx(conn: &mut SqliteConnection, m: TaskMutation<'_>) -> crate::Result<()> {
+    let task = match &m {
+        TaskMutation::Created(t) | TaskMutation::Deleted { task: t } |
+        TaskMutation::StatusChanged { task: t, .. } | TaskMutation::Updated { task: t, .. } => *t,
+    };
+    if task.sync_policy == "local_only" { return Ok(()); }
+    let active: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM integration_sync_state WHERE provider='todoist' AND enabled=1 AND EXISTS (SELECT 1 FROM settings WHERE key='todoist_api_token')"
+    ).fetch_optional(&mut *conn).await?;
+    if active.is_none() { return Ok(()); }
+    match m {
+        TaskMutation::Created(task) => {
+            if task.external_id.is_none() {
+                outbox::enqueue_tx(conn, "task", &task.id, "create", task_create_payload(task)).await?;
+            }
+        }
+        TaskMutation::Updated { task, fields_changed } => {
+            let mut payload = serde_json::Map::new();
+            for field in fields_changed {
+                match field.as_str() {
+                    "content" => { payload.insert("content".into(), task.content.clone().into()); }
+                    "description" => { payload.insert("description".into(), task.description.clone().into()); }
+                    "due_date" => { payload.insert("due_date".into(), task.due_date.clone().into()); }
+                    "priority" => { payload.insert("priority".into(), task.priority.into()); }
+                    "due_time" => {
+                        payload.insert("due_time".into(), task.due_time.clone().into());
+                        payload.entry("due_date").or_insert_with(|| task.due_date.clone().into());
+                    }
+                    "duration_minutes" => { payload.insert("duration_minutes".into(), task.duration_minutes.into()); }
+                    "labels" => {
+                        let rows: Vec<(String,)> = sqlx::query_as(
+                            "SELECT name FROM labels WHERE id IN (SELECT label_id FROM task_labels WHERE task_id=?) ORDER BY name"
+                        ).bind(&task.id).fetch_all(&mut *conn).await?;
+                        payload.insert("labels".into(), serde_json::json!(rows.into_iter().map(|r| r.0).collect::<Vec<_>>()));
+                    }
+                    _ => {}
+                }
+            }
+            if !payload.is_empty() {
+                outbox::enqueue_tx(conn, "task", &task.id, "update", payload.into()).await?;
+            }
+            if fields_changed.iter().any(|f| f == "project_id") {
+                outbox::enqueue_tx(conn, "task", &task.id, "move", serde_json::json!({"project_local_id": task.project_id})).await?;
+            }
+        }
+        TaskMutation::StatusChanged { task, was_completed } => {
+            match (was_completed, task.completed) {
+                (false, true) => outbox::enqueue_tx(conn, "task", &task.id, "close", serde_json::json!({})).await?,
+                (true, false) => outbox::enqueue_tx(conn, "task", &task.id, "reopen", serde_json::json!({})).await?,
+                _ => {},
+            }
+        }
+        TaskMutation::Deleted { task } => {
+            outbox::enqueue_tx(conn, "task", &task.id, "delete", serde_json::json!({"external_id": task.external_id})).await?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn on_project_mutation(pool: &SqlitePool, m: ProjectMutation<'_>) {
     if !active(pool).await {
         return;
@@ -138,13 +201,25 @@ pub async fn on_turso_row_applied(
     table: &str,
     row_id: &str,
     pre_delete_external_id: Option<String>,
+    pre_delete_sync_policy: Option<String>,
     deleted: bool,
 ) {
+    if table == "local_tasks" && !deleted {
+        let policy: Option<String> = sqlx::query_scalar("SELECT sync_policy FROM local_tasks WHERE id=?")
+            .bind(row_id).fetch_optional(pool).await.ok().flatten();
+        if policy.as_deref() == Some("local_only") {
+            if let Err(e) = outbox::cancel_unsent_task(pool, row_id).await {
+                log::warn!("todoist observer: failed to cancel local-only intents: {e}");
+            }
+            return;
+        }
+    }
     if !active(pool).await {
         return;
     }
     if table == "local_tasks" {
         if deleted {
+            if pre_delete_sync_policy.as_deref() == Some("local_only") { return; }
             let _ = outbox::enqueue(pool, "task", row_id, "delete",
                 serde_json::json!({"external_id": pre_delete_external_id})).await;
             return;
@@ -158,6 +233,7 @@ pub async fn on_turso_row_applied(
         .ok()
         .flatten();
         let Some(task) = task else { return };
+        if task.sync_policy == "local_only" { return; }
         if task.external_id.is_none() {
             on_task_mutation(pool, TaskMutation::Created(&task)).await;
         } else {
@@ -184,7 +260,7 @@ pub async fn seed_outbox_for_unlinked(pool: &SqlitePool) -> crate::Result<(usize
         }
     }
     let tasks: Vec<LocalTask> = sqlx::query_as(
-        &format!("SELECT {} FROM local_tasks WHERE completed = 0 AND external_id IS NULL", crate::db::tasks::SELECT_COLS),
+        &format!("SELECT {} FROM local_tasks WHERE completed = 0 AND external_id IS NULL AND sync_policy != 'local_only'", crate::db::tasks::SELECT_COLS),
     )
     .fetch_all(pool)
     .await?;

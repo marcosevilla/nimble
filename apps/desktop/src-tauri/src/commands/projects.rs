@@ -1,6 +1,8 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
+use crate::data_events::{after_commit, PROJECTS, TASKS_AND_PROJECTS};
+
 pub use nimble_core::types::Project;
 
 #[tauri::command]
@@ -19,9 +21,10 @@ pub async fn create_project(
     parent_id: Option<String>,
 ) -> Result<Project, String> {
     let pool = app.state::<SqlitePool>();
-    nimble_core::db::projects::create_project(pool.inner(), &name, &color, parent_id.as_deref())
+    let result = nimble_core::db::projects::create_project(pool.inner(), &name, &color, parent_id.as_deref())
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    after_commit(&app, result, PROJECTS, |project| vec![project.id.clone()])
 }
 
 #[tauri::command]
@@ -34,7 +37,7 @@ pub async fn update_project(
     clear_parent: Option<bool>,
 ) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    nimble_core::db::projects::update_project(
+    let result = nimble_core::db::projects::update_project(
         pool.inner(),
         &id,
         name.as_deref(),
@@ -43,13 +46,15 @@ pub async fn update_project(
         clear_parent.unwrap_or(false),
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string());
+    after_commit(&app, result, PROJECTS, |_| vec![id.clone()])
 }
 
 #[tauri::command]
 pub async fn delete_project(app: AppHandle, id: String) -> Result<(), String> {
     let pool = app.state::<SqlitePool>();
-    nimble_core::db::projects::delete_project(pool.inner(), &id)
+    let result = nimble_core::db::projects::delete_project(pool.inner(), &id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    after_commit(&app, result, TASKS_AND_PROJECTS, |_| vec![id.clone()])
 }

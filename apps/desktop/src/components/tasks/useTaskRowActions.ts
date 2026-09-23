@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { addDays, format } from 'date-fns'
 import { useDataProvider } from '@/services/provider-context'
 import { useDetailStore } from '@/stores/detailStore'
-import { useFocusStore, DEFAULT_FOCUS_CONFIG } from '@/stores/focusStore'
+import { focusNowForTask } from '@/components/focus/focusEntryActions'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { taskToast } from '@/lib/taskToast'
 import { completeTaskWithExit } from './StatusDropdown'
@@ -16,7 +16,9 @@ import type { LocalTask } from '@nimble/types'
  * - Enter: open detail
  * - x / Space: complete, with the same exit animation as the status menu
  * - s: snooze — due date moves to tomorrow (neutral copy, §1.1)
- * - f: start a focus session with the default timer config
+ * - f: Focus now — one explicit Start (appends the task first if needed);
+ *   a no-op on a completed task; while live timing is unavailable it
+ *   explains why (friendly copy) and writes nothing
  */
 export function useTaskRowActions(tasks: LocalTask[]) {
   const dp = useDataProvider()
@@ -24,7 +26,7 @@ export function useTaskRowActions(tasks: LocalTask[]) {
   return useMemo(
     () => ({
       onOpen: (id: string) => useDetailStore.getState().openTask(id),
-      onComplete: (id: string) => completeTaskWithExit(dp, id),
+      onComplete: (id: string) => completeTaskWithExit(dp, id, tasks.find((t) => t.id === id)?.due_date),
       onSnooze: async (id: string) => {
         const dueDate = format(addDays(new Date(), 1), 'yyyy-MM-dd')
         try {
@@ -35,10 +37,10 @@ export function useTaskRowActions(tasks: LocalTask[]) {
           toast.error(`Failed to reschedule: ${e}`)
         }
       },
+      // Completed rows are a quiet no-op; failures show friendly copy.
       onFocusStart: (id: string) => {
         const task = tasks.find((t) => t.id === id)
-        if (!task) return
-        useFocusStore.getState().startFocus(task, DEFAULT_FOCUS_CONFIG)
+        if (task) void focusNowForTask(task)
       },
     }),
     [dp, tasks],

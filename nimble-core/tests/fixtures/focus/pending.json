@@ -1,0 +1,17 @@
+[
+  {
+    "kind": "close",
+    "taskId": "90071992547409931234",
+    "createdAt": 1758542500000,
+    "attempts": 7,
+    "nextAttemptAt": 1758546100000
+  },
+  {
+    "kind": "comment",
+    "taskId": "90071992547409931234",
+    "content": "Synthetic tracked-time comment",
+    "createdAt": 1758542500000,
+    "attempts": 7,
+    "nextAttemptAt": 1758546100000
+  }
+]
