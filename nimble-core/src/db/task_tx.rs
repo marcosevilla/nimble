@@ -30,6 +30,10 @@ pub struct TaskEffects {
     pub deleted: Vec<LocalTask>,
     pub recurrence: Option<RecurrenceEffect>,
     pub previous_status: Option<String>,
+    /// Task IDs whose due date a LOCAL user edit changed. Only these refresh
+    /// an open focus occurrence's expected due identity; a remote pull that
+    /// moves a due never does (focus Complete then refuses as stale).
+    pub rescheduled: Vec<String>,
 }
 
 fn validate_reminder(

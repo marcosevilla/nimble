@@ -1103,3 +1103,179 @@ async fn pomodoro_round_and_break_boundaries_signal_one_sound_each() {
     assert!(h.service.claim_sound().await.unwrap().is_some_and(|t| t.starts_with("chime:")));
     assert_eq!(h.service.claim_sound().await.unwrap(), None);
 }
+
+// ── Final review C1: focus Complete names the expected due identity ──
+
+async fn recurring_queued(h: &fixture::Harness, due: &str) -> (String, String) {
+    let task = nimble_core::db::tasks::create_local_task(
+        &h.pool,
+        CreateTaskInput {
+            content: "EDD".into(),
+            due_date: Some(due.into()),
+            recurrence_rule: Some("every day".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![task.id.clone()],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    (task.id, oid)
+}
+
+/// A Todoist/Turso pull that moved the due date: raw row write + plain edit effects.
+async fn remote_due_change(h: &fixture::Harness, task_id: &str, due: &str) {
+    let mut write =
+        nimble_core::db::focus::task_write::TaskWrite::begin(&h.pool, Some(&h.service))
+            .await
+            .unwrap();
+    sqlx::query("UPDATE local_tasks SET due_date=? WHERE id=?")
+        .bind(due)
+        .bind(task_id)
+        .execute(write.conn())
+        .await
+        .unwrap();
+    let task: nimble_core::types::LocalTask = sqlx::query_as(
+        "SELECT id, parent_id, content, description, project_id, priority, due_date, due_time, duration_minutes, recurrence_rule, section_id, reminder_offset_minutes, google_calendar_enabled, completed, completed_at, status, linked_doc_id, position, created_at, updated_at, external_id, external_source, remote_updated_at, synced_snapshot, sync_policy FROM local_tasks WHERE id=?",
+    )
+    .bind(task_id)
+    .fetch_one(write.conn())
+    .await
+    .unwrap();
+    write
+        .commit(&nimble_core::db::task_tx::TaskEffects {
+            changed: vec![task],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+}
+
+async fn due_of(h: &fixture::Harness, task_id: &str) -> Option<String> {
+    sqlx::query_scalar("SELECT due_date FROM local_tasks WHERE id=?")
+        .bind(task_id)
+        .fetch_one(&h.pool)
+        .await
+        .unwrap()
+}
+
+async fn outbox_rows(h: &fixture::Harness) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM todoist_outbox")
+        .fetch_one(&h.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn focus_complete_refuses_recurring_occurrence_advanced_remotely() {
+    let h = fixture::Harness::new().await;
+    let (task_id, oid) = recurring_queued(&h, "2026-09-22").await;
+    // Completed on the phone: the pull advances the due as a plain edit.
+    remote_due_change(&h, &task_id, "2026-09-23").await;
+    let outbox_before = outbox_rows(&h).await;
+    let refused = h
+        .send(FocusAction::Complete {
+            occurrence_id: oid.clone(),
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        refused.to_string().starts_with("stale_occurrence"),
+        "{refused}"
+    );
+    assert!(matches!(
+        nimble_core::db::focus::engine::focus_error(&refused).code,
+        nimble_core::focus_types::FocusErrorCode::StaleOccurrence
+    ));
+    assert_eq!(due_of(&h, &task_id).await.as_deref(), Some("2026-09-23"));
+    assert_eq!(outbox_rows(&h).await, outbox_before, "nothing enqueued");
+    // Surfaced, not silently closed: the occurrence stays open in the queue.
+    let snap = h.snapshot().await;
+    assert_eq!(snap.queue[0].occurrence_id, oid);
+    let state: String = sqlx::query_scalar("SELECT state FROM focus_occurrences WHERE id=?")
+        .bind(&oid)
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+    assert_eq!(state, "open");
+}
+
+#[tokio::test]
+async fn focus_complete_follows_local_due_edits() {
+    let h = fixture::Harness::new().await;
+    // Pool CRUD path (task detail).
+    let (task_id, oid) = recurring_queued(&h, "2026-09-22").await;
+    nimble_core::db::tasks::update_local_task(
+        &h.pool,
+        &task_id,
+        nimble_core::types::UpdateTaskInput {
+            due_date: Some("2026-09-25".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    h.send(FocusAction::Complete { occurrence_id: oid })
+        .await
+        .unwrap();
+    assert_eq!(due_of(&h, &task_id).await.as_deref(), Some("2026-09-26"));
+
+    // Service-owned native path (desktop/dt while the app runs).
+    let (task_id, oid) = recurring_queued(&h, "2026-09-22").await;
+    h.service
+        .execute_native_task(NativeTaskCommand {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            action: NativeTaskAction::Update {
+                id: task_id.clone(),
+                input: nimble_core::types::UpdateTaskInput {
+                    due_date: Some("2026-09-24".into()),
+                    ..Default::default()
+                },
+            },
+        })
+        .await
+        .unwrap();
+    h.send(FocusAction::Complete { occurrence_id: oid })
+        .await
+        .unwrap();
+    assert_eq!(due_of(&h, &task_id).await.as_deref(), Some("2026-09-25"));
+}
+
+#[tokio::test]
+async fn focus_complete_of_non_recurring_task_ignores_remote_due_change() {
+    let h = fixture::Harness::new().await;
+    let task = nimble_core::db::tasks::create_local_task(
+        &h.pool,
+        CreateTaskInput {
+            content: "one-off".into(),
+            due_date: Some("2026-09-22".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![task.id.clone()],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    remote_due_change(&h, &task.id, "2026-09-30").await;
+    h.send(FocusAction::Complete { occurrence_id: oid })
+        .await
+        .unwrap();
+    let completed: i64 = sqlx::query_scalar("SELECT completed FROM local_tasks WHERE id=?")
+        .bind(&task.id)
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+    assert_eq!(completed, 1);
+}

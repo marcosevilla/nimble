@@ -190,8 +190,9 @@ pub async fn update_local_task(pool: &SqlitePool, id: &str, input: UpdateTaskInp
         .bind(id).fetch_one(&mut *tx).await?;
     let fields_changed = activity_fields(&input, &old);
     let task = crate::db::task_tx::update_task_tx(&mut tx, id, input, crate::db::task_tx::MutationPolicy::User).await?;
+    let rescheduled = if old.due_date != task.due_date { vec![task.id.clone()] } else { Vec::new() };
     crate::db::focus::engine::reconcile_task_effects_tx(&mut tx, &crate::db::task_tx::TaskEffects {
-        changed: vec![task.clone()], ..Default::default()
+        changed: vec![task.clone()], rescheduled, ..Default::default()
     }).await?;
     tx.commit().await?;
     if !fields_changed.is_empty() {

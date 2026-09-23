@@ -184,6 +184,15 @@ test('uncertain failures offer Try again with the SAME command; certain ones onl
   assert.equal(failureControl(null), null)
 })
 
+test('a stale occurrence shows readable copy, never raw engine text', () => {
+  const command = { command_id: 'c-2', action: { kind: 'complete', occurrence_id: 'o1' } }
+  const failure = failureControl({ code: 'stale_occurrence', message: 'recurring due identity changed', command })
+  assert.equal(failure.retry, null)
+  assert.doesNotMatch(failure.message, /identity|stale_occurrence|recurring due/)
+  assert.match(failure.message, /changed elsewhere/)
+  assert.match(failure.message, /Nothing was saved/)
+})
+
 test('typed focus failures live only in the cache, so a successful retry leaves no stale alert', () => {
   const command = { command_id: 'c-1', action: { kind: 'skip' } }
   const storage = Object.assign(new Error('Disk was busy'), { code: 'storage', command })

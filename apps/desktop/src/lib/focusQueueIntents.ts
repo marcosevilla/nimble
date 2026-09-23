@@ -379,8 +379,16 @@ export interface FailureControl {
 export function failureControl(error: { code: string; message: string; command?: unknown } | null): FailureControl | null {
   if (!error) return null
   const retry = error.code === 'storage' && error.command != null ? error.command : null
-  return { message: error.message, retry }
+  return { message: error.code === 'stale_occurrence' ? STALE_OCCURRENCE_COPY : error.message, retry }
 }
+
+/**
+ * A refused stale occurrence — e.g. a recurring task already completed on
+ * another device, whose due date moved on. The engine detail is not copy.
+ */
+export const STALE_OCCURRENCE_COPY =
+  'This task changed elsewhere (it may already be done on another device). Nothing was saved. Remove it from the queue and add it again to keep going.'
+
 
 /**
  * Message a surface should keep for a failed write, or null when the error

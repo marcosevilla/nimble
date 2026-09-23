@@ -765,8 +765,14 @@ impl FocusService {
                 }
                 let task =
                     task_tx::update_task_tx(&mut tx, &id, input, MutationPolicy::User).await?;
+                let rescheduled = if old.as_ref().is_some_and(|o| o.due_date != task.due_date) {
+                    vec![task.id.clone()]
+                } else {
+                    Vec::new()
+                };
                 let effects = TaskEffects {
                     changed: vec![task.clone()],
+                    rescheduled,
                     ..Default::default()
                 };
                 (Some(task), effects)
@@ -1191,13 +1197,13 @@ async fn apply_action_tx(
                 if entries.iter().any(|e| &e.task_id == task_id) {
                     continue;
                 }
-                let task: Option<(String, String, String, i64)> = sqlx::query_as(
-                    "SELECT content,project_id,status,completed FROM local_tasks WHERE id=?",
+                let task: Option<(String, String, String, i64, Option<String>)> = sqlx::query_as(
+                    "SELECT content,project_id,status,completed,due_date FROM local_tasks WHERE id=?",
                 )
                 .bind(task_id)
                 .fetch_optional(&mut *conn)
                 .await?;
-                let Some((title, project, status, completed)) = task else {
+                let Some((title, project, status, completed, due)) = task else {
                     return Err(err("not_found", "task missing"));
                 };
                 if (completed != 0 || status == "complete") && !explicit_still_open {
@@ -1208,8 +1214,10 @@ async fn apply_action_tx(
                 }
                 let generation:i64=sqlx::query_scalar("SELECT COALESCE(MAX(generation),0)+1 FROM focus_occurrences WHERE original_task_id=?").bind(task_id).fetch_one(&mut *conn).await?;
                 let oid = id();
-                sqlx::query("INSERT INTO focus_occurrences(id,task_id,original_task_id,title_snapshot,project_snapshot,generation,state,created_at) VALUES(?,?,?,?,?,?,'open',?)")
-                    .bind(&oid).bind(task_id).bind(task_id).bind(title).bind(project).bind(generation).bind(stamp).execute(&mut *conn).await?;
+                // The due date seen at enqueue is this occurrence's scheduling
+                // identity; Complete must still find it (see Complete).
+                sqlx::query("INSERT INTO focus_occurrences(id,task_id,original_task_id,title_snapshot,project_snapshot,scheduling_identity,generation,state,created_at) VALUES(?,?,?,?,?,?,?,'open',?)")
+                    .bind(&oid).bind(task_id).bind(task_id).bind(title).bind(project).bind(due).bind(generation).bind(stamp).execute(&mut *conn).await?;
                 entries.push(FocusEntry {
                     id: id(),
                     task_id: task_id.clone(),
@@ -1393,6 +1401,18 @@ async fn apply_action_tx(
                 .ok_or_else(|| err("stale_occurrence", "not queued"))?
                 .clone();
             ensure_open_task_tx(conn, &entry).await?;
+            // Name the due identity this occurrence was queued for. A remote
+            // pull that already advanced a recurring task (completed on the
+            // phone) leaves the occurrence open but stale; completing it here
+            // would advance it again and push the skipped date to Todoist.
+            let identity: Option<String> = sqlx::query_scalar(
+                "SELECT scheduling_identity FROM focus_occurrences WHERE id=?",
+            )
+            .bind(occurrence_id)
+            .fetch_one(&mut *conn)
+            .await?;
+            task_tx::ensure_expected_due_tx(conn, &entry.task_id, "complete", identity.as_deref())
+                .await?;
             let effects = task_tx::set_status_tx(
                 conn,
                 &entry.task_id,
@@ -1736,6 +1756,14 @@ async fn reconcile_task_effects_inner_tx(
     entries.retain(|e| !remove.contains(&e.occurrence_id));
     if selected.as_ref().is_some_and(|oid| remove.contains(oid)) {
         selected = entries.first().map(|e| e.occurrence_id.clone());
+    }
+    // Only a LOCAL user due edit re-binds an open occurrence to the new due;
+    // a remote due change leaves it stale for Complete to refuse.
+    if origin == EffectOrigin::Local {
+        for task in effects.changed.iter().filter(|t| effects.rescheduled.contains(&t.id)) {
+            sqlx::query("UPDATE focus_occurrences SET scheduling_identity=? WHERE task_id=? AND state='open'")
+                .bind(&task.due_date).bind(&task.id).execute(&mut *conn).await?;
+        }
     }
     for task in &effects.changed {
         let snapshots = sqlx::query("UPDATE focus_occurrences SET title_snapshot=?,project_snapshot=? WHERE task_id=? AND state='open' AND (title_snapshot IS NOT ? OR project_snapshot IS NOT ?)")

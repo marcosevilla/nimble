@@ -807,8 +807,8 @@ pub async fn commit_import(pool: &SqlitePool, files: &LegacyFocusFiles, preview_
             let exists: Option<String> = sqlx::query_scalar("SELECT id FROM focus_occurrences WHERE id=?").bind(&o.id).fetch_optional(&mut *tx).await?;
             if exists.is_some() { continue; }
             let project: Option<String> = sqlx::query_scalar("SELECT project_id FROM local_tasks WHERE id=?").bind(&o.task_id).fetch_optional(&mut *tx).await?;
-            sqlx::query("INSERT INTO focus_occurrences(id,task_id,original_task_id,title_snapshot,project_snapshot,generation,state,created_at,completed_at,completion_reason) VALUES(?,?,?,?,?,(SELECT COALESCE(MAX(generation),0)+1 FROM focus_occurrences WHERE original_task_id=?),?,?,?,?)")
-                .bind(&o.id).bind(&o.task_id).bind(&o.task_id).bind(&o.title).bind(project).bind(&o.task_id)
+            sqlx::query("INSERT INTO focus_occurrences(id,task_id,original_task_id,title_snapshot,project_snapshot,scheduling_identity,generation,state,created_at,completed_at,completion_reason) VALUES(?,?,?,?,?,(SELECT due_date FROM local_tasks WHERE id=?),(SELECT COALESCE(MAX(generation),0)+1 FROM focus_occurrences WHERE original_task_id=?),?,?,?,?)")
+                .bind(&o.id).bind(&o.task_id).bind(&o.task_id).bind(&o.title).bind(project).bind(&o.task_id).bind(&o.task_id)
                 .bind(if o.completed_at.is_some() { "completed" } else { "open" })
                 .bind(o.completed_at.as_deref().unwrap_or(&stamp)).bind(&o.completed_at)
                 .bind(o.completed_at.as_ref().map(|_| "imported")).execute(&mut *tx).await?;
