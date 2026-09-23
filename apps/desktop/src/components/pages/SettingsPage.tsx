@@ -51,7 +51,15 @@ import { TasksMigrationSection } from '@/components/settings/TasksMigrationSecti
 import { VaultSection } from '@/components/settings/VaultSection'
 import { LabelManager } from '@/components/settings/LabelManager'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
-import { visibleSections, activeSectionId } from '@/lib/settingsSections'
+import {
+  visibleSections,
+  visiblePages,
+  sectionsOnPage,
+  resolveSettingsPage,
+  activeSectionId,
+  DEFAULT_SETTINGS_PAGE,
+} from '@/lib/settingsSections'
+import { useSettingsNavStore } from '@/stores/settingsNavStore'
 import { settingsFailure, settingsMessage } from '@/lib/settingsMessage'
 import type { SettingsFailure } from '@/lib/settingsMessage'
 
@@ -1364,6 +1372,11 @@ export function SettingsPage() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const [checking, setChecking] = useState(false)
   const [maintenanceOpen, setMaintenanceOpen] = useState(false)
+  const storedPage = useSettingsNavStore((s) => s.page)
+  const showPage = useSettingsNavStore((s) => s.showPage)
+  const pendingSection = useSettingsNavStore((s) => s.pendingSection)
+  const clearPendingSection = useSettingsNavStore((s) => s.clearPendingSection)
+  const contentRef = useRef<HTMLDivElement>(null)
 
   const backupSupported = dp.backup.supported
   const remindersSupported = dp.reminders.supported
@@ -1372,8 +1385,6 @@ export function SettingsPage() {
     () => visibleSections({ backup: backupSupported, reminders: remindersSupported, googleCalendar: googleSupported }),
     [backupSupported, remindersSupported, googleSupported],
   )
-  const sectionIds = useMemo(() => sections.map((s) => s.id), [sections])
-  const { active: activeSection, select: selectSection } = useSettingsScrollSpy(sectionIds)
 
   // Load current values on mount
   useEffect(() => {
@@ -1587,7 +1598,7 @@ export function SettingsPage() {
     integrations: (
       <section id="integrations" className={SECTION_CLASS}>
         <SectionHeader
-          title="Integrations"
+          title="API keys"
           description="API tokens and URLs for connected services. Stored locally on your machine."
         />
         <div className="space-y-4">
@@ -1749,6 +1760,10 @@ export function SettingsPage() {
       </section>
     ),
 
+    /* Lane B mounts <TodayBriefSettings /> here (one root
+       <section id="today-brief">). While null, the page stays hidden. */
+    'today-brief': null,
+
     /* One-time migrations and developer verbs, collapsed and last
        (settings P2-1). Each keeps its old id so deep links still land. */
     maintenance: (
@@ -1758,6 +1773,7 @@ export function SettingsPage() {
           description="One-time migrations and sync tools. Nothing here is part of a normal day."
         />
         <details
+          open={maintenanceOpen}
           className="group rounded-lg border"
           onToggle={(e) => setMaintenanceOpen(e.currentTarget.open)}
         >
@@ -1805,43 +1821,111 @@ export function SettingsPage() {
     ),
   }
 
+  // A section renders only when it has a body; `today-brief` stays null
+  // until Lane B mounts its component, which keeps "Today & brief" out of
+  // the rail until then.
+  const renderable = sections.filter((s) => bodies[s.id] != null)
+  const pages = visiblePages(renderable)
+  const page = resolveSettingsPage(storedPage, pages) ?? DEFAULT_SETTINGS_PAGE
+  const pageSections = sectionsOnPage(renderable, page)
+  const { active: activeSection, select: selectSection } = useSettingsScrollSpy(pageSections.map((s) => s.id))
+
+  // A new page starts at its top…
+  useEffect(() => {
+    if (contentRef.current) findScroller(contentRef.current).scrollTop = 0
+  }, [page])
+
+  // …unless a deep link names a section; this effect runs after the one
+  // above, so the section wins. Clearing it re-runs only this effect.
+  useEffect(() => {
+    if (!pendingSection) return
+    const el = document.getElementById(pendingSection)
+    if (el) {
+      el.scrollIntoView({ block: 'start' })
+      selectSection(pendingSection)
+    }
+    clearPendingSection()
+  }, [pendingSection, page, selectSection, clearPendingSection])
+
+  const pageButtonClass = (current: boolean) =>
+    cn(
+      'rounded-md px-2 py-1 text-left transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground',
+      current ? 'text-body-strong text-foreground' : 'text-muted-foreground',
+    )
+
   return (
     <PageFrame title="Settings" width="wide" bodyClassName="flex gap-8">
-      {/* Left rail — section navigation, generated from SETTINGS_SECTIONS */}
+      {/* Left rail — the sub-pages; the current page's sections nest under it */}
       <nav
-        aria-label="Settings sections"
+        aria-label="Settings pages"
         className="sticky top-[calc(var(--page-header-h)+1.5rem)] hidden w-40 shrink-0 self-start md:block"
       >
         <ul className="space-y-0.5 text-body">
-          {sections.map((s) => {
-            const isActive = activeSection === s.id
+          {pages.map((p) => {
+            const isCurrent = p.id === page
             return (
-              <li key={s.id}>
-                <a
-                  href={`#${s.id}`}
-                  aria-current={isActive ? 'true' : undefined}
-                  onClick={() => selectSection(s.id)}
-                  className={cn(
-                    'block rounded-md px-2 py-1 transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground',
-                    isActive ? 'text-foreground' : 'text-muted-foreground',
-                  )}
+              <li key={p.id}>
+                <button
+                  type="button"
+                  aria-current={isCurrent ? 'page' : undefined}
+                  onClick={() => showPage(p.id)}
+                  className={cn('block w-full', pageButtonClass(isCurrent))}
                 >
-                  {s.label}
-                </a>
+                  {p.label}
+                </button>
+                {isCurrent && pageSections.length > 1 && (
+                  <ul aria-label={`${p.label} sections`} className="mt-0.5 mb-1 space-y-0.5">
+                    {pageSections.map((s) => {
+                      const isActive = activeSection === s.id
+                      return (
+                        <li key={s.id}>
+                          <a
+                            href={`#${s.id}`}
+                            aria-current={isActive ? 'true' : undefined}
+                            onClick={() => selectSection(s.id)}
+                            className={cn(
+                              'block rounded-md py-1 pl-5 pr-2 transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground',
+                              isActive ? 'text-foreground' : 'text-muted-foreground',
+                            )}
+                          >
+                            {s.label}
+                          </a>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
               </li>
             )
           })}
         </ul>
       </nav>
 
-      {/* Main content — same array, same order */}
-      {/* Section offset on every direct child, so the standalone Backups /
+      {/* Main content — the current page's sections, in registry order.
+          Section offset on every direct child, so the standalone Backups /
           Reminders / Phone alerts components land like the rest. */}
-      <div className="flex-1 min-w-0 space-y-8 [&>section]:scroll-mt-[calc(var(--page-header-h)+1.5rem)]">
-        {sections.map((s, i) => (
+      <div
+        ref={contentRef}
+        className="flex-1 min-w-0 space-y-8 [&>section]:scroll-mt-[calc(var(--page-header-h)+1.5rem)]"
+      >
+        {/* Below md the rail is hidden; keep every page reachable */}
+        <nav aria-label="Settings pages" className="flex flex-wrap gap-1 md:hidden">
+          {pages.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              aria-current={p.id === page ? 'page' : undefined}
+              onClick={() => showPage(p.id)}
+              className={cn('text-body', pageButtonClass(p.id === page))}
+            >
+              {p.label}
+            </button>
+          ))}
+        </nav>
+        {pageSections.map((s, i) => (
           <Fragment key={s.id}>
             {i > 0 && !s.standalone && <Separator />}
-            {bodies[s.id] ?? null}
+            {bodies[s.id]}
           </Fragment>
         ))}
       </div>
