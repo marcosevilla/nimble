@@ -1233,11 +1233,12 @@ async fn focus_log_ctx_tx(
             .fetch_optional(&mut *conn)
             .await
             .ok()??;
-    let session_id = before
-        .session
-        .as_ref()
-        .filter(|s| s.occurrence_id == occ)
-        .map(|s| s.id.clone());
+    // `before.session` is only the selected occurrence's. Completing an
+    // "Up next" row whose session was paused by a switch reads its own.
+    let session_id = match action {
+        FocusAction::Complete { .. } => read_session_tx(conn, &occ).await.ok().flatten().map(|s| s.id),
+        _ => before.session.as_ref().map(|s| s.id.clone()),
+    };
     Some(FocusLogCtx { task_id, content, status, due_date, session_id })
 }
 
@@ -1277,7 +1278,9 @@ async fn focus_log_rows_tx(
                     .flatten();
             if let Some((status, due)) = after {
                 let recurred = status != "complete" && due != ctx.due_date;
-                if status == "complete" || recurred {
+                // Already complete (e.g. a remote pull) → set_status_tx was a no-op.
+                let completed = status == "complete" && ctx.status != "complete";
+                if completed || recurred {
                     let from = ctx.due_date.clone().unwrap_or_default();
                     let to = due.unwrap_or_default();
                     out.push(activity::status_activity(&activity::StatusActivity {

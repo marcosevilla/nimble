@@ -101,3 +101,36 @@ async fn pause_resume_and_replay_log_nothing_extra() {
     let actions: Vec<String> = rows(&h.pool, &t).await.into_iter().map(|(a, _)| a).collect();
     assert_eq!(actions, ["focus_started", "focus_abandoned"]);
 }
+
+#[tokio::test]
+async fn completing_an_up_next_task_keeps_its_paused_session_time() {
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    let b = h.task("B").await;
+    let occ_a = queued(&h, &a).await;
+    let occ_b = queued(&h, &b).await;
+    h.send(FocusAction::Start { occurrence_id: occ_a.clone() }).await.unwrap();
+    h.advance(20_000).await;
+    // Starting B pauses A's session (switched), it doesn't end it.
+    h.send(FocusAction::Start { occurrence_id: occ_b }).await.unwrap();
+    h.send(FocusAction::Complete { occurrence_id: occ_a }).await.unwrap();
+    let r = rows(&h.pool, &a).await;
+    let actions: Vec<&str> = r.iter().map(|(x, _)| x.as_str()).collect();
+    assert_eq!(actions, ["focus_started", "focus_completed", "task_completed"], "{r:?}");
+    assert_eq!(r[1].1["duration_secs"], 20);
+}
+
+#[tokio::test]
+async fn focus_completing_an_already_complete_task_logs_no_second_completion() {
+    let h = fixture::Harness::new().await;
+    let t = h.task("Done elsewhere").await;
+    h.send(FocusAction::Enqueue { task_ids: vec![t.clone()], source: FocusSource::Today, explicit_still_open: true })
+        .await.unwrap();
+    let occ = h.snapshot().await.queue[0].occurrence_id.clone();
+    // A remote pull completes the task and leaves the occurrence open.
+    sqlx::query("UPDATE local_tasks SET status='complete', completed=1 WHERE id=?")
+        .bind(&t).execute(&h.pool).await.unwrap();
+    let res = h.send(FocusAction::Complete { occurrence_id: occ }).await;
+    let actions: Vec<String> = rows(&h.pool, &t).await.into_iter().map(|(a, _)| a).collect();
+    assert!(!actions.iter().any(|a| a == "task_completed"), "{actions:?} (complete result: {:?})", res.map(|_| ()));
+}
