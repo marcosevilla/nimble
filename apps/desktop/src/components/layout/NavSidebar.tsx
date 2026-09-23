@@ -210,8 +210,13 @@ function SortableNavItem({
           <ChevronRight className={cn('size-3.5 transition-transform duration-(--transition-fast)', treeOpen && 'rotate-90')} />
         </IconButton>
       )}
+      {/* Own scroll region, capped so every page item stays in view (re-score shell N-P1-1) */}
       {showTree && (
-        <div className="mt-0.5 mb-1 pl-4" role="group" aria-label={`${label} list`}>
+        <div
+          className="mt-0.5 mb-1 max-h-[40vh] overflow-y-auto overflow-x-hidden overscroll-contain pl-4 [scrollbar-width:thin]"
+          role="group"
+          aria-label={`${label} list`}
+        >
           {treeId === 'tasks' ? <NavTasksTree /> : <NavDocsTree />}
         </div>
       )}
@@ -375,7 +380,7 @@ export function NavSidebar() {
         }}
       >
         <SortableContext items={navOrder} strategy={verticalListSortingStrategy}>
-          <div className={cn('flex flex-1 min-h-0 flex-col gap-1 overflow-y-auto overflow-x-hidden [scrollbar-width:none]', expanded ? 'px-2' : 'items-center')}>
+          <div className={cn('flex flex-1 min-h-0 flex-col gap-1 overflow-y-auto overflow-x-hidden [scrollbar-width:thin]', expanded ? 'px-2' : 'items-center')}>
             {navOrder.map((id) => (
               <SortableNavItem
                 key={id}
