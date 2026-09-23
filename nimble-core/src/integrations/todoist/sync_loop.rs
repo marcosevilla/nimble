@@ -480,6 +480,8 @@ pub struct SyncReport {
     pub created: usize, // native tasks created from pull
     pub updated: usize,
     pub deleted: usize,
+    /// Project/section structure changes: project create, rename,
+    /// archive/unarchive, nesting; section create, rename, move, delete.
     pub projects_upserted: usize,
 }
 
@@ -650,6 +652,7 @@ async fn apply_pull_tx(
                 .await?;
                 if res.rows_affected() > 0 {
                     project_sync_ops.push((local_id, "UPDATE"));
+                    report.projects_upserted += 1;
                 } else {
                     // Self-heal: projects imported before sync_log emission
                     // existed (the measured 34-of-52 gap) have no sync_log
@@ -674,6 +677,7 @@ async fn apply_pull_tx(
                     .bind(&p.id).execute(&mut *tx).await?;
                 if res.rows_affected() > 0 {
                     project_sync_ops.push(("inbox".to_string(), "UPDATE"));
+                    report.projects_upserted += 1;
                 }
             }
             None => {
@@ -732,8 +736,12 @@ async fn apply_pull_tx(
         // commit, so its one sync_log entry already carries the parent.
         if !project_sync_ops.iter().any(|(id, _)| id == &local_id) {
             project_sync_ops.push((local_id, "UPDATE"));
+            report.projects_upserted += 1;
         }
     }
+
+    // Local ids of sections Todoist deleted, removed in step 4b.
+    let mut deleted_sections: Vec<String> = Vec::new();
 
     // 2. sections -> real `sections` rows under their parent project, keyed
     // by (external_source='todoist', external_id). Direct SQL, never
@@ -746,23 +754,11 @@ async fn apply_pull_tx(
         .fetch_optional(&mut *tx)
         .await?;
         if s.is_deleted.unwrap_or(false) {
-            // Only drop an empty section: tasks still pointing at it are
-            // moved/removed by their own item deltas, and `section_id` has no
-            // FK to clean up after us.
+            // Removal is deferred to step 4b, after the items: Todoist
+            // usually deletes a section together with its items in the same
+            // delta, and those item deletes haven't been applied yet here.
             if let Some((section_id, _, _)) = existing {
-                let in_use: Option<i64> = sqlx::query_scalar(
-                    "SELECT 1 FROM local_tasks WHERE section_id = ? LIMIT 1",
-                )
-                .bind(&section_id)
-                .fetch_optional(&mut *tx)
-                .await?;
-                if in_use.is_none() {
-                    sqlx::query("DELETE FROM sections WHERE id = ?")
-                        .bind(&section_id)
-                        .execute(&mut *tx)
-                        .await?;
-                    section_sync_ops.push((section_id, "DELETE", None));
-                }
+                deleted_sections.push(section_id);
             }
             continue;
         }
@@ -809,9 +805,11 @@ async fn apply_pull_tx(
                             .execute(&mut *tx)
                             .await?;
                         logged.push((task_id, "UPDATE"));
+                        report.updated += 1;
                     }
                 }
                 section_sync_ops.push((section_id, "UPDATE", Some(serde_json::json!(changed).to_string())));
+                report.projects_upserted += 1;
             }
             None => {
                 let position: i64 = sqlx::query_scalar(
@@ -832,6 +830,7 @@ async fn apply_pull_tx(
                 .execute(&mut *tx)
                 .await?;
                 section_sync_ops.push((new_id, "INSERT", None));
+                report.projects_upserted += 1;
             }
         }
     }
@@ -1092,6 +1091,42 @@ async fn apply_pull_tx(
         .bind(&child_ext)
         .execute(&mut *tx)
         .await?;
+    }
+
+    // 4b. sections Todoist deleted, now that this delta's item deletes and
+    // moves are applied. Completed tasks don't pin a deleted section (they
+    // aren't in Todoist's open-item deltas, so nothing else would ever move
+    // them): they drop to their project root. A section still holding OPEN
+    // tasks is kept, since those tasks' own deltas haven't moved them yet.
+    for section_id in deleted_sections {
+        let completed: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM local_tasks WHERE section_id = ? AND completed = 1",
+        )
+        .bind(&section_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        for task_id in completed {
+            sqlx::query("UPDATE local_tasks SET section_id = NULL, updated_at = datetime('now','localtime') WHERE id = ?")
+                .bind(&task_id)
+                .execute(&mut *tx)
+                .await?;
+            logged.push((task_id, "UPDATE"));
+            report.updated += 1;
+        }
+        let in_use: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM local_tasks WHERE section_id = ? LIMIT 1",
+        )
+        .bind(&section_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if in_use.is_none() {
+            sqlx::query("DELETE FROM sections WHERE id = ?")
+                .bind(&section_id)
+                .execute(&mut *tx)
+                .await?;
+            section_sync_ops.push((section_id, "DELETE", None));
+            report.projects_upserted += 1;
+        }
     }
 
     // 5. token -- same transaction as the applied deltas
@@ -2180,11 +2215,90 @@ mod pull_tests {
                          {"id": "E", "project_id": "P", "name": "Empty", "is_deleted": true}]}))).await.unwrap();
         let names: Vec<String> = sqlx::query_scalar("SELECT name FROM sections ORDER BY name")
             .fetch_all(&pool).await.unwrap();
-        assert_eq!(names, vec!["Busy".to_string()], "a section still holding tasks is kept");
+        assert_eq!(names, vec!["Busy".to_string()], "a section still holding open tasks is kept");
         let deletes: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sync_log WHERE table_name = 'sections' AND operation = 'DELETE'",
         ).fetch_one(&pool).await.unwrap();
         assert_eq!(deletes, 1);
+
+        // Same delta: Todoist deletes the section AND its items. §2 runs
+        // before §3, so the emptiness check must happen after the items.
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Doomed"}],
+            "items": [{"id": "R1", "content": "A", "project_id": "P", "section_id": "S", "checked": false, "is_deleted": false}]}))).await.unwrap();
+        apply_pull(&pool, &resp(json!({"sync_token": "T2",
+            "sections": [{"id": "S", "project_id": "P", "name": "Doomed", "is_deleted": true}],
+            "items": [{"id": "R1", "content": "A", "project_id": "P", "section_id": "S", "checked": false, "is_deleted": true}]}))).await.unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sections").fetch_one(&pool).await.unwrap();
+        assert_eq!(left, 0, "a section deleted together with its items is removed");
+
+        // Completed tasks don't pin a deleted section: they drop to the
+        // project root (logged as a task UPDATE) and the section goes.
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Done lane"}],
+            "items": [{"id": "R1", "content": "A", "project_id": "P", "section_id": "S", "checked": false, "is_deleted": false}]}))).await.unwrap();
+        apply_pull(&pool, &resp(json!({"sync_token": "T2",
+            "items": [{"id": "R1", "content": "A", "project_id": "P", "section_id": "S", "checked": true, "is_deleted": false,
+                       "updated_at": "2026-09-02T00:00:00Z"}]}))).await.unwrap();
+        let done = crate::db::tasks::get_local_tasks(&pool, None, None, true).await.unwrap()
+            .into_iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert!(done.completed);
+        let report = apply_pull(&pool, &resp(json!({"sync_token": "T3",
+            "sections": [{"id": "S", "project_id": "P", "name": "Done lane", "is_deleted": true}]}))).await.unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sections").fetch_one(&pool).await.unwrap();
+        assert_eq!(left, 0, "completed tasks must not keep a deleted section alive");
+        let done = crate::db::tasks::get_local_tasks(&pool, None, None, true).await.unwrap()
+            .into_iter().find(|t| t.external_id.as_deref() == Some("R1")).unwrap();
+        assert!(done.section_id.is_none());
+        assert_eq!(done.project_id, sqlx::query_scalar::<_, String>("SELECT id FROM projects WHERE external_id = 'P'").fetch_one(&pool).await.unwrap());
+        let task_updates: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_log WHERE table_name = 'local_tasks' AND row_id = ? AND operation = 'UPDATE'",
+        ).bind(&done.id).fetch_one(&pool).await.unwrap();
+        assert!(task_updates >= 2, "the completion and the section clear are both logged");
+        assert!(report.changed_anything());
+    }
+
+    #[tokio::test]
+    async fn structure_only_deltas_report_changes() {
+        // sync_runner only emits `todoist-sync-applied` when changed_anything().
+        let pool = test_pool().await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1",
+            "projects": [{"id": "P", "name": "Work"}, {"id": "Q", "name": "Home"}],
+            "sections": [{"id": "S", "project_id": "P", "name": "Lane"}],
+            "items": [{"id": "R1", "content": "A", "project_id": "P", "section_id": "S", "checked": false, "is_deleted": false}]}))).await.unwrap();
+
+        let archive = apply_pull(&pool, &resp(json!({"sync_token": "T2",
+            "projects": [{"id": "P", "name": "Work", "is_archived": true}]}))).await.unwrap();
+        assert!(archive.changed_anything(), "archive-only delta must report a change");
+
+        let unchanged = apply_pull(&pool, &resp(json!({"sync_token": "T3",
+            "projects": [{"id": "P", "name": "Work", "is_archived": true}]}))).await.unwrap();
+        assert!(!unchanged.changed_anything(), "an identical re-pull changes nothing");
+
+        let nest = apply_pull(&pool, &resp(json!({"sync_token": "T4",
+            "projects": [{"id": "Q", "name": "Home", "parent_id": "P"}]}))).await.unwrap();
+        assert!(nest.changed_anything(), "nesting-only delta must report a change");
+
+        let new_section = apply_pull(&pool, &resp(json!({"sync_token": "T5",
+            "sections": [{"id": "S2", "project_id": "Q", "name": "Chores"}]}))).await.unwrap();
+        assert!(new_section.changed_anything(), "section create must report a change");
+
+        let rename = apply_pull(&pool, &resp(json!({"sync_token": "T6",
+            "sections": [{"id": "S2", "project_id": "Q", "name": "Chores 2"}]}))).await.unwrap();
+        assert!(rename.changed_anything(), "section rename must report a change");
+
+        let carry = apply_pull(&pool, &resp(json!({"sync_token": "T7",
+            "sections": [{"id": "S", "project_id": "Q", "name": "Lane"}]}))).await.unwrap();
+        assert!(carry.projects_upserted >= 1);
+        assert_eq!(carry.updated, 1, "the carried task counts as an update");
+
+        let delete = apply_pull(&pool, &resp(json!({"sync_token": "T8",
+            "sections": [{"id": "S2", "project_id": "Q", "name": "Chores 2", "is_deleted": true}]}))).await.unwrap();
+        assert!(delete.changed_anything(), "section delete must report a change");
     }
 
     #[tokio::test]
