@@ -20,6 +20,7 @@ import { Meta, SectionTitle } from '@/components/shared/typography'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { scrollPageToTop } from '@/lib/pageScroll'
 import { useLocalToday } from '@/hooks/useLocalToday'
+import { briefFor, pickBriefDate, resolveBriefDate } from '@/lib/briefDate'
 
 // ── Shared Utilities ──
 
@@ -286,23 +287,18 @@ function DashboardMode({
 
   // Brief browsing. Today's brief comes from TodayPage state — the one the
   // review just showed — so the swap never re-fetches it (today P2-3).
-  const [selectedDate, setSelectedDate] = useState(today)
+  // `null` = follow today, so at midnight the card moves to the new date in
+  // the same render (no effect, no stale fetch for the old date).
+  const [pickedDate, setPickedDate] = useState<string | null>(null)
+  const selectedDate = resolveBriefDate(pickedDate, today)
+  const selectDate = useCallback((date: string) => setPickedDate(pickBriefDate(date, today)), [today])
   const [briefDates, setBriefDates] = useState<Set<string>>(new Set())
   const [otherBrief, setOtherBrief] = useState<{ date: string; content: string | null } | null>(null)
 
-  // Past midnight, a card that was showing "Today" follows the new today
-  // instead of turning into yesterday's date.
-  const prevToday = useRef(today)
   useEffect(() => {
-    if (prevToday.current === today) return
-    const previous = prevToday.current
-    prevToday.current = today
-    setSelectedDate((d) => (d === previous ? today : d))
-  }, [today])
-
-  useEffect(() => {
+    // Re-listed when the local date rolls over, so today's dot appears.
     dp.dailyState.listBriefDates().then((dates) => setBriefDates(new Set(dates))).catch(() => {})
-  }, [dp])
+  }, [dp, today])
 
   useEffect(() => {
     if (selectedDate === today) return
@@ -313,9 +309,7 @@ function DashboardMode({
     return () => { live = false }
   }, [selectedDate, today, dp])
 
-  const briefContent = selectedDate === today
-    ? todayBrief
-    : otherBrief?.date === selectedDate ? otherBrief.content : undefined
+  const briefContent = selectedDate === today ? todayBrief : briefFor(otherBrief, selectedDate)
 
   const { tasks: localTasks, loading: localLoading, remove: removeLocal, addTask, refresh: refreshLocal } = useLocalTasks({ dueDate: today })
   const { projects } = useProjects()
@@ -404,7 +398,7 @@ function DashboardMode({
       <BriefCard
         today={today}
         selectedDate={selectedDate}
-        onSelectDate={setSelectedDate}
+        onSelectDate={selectDate}
         briefDates={briefDates}
         content={briefContent}
       />
@@ -424,11 +418,18 @@ export function TodayPage() {
   const [cachedEnergy, setCachedEnergy] = useState<string | null>(null)
   // Today's brief is read once here and handed to both modes, so the
   // review → dashboard swap keeps what the user just read (today P2-3).
-  const [todayBrief, setTodayBrief] = useState<string | null | undefined>(undefined)
+  // Keyed by the date it was read for: after midnight the old day's text is
+  // never shown as today's, only a skeleton until the new read lands.
+  const [loadedBrief, setLoadedBrief] = useState<{ date: string; content: string | null } | null>(null)
+  const todayBrief = briefFor(loadedBrief, today)
 
   useEffect(() => {
-    dp.dailyState.readDailyBrief().then(setTodayBrief).catch(() => setTodayBrief(null))
-  }, [dp])
+    let live = true
+    dp.dailyState.readDailyBrief(today)
+      .then((content) => { if (live) setLoadedBrief({ date: today, content }) })
+      .catch(() => { if (live) setLoadedBrief({ date: today, content: null }) })
+    return () => { live = false }
+  }, [dp, today])
 
   // Check if today's review has been done
   useEffect(() => {

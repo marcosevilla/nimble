@@ -50,3 +50,27 @@ test('msUntilNextLocalDay counts to local midnight, including DST days', () => {
   // Fall back (Nov 1 2026): 25 hours.
   assert.equal(msUntilNextLocalDay(new Date(2026, 10, 1, 0, 0, 0)), 25 * 3_600_000)
 })
+
+// C2 fix round 1: the brief card follows "today" across midnight without an
+// effect (no stale render), and a brief loaded for one day is never shown
+// as another day's.
+const { pickBriefDate, resolveBriefDate, briefFor } = await import('../src/lib/briefDate.ts')
+
+test('picking today stores "follow today"; any other date is pinned', () => {
+  assert.equal(pickBriefDate('2026-09-22', '2026-09-22'), null)
+  assert.equal(pickBriefDate('2026-09-20', '2026-09-22'), '2026-09-20')
+})
+
+test('a card following today moves to the new date at midnight; a pinned one stays', () => {
+  assert.equal(resolveBriefDate(null, '2026-09-22'), '2026-09-22')
+  assert.equal(resolveBriefDate(null, '2026-09-23'), '2026-09-23')
+  assert.equal(resolveBriefDate('2026-09-20', '2026-09-23'), '2026-09-20')
+})
+
+test('briefFor returns loaded content only for the date it was loaded for', () => {
+  const loaded = { date: '2026-09-22', content: 'yesterday' }
+  assert.equal(briefFor(loaded, '2026-09-22'), 'yesterday')
+  assert.equal(briefFor(loaded, '2026-09-23'), undefined) // still loading the new day
+  assert.equal(briefFor({ date: '2026-09-23', content: null }, '2026-09-23'), null)
+  assert.equal(briefFor(null, '2026-09-23'), undefined)
+})

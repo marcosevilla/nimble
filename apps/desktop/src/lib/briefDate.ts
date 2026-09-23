@@ -46,3 +46,26 @@ export function msUntilNextLocalDay(now: Date = new Date()): number {
   const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
   return next.getTime() - now.getTime()
 }
+
+// ── Brief card selection across midnight ──
+// The card stores `null` for "follow today", so when the local date rolls
+// over it moves in the same render — no effect, no stale fetch for the old
+// date. Loaded briefs carry the date they were read for.
+
+/** What to store when the user picks `date`: `null` (follow today) or the pinned date. */
+export function pickBriefDate(date: string, today: string): string | null {
+  return date === today ? null : date
+}
+
+/** The date the card shows. */
+export function resolveBriefDate(picked: string | null, today: string): string {
+  return picked ?? today
+}
+
+/** `content` if it was loaded for `date`, else `undefined` (still loading). */
+export function briefFor(
+  loaded: { date: string; content: string | null } | null,
+  date: string,
+): string | null | undefined {
+  return loaded?.date === date ? loaded.content : undefined
+}
