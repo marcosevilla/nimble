@@ -126,11 +126,8 @@ function unsupported(capabilities: FocusCapabilities, action: FocusAction): Focu
 }
 
 /**
- * Send one focus action through the provider. The reply is applied only if
- * it is not older than what this window already shows; a reply from a new
- * owner epoch forces a full read. An uncertain failure is retried once with
- * the SAME envelope (same command_id) — never a new intent. A definite
- * rejection refreshes so the UI can ask the user to repeat the action.
+ * Send one focus action through the provider. The envelope is built once
+ * from the latest snapshot; capability gating happens before any call.
  */
 export async function sendFocusAction(action: FocusAction): Promise<FocusReply> {
   if (!useFocusCache.getState().snapshot || !useFocusCache.getState().capabilities) await refreshFocus()
@@ -143,21 +140,40 @@ export async function sendFocusAction(action: FocusAction): Promise<FocusReply> 
     useFocusCache.setState({ error: blocked })
     throw blocked
   }
+  return submit(buildCommand(snapshot, action), true)
+}
 
+/**
+ * "Try again" after an uncertain failure: resubmits the failed envelope
+ * unchanged (`error.command`, same command_id), so the service replays a
+ * committed result instead of running a second intent. Never mint a new
+ * command for a retry — that would be a new skip/complete/enqueue.
+ */
+export function retryFocusCommand(command: FocusCommand): Promise<FocusReply> {
+  return submit(command, false)
+}
+
+/**
+ * Execute one envelope. An uncertain failure (storage/transport) may have
+ * committed, so it is retried with the SAME envelope when `autoRetry`.
+ * A reply is applied only if not older than what this window shows; a reply
+ * from a new owner epoch forces a full read. Any failure except a local
+ * `unsupported`/`invalid` is followed by a full read that keeps the error
+ * visible, so the cache catches up with a command that did commit and a
+ * storage failure's `recovery_reason` surfaces.
+ */
+async function submit(command: FocusCommand, autoRetry: boolean): Promise<FocusReply> {
   const dp = getDataProvider()
-  const command = buildCommand(snapshot, action)
+  const { action } = command
   useFocusCache.setState({ pending: action, error: null })
-  const clearPending = () => {
-    if (useFocusCache.getState().pending === action) useFocusCache.setState({ pending: null })
-  }
   try {
     let reply: FocusReply
     try {
       reply = await dp.focus.execute(command)
     } catch (first) {
       const error = FocusRequestError.from(first, command)
-      if (!isUncertain(error)) throw error
-      reply = await dp.focus.execute((error.command as FocusCommand | undefined) ?? command)
+      if (!autoRetry || !isUncertain(error)) throw error
+      reply = await dp.focus.execute(command)
     }
     const current = useFocusCache.getState().snapshot
     if (!applySnapshot(reply.snapshot, 'reply') && current && current.owner_epoch !== reply.snapshot.owner_epoch) {
@@ -167,10 +183,10 @@ export async function sendFocusAction(action: FocusAction): Promise<FocusReply> 
   } catch (raw) {
     const error = FocusRequestError.from(raw, command)
     useFocusCache.setState({ error })
-    if (!isUncertain(error) && error.code !== 'unsupported' && error.code !== 'invalid') void readFull(false)
+    if (error.code !== 'unsupported' && error.code !== 'invalid') void readFull(false)
     throw error
   } finally {
-    clearPending()
+    if (useFocusCache.getState().pending === action) useFocusCache.setState({ pending: null })
   }
 }
 

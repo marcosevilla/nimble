@@ -67,6 +67,25 @@ test('Project: open tasks in project order, undated and past-due included, nothi
     { ids: ['p1', 'p1b', 'p2', 'p3'], still_open_ids: [] })
 })
 
+test('Project order follows section lanes like the project view: unsectioned, then sections by position', () => {
+  const sections = [
+    { id: 'sec-late', project_id: 'proj', name: 'Later', position: 2, external_id: null, external_source: null, created_at: '' },
+    { id: 'sec-first', project_id: 'proj', name: 'First', position: 1, external_id: null, external_source: null, created_at: '' },
+  ]
+  const tasks = [
+    task({ id: 'late0', project_id: 'proj', section_id: 'sec-late', position: 0 }),
+    task({ id: 'first1', project_id: 'proj', section_id: 'sec-first', position: 1 }),
+    task({ id: 'none5', project_id: 'proj', position: 5 }),
+    task({ id: 'first0', project_id: 'proj', section_id: 'sec-first', position: 0 }),
+    task({ id: 'ghost', project_id: 'proj', section_id: 'deleted-section', position: 9 }), // unknown -> unsectioned lane
+    task({ id: 'none2', project_id: 'proj', position: 2 }),
+  ]
+  assert.deepEqual(candidateIds(tasks, { kind: 'project', project_id: 'proj' }, TODAY, sections).ids,
+    ['none2', 'none5', 'ghost', 'first0', 'first1', 'late0'])
+  const action = queueTheseAction(tasks, { kind: 'project', project_id: 'proj' }, TODAY, snapshotWith(['none5']), { sections })
+  assert.deepEqual(action.task_ids, ['none2', 'ghost', 'first0', 'first1', 'late0'])
+})
+
 test('Local-only: only tasks flagged local_only, in input order', () => {
   const tasks = [
     task({ id: 'bound', external_id: '123', external_source: 'todoist' }),

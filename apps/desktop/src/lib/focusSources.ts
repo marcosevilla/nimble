@@ -7,7 +7,8 @@
  * IDs are opaque strings throughout — never coerced to numbers or sorted.
  * Type-only imports keep this loadable directly by node:test.
  */
-import type { FocusAction, FocusSnapshot, FocusSource, LocalTask } from '@nimble/types'
+import type { FocusAction, FocusSnapshot, FocusSource, LocalTask, Section } from '@nimble/types'
+import { UNSECTIONED, laneKeyOf, orderedSections } from './sectionLanes.ts'
 
 export interface FocusCandidates {
   /** Queueable now, in candidate order, children folded under candidate ancestors. */
@@ -54,11 +55,31 @@ function foldChildren(ids: string[], anchors: ReadonlySet<string>, byId: Readonl
 }
 
 /**
+ * Project order exactly as the project view renders it: section lanes via
+ * the shared `sectionLanes` order, then `position` within a lane (stable).
+ */
+function projectOrder(tasks: LocalTask[], sections: readonly Section[]): LocalTask[] {
+  const lanes = [UNSECTIONED, ...orderedSections(sections).map((s) => s.id)]
+  const rank = new Map(lanes.map((key, index) => [key, index]))
+  const known = new Set(sections.map((s) => s.id))
+  return tasks
+    .map((t, index) => ({ t, index, lane: rank.get(laneKeyOf(t, known)) ?? 0 }))
+    .sort((a, b) => a.lane - b.lane || a.t.position - b.t.position || a.index - b.index)
+    .map(({ t }) => t)
+}
+
+/**
  * Candidate membership for a source. `today` is the user's local calendar
  * date (YYYY-MM-DD). Today and local-only keep the caller's display order;
- * project uses project order (`position`, stable for ties).
+ * project uses project order (section lanes, then `position`), which needs
+ * that project's `sections`.
  */
-export function candidateIds(tasks: LocalTask[], source: FocusSource, today: string): FocusCandidates {
+export function candidateIds(
+  tasks: LocalTask[],
+  source: FocusSource,
+  today: string,
+  sections: readonly Section[] = [],
+): FocusCandidates {
   const open = tasks.filter(isOpen)
   const byId = new Map(tasks.map((t) => [t.id, t]))
   let ids: string[] = []
@@ -72,11 +93,8 @@ export function candidateIds(tasks: LocalTask[], source: FocusSource, today: str
       else if (date < today) stillOpen.push(task.id)
     }
   } else if (source.kind === 'project') {
-    ids = open
-      .filter((t) => t.project_id === source.project_id)
-      .map((t, index) => ({ t, index }))
-      .sort((a, b) => a.t.position - b.t.position || a.index - b.index)
-      .map(({ t }) => t.id)
+    const inProject = open.filter((t) => t.project_id === source.project_id)
+    ids = projectOrder(inProject, sections.filter((s) => s.project_id === source.project_id)).map((t) => t.id)
   } else {
     ids = open.filter((t) => t.sync_policy === 'local_only').map((t) => t.id)
   }
@@ -102,9 +120,9 @@ export function queueTheseAction(
   source: FocusSource,
   today: string,
   snapshot: FocusSnapshot,
-  opts: { stillOpen?: boolean } = {},
+  opts: { stillOpen?: boolean; sections?: readonly Section[] } = {},
 ): Extract<FocusAction, { kind: 'enqueue' }> | null {
-  const candidates = candidateIds(tasks, source, today)
+  const candidates = candidateIds(tasks, source, today, opts.sections)
   const picked = opts.stillOpen ? candidates.still_open_ids : candidates.ids
   const queued = new Set(snapshot.queue.map((entry) => entry.task_id))
   const byId = new Map(tasks.map((t) => [t.id, t]))

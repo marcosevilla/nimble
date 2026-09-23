@@ -177,3 +177,40 @@ test('actions that open a live segment wait for live timing; settling actions do
   await h.sendFocusAction({ kind: 'stop' })
   assert.equal(calls.execute.length, 1)
 })
+
+test('a second uncertain failure keeps the command, re-reads, and retryFocusCommand resubmits the same UUID', async () => {
+  let fail = true
+  const calls = provider({ snapshots: [snap(5), snap(7)], execute: () => {
+    if (fail) throw new Error('IPC timed out')
+    return { snapshot: snap(8), replayed: true, committed_revision: 7 }
+  } })
+  await h.refreshFocus()
+  let failed
+  await assert.rejects(h.sendFocusAction({ kind: 'skip' }), (e) => { failed = e; return e.code === 'storage' })
+  assert.equal(calls.execute.length, 2)
+  assert.equal(failed.command.command_id, calls.execute[0].command_id)
+  await new Promise((r) => setImmediate(r))
+  // The command may have committed: the cache catches up with a full read and keeps the error.
+  assert.equal(calls.snapshot, 2)
+  assert.equal(h.useFocusCache.getState().snapshot.engine_revision, 7)
+  assert.equal(h.useFocusCache.getState().error.code, 'storage')
+  fail = false
+  const reply = await h.retryFocusCommand(failed.command)
+  assert.equal(reply.replayed, true)
+  assert.equal(calls.execute.length, 3)
+  assert.deepEqual(calls.execute[2], calls.execute[0], 'same envelope and command_id, never a new intent')
+  const s = h.useFocusCache.getState()
+  assert.equal(s.snapshot.engine_revision, 8)
+  assert.equal(s.error, null)
+  assert.equal(s.pending, null)
+})
+
+test('a typed storage failure also triggers a full read so recovery_reason surfaces', async () => {
+  const calls = provider({ snapshots: [snap(5), snap(5, { recovery_reason: 'storage_failed' })],
+    execute: () => { throw { code: 'storage', message: 'disk full' } } })
+  await h.refreshFocus()
+  await assert.rejects(h.sendFocusAction({ kind: 'pause' }), (e) => e.code === 'storage')
+  await new Promise((r) => setImmediate(r))
+  assert.equal(calls.snapshot, 2)
+  assert.equal(h.useFocusCache.getState().snapshot.recovery_reason, 'storage_failed')
+})
