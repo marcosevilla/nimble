@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocalToday } from '@/hooks/useLocalToday'
 import { useAppStore } from '@/stores/appStore'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { useDataProvider } from '@/services/provider-context'
@@ -94,7 +95,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, initialEnerg
   const dp = useDataProvider()
   const calendarEvents = useAppStore((s) => s.calendarEvents)
   const obsidianToday = useAppStore((s) => s.obsidianToday)
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const today = useLocalToday() // local date, like the Today list below (C2)
   const { tasks: tasksDueToday } = useLocalTasks({ dueDate: today, includeCompleted: false })
   const { projects } = useProjects()
   const projectNames = useMemo(() => {

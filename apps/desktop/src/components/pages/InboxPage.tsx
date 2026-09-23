@@ -453,7 +453,7 @@ export function InboxPage() {
 // ── Note row ──
 //
 // Same chrome as TaskItem (tasks list) so the two lists read as one object
-// (inbox audit P2-6): 40px row, hover cluster hanging outside the column,
+// (inbox audit P2-6): 36px row, hover cluster hanging outside the column,
 // content offset by margin so the hairline starts at the icon.
 
 function InboxNoteRow({
@@ -505,17 +505,17 @@ function InboxNoteRow({
         }
       }}
       className={cn(
-        'group relative flex h-10 items-center min-w-0 transition-colors hover:bg-hover cursor-default',
+        'group relative flex h-9 items-center min-w-0 transition-colors hover:bg-hover cursor-default',
         'focus-visible:-outline-offset-2',
         focused && 'bg-accent/10',
         isSelected && 'bg-accent-blue/10',
       )}
     >
-      <div className="absolute right-full top-0 flex h-10 items-center gap-1 pr-2">
+      <div className="absolute right-full top-0 flex h-9 items-center gap-1 pr-2">
         <SelectionCheckbox id={capture.id} type="capture" />
       </div>
 
-      <div className="flex flex-1 h-10 items-center gap-3 min-w-0 ml-4 border-b border-secondary">
+      <div className="flex flex-1 h-9 items-center gap-3 min-w-0 ml-4 border-b border-secondary">
         <PenLine className="size-4 shrink-0 text-muted-foreground" />
 
         <span className="flex-1 min-w-0 truncate text-body">{capture.content}</span>
