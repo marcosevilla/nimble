@@ -966,6 +966,7 @@ export const backupGetStatus = () => invoke<BackupStatus>('backup_get_status')
 export const backupRunNow = () => invoke<BackupStatus>('backup_run_now')
 export const backupVerifyLatest = () => invoke<{ verified: boolean }>('backup_verify_latest')
 export const backupOpenFolder = () => invoke<void>('backup_open_folder')
+export const backupActivateRestoredProfile = () => invoke<BackupStatus>('backup_activate_restored_profile')
 export const backupConfigureRemote = (ownerRepo: string) =>
   invoke<BackupStatus>('backup_configure_remote', { ownerRepo })
 

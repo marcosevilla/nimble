@@ -501,6 +501,7 @@ pub fn run() {
             commands::backup::backup_get_status,
             commands::backup::backup_run_now,
             commands::backup::backup_verify_latest,
+            commands::backup::backup_activate_restored_profile,
             commands::backup::backup_open_folder,
             commands::backup::backup_configure_remote,
             dismiss_capture_strip,

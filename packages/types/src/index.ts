@@ -506,6 +506,8 @@ export interface BackupStatus {
   turso_pending: number | null
   todoist_pending: number | null
   todoist_failed: number | null
+  /** A restored profile: sync, backups, reminders and focus writes stay off until activated. */
+  restore_activation_required: boolean
   error: { stage: string; code: string; at: string } | null
 }
 export interface BackupCapability {
@@ -515,6 +517,8 @@ export interface BackupCapability {
   verifyLatest(): Promise<{ verified: boolean }>
   openFolder(): Promise<void>
   configureRemote(ownerRepo: string): Promise<BackupStatus>
+  /** Explicitly activate a restored profile on this Mac. Idempotent; starts nothing. */
+  activateRestoredProfile(): Promise<BackupStatus>
 }
 
 export interface ReminderStatus { permission: 'granted' | 'denied' | 'unknown'; timezone: string; errorCode: string | null }

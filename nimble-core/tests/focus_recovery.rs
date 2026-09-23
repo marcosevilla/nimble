@@ -1279,3 +1279,75 @@ async fn focus_complete_of_non_recurring_task_ignores_remote_due_change() {
         .unwrap();
     assert_eq!(completed, 1);
 }
+
+// ── Final review I4: a restored profile has an explicit activation path ──
+
+#[tokio::test]
+async fn restored_profile_activates_explicitly_idempotently_and_starts_nothing() {
+    use nimble_core::db::recovery::{activate_restored_profile, require_activation_clear};
+    let h = fixture::Harness::new().await;
+    let a = h.task("A").await;
+    h.send(FocusAction::Enqueue {
+        task_ids: vec![a],
+        source: FocusSource::Today,
+        explicit_still_open: false,
+    })
+    .await
+    .unwrap();
+    let oid = h.snapshot().await.queue[0].occurrence_id.clone();
+    h.send(FocusAction::Start { occurrence_id: oid.clone() }).await.unwrap();
+    h.advance(12_000).await;
+    nimble_core::db::recovery::normalize_focus_restore(&h.pool).await.unwrap();
+
+    // Blocked: sync/backup/reminder gate and focus ownership.
+    assert!(require_activation_clear(&h.pool).await.is_err());
+    let blocked = FocusService::new(h.pool.clone(), "restored-mac".into());
+    assert!(blocked.initialize().await.unwrap_err().to_string().starts_with("wrong_owner"));
+
+    assert!(activate_restored_profile(&h.pool, "restored-mac").await.unwrap(), "activated");
+    require_activation_clear(&h.pool).await.unwrap();
+    let service = FocusService::new(h.pool.clone(), "restored-mac".into());
+    service.initialize().await.unwrap();
+    let snap = service.snapshot().await.unwrap();
+    // Nothing starts: the restored session is paused with its exact total.
+    assert_eq!(snap.writer_device_id, "restored-mac");
+    assert_eq!(snap.session.as_ref().unwrap().status, FocusStatus::Paused);
+    assert_eq!(snap.totals[&oid], 12_000);
+    let live: Option<String> = sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+        .fetch_one(&h.pool).await.unwrap();
+    assert!(live.is_none());
+    // Focus writes are allowed again.
+    let b = h.task("B").await;
+    service
+        .execute(FocusCommand {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            expected_engine_revision: snap.engine_revision,
+            expected_queue_revision: snap.queue_revision,
+            owner_epoch: snap.owner_epoch.clone(),
+            process_generation: snap.process_generation,
+            session_id: snap.session.as_ref().map(|s| s.id.clone()),
+            action: FocusAction::Enqueue {
+                task_ids: vec![b],
+                source: FocusSource::Today,
+                explicit_still_open: false,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Idempotent: a second activation changes nothing (same epoch).
+    let epoch = service.snapshot().await.unwrap().owner_epoch;
+    assert!(!activate_restored_profile(&h.pool, "restored-mac").await.unwrap());
+    assert_eq!(service.snapshot().await.unwrap().owner_epoch, epoch);
+    require_activation_clear(&h.pool).await.unwrap();
+}
+
+#[tokio::test]
+async fn activation_refuses_a_profile_another_device_owns() {
+    let h = fixture::Harness::new().await; // owned by "test-device", not restored
+    let refused = nimble_core::db::recovery::activate_restored_profile(&h.pool, "intruder")
+        .await
+        .unwrap_err();
+    assert!(refused.to_string().starts_with("wrong_owner"), "{refused}");
+    assert_eq!(h.snapshot().await.writer_device_id, "test-device");
+}

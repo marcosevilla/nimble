@@ -201,6 +201,31 @@ impl FocusRuntime {
         }
     }
 
+    /// The explicit activation of a restored profile (Settings → Backups or
+    /// `dt backup activate`). Only the process holding the profile owner lock
+    /// may run it; it clears the restore marker, makes this device the focus
+    /// writer and re-initializes the service. Nothing starts. `Ok(false)`
+    /// means the profile was already active and nothing was re-initialized.
+    pub async fn activate_restored(&self) -> Result<bool, FocusError> {
+        if !self.owns_profile {
+            return Err(not_profile_owner());
+        }
+        let mut state = self.state.lock().await;
+        let device = nimble_core::db::sync::get_or_create_device_id(&self.pool)
+            .await
+            .map_err(|e| focus_error(&e))?;
+        let activated = nimble_core::db::recovery::activate_restored_profile(&self.pool, &device)
+            .await
+            .map_err(|e| focus_error(&e))?;
+        if activated || state.blocked.is_some() || state.service.is_none() {
+            *state = open(&self.pool).await;
+        }
+        match &state.blocked {
+            Some(e) => Err(e.clone()),
+            None => Ok(activated),
+        }
+    }
+
     /// Reads (snapshot/history) are allowed on a blocked restored profile.
     pub async fn reader(&self) -> Result<Arc<FocusService>, FocusError> {
         self.resolve(false).await
@@ -354,6 +379,17 @@ pub async fn broadcast(app: &AppHandle) {
     if let Ok(snapshot) = service.snapshot().await {
         rt.emit(app, &snapshot, None);
     }
+}
+
+/// Activate a restored profile in this (owner) process and broadcast the
+/// re-initialized focus state. See `FocusRuntime::activate_restored`.
+pub async fn activate_restored(app: &AppHandle) -> Result<bool, FocusError> {
+    let Some(rt) = runtime(app) else {
+        return Err(error(FocusErrorCode::Unsupported, "Focus is not running in this process."));
+    };
+    let activated = rt.activate_restored().await?;
+    broadcast(app).await;
+    Ok(activated)
 }
 
 /// The apply gate for sync/calendar runners (see `FocusRuntime::apply_service`).
@@ -571,5 +607,33 @@ mod tests {
         FocusService::new(restored_pool.clone(), "other-device".into()).initialize().await.unwrap();
         let restored = FocusRuntime::start(restored_pool, true).await;
         assert!(restored.apply_service().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn restored_profile_activation_reinitializes_ownership_once_and_refuses_non_owners() {
+        let pool = memory_pool().await;
+        FocusService::new(pool.clone(), "old-mac".into()).initialize().await.unwrap();
+        nimble_core::db::recovery::normalize_focus_restore(&pool).await.unwrap();
+
+        // A second process without the profile lock may never activate.
+        let non_owner = FocusRuntime::start(pool.clone(), false).await;
+        let e = non_owner.activate_restored().await.unwrap_err();
+        assert!(matches!(e.code, FocusErrorCode::WrongOwner));
+        assert!(nimble_core::db::recovery::require_activation_clear(&pool).await.is_err());
+
+        let rt = FocusRuntime::start(pool.clone(), true).await;
+        assert!(rt.writer().await.is_err(), "restored profile starts blocked");
+        assert!(rt.activate_restored().await.unwrap(), "activated");
+        nimble_core::db::recovery::require_activation_clear(&pool).await.unwrap();
+        let writer = rt.writer().await.expect("writable after activation");
+        let snap = writer.snapshot().await.unwrap();
+        assert!(snap.session.is_none() && snap.recovery_reason.is_none());
+        let caps = rt.capabilities().await;
+        assert!(caps.queue_write && caps.import);
+
+        // Idempotent: nothing re-initializes (the generation stays put).
+        let generation = snap.process_generation;
+        assert!(!rt.activate_restored().await.unwrap());
+        assert_eq!(rt.writer().await.unwrap().snapshot().await.unwrap().process_generation, generation);
     }
 }

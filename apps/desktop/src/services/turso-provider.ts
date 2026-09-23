@@ -91,6 +91,7 @@ export function createTursoProvider(): DataProvider {
       verifyLatest: ni('backup.verifyLatest'),
       openFolder: ni('backup.openFolder'),
       configureRemote: ni('backup.configureRemote'),
+      activateRestoredProfile: ni('backup.activateRestoredProfile'),
     },
     settings: {
       // See note 2 in the file header — deliberately resolves.

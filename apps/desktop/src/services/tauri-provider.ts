@@ -24,6 +24,7 @@ export function createTauriProvider(): DataProvider {
       verifyLatest: tauri.backupVerifyLatest,
       openFolder: tauri.backupOpenFolder,
       configureRemote: tauri.backupConfigureRemote,
+      activateRestoredProfile: tauri.backupActivateRestoredProfile,
     },
     settings: {
       checkSetupComplete: tauri.checkSetupComplete,

@@ -1001,12 +1001,14 @@
     turso_pending: backupScenario === 'unavailable' ? null : 0,
     todoist_pending: backupScenario === 'unavailable' ? null : 0,
     todoist_failed: backupScenario === 'unavailable' ? null : 0,
+    restore_activation_required: backupScenario === 'restored',
     error: backupScenario === 'error' ? { stage: 'publish', code: 'offline', at: '2026-09-21T09:00:00Z' } : null,
   }
   var commands = {
     backup_get_status: function () { return Object.assign({}, backupMock) },
     backup_run_now: function () { backupMock.last_local_success_at = new Date().toISOString(); return Object.assign({}, backupMock) },
     backup_verify_latest: function () { return { verified: true } },
+    backup_activate_restored_profile: function () { backupMock.restore_activation_required = false; return Object.assign({}, backupMock) },
     backup_open_folder: function () { return null },
     backup_configure_remote: function (args) { backupMock.remote_configured = true; backupMock.remote_name = args.ownerRepo; return Object.assign({}, backupMock) },
     // Settings

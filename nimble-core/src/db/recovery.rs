@@ -166,6 +166,51 @@ pub async fn require_activation_clear(pool: &SqlitePool) -> crate::Result<()> {
     Ok(())
 }
 
+/// The explicit activation a restored v21 profile needs before it may sync,
+/// back up, remind or write focus: clears the restore marker and makes
+/// `device_id` the focus writer under a fresh owner epoch, in one
+/// transaction. Nothing starts — restored sessions stay paused at their
+/// exact totals and quarantined deliveries stay in review. Returns `false`
+/// when the profile is already active for this device (idempotent). Refuses
+/// (`wrong_owner`) a queue another device owns. The caller must hold the
+/// profile owner lock and re-initialize its focus service afterwards.
+pub async fn activate_restored_profile(pool: &SqlitePool, device_id: &str) -> crate::Result<bool> {
+    if device_id.is_empty() {
+        return Err(crate::Error::Other("invalid: empty device id".into()));
+    }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let marker: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM settings WHERE key='restored_activation_required'")
+        .fetch_optional(&mut *tx).await?;
+    let writer: Option<String> = sqlx::query_scalar(
+        "SELECT writer_device_id FROM focus_queue_state WHERE id=1")
+        .fetch_optional(&mut *tx).await?;
+    let restored = marker.as_deref() == Some("1");
+    match writer.as_deref() {
+        Some(w) if !w.is_empty() && w != device_id => {
+            return Err(crate::Error::Other(
+                "wrong_owner: another device owns this focus queue".into(),
+            ));
+        }
+        Some(w) if w == device_id && !restored => return Ok(false),
+        None if !restored => return Ok(false),
+        _ => {}
+    }
+    sqlx::query("DELETE FROM settings WHERE key='restored_activation_required'")
+        .execute(&mut *tx).await?;
+    if writer.is_some() {
+        let epoch = uuid::Uuid::new_v4().to_string();
+        sqlx::query("UPDATE focus_queue_state SET writer_device_id=?,owner_epoch=?,updated_at=? WHERE id=1")
+            .bind(device_id).bind(&epoch).bind(chrono::Utc::now().to_rfc3339())
+            .execute(&mut *tx).await?;
+        sqlx::query("UPDATE focus_runtime SET owner_epoch=?,live_session_id=NULL,recovery_reason=NULL,engine_revision=engine_revision+1 WHERE id=1")
+            .bind(&epoch).execute(&mut *tx).await?;
+        crate::db::focus::replica::publish_focus_replica_tx(&mut tx).await?;
+    }
+    tx.commit().await?;
+    Ok(true)
+}
+
 pub async fn restore_snapshot(source: &Path, dest: &Path) -> crate::Result<RecoveryReport> {
     let dest = destination(dest, None)?;
     let verified = backup::verify_generation(source).await?;

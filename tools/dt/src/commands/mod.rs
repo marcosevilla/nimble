@@ -317,6 +317,7 @@ pub fn app_operation(command: &Command) -> Option<AgentOperation> {
         Command::Backup(Backup::Status) => Some(AgentOperation::BackupStatus),
         Command::Backup(Backup::Now) => Some(AgentOperation::BackupNow),
         Command::Backup(Backup::Verify) => Some(AgentOperation::BackupVerify),
+        Command::Backup(Backup::Activate) => Some(AgentOperation::RestoreActivate),
         Command::Sync(Sync::Now) => Some(AgentOperation::SyncNow),
         _ => None,
     }

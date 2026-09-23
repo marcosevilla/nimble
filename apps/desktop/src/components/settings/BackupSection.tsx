@@ -24,6 +24,8 @@ function backupMessage(code: unknown): string {
     backup_no_verified_backup: 'No usable latest backup was found. Create a new backup before verifying.',
     backup_test_profile_upload_disabled: 'Online uploads are disabled in this synthetic test profile.',
     backup_lock_replaced: 'The backup folder changed during the job. Cleanup was stopped; try again.',
+    restore_activation_required: 'This restored profile isn’t activated yet. Activate it below first.',
+    restore_activation_refused: 'Another Nimble process or device owns this profile, so it wasn’t activated. Quit the other copy and try again.',
   }
   return typeof code === 'string' && messages[code] ? messages[code] : 'This backup step could not finish. Previous verified copies are kept. Try again.'
 }
@@ -98,6 +100,11 @@ function DesktopBackupSection() {
       {!status && loadError && <Button variant="outline" size="sm" onClick={() => void refresh()}>Try again</Button>}
       {status && <>
         {status.disabled_reason && <Meta as="p">{status.disabled_reason}</Meta>}
+        {status.restore_activation_required && <div className="space-y-2 rounded-md border border-border p-3" role="region" aria-label="Restored profile">
+          <p className="text-body">This profile was restored from a backup. Sync, backups, reminders and focus changes stay paused until you activate it on this Mac.</p>
+          <Meta as="p">Only activate once the original Mac no longer uses this data. Nothing starts: paused focus time and deliveries waiting for review stay as they are.</Meta>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(() => dp.backup.activateRestoredProfile())}>Activate restored profile</Button>
+        </div>}
         <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-body">
           <dt className="text-muted-foreground">On this Mac</dt><dd>{when(status.last_local_success_at)}</dd>
           <dt className="text-muted-foreground">Private online copy</dt><dd>{status.remote_configured ? when(status.last_push_at) : 'Not connected'}</dd>

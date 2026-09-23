@@ -228,6 +228,12 @@ async fn dispatch(
                 .map_err(|_| "verification failed")?;
             Ok(json!({"verified":true}))
         }
+        AgentOperation::RestoreActivate => {
+            let activated = crate::focus_service::activate_restored(app)
+                .await
+                .map_err(Failure::Focus)?;
+            Ok(json!({"activated": activated}))
+        }
         AgentOperation::SyncStatus => {
             let pool = app.state::<sqlx::SqlitePool>();
             serde_json::to_value(

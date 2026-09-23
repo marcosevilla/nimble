@@ -122,6 +122,11 @@ async fn gap_and_capture_are_persisted_and_backup_requires_app() {
     let (c, v) = run(&root, &["backup", "now"]);
     assert_eq!(c, 1);
     assert_eq!(v["error"]["code"], "app_required");
+    // Restored-profile activation re-initializes the running app's focus
+    // ownership, so it is app-only too (never a direct DB write).
+    let (c, v) = run(&root, &["backup", "activate"]);
+    assert_eq!(c, 1, "{v}");
+    assert_eq!(v["error"]["code"], "app_required");
     std::fs::remove_dir_all(root).unwrap();
 }
 #[tokio::test]

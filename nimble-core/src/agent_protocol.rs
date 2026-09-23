@@ -33,6 +33,8 @@ pub enum AgentOperation {
     BackupStatus,
     BackupNow,
     BackupVerify,
+    /// Explicit activation of a restored profile by the running owner app.
+    RestoreActivate,
     SyncStatus,
     SyncNow,
     /// A task write the running app executes through its one FocusService.

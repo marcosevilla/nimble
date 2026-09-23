@@ -256,6 +256,8 @@ pub enum Backup {
     Status,
     Now,
     Verify,
+    /// Explicitly activate a restored profile on this Mac (running app only).
+    Activate,
 }
 #[derive(Subcommand, Debug, Clone)]
 pub enum Sync {
