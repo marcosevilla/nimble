@@ -162,7 +162,8 @@ pub async fn build_focus_replica_tx(conn: &mut SqliteConnection) -> crate::Resul
     }))
 }
 
-/// Publish inside the same transaction that changed the queue or ledger.
+/// Publish inside the same transaction that changed the queue or ledger, on
+/// state transitions only — never from a plain running heartbeat.
 pub async fn publish_focus_replica_tx(conn: &mut SqliteConnection) -> crate::Result<()> {
     let Some(replica) = build_focus_replica_tx(conn).await? else { return Ok(()); };
     let last: Option<String> = sqlx::query_scalar(
@@ -177,6 +178,11 @@ pub async fn publish_focus_replica_tx(conn: &mut SqliteConnection) -> crate::Res
             return Ok(());
         }
     }
+    // One aggregate key: an unpushed older row is fully superseded by this
+    // one (remote apply only ever accepts a higher revision), so drop it
+    // instead of queueing every intermediate projection for Turso.
+    sqlx::query("DELETE FROM sync_log WHERE table_name='focus_replica' AND row_id='current' AND synced=0")
+        .execute(&mut *conn).await?;
     let payload_json = serde_json::to_string(&replica).map_err(|_| invalid("serialize"))?;
     let row = serde_json::json!({
         "id": "current", "writer_device_id": replica.writer_device_id,

@@ -146,6 +146,11 @@ pub struct FocusTaskWriteGuard<'a> {
     anchor: tokio::sync::MutexGuard<'a, Anchor>,
     sampled_ms: u64,
     committed: bool,
+    /// Engine revision right after the clock settle; a higher revision at
+    /// commit means the applied effects touched focused work.
+    settled_revision: i64,
+    /// The settle itself stopped the live session (gap pause).
+    settle_transitioned: bool,
 }
 impl FocusTaskWriteGuard<'_> {
     pub fn connection(&mut self) -> &mut SqliteConnection {
@@ -160,7 +165,15 @@ impl FocusTaskWriteGuard<'_> {
             .expect("uncommitted focus task transaction");
         // Only remote applies (`TaskWrite`) use this guard.
         reconcile_task_effects_owned_tx(tx, effects, EffectOrigin::Remote).await?;
-        replica::publish_focus_replica_tx(tx).await?;
+        let revision: i64 =
+            sqlx::query_scalar("SELECT engine_revision FROM focus_runtime WHERE id=1")
+                .fetch_one(&mut **tx)
+                .await?;
+        // A periodic pull that changed nothing focused only settled a running
+        // clock: not a transition, so nothing is published.
+        if self.settle_transitioned || revision > self.settled_revision {
+            replica::publish_focus_replica_tx(tx).await?;
+        }
         let snapshot = snapshot_tx(tx).await?;
         self.tx
             .take()
@@ -297,26 +310,41 @@ impl FocusService {
         };
         let result = async {
             ensure_process_tx(&mut tx, anchor.process_generation).await?;
+            let live_before: Option<String> =
+                sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+                    .fetch_one(&mut *tx)
+                    .await?;
             settle_tx(
                 &mut tx,
                 sampled_ms.saturating_sub(anchor.sampled_ms),
                 &now(),
             )
-            .await
+            .await?;
+            let (live_after, revision): (Option<String>, i64) = sqlx::query_as(
+                "SELECT live_session_id,engine_revision FROM focus_runtime WHERE id=1",
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            Ok::<_, crate::Error>((live_before != live_after, revision))
         }
         .await;
-        if let Err(e) = result {
-            drop(tx);
-            if is_storage_error(&e) {
-                self.recover_storage_failure(&mut anchor).await;
+        let (settle_transitioned, settled_revision) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                drop(tx);
+                if is_storage_error(&e) {
+                    self.recover_storage_failure(&mut anchor).await;
+                }
+                return Err(e);
             }
-            return Err(e);
-        }
+        };
         Ok(FocusTaskWriteGuard {
             tx: Some(tx),
             anchor,
             sampled_ms,
             committed: false,
+            settled_revision,
+            settle_transitioned,
         })
     }
     pub async fn execute(&self, command: FocusCommand) -> crate::Result<FocusReply> {
@@ -570,15 +598,23 @@ impl FocusService {
         }
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         ensure_process_tx(&mut tx, guard.process_generation).await?;
-        let prior_revision: i64 = sqlx::query_scalar("SELECT engine_revision FROM focus_runtime WHERE id=1")
-            .fetch_one(&mut *tx).await?;
+        let live_before: Option<String> =
+            sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+                .fetch_one(&mut *tx)
+                .await?;
         if let Err(e) = settle_tx(&mut tx, elapsed_ms, &wall_time).await {
             guard.frozen = true;
             return Err(e);
         }
-        let current_revision: i64 = sqlx::query_scalar("SELECT engine_revision FROM focus_runtime WHERE id=1")
-            .fetch_one(&mut *tx).await?;
-        if current_revision > prior_revision {
+        let live_after: Option<String> =
+            sqlx::query_scalar("SELECT live_session_id FROM focus_runtime WHERE id=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        // A plain running checkpoint is not a state transition: it stays
+        // local (the next transition publishes the settled totals). Only a
+        // settle that stopped the live session (Pomodoro boundary, gap
+        // pause) publishes, so remote readers stop seeing it as live.
+        if live_before != live_after {
             replica::publish_focus_replica_tx(&mut tx).await?;
         }
         let snap = snapshot_tx(&mut tx).await?;

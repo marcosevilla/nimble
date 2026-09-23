@@ -57,8 +57,10 @@ async fn task_row(h: &fixture::Harness, id: &str) -> serde_json::Value {
     serde_json::from_str(&nimble_core::db::sync::task_sync_snapshot(&task)).unwrap()
 }
 
+/// Revision of the latest published replica row. Older unsynced rows are
+/// superseded (deleted) on publish, so a row count is no longer a counter.
 async fn replica_rows(h: &fixture::Harness) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM sync_log WHERE table_name='focus_replica'")
+    sqlx::query_scalar("SELECT json_extract(snapshot,'$.revision') FROM sync_log WHERE table_name='focus_replica' ORDER BY rowid DESC LIMIT 1")
         .fetch_one(&h.pool)
         .await
         .unwrap()
