@@ -6,8 +6,6 @@ import { SelectionActionBar } from '@/components/tasks/SelectionActionBar'
 import { PageDragRegion } from '@/components/shared/PageDragRegion'
 import { useDataProvider } from '@/services/provider-context'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView } from '@/lib/task-view'
-import { matchesLabelFilter } from '@/lib/labelFilter'
-import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { useTaskNavigation } from '@/hooks/useTaskNavigation'
 import { useTaskRowActions } from './useTaskRowActions'
@@ -43,7 +41,6 @@ export function ProjectDetailPage({
   // (key={project.id} in TasksPage) on project switch, so this only ever
   // needs to load once per mount rather than resync on prop change.
   const [viewState, setViewState] = useState(() => loadTaskView(project.id, 'section'))
-  const labelFilter = useTasksNavStore((s) => s.labelFilter)
 
   useEffect(() => {
     saveTaskView(project.id, viewState)
@@ -83,9 +80,11 @@ export function ProjectDetailPage({
     return tasks.filter((t) => t.project_id === project.id)
   }, [tasks, project.id])
 
+  // Single label predicate — matchesLabelFilter already runs inside
+  // filterTasks (task-view.ts) against viewState.filter.labelFilter.
   const filteredTasks = useMemo(
-    () => filterTasks(projectTasks, viewState.filter).filter((t) => matchesLabelFilter(t.labels, labelFilter)),
-    [projectTasks, viewState.filter, labelFilter],
+    () => filterTasks(projectTasks, viewState.filter),
+    [projectTasks, viewState.filter],
   )
 
   const groups = useMemo(

@@ -312,12 +312,15 @@ function DashboardMode({
   const briefContent = selectedDate === today ? todayBrief : briefFor(otherBrief, selectedDate)
 
   const { tasks: localTasks, loading: localLoading, remove: removeLocal, addTask, refresh: refreshLocal } = useLocalTasks({ dueDate: today })
-  const { projects } = useProjects()
+  // Display-only lookup (resolving a task's own project name/color), not a
+  // picker — `allProjects` so a task still in an archived project doesn't
+  // lose its badge.
+  const { allProjects } = useProjects()
   const projectMap = useMemo(() => {
     const map: Record<string, { name: string; color: string }> = {}
-    for (const p of projects) map[p.id] = { name: p.name, color: p.color }
+    for (const p of allProjects) map[p.id] = { name: p.name, color: p.color }
     return map
-  }, [projects])
+  }, [allProjects])
 
   const topLevelLocal = useMemo(() => localTasks.filter((t) => !t.parent_id), [localTasks])
   const subtaskMap = useMemo(() => {

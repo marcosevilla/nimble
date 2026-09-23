@@ -11,6 +11,7 @@ import {
 import { STATUSES } from '@/components/tasks/StatusDropdown'
 import type { LocalTask, Section, TaskStatus } from '@nimble/types'
 import { UNSECTIONED, laneKeyOf, orderedSections } from './sectionLanes'
+import { EMPTY_LABEL_FILTER, matchesLabelFilter, type LabelFilter } from './labelFilter'
 
 // ── Grouping ─────────────────────────────────────────────────────────────
 
@@ -140,18 +141,24 @@ export function groupTasks(tasks: LocalTask[], by: GroupBy, sections: Section[])
 export interface TaskFilter {
   statuses: TaskStatus[]
   priorities: number[]
-  labelIds: string[]
+  /** include = task has ALL of these; exclude = task has NONE of these —
+   * see labelFilter.ts. This is the single label predicate for the task
+   * list (the Filter dropdown's "Label" section); there is no second,
+   * separate label filter anywhere in the header. */
+  labelFilter: LabelFilter
 }
 
-export const EMPTY_FILTER: TaskFilter = { statuses: [], priorities: [], labelIds: [] }
+export const EMPTY_FILTER: TaskFilter = { statuses: [], priorities: [], labelFilter: EMPTY_LABEL_FILTER }
 
-/** An empty facet array means that facet isn't filtering. Facets AND
- * together; values within a facet OR (e.g. status IN [todo, blocked]). */
+/** An empty facet means that facet isn't filtering. Status/priority AND
+ * together with the label facet; values within status/priority OR (e.g.
+ * status IN [todo, blocked]). The label facet has its own AND-include /
+ * NOT-exclude semantics — see matchesLabelFilter. */
 export function filterTasks(tasks: LocalTask[], f: TaskFilter): LocalTask[] {
   return tasks.filter((t) => {
     if (f.statuses.length > 0 && !f.statuses.includes(t.status)) return false
     if (f.priorities.length > 0 && !f.priorities.includes(t.priority)) return false
-    if (f.labelIds.length > 0 && !t.labels.some((id) => f.labelIds.includes(id))) return false
+    if (!matchesLabelFilter(t.labels, f.labelFilter)) return false
     return true
   })
 }
@@ -179,15 +186,40 @@ export function loadTaskView(
   try {
     const raw = localStorage.getItem(STORAGE_PREFIX + key)
     if (!raw) return { groupBy: defaultGroupBy, filter: EMPTY_FILTER }
-    const parsed = JSON.parse(raw) as Partial<TaskViewState>
+    // Old schema (pre label-facet upgrade) stored `filter.labelIds: string[]`
+    // under OR-across-labels semantics ("any of these"). The new
+    // `labelFilter` facet is AND-include/NOT-exclude, which has no faithful
+    // equivalent for "any of N labels" once N > 1 — mapping that case to
+    // `include` would silently narrow it to "all of these" instead, and
+    // mapping it to `exclude` would invert the filter's meaning entirely.
+    // A single stored id is unambiguous either way, so that one case
+    // migrates to `{ include: [id] }`; anything broader resets to empty
+    // rather than risk a surprising, differently-scoped filter surviving
+    // the upgrade silently.
+    const parsed = JSON.parse(raw) as Partial<TaskViewState> & {
+      filter?: Partial<TaskFilter> & { labelIds?: unknown }
+    }
     const groupBy =
       isGroupBy(parsed.groupBy) && allowed.includes(parsed.groupBy) ? parsed.groupBy : defaultGroupBy
+    const rawLabelFilter = parsed.filter?.labelFilter
+    const legacyLabelIds = parsed.filter?.labelIds
+    let labelFilter: LabelFilter
+    if (rawLabelFilter && typeof rawLabelFilter === 'object') {
+      labelFilter = {
+        include: Array.isArray(rawLabelFilter.include) ? rawLabelFilter.include : [],
+        exclude: Array.isArray(rawLabelFilter.exclude) ? rawLabelFilter.exclude : [],
+      }
+    } else if (Array.isArray(legacyLabelIds) && legacyLabelIds.length === 1) {
+      labelFilter = { include: [legacyLabelIds[0]], exclude: [] }
+    } else {
+      labelFilter = EMPTY_LABEL_FILTER
+    }
     return {
       groupBy,
       filter: {
         statuses: Array.isArray(parsed.filter?.statuses) ? parsed.filter!.statuses : [],
         priorities: Array.isArray(parsed.filter?.priorities) ? parsed.filter!.priorities : [],
-        labelIds: Array.isArray(parsed.filter?.labelIds) ? parsed.filter!.labelIds : [],
+        labelFilter,
       },
     }
   } catch {

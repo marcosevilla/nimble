@@ -26,7 +26,12 @@ export interface FocusTrayOptions {
 
 export interface FocusTrayData {
   tasks: LocalTask[]
+  /** Active-only — FocusSourcePicker's project list; archived projects
+   * shouldn't be offered as a source to pull candidates from. */
   projects: Project[]
+  /** Every project, archived included — for display lookups (task/source
+   * labels) so a task still in an archived project keeps its name. */
+  allProjects: Project[]
   sections: Section[]
   completed: FocusHistoryRow[]
   today: string
@@ -45,7 +50,7 @@ export interface FocusTrayData {
 export function useFocusTrayData(options: FocusTrayOptions = {}): FocusTrayData {
   const dp = useDataProvider()
   const { tasks, refresh: refreshTasks } = useLocalTasks()
-  const { projects } = useProjects()
+  const { projects, allProjects } = useProjects()
   const sectionVersion = useDataVersion('sections')
   const [sections, setSections] = useState<Section[]>([])
   const [history, setHistory] = useState<FocusHistoryRow[]>([])
@@ -118,5 +123,5 @@ export function useFocusTrayData(options: FocusTrayOptions = {}): FocusTrayData 
 
   const completed = useMemo(() => completedTrayRows(history, today), [history, today])
 
-  return { tasks, projects, sections, completed, today, taskOps, onAction, soundMuted, setSoundMuted }
+  return { tasks, projects, allProjects, sections, completed, today, taskOps, onAction, soundMuted, setSoundMuted }
 }

@@ -16,7 +16,6 @@ import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataProvider } from '@/services/provider-context'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView, type GroupBy } from '@/lib/task-view'
-import { matchesLabelFilter } from '@/lib/labelFilter'
 import type { LocalTask, Label, Project } from '@nimble/types'
 
 // Section/manual grouping don't have a coherent cross-project meaning here —
@@ -47,7 +46,6 @@ function AllTasksView({
   refresh: () => void
 }) {
   const [viewState, setViewState] = useState(() => loadTaskView('all', 'status', ALL_TASKS_GROUP_BY))
-  const labelFilter = useTasksNavStore((s) => s.labelFilter)
 
   useEffect(() => {
     saveTaskView('all', viewState)
@@ -60,10 +58,9 @@ function AllTasksView({
     setViewState((v) => ({ ...v, filter }))
   }, [])
 
-  const filteredTasks = useMemo(
-    () => filterTasks(tasks, viewState.filter).filter((t) => matchesLabelFilter(t.labels, labelFilter)),
-    [tasks, viewState.filter, labelFilter],
-  )
+  // Single label predicate — matchesLabelFilter already runs inside
+  // filterTasks (task-view.ts) against viewState.filter.labelFilter.
+  const filteredTasks = useMemo(() => filterTasks(tasks, viewState.filter), [tasks, viewState.filter])
   const groups = useMemo(
     // `sections` is always [] — groupBy here is restricted to
     // status/priority/due (ALL_TASKS_GROUP_BY), none of which consult it.

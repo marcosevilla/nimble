@@ -145,6 +145,7 @@ export function FocusView() {
             capabilities={capabilities}
             tasks={data.tasks}
             projects={data.projects}
+            allProjects={data.allProjects}
             sections={data.sections}
             completed={data.completed}
             today={data.today}
