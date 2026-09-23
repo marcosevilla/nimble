@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useAppStore } from '@/stores/appStore'
+import { openSettings } from '@/stores/settingsNavStore'
 import { NAV_MAX_WIDTH, NAV_MIN_WIDTH, useLayoutStore, type NavTreeId } from '@/stores/layoutStore'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataProvider } from '@/services/provider-context'
@@ -346,7 +347,7 @@ export function NavSidebar() {
                 'flex items-center gap-1.5 rounded-full bg-warning/15 text-foreground transition-colors hover:bg-warning/25',
                 expanded ? 'px-2.5 py-1 text-label' : 'size-6 justify-center',
               )}
-              onClick={() => setCurrentPage('settings')}
+              onClick={() => openSettings('demo')}
             >
               <span className="size-1.5 rounded-full bg-warning animate-pulse" />
               {expanded && 'Demo'}
