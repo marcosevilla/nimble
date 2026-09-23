@@ -535,7 +535,15 @@ impl Builder<'_> {
         match target {
             _ if self.legacy_completed.contains(legacy) => {
                 self.record(&key, "timer", ImportRecordStatus::Quarantined, "residual timer for a completed task (potential overlap)", rec.clone(), Value::Null);
-                self.contribution(&key, legacy, "timer", duration, None, None, None, ImportInclusion::Excluded, "overlaps the recorded completion; not added");
+                match prior.filter(|p| p.inclusion == "included") {
+                    // Time already imported as open work is never withdrawn by a later snapshot.
+                    Some(p) => {
+                        self.issue(ImportSeverity::Review, Some(&key), format!(
+                            "{legacy} was completed in Focus Queue after an earlier import. The {} ms already imported is kept; newer time is not added.", p.duration));
+                        self.contribution(&key, legacy, "timer", p.duration, None, None, p.occurrence, ImportInclusion::Included, "earlier import kept; later completion needs review");
+                    }
+                    None => self.contribution(&key, legacy, "timer", duration, None, None, None, ImportInclusion::Excluded, "overlaps the recorded completion; not added"),
+                }
             }
             Target::Native { id, title, completed } => {
                 let occurrence_open = match prior.as_ref().and_then(|p| p.occurrence.as_deref()) {
@@ -667,10 +675,12 @@ async fn build(conn: &mut SqliteConnection, files: &LegacyFocusFiles) -> crate::
         let title = b.native_row(&entry.task_id).await?.map(|r| r.0).unwrap_or_else(|| "Task unavailable".into());
         merged.push(FocusImportOrderItem { legacy_task_id: None, task_id: entry.task_id.clone(), title, origin: "existing".into() });
     }
-    let active: Vec<(String, &str)> = if source_kind.as_deref() == Some("manual") {
-        manual_order.iter().map(|id| (id.clone(), "manual")).collect()
-    } else {
-        source_order.iter().map(|id| (id.clone(), "source")).chain(manual_order.iter().map(|id| (id.clone(), "manual"))).collect()
+    // Only a known Today/project source makes queueIds an active order; an
+    // absent or unknown source keeps it as evidence only.
+    let active: Vec<(String, &str)> = match source_kind.as_deref() {
+        Some("today" | "project") => source_order.iter().map(|id| (id.clone(), "source"))
+            .chain(manual_order.iter().map(|id| (id.clone(), "manual"))).collect(),
+        _ => manual_order.iter().map(|id| (id.clone(), "manual")).collect(),
     };
     let stamp = Utc::now().to_rfc3339();
     for (legacy, origin) in active {
@@ -695,6 +705,7 @@ async fn build(conn: &mut SqliteConnection, files: &LegacyFocusFiles) -> crate::
     let legacy_completed_today = match &state { Some(s) => safe_u64(s.get("completedToday")), None => None };
     b.fingerprint_rows.sort();
     let tasks_fingerprint = hash(&[&serde_json::to_string(&queue).unwrap_or_default(), selected.as_deref().unwrap_or(""), &b.fingerprint_rows.join("\n")]);
+    other_namespace_guard(&mut b, &file_hashes).await?;
     let blocked = b.issues.iter().any(|i| i.severity == ImportSeverity::Blocking);
     let noop = b.creates.is_empty() && b.totals.is_empty() && queue_adds.is_empty() && b.records.iter().all(|r| r.change == ImportChange::Unchanged);
     let mut preview = FocusImportPreview {
@@ -708,6 +719,32 @@ async fn build(conn: &mut SqliteConnection, files: &LegacyFocusFiles) -> crate::
         preview, creates: b.creates, occurrences: b.occurrences, totals: b.totals, record_mappings: b.record_mappings,
         queue_adds, queue_entries: queue, selected,
     })
+}
+
+/// Dedup keys live in a namespace, so the same files under a second name
+/// would re-create every task and add every cumulative total again. Block
+/// when another namespace already holds these files or task records.
+async fn other_namespace_guard(b: &mut Builder<'_>, file_hashes: &BTreeMap<String, String>) -> crate::Result<()> {
+    let mut clash: Vec<String> = Vec::new();
+    let batches: Vec<(String, String)> = sqlx::query_as("SELECT source_namespace,file_hashes_json FROM focus_import_batches WHERE source_namespace!=?")
+        .bind(&b.ns).fetch_all(&mut *b.conn).await?;
+    for (ns, json) in batches {
+        let hashes: BTreeMap<String, String> = serde_json::from_str(&json).unwrap_or_default();
+        if hashes.values().any(|h| file_hashes.values().any(|f| f == h)) { clash.push(ns); }
+    }
+    let prior: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT source_namespace,record_key,fingerprint FROM focus_import_records WHERE source_namespace!=? AND (record_key LIKE 'task:%' OR record_key LIKE 'completion:%' OR record_key LIKE 'timer:%')")
+        .bind(&b.ns).fetch_all(&mut *b.conn).await?;
+    for (ns, key, fingerprint) in prior {
+        if b.records.iter().any(|r| r.record_key == key && r.fingerprint == fingerprint) { clash.push(ns); }
+    }
+    clash.sort();
+    clash.dedup();
+    for ns in clash {
+        b.issue(ImportSeverity::Blocking, None, format!(
+            "These files were already imported under the source name \"{ns}\". Import them under that name so nothing is counted twice."));
+    }
+    Ok(())
 }
 
 /// Read-only: validates the files as a set and proposes every decision.

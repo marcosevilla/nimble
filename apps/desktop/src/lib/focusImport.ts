@@ -5,6 +5,14 @@
  */
 import type { FocusImportPreview } from '@nimble/types'
 
+/**
+ * One fixed source name for the single legacy installation. Deduplication is
+ * keyed by it, so the dialog never lets it be edited: a second name would
+ * re-create tasks and count cumulative time twice (the importer also blocks
+ * files already imported under another name).
+ */
+export const FOCUS_QUEUE_NAMESPACE = 'focus-queue'
+
 export type LegacyFileRole = 'state' | 'manual' | 'pending' | 'config'
 
 /** Assign a picked file by its name. `config` is refused by the caller. */

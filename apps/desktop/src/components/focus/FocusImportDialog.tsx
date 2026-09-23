@@ -9,10 +9,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Caption, FieldLabel, Label } from '@/components/shared/typography'
 import { formatDurationMs } from '@/lib/focusModel'
-import { importBlockedReason, importSummary, legacyFileRole } from '@/lib/focusImport'
+import { FOCUS_QUEUE_NAMESPACE, importBlockedReason, importSummary, legacyFileRole } from '@/lib/focusImport'
 import { cn } from '@/lib/utils'
 import { FocusRequestError } from '@/services/focus-events'
 import { useDataProvider } from '@/services/provider-context'
@@ -20,6 +19,8 @@ import { refreshFocus } from '@/stores/focusStore'
 
 type Role = 'state' | 'manual' | 'pending'
 type Picked = Partial<Record<Role, { name: string; text: string }>>
+
+const ACTION: Record<string, string> = { create: 'Create', reuse: 'Reuse', unchanged: 'Already imported', unresolved: 'Not imported' }
 
 const ORIGIN: Record<string, string> = { existing: 'In Nimble', source: 'Old Today/project', manual: 'Old manual list' }
 
@@ -33,7 +34,6 @@ const ORIGIN: Record<string, string> = { existing: 'In Nimble', source: 'Old Tod
  */
 export function FocusImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const dp = useDataProvider()
-  const [namespace, setNamespace] = useState('focus-queue')
   const [picked, setPicked] = useState<Picked>({})
   const [preview, setPreview] = useState<FocusImportPreview | null>(null)
   const [result, setResult] = useState<FocusImportResult | null>(null)
@@ -43,7 +43,7 @@ export function FocusImportDialog({ open, onOpenChange }: { open: boolean; onOpe
   const commandFor = useRef<{ token: string; id: string } | null>(null)
 
   const files = (): LegacyFocusFiles => ({
-    source_namespace: namespace.trim(),
+    source_namespace: FOCUS_QUEUE_NAMESPACE,
     state_json: picked.state?.text ?? null,
     manual_json: picked.manual?.text ?? null,
     pending_json: picked.pending?.text ?? null,
@@ -125,11 +125,6 @@ export function FocusImportDialog({ open, onOpenChange }: { open: boolean; onOpe
 
         <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1">
-            <FieldLabel>Source name</FieldLabel>
-            <Input value={namespace} onChange={(e) => { setNamespace(e.target.value); setPreview(null) }} />
-            <Caption tone="muted">Use the same name for every import from this Mac, so repeats are recognized.</Caption>
-          </label>
-          <label className="flex flex-col gap-1">
             <FieldLabel>Files</FieldLabel>
             <input
               type="file"
@@ -153,6 +148,37 @@ export function FocusImportDialog({ open, onOpenChange }: { open: boolean; onOpe
               {summary.excludedMs > 0 && ` · ${formatDurationMs(summary.excludedMs)} held back as possible overlap`}
               {` · ${summary.unresolved} unresolved · ${summary.quarantined} quarantined (${summary.pending} old pending sends, never replayed)`}
             </Caption>
+
+            {preview.legacy_completed_today != null && (
+              <Caption as="p" tone="muted">
+                {`Focus Queue's daily count: ${preview.legacy_completed_today} completed. Kept as a summary, not as completion records.`}
+              </Caption>
+            )}
+
+            <section className="flex flex-col gap-1">
+              <Label as="h3">Tasks</Label>
+              {preview.tasks.length === 0 ? (
+                <Caption tone="muted">No task records.</Caption>
+              ) : preview.tasks.map((t) => (
+                <div key={t.legacy_task_id} className="flex flex-col text-meta">
+                  <div className="flex items-baseline gap-2">
+                    <span className="min-w-0 flex-1 truncate" title={t.legacy_task_id}>{t.title ?? t.legacy_task_id}</span>
+                    <Caption tone="muted">{ACTION[t.action] ?? t.action}{t.completed_at ? ' · completed' : ''}</Caption>
+                  </div>
+                  {t.differences.map((d) => (
+                    <Caption key={d} tone="muted" className="pl-3">{d}</Caption>
+                  ))}
+                </div>
+              ))}
+            </section>
+
+            <section className="flex flex-col gap-1">
+              <Label as="h3">Original orders (kept as evidence)</Label>
+              <Caption as="p" tone="muted">
+                {`${preview.source_kind ? `Source (${preview.source_kind})` : 'Source (unknown, not queued)'}: ${preview.source_order.join(', ') || 'empty'}`}
+              </Caption>
+              <Caption as="p" tone="muted">{`Manual: ${preview.manual_order.join(', ') || 'empty'}`}</Caption>
+            </section>
 
             <section className="flex flex-col gap-1">
               <Label as="h3">Queue after import</Label>
@@ -226,7 +252,7 @@ export function FocusImportDialog({ open, onOpenChange }: { open: boolean; onOpe
 
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Close</Button>
-          <Button variant="outline" size="sm" disabled={busy || chosen.length === 0 || !namespace.trim()} onClick={() => void runPreview()}>
+          <Button variant="outline" size="sm" disabled={busy || chosen.length === 0} onClick={() => void runPreview()}>
             Preview
           </Button>
           <Button size="sm" disabled={busy || !preview || blocked != null} onClick={() => void runCommit()} title={blocked ?? undefined}>

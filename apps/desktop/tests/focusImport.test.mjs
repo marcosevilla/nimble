@@ -1,6 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { legacyFileRole, importBlockedReason, importSummary } from '../src/lib/focusImport.ts'
+import { legacyFileRole, importBlockedReason, importSummary, FOCUS_QUEUE_NAMESPACE } from '../src/lib/focusImport.ts'
+import { readFileSync } from 'node:fs'
+
+test('the dialog imports under one fixed, non-editable source name', () => {
+  assert.equal(FOCUS_QUEUE_NAMESPACE, 'focus-queue')
+  const dialog = readFileSync(new URL('../src/components/focus/FocusImportDialog.tsx', import.meta.url), 'utf8')
+  assert.match(dialog, /source_namespace: FOCUS_QUEUE_NAMESPACE/)
+  assert.doesNotMatch(dialog, /setNamespace/)
+  for (const field of ['preview.tasks', 'differences', 'preview.source_order', 'preview.manual_order', 'legacy_completed_today']) {
+    assert.ok(dialog.includes(field), `dialog renders ${field}`)
+  }
+})
 
 const preview = (over = {}) => ({
   preview_token: 't', source_namespace: 'fixture', file_hashes: {}, destination: { queue_revision: 1, engine_revision: 1, tasks_fingerprint: 'f' },

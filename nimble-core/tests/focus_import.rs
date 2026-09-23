@@ -420,3 +420,65 @@ async fn running_session_blocks_import_until_paused() {
     assert_eq!(snapshot.session.as_ref().map(|s| s.status), Some(nimble_core::focus_types::FocusStatus::Paused));
     assert_eq!(snapshot.queue.len(), 2);
 }
+
+#[tokio::test]
+async fn later_legacy_completion_never_withdraws_imported_open_time() {
+    let h = Harness::new().await;
+    let preview = preview_import(&h.pool, &files()).await.unwrap();
+    commit_import(&h.pool, &files(), &preview.preview_token, &command()).await.unwrap();
+    let occurrence = h.snapshot().await.queue[0].occurrence_id.clone();
+    assert_eq!(h.snapshot().await.totals[&occurrence], 7_000);
+
+    // In Focus Queue, m2 then gained time and was completed.
+    let mut later = files();
+    later.state_json = Some(fixture("state.json").replace("\"elapsedMs\": 5000", "\"elapsedMs\": 9000"));
+    later.manual_json = Some(fixture("manual.json")
+        .replace("\"order\": [\"manual:m2\"]", "\"order\": []")
+        .replace("{ \"id\": \"manual:m1\", \"spentMs\": 12345, \"completedAt\": 1758542400000 }",
+            "{ \"id\": \"manual:m1\", \"spentMs\": 12345, \"completedAt\": 1758542400000 }, { \"id\": \"manual:m2\", \"spentMs\": 11000, \"completedAt\": 1758546000000 }"));
+    let preview = preview_import(&h.pool, &later).await.unwrap();
+    assert!(!preview.blocked, "{:?}", preview.issues);
+    assert!(preview.issues.iter().any(|i| i.record_key.as_deref() == Some("timer:manual:m2")));
+    commit_import(&h.pool, &later, &preview.preview_token, &command()).await.unwrap();
+    let total: i64 = sqlx::query_scalar("SELECT COALESCE(sum(duration_ms),0) FROM focus_import_totals WHERE occurrence_id=? AND inclusion='included'")
+        .bind(&occurrence).fetch_one(&h.pool).await.unwrap();
+    assert_eq!(total, 7_000, "previously imported time stays on its occurrence");
+    let completions: i64 = sqlx::query_scalar("SELECT COALESCE(sum(duration_ms),0) FROM focus_import_totals WHERE inclusion='included' AND source_kind='completion'")
+        .fetch_one(&h.pool).await.unwrap();
+    assert_eq!(completions, 12_345, "the overlapping later completion is not added");
+}
+
+#[tokio::test]
+async fn unknown_source_queue_ids_are_evidence_only() {
+    let h = Harness::new().await;
+    let id = h.task("Remote task body").await;
+    sqlx::query("UPDATE local_tasks SET external_source='todoist',external_id=? WHERE id=?")
+        .bind(REMOTE).bind(&id).execute(&h.pool).await.unwrap();
+    for source in ["", "\"source\": { \"kind\": \"someday\" },"] {
+        let mut f = files();
+        f.state_json = Some(fixture("state.json").replace("\"source\": { \"kind\": \"today\" },", source));
+        let preview = preview_import(&h.pool, &f).await.unwrap();
+        let order: Vec<_> = preview.merged_order.iter().map(|o| o.legacy_task_id.as_deref()).collect();
+        assert_eq!(order, vec![Some("manual:m2")], "source {source:?}");
+        assert_eq!(preview.source_order, vec![REMOTE.to_string()]);
+    }
+}
+
+#[tokio::test]
+async fn same_files_under_another_namespace_are_blocked() {
+    let h = Harness::new().await;
+    let preview = preview_import(&h.pool, &files()).await.unwrap();
+    commit_import(&h.pool, &files(), &preview.preview_token, &command()).await.unwrap();
+    let tasks = count(&h.pool, "SELECT count(*) FROM local_tasks").await;
+    let mut renamed = files();
+    renamed.source_namespace = "Focus Queue".into();
+    let preview = preview_import(&h.pool, &renamed).await.unwrap();
+    assert!(preview.blocked);
+    assert!(preview.issues.iter().any(|i| i.message.contains("\"fixture\"")), "{:?}", preview.issues);
+    assert!(commit_import(&h.pool, &renamed, &preview.preview_token, &command()).await.is_err());
+    // A later snapshot (different file hashes) is still caught by record fingerprints.
+    renamed.state_json = Some(fixture("state.json").replace("\"elapsedMs\": 5000", "\"elapsedMs\": 9000"));
+    renamed.pending_json = None;
+    assert!(preview_import(&h.pool, &renamed).await.unwrap().blocked);
+    assert_eq!(count(&h.pool, "SELECT count(*) FROM local_tasks").await, tasks);
+}
