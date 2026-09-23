@@ -42,3 +42,29 @@ export function toggleFocusQueue(): void {
   }
   openFocusQueue()
 }
+
+/**
+ * ⇧H: show today's habits in the right column, or hide the column if the
+ * Habits tab is already showing. Where the column isn't on screen it is
+ * brought back first: Settings / Session go to Today, and an open detail
+ * sidebar closes (as Escape would).
+ */
+export function toggleHabits(): void {
+  const layout = useLayoutStore.getState()
+  if (pageHidesRightRail(useAppStore.getState().currentPage)) {
+    useAppStore.getState().setCurrentPage('today')
+    layout.openRightTab('habits')
+    return
+  }
+  const detail = useDetailStore.getState()
+  if (detail.target && detail.mode === 'sidebar') {
+    detail.close()
+    layout.openRightTab('habits')
+    return
+  }
+  if (layout.rightTab === 'habits' && !layout.rightCollapsed) {
+    layout.setRightCollapsed(true)
+    return
+  }
+  layout.openRightTab('habits')
+}

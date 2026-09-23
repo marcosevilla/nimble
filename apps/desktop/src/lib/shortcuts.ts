@@ -138,6 +138,9 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Tasks', keys: '← / →', label: 'Collapse / expand a parent project' },
   { section: 'Tasks', keys: 'e', label: 'Edit the focused project' },
   { section: 'Tasks', keys: '⌫', label: 'Delete the focused project (asks first)' },
+
+  // ── Goals: habits in the right column (Dashboard.tsx ⇧H → lib/rightRail.ts toggleHabits) ──
+  { section: 'Goals', keys: '⇧H', label: 'Open / close habits in the right column' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [
@@ -168,4 +171,9 @@ const MODIFIER_ONLY_KEYS = new Set(['Shift', 'Alt', 'Meta', 'Control', 'CapsLock
 
 export function isModifierOnlyKey(key: string): boolean {
   return MODIFIER_ONLY_KEYS.has(key)
+}
+
+/** ⇧H: open / close habits in the right column (re-score goals N-P1-1). */
+export function isHabitsShortcut(e: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; repeat?: boolean }): boolean {
+  return e.key === 'H' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.repeat
 }

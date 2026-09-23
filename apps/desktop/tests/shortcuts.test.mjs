@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { SHORTCUTS, G_PREFIX_PAGES, G_PREFIX_TIMEOUT_MS } from '../src/lib/shortcuts.ts'
+import { SHORTCUTS, G_PREFIX_PAGES, G_PREFIX_TIMEOUT_MS, isHabitsShortcut } from '../src/lib/shortcuts.ts'
 
 test('every shortcut has a section, non-empty keys and a non-empty label', () => {
   assert.ok(SHORTCUTS.length > 0)
@@ -96,4 +96,14 @@ test('Session section carries complete, minimize, stop and the completion-note k
   for (const s of note) assert.match(s.label, /^Dismiss/, 'dismissing never starts the next task')
   assert.ok(note.some((s) => s.label.includes('stays paused')))
   for (const s of SHORTCUTS) assert.doesNotMatch(s.label, /start the next task/i)
+})
+
+test('⇧H is the habits shortcut, bare and unrepeated (goals N-P1-1)', () => {
+  assert.equal(isHabitsShortcut({ key: 'H' }), true)
+  assert.equal(isHabitsShortcut({ key: 'h' }), false)
+  assert.equal(isHabitsShortcut({ key: 'H', metaKey: true }), false)
+  assert.equal(isHabitsShortcut({ key: 'H', ctrlKey: true }), false)
+  assert.equal(isHabitsShortcut({ key: 'H', altKey: true }), false)
+  assert.equal(isHabitsShortcut({ key: 'H', repeat: true }), false)
+  assert.ok(SHORTCUTS.some((s) => s.keys === '⇧H'), 'registry lists ⇧H')
 })

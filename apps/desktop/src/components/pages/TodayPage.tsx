@@ -354,7 +354,7 @@ function DashboardMode({
   const remaining = total - completed
 
   // Primary lane: Priorities → Tasks → collapsed Brief (today P2-1). Habits
-  // live in the right rail under the calendar (RightSidebar).
+  // are the right rail's Habits tab (⇧H), not part of this lane.
   return (
     <PageFrame
       title="Today"

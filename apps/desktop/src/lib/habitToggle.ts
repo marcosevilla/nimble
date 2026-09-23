@@ -69,3 +69,10 @@ export function createHabitLoadGate() {
     get pending(): number { return inFlight },
   }
 }
+
+/** Today's check-offs across active habits — the rail's Habits tab count
+ *  and the section header share it. */
+export function habitProgress(habits: { active: boolean; today_completed: boolean }[]): { done: number; total: number } {
+  const active = habits.filter((h) => h.active)
+  return { done: active.filter((h) => h.today_completed).length, total: active.length }
+}

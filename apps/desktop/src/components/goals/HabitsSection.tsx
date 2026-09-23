@@ -27,6 +27,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { GOAL_COLORS } from '@/lib/goalStatus'
+import { habitProgress } from '@/lib/habitToggle'
 
 /* Stored `habit.icon` is a lucide name (kebab or Pascal). This curated map
    covers the names the habit picker and the vault import produce; anything
@@ -248,7 +249,7 @@ export function HabitsSection() {
   }, [toggleHabit])
 
   const activeHabits = habits.filter((h) => h.active)
-  const completedCount = activeHabits.filter((h) => h.today_completed).length
+  const { done: completedCount } = habitProgress(habits)
   const avgMomentum = activeHabits.length > 0
     ? Math.round(activeHabits.reduce((sum, h) => sum + h.current_momentum, 0) / activeHabits.length)
     : 0

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { flipHabit, toggleHabitOptimistically } from '../src/lib/habitToggle.ts'
+import { flipHabit, toggleHabitOptimistically, habitProgress } from '../src/lib/habitToggle.ts'
 
 const habits = () => [
   { id: 'a', name: 'Gym', today_completed: false, current_momentum: 40 },
@@ -95,4 +95,16 @@ test('only the latest reload applies', () => {
   const second = gate.beginLoad()
   assert.equal(gate.canApply(first), false)
   assert.equal(gate.canApply(second), true)
+})
+
+test('habitProgress counts only active habits', () => {
+  assert.deepEqual(
+    habitProgress([
+      { active: true, today_completed: true },
+      { active: true, today_completed: false },
+      { active: false, today_completed: true },
+    ]),
+    { done: 1, total: 2 },
+  )
+  assert.deepEqual(habitProgress([]), { done: 0, total: 0 })
 })

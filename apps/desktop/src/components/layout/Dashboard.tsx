@@ -13,7 +13,7 @@ import { RightSidebar } from './RightSidebar'
 import { CommandBar } from '@/components/shared/CommandBar'
 import { HelpPanel } from '@/components/shared/HelpPanel'
 import { useHelpPanelStore } from '@/stores/helpPanelStore'
-import { G_PREFIX_PAGES, G_PREFIX_TIMEOUT_MS, isModifierOnlyKey } from '@/lib/shortcuts'
+import { G_PREFIX_PAGES, G_PREFIX_TIMEOUT_MS, isHabitsShortcut, isModifierOnlyKey } from '@/lib/shortcuts'
 import { BulkActionBar } from '@/components/shared/BulkActionBar'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { QuickCreateDialog } from '@/components/tasks/QuickCreateDialog'
@@ -29,7 +29,7 @@ import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { connectFocusCache, focusSpaceAction, isDroppedRepeat, sendFocusAction, useFocusCache } from '@/stores/focusStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import { isFocusTrayShortcut } from '@/lib/focusFlows'
-import { pageHidesRightRail, toggleFocusQueue } from '@/lib/rightRail'
+import { pageHidesRightRail, toggleFocusQueue, toggleHabits } from '@/lib/rightRail'
 import { FocusView } from '@/components/focus/FocusView'
 import { FocusBanner } from '@/components/focus/FocusBanner'
 import { FocusResumeDialog } from '@/components/focus/FocusResumeDialog'
@@ -192,6 +192,13 @@ export function Dashboard() {
       if (!isInput && isFocusTrayShortcut(e)) {
         e.preventDefault()
         toggleFocusQueue()
+        return
+      }
+
+      // ⇧H — open/close habits in the right column (re-score goals N-P1-1)
+      if (!isInput && isHabitsShortcut(e)) {
+        e.preventDefault()
+        toggleHabits()
         return
       }
 

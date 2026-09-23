@@ -9,6 +9,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { HabitsSection } from '@/components/goals/HabitsSection'
 import { ActivityPanel } from '@/components/activity/ActivityPanel'
 import { FocusRailPanel } from '@/components/focus/FocusRailPanel'
+import { useGoalsStore } from '@/stores/goalsStore'
+import { habitProgress } from '@/lib/habitToggle'
 
 const MIN_WIDTH = 200
 const MAX_WIDTH = 480
@@ -33,6 +35,14 @@ export function RightSidebar() {
   const tab = useLayoutStore((s) => s.rightTab)
   const setTab = useLayoutStore((s) => s.setRightTab)
   const openTab = useLayoutStore((s) => s.openRightTab)
+
+  // Today's habit count on the Habits tab, so it's visible from Calendar
+  // (re-score goals N-P1-1). The tab panel loads habits too; the store
+  // gates overlapping loads.
+  const habits = useGoalsStore((s) => s.habits)
+  const loadHabits = useGoalsStore((s) => s.loadHabits)
+  useEffect(() => { loadHabits() }, [loadHabits])
+  const habitCount = habitProgress(habits)
 
   const [dragging, setDragging] = useState(false)
   const startX = useRef(0)
@@ -130,6 +140,11 @@ export function RightSidebar() {
                   >
                     <Icon icon={TAB_META[id].icon} />
                     <span className={cn(id === tab ? 'inline' : 'sr-only')}>{TAB_META[id].label}</span>
+                    {id === 'habits' && habitCount.total > 0 && (
+                      <span className="text-label tabular-nums text-muted-foreground" aria-label={`${habitCount.done} of ${habitCount.total} done today`}>
+                        {habitCount.done}/{habitCount.total}
+                      </span>
+                    )}
                   </TabsTrigger>
                 ))}
               </TabsList>
