@@ -91,12 +91,22 @@ pub async fn backfill_origin_label(pool: &SqlitePool) -> crate::Result<usize> {
     .bind(&label_id)
     .fetch_all(&mut *tx)
     .await?;
+    // (task_id, created_at) for every `task_labels` row just written, so the
+    // post-commit sync_log entry can carry a real snapshot — see below.
+    let mut created_ats: Vec<(String, String)> = Vec::with_capacity(ids.len());
     for id in &ids {
         sqlx::query("INSERT OR IGNORE INTO task_labels (task_id, label_id) VALUES (?, ?)")
             .bind(id)
             .bind(&label_id)
             .execute(&mut *tx)
             .await?;
+        let created_at: String =
+            sqlx::query_scalar("SELECT created_at FROM task_labels WHERE task_id = ? AND label_id = ?")
+                .bind(id)
+                .bind(&label_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        created_ats.push((id.clone(), created_at));
         // The two queued creates are unlinked, so their pending outbox
         // `create` row must carry the label too, or the first push would
         // omit it. Read-merge-write in Rust rather than a clever nested
@@ -131,15 +141,27 @@ pub async fn backfill_origin_label(pool: &SqlitePool) -> crate::Result<usize> {
         }
     }
     tx.commit().await?;
-    for id in &ids {
-        // sync_log so the web replica sees it; composite row id helper lives in db::sync
+    for (id, created_at) in &created_ats {
+        // sync_log so the web replica sees it; composite row id helper lives
+        // in db::sync. A snapshot is required here, not optional: a `None`
+        // snapshot makes `build_data_mutation_requests` (db/sync.rs) return
+        // no statements for this INSERT, and `push` then marks the entry
+        // synced anyway — the label association would silently never reach
+        // Turso. Mirrors the snapshot shape every other `task_labels` INSERT
+        // site uses (`task_tx::set_labels_tx`, `labels::set_task_labels`).
+        let snapshot = serde_json::json!({
+            "task_id": id,
+            "label_id": label_id,
+            "created_at": created_at,
+        })
+        .to_string();
         crate::db::sync::append_sync_log(
             pool,
             "task_labels",
             &crate::db::sync::task_labels_row_id(id, &label_id),
             "INSERT",
             None,
-            None,
+            Some(&snapshot),
         )
         .await
         .ok();

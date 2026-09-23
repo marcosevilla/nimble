@@ -100,6 +100,40 @@ async fn backfill_labels_only_unlinked_tasks_and_is_idempotent() {
     assert_eq!(names_on_task(&pool, "n2").await, vec!["nimble".to_string()]);
 }
 
+/// Reviewer finding: the backfill's `task_labels` sync_log entry must carry
+/// a real snapshot, not `None` — `build_data_mutation_requests` returns no
+/// statements for an INSERT/UPDATE with a `None` snapshot, and `push` then
+/// marks the entry synced anyway, so a `None` snapshot here would make the
+/// label association silently never reach Turso.
+#[tokio::test]
+async fn backfill_sync_log_entry_carries_a_real_snapshot() {
+    let pool = test_pool().await;
+    sqlx::query("INSERT INTO local_tasks (id, content, project_id) VALUES ('n1','native','inbox')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(origin_label::backfill_origin_label(&pool).await.unwrap(), 1);
+
+    let label_id: String = sqlx::query_scalar("SELECT id FROM labels WHERE name = 'nimble'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let row_id = format!("n1::{label_id}");
+    let snapshot: Option<String> = sqlx::query_scalar(
+        "SELECT snapshot FROM sync_log WHERE table_name = 'task_labels' AND row_id = ? AND operation = 'INSERT'",
+    )
+    .bind(&row_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let snapshot = snapshot.expect("task_labels sync_log entry must carry a snapshot, not None");
+    let snapshot: serde_json::Value = serde_json::from_str(&snapshot).unwrap();
+    assert_eq!(snapshot["task_id"], "n1");
+    assert_eq!(snapshot["label_id"], label_id);
+    assert!(snapshot.get("created_at").is_some(), "got {snapshot:?}");
+}
+
 /// Backfill must also merge `nimble` into any pending outbox `create` row for
 /// an unlinked task — that queued create is the only thing that will ever
 /// push the label to Todoist, since the task never goes through

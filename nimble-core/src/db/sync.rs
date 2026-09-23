@@ -2867,6 +2867,45 @@ mod v19_sync_tests {
         assert!(reqs.is_empty());
     }
 
+    /// Regression for a review finding on `db::origin_label::backfill_origin_label`:
+    /// its `task_labels` sync_log entry must carry a real snapshot, in the
+    /// exact `{"task_id","label_id","created_at"}` shape every other
+    /// `task_labels` INSERT site uses (`task_tx::set_labels_tx`,
+    /// `labels::set_task_labels`). A `None` snapshot makes
+    /// `build_data_mutation_requests` return no statements for an
+    /// INSERT/UPDATE (see the early return above), and `push` then marks the
+    /// entry synced anyway — the association would silently never reach
+    /// Turso.
+    #[test]
+    fn task_labels_insert_snapshot_shape_builds_a_valid_statement() {
+        let snapshot = serde_json::json!({
+            "task_id": "task-1",
+            "label_id": "label-1",
+            "created_at": "2026-09-23 12:00:00",
+        })
+        .to_string();
+        let reqs = super::build_data_mutation_requests(
+            "task_labels",
+            &super::task_labels_row_id("task-1", "label-1"),
+            "INSERT",
+            &Some(snapshot),
+        );
+        assert_eq!(reqs.len(), 1, "a task_labels INSERT with a real snapshot must produce a statement");
+        let sql = reqs[0].pointer("/stmt/sql").and_then(|v| v.as_str()).unwrap_or_default();
+        assert!(sql.starts_with("INSERT INTO task_labels"), "got {sql}");
+        assert!(sql.contains("ON CONFLICT(task_id, label_id)"), "got {sql}");
+
+        // The bug this guards against: a `None` snapshot silently drops the
+        // mutation instead of replicating it.
+        let dropped = super::build_data_mutation_requests(
+            "task_labels",
+            &super::task_labels_row_id("task-1", "label-1"),
+            "INSERT",
+            &None,
+        );
+        assert!(dropped.is_empty());
+    }
+
     /// Regression: a plain `serde_json::to_string(&task)` snapshot carries
     /// `LocalTask::labels` (not a `local_tasks` column), which broke every
     /// apply — local or remote — with "no such column: labels" for every
