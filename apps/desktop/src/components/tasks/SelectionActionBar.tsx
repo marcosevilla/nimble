@@ -150,7 +150,7 @@ export function SelectionActionBar() {
   return (
     <>
     {deleteDialog}
-    <div className="sticky bottom-4 z-20 mx-auto w-fit animate-in fade-in slide-in-from-bottom-2">
+    <div className="sticky bottom-4 z-20 mx-auto w-fit panel-in">
       <div className="flex items-center gap-1 rounded-[10px] border border-input bg-card px-2 py-1.5 shadow-[0px_6px_16px_-2px_rgba(0,0,0,0.12)]">
         <span className="px-2 text-meta text-muted-foreground tabular-nums">
           {count} selected

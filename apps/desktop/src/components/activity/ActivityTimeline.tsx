@@ -4,7 +4,9 @@ import type { ActivityEntry, ActivitySummary } from '@nimble/types'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
-import { Zap } from 'lucide-react'
+import { Activity, Zap } from 'lucide-react'
+import { EmptyState } from '@/components/shared/EmptyState'
+import { SectionTitle } from '@/components/shared/typography'
 import { ACTION_META, ACTIVITY_COLORS } from '@/lib/activityMeta'
 
 /** Fallback for unknown action types: snake_case → sentence case ("thing_happened" → "Thing happened"). */
@@ -161,9 +163,9 @@ export function ActivityTimeline() {
 
   if (entries.length === 0) {
     return (
-      <p className="text-body text-muted-foreground">
+      <EmptyState icon={Activity}>
         No activity yet today. It'll appear here as you use the app.
-      </p>
+      </EmptyState>
     )
   }
 
@@ -172,21 +174,23 @@ export function ActivityTimeline() {
       {/* Summary */}
       <SummaryBar summaries={summaries} />
 
-      {/* Filter toggle */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-label text-muted-foreground">
-          Timeline
-        </h3>
-        <Button
-          variant="ghost"
-          size="xs"
-          aria-pressed={showNoise}
-          onClick={() => setShowNoise(!showNoise)}
-          className="text-muted-foreground"
-        >
-          {showNoise ? 'Hide noise' : 'Show all'}
-        </Button>
-      </div>
+      {/* Section heading — "Timeline" was already the active tab label
+          (session P3-4); the heading names the day instead. */}
+      <SectionTitle
+        action={
+          <Button
+            variant="ghost"
+            size="xs"
+            aria-pressed={showNoise}
+            onClick={() => setShowNoise(!showNoise)}
+            className="text-muted-foreground"
+          >
+            {showNoise ? 'Hide noise' : 'Show all'}
+          </Button>
+        }
+      >
+        Today
+      </SectionTitle>
 
       {/* Timeline */}
       <div className="space-y-0">

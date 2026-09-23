@@ -5,6 +5,7 @@ import { useDataProvider } from '@/services/provider-context'
 import type { HabitHeatmapEntry, HabitWithStats } from '@nimble/types'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { Skeleton } from '@/components/ui/skeleton'
+import { SectionTitle } from '@/components/shared/typography'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
@@ -427,7 +428,7 @@ export function HabitsSection() {
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Sparkles className="size-3.5 text-muted-foreground" />
-          <h3 className="text-body-strong">Habits</h3>
+          <SectionTitle>Habits</SectionTitle>
         </div>
         <div className="flex items-center gap-3">
           <p className="text-meta text-muted-foreground">
@@ -451,10 +452,7 @@ export function HabitsSection() {
       <div className="flex items-baseline justify-between">
         <div className="flex items-center gap-2">
           <Sparkles className="size-3.5 text-muted-foreground" />
-          <h3 className="text-body-strong">Habits</h3>
-          <span className="text-label text-muted-foreground tabular-nums">
-            {completedCount}/{activeHabits.length}
-          </span>
+          <SectionTitle count={`${completedCount}/${activeHabits.length}`}>Habits</SectionTitle>
           <ManageHabitsPopover habits={activeHabits} onChanged={loadHabits} />
         </div>
         {avgMomentum > 0 && (
@@ -480,7 +478,7 @@ export function HabitsSection() {
         ))}
         <AddHabitPopover
           onCreated={loadHabits}
-          triggerClassName="size-10 rounded-full flex items-center justify-center ring-1 ring-dashed ring-border/40 text-muted-foreground hover:text-foreground hover:ring-border/70 transition-all"
+          triggerClassName="size-10 rounded-full flex items-center justify-center ring-1 ring-dashed ring-border/40 text-muted-foreground hover:text-foreground hover:ring-border/70 transition-[color,box-shadow] duration-(--transition-fast)"
         >
           <Plus className="size-4" />
         </AddHabitPopover>
@@ -550,7 +548,7 @@ function AddHabitPopover({
             <button
               key={c}
               className={cn(
-                'size-5 rounded-full border-2 transition-all',
+                'size-5 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
                 color === c ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',
               )}
               style={{ backgroundColor: c }}
@@ -598,7 +596,7 @@ function ManageHabitsPopover({ habits, onChanged }: { habits: HabitWithStats[]; 
     <>
       <Popover>
         <PopoverTrigger
-          className="flex size-5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover transition-colors"
+          className="relative flex size-5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover transition-colors before:absolute before:-inset-2 before:content-['']"
           aria-label="Manage habits"
         >
           <Settings2 className="size-3" />
@@ -667,7 +665,7 @@ function ManageHabitRow({
       />
       <button
         onClick={onDelete}
-        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
+        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-[opacity,color] duration-(--transition-fast)"
         aria-label={`Delete habit ${habit.name}`}
       >
         <Trash2 className="size-3.5" />

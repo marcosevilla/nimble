@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocalToday } from '@/hooks/useLocalToday'
 import { useAppStore } from '@/stores/appStore'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { useDataProvider } from '@/services/provider-context'
@@ -7,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { Meta } from '@/components/shared/typography'
+import { Meta, SectionTitle } from '@/components/shared/typography'
 import { toast } from 'sonner'
 import { Sparkles, RefreshCw, Battery, BatteryMedium, BatteryLow } from 'lucide-react'
 
@@ -94,7 +95,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, initialEnerg
   const dp = useDataProvider()
   const calendarEvents = useAppStore((s) => s.calendarEvents)
   const obsidianToday = useAppStore((s) => s.obsidianToday)
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const today = useLocalToday() // local date, like the Today list below (C2)
   const { tasks: tasksDueToday } = useLocalTasks({ dueDate: today, includeCompleted: false })
   const { projects } = useProjects()
   const projectNames = useMemo(() => {
@@ -153,7 +154,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, initialEnerg
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Sparkles className="size-4 text-muted-foreground" />
-          <h3 className="text-body-strong">How's your energy?</h3>
+          <SectionTitle>How's your energy?</SectionTitle>
         </div>
         <Meta as="p">Pick your energy level and I'll suggest your top 3 priorities.</Meta>
         <div className="flex gap-2">
@@ -183,7 +184,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, initialEnerg
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Sparkles className="size-4 text-muted-foreground animate-pulse" />
-          <h3 className="text-body-strong">Thinking...</h3>
+          <SectionTitle>Thinking...</SectionTitle>
         </div>
         <div className="space-y-3">
           {[...Array(3)].map((_, i) => (
@@ -206,7 +207,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, initialEnerg
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Sparkles className="size-4 text-destructive" />
-          <h3 className="text-body-strong">Couldn't generate priorities</h3>
+          <SectionTitle>Couldn't generate priorities</SectionTitle>
         </div>
         <Meta as="p">{error}</Meta>
         <Button variant="outline" size="sm" onClick={() => setEnergy(null)}>
@@ -222,7 +223,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, initialEnerg
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Sparkles className="size-4 text-muted-foreground" />
-          <h3 className="text-body-strong">Today's priorities</h3>
+          <SectionTitle>Today's priorities</SectionTitle>
         </div>
         <Button
           variant="ghost"
@@ -259,7 +260,7 @@ export function PrioritiesSection({ onGenerated, initialPriorities, initialEnerg
   }
 
   return (
-    <div className="rounded-lg border bg-card p-4 space-y-2">
+    <div className="surface-panel p-4 space-y-2">
       {content}
     </div>
   )

@@ -27,7 +27,7 @@ export function ReminderSection() {
     finally { setBusy(false) }
   }
   return <section id="reminders" aria-label="Reminders" className="space-y-4 border-t border-border pt-6">
-    <SectionTitle>Reminders</SectionTitle>
+    <SectionTitle size="lg">Reminders</SectionTitle>
     <Meta as="p">Alerts appear while Nimble is open. Missed reminders stay on Today for you to review.</Meta>
     {error && <p role="alert" className="text-body text-destructive">{error}</p>}
     <Meta as="p">Mac notifications: {status?.permission === 'granted' ? 'Enabled' : status?.permission === 'denied' ? 'Disabled in System Settings → Notifications → Nimble' : 'Not enabled yet'}</Meta>

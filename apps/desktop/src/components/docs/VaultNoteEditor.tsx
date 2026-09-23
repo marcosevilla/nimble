@@ -3,7 +3,8 @@ import { useDocsStore } from '@/stores/docsStore'
 import { useDataProvider } from '@/services/provider-context'
 import { TiptapEditor } from './TiptapEditor'
 import { Button } from '@/components/ui/button'
-import { Meta } from '@/components/shared/typography'
+import { Meta, SectionTitle } from '@/components/shared/typography'
+import { PageColumn } from '@/components/shared/PageFrame'
 import { splitFrontmatter } from '@/lib/frontmatter'
 import { ExternalLink, Lock } from 'lucide-react'
 import { toast } from 'sonner'
@@ -101,60 +102,64 @@ export function VaultNoteEditor() {
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
-      <div className="flex items-start justify-between gap-3 px-8 pt-6">
-        <div className="min-w-0 space-y-1">
-          <Meta as="p" className="truncate" title={note.path}>{note.path}</Meta>
-          {/* Read-only cue sits with the path, not in the dimmest corner (P2-1). */}
-          <p className="flex items-center gap-1 text-label text-muted-foreground">
-            <Lock className="size-3 shrink-0" aria-hidden="true" />
-            Read-only · edited in Obsidian
-          </p>
-          {fields.length > 0 && (
-            <ul className="flex flex-wrap gap-1 pt-1" aria-label="Note properties">
-              {fields.map((f) => (
-                <li
-                  key={f.key}
-                  className="inline-flex max-w-full items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-label"
-                >
-                  <span className="text-muted-foreground">{f.key}</span>
-                  {f.value && <span className="truncate text-foreground">{f.value}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <Button variant="secondary" size="sm" onClick={openInObsidian} className="shrink-0">
-          <ExternalLink className="size-3" />
-          Open in Obsidian
-        </Button>
-      </div>
-
-      <div className="px-8 py-4 cursor-default select-text [&_.ProseMirror]:cursor-default" aria-readonly="true">
-        <TiptapEditor
-          key={note.id}
-          content={body}
-          format="markdown"
-          onWikilinkClick={handleWikilink}
-        />
-      </div>
-
-      {backlinks.length > 0 && (
-        <div className="border-t border-border/20 px-8 py-4">
-          <span className="text-label text-muted-foreground">Linked from</span>
-          <div className="mt-2 space-y-1">
-            {backlinks.map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => selectVaultNote(b.path)}
-                className="block w-full truncate rounded text-left text-meta text-muted-foreground hover:text-foreground transition-colors duration-(--transition-fast)"
-              >
-                {b.title || b.path}
-              </button>
-            ))}
+      {/* Same shell as a native doc (docs P2-3): one centered wide column,
+          the path as the eyebrow where DocEditor shows the folder. */}
+      <PageColumn width="wide" className="space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <Meta as="p" className="truncate" title={note.path}>{note.path}</Meta>
+            {/* Read-only cue sits with the path, not in the dimmest corner (P2-1). */}
+            <p className="flex items-center gap-1 text-label text-muted-foreground">
+              <Lock className="size-3 shrink-0" aria-hidden="true" />
+              Read-only · edited in Obsidian
+            </p>
+            {fields.length > 0 && (
+              <ul className="flex flex-wrap gap-1 pt-1" aria-label="Note properties">
+                {fields.map((f) => (
+                  <li
+                    key={f.key}
+                    className="inline-flex max-w-full items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-label"
+                  >
+                    <span className="text-muted-foreground">{f.key}</span>
+                    {f.value && <span className="truncate text-foreground">{f.value}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
+          <Button variant="secondary" size="sm" onClick={openInObsidian} className="shrink-0">
+            <ExternalLink className="size-3" />
+            Open in Obsidian
+          </Button>
         </div>
-      )}
+
+        <div className="cursor-default select-text [&_.ProseMirror]:cursor-default" aria-readonly="true">
+          <TiptapEditor
+            key={note.id}
+            content={body}
+            format="markdown"
+            onWikilinkClick={handleWikilink}
+          />
+        </div>
+
+        {backlinks.length > 0 && (
+          <div className="border-t border-border/20 pt-4">
+            <SectionTitle count={backlinks.length}>Linked from</SectionTitle>
+            <div className="mt-2 space-y-1">
+              {backlinks.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => selectVaultNote(b.path)}
+                  className="block w-full truncate rounded text-left text-meta text-muted-foreground hover:text-foreground transition-colors duration-(--transition-fast)"
+                >
+                  {b.title || b.path}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </PageColumn>
     </div>
   )
 }

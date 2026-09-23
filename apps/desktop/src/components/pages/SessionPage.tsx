@@ -4,7 +4,9 @@ import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ActivityTimeline } from '@/components/activity/ActivityTimeline'
-import { PageHeader } from '@/components/shared/PageHeader'
+import { PageFrame } from '@/components/shared/PageFrame'
+import { EmptyState } from '@/components/shared/EmptyState'
+import { Terminal } from 'lucide-react'
 
 // ── Lightweight inline-markdown renderer ──
 //
@@ -116,7 +118,7 @@ function SessionCard({ entry }: { entry: SessionEntry }) {
   const [expanded, setExpanded] = useState(true)
 
   return (
-    <div className="rounded-lg border bg-card p-4">
+    <div className="surface-panel p-4">
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-start gap-3 text-left"
@@ -220,28 +222,18 @@ function SessionsTab() {
     )
   }
 
+  // Calm, non-technical copy (session P3-6): the raw error stays in the
+  // tooltip, never in red body text.
   if (error) {
     return (
-      <p className="text-body text-destructive">
-        Could not load session log: {error}
-      </p>
+      <EmptyState>
+        <span title={error}>Couldn't read today's session log.</span>
+      </EmptyState>
     )
   }
 
-  if (!raw) {
-    return (
-      <p className="text-body text-muted-foreground">
-        No sessions yet today. They'll appear here as you work with Claude Code.
-      </p>
-    )
-  }
-
-  if (entries.length === 0) {
-    return (
-      <p className="text-body text-muted-foreground">
-        Session log exists but no entries parsed yet.
-      </p>
-    )
+  if (!raw || entries.length === 0) {
+    return <EmptyState icon={Terminal}>Nothing logged yet today.</EmptyState>
   }
 
   return (
@@ -257,23 +249,20 @@ function SessionsTab() {
 
 export function SessionPage() {
   return (
-    <>
-      <PageHeader title="Activity" />
-      <div className="w-full max-w-3xl px-5 py-6">
-        <Tabs defaultValue="timeline">
-          <TabsList>
-            <TabsTrigger value="timeline">Timeline</TabsTrigger>
-            <TabsTrigger value="sessions">Sessions</TabsTrigger>
-          </TabsList>
+    <PageFrame title="Activity">
+      <Tabs defaultValue="timeline">
+        <TabsList>
+          <TabsTrigger value="timeline">Timeline</TabsTrigger>
+          <TabsTrigger value="sessions">Sessions</TabsTrigger>
+        </TabsList>
 
-          <TabsContent value="timeline">
-            <ActivityTimeline />
-          </TabsContent>
-          <TabsContent value="sessions">
-            <SessionsTab />
-          </TabsContent>
-        </Tabs>
-      </div>
-    </>
+        <TabsContent value="timeline">
+          <ActivityTimeline />
+        </TabsContent>
+        <TabsContent value="sessions">
+          <SessionsTab />
+        </TabsContent>
+      </Tabs>
+    </PageFrame>
   )
 }

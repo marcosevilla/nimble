@@ -573,7 +573,7 @@ export function TaskDetailPage() {
 
           {/* AI breakdown loading state */}
           {breakingDown && (
-            <div className="space-y-2 py-2 animate-in fade-in duration-300">
+            <div className="space-y-2 py-2 animate-in fade-in duration-(--transition-slow)">
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-0.5">
                   <Sparkles className="size-3.5 text-ai ai-star-1" />

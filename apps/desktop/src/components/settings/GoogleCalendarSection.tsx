@@ -41,7 +41,7 @@ export function GoogleCalendarSection() {
     } finally { setBusy(false) }
   }
   return <section id="google-calendar" aria-label="Google Calendar phone alerts" className="space-y-4 border-t border-border pt-6">
-    <SectionTitle>Phone alerts</SectionTitle>
+    <SectionTitle size="lg">Phone alerts</SectionTitle>
     <Meta as="p">Connect a dedicated Nimble calendar. Turn on phone alerts only for the tasks you choose. Already-published alerts can fire while Nimble is closed; new changes sync while the Mac app is open.</Meta>
     {error && <p className="text-body text-destructive" role="alert">{error}</p>}
     {status?.errorCode && <Meta as="p">Last sync didn't finish. Sync now or reconnect.</Meta>}
@@ -79,7 +79,7 @@ export function GoogleCalendarSection() {
         <Meta as="p">Use the ID and secret from the same Google Cloud Desktop OAuth client, with Calendar API enabled.</Meta>
       </form>
     </details>
-    {conflicts.length > 0 && <div className="space-y-3"><SectionTitle>Calendar changes to review</SectionTitle>
+    {conflicts.length > 0 && <div className="space-y-3"><SectionTitle size="lg">Calendar changes to review</SectionTitle>
       {conflicts.map(conflict => <div key={conflict.taskId} className="rounded-md border border-border p-3 space-y-2">
         <Meta as="p">A task and its calendar event need reconciliation. Open the task before choosing which version to keep.</Meta>
         <div className="flex gap-2 flex-wrap">

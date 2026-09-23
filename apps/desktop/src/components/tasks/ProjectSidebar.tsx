@@ -125,7 +125,7 @@ export function ProjectSidebar({
         <div className="hidden items-center gap-0.5 group-hover:flex" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => setEditingProject(project)}
-            className="flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+            className="relative flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground before:absolute before:-inset-y-2 before:-inset-x-px before:content-['']"
             title="Edit project"
           >
             <Pencil className="size-2.5" />
@@ -133,7 +133,7 @@ export function ProjectSidebar({
           {!isInbox && (
             <button
               onClick={() => setConfirmDeleteId(project.id)}
-              className="flex size-4 items-center justify-center rounded text-destructive/30 hover:text-destructive"
+              className="relative flex size-4 items-center justify-center rounded text-destructive/30 hover:text-destructive before:absolute before:-inset-y-2 before:-inset-x-px before:content-['']"
               title="Delete"
             >
               <Trash2 className="size-2.5" />
@@ -279,7 +279,7 @@ export function ProjectSidebar({
                 <button
                   key={c}
                   className={cn(
-                    'size-4 rounded-full border-2 transition-all',
+                    'size-4 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
                     newProjectColor === c ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',
                   )}
                   style={{ backgroundColor: c }}

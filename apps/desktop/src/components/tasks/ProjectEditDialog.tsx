@@ -76,7 +76,7 @@ export function ProjectEditDialog({
                   type="button"
                   onClick={() => setColor(c)}
                   className={cn(
-                    'size-6 rounded-full border-2 transition-all',
+                    'size-6 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
                     color === c
                       ? 'border-foreground scale-110'
                       : 'border-transparent hover:border-muted-foreground/50',

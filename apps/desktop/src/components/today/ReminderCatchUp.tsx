@@ -84,12 +84,12 @@ export function ReminderCatchUp() {
   }
 
   return (
-    <section aria-labelledby="reminders-heading" className="rounded-md bg-muted/30 px-3 py-2">
-      <div className="flex items-center justify-between gap-3">
-        <SectionTitle as="h2" id="reminders-heading" className="text-body-strong tabular-nums">
-          Reminders · {items.length}
-        </SectionTitle>
-        {items.length > 1 && (
+    <section aria-labelledby="reminders-heading" className="surface-inset px-3 py-2">
+      <SectionTitle
+        as="h2"
+        id="reminders-heading"
+        count={items.length}
+        action={items.length > 1 && (
           <button
             type="button"
             onClick={() => dismiss(items.map(i => i.occurrenceKey))}
@@ -98,7 +98,9 @@ export function ReminderCatchUp() {
             Dismiss all
           </button>
         )}
-      </div>
+      >
+        Reminders
+      </SectionTitle>
       {error && <Meta as="p" className="py-1">{error}</Meta>}
       <ul className="divide-y divide-border/50">
         {items.map(item => (

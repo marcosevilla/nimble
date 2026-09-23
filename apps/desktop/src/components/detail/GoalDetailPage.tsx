@@ -204,7 +204,7 @@ export function GoalDetailPage() {
         <div className="h-1.5 rounded-full bg-muted overflow-hidden">
           <div
             /* Neutral fill (goals P2-1) — matches the GoalsPage card bar. */
-            className="h-full rounded-full bg-foreground/70 transition-all duration-500"
+            className="h-full rounded-full bg-foreground/70 transition-[width] duration-(--transition-slow)"
             style={{ width: `${Math.min(goal.progress, 100)}%` }}
           />
         </div>
@@ -434,7 +434,7 @@ function MilestonesSection({
                   () => dp.goals.deleteMilestone(m.id),
                   'Failed to delete milestone',
                 )}
-                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
+                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-[opacity,color] duration-(--transition-fast)"
                 aria-label={`Delete milestone ${m.name}`}
               >
                 <Trash2 className="size-3.5" />

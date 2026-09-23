@@ -189,7 +189,7 @@ export function CaptureStrip() {
           type="button"
           onClick={submit}
           aria-label="Save capture"
-          className="relative shrink-0 rounded-lg border border-foreground/25 bg-background/60 p-2 text-foreground/80 transition-[scale,border-color,color] duration-150 ease-out after:absolute after:-inset-1.5 hover:border-foreground/40 hover:text-foreground active:scale-[0.96]"
+          className="relative shrink-0 rounded-lg border border-foreground/25 bg-background/60 p-2 text-foreground/80 transition-[scale,border-color,color] duration-(--transition-fast) ease-out after:absolute after:-inset-1.5 hover:border-foreground/40 hover:text-foreground active:scale-[0.96]"
         >
           <AnimatePresence initial={false} mode="popLayout">
             {saved ? (

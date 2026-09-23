@@ -136,7 +136,7 @@ export function LabelManager() {
                 key={c}
                 type="button"
                 className={cn(
-                  'size-6 rounded-full border-2 transition-all',
+                  'size-6 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
                   newColor === c ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',
                 )}
                 style={{ backgroundColor: labelColor(c) }}
@@ -199,7 +199,7 @@ function LabelRow({
     <div className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-hover transition-colors">
       <Popover>
         <PopoverTrigger
-          className="flex size-5 shrink-0 items-center justify-center rounded-full hover:ring-2 hover:ring-border/60 transition-all"
+          className="relative flex size-5 shrink-0 items-center justify-center rounded-full before:absolute before:-inset-1.5 before:content-[''] hover:ring-2 hover:ring-border/60 transition-shadow duration-(--transition-fast)"
           aria-label={`Change color for ${label.name}`}
         >
           <span className="size-2.5 rounded-full" style={{ backgroundColor: labelColor(label.color) }} />
@@ -211,7 +211,7 @@ function LabelRow({
                 key={c}
                 type="button"
                 className={cn(
-                  'size-5 rounded-full border-2 transition-all',
+                  'size-5 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
                   label.color === c ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',
                 )}
                 style={{ backgroundColor: labelColor(c) }}

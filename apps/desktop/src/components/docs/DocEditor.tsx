@@ -4,10 +4,13 @@ import { useDataProvider, getDataProvider } from '@/services/provider-context'
 import { TiptapEditor } from './TiptapEditor'
 import { DocNoteEntry } from './DocNoteEntry'
 import { VaultNoteEditor } from './VaultNoteEditor'
-import { Plus } from 'lucide-react'
+import { FileText, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import type { DocNote } from '@nimble/types'
+import { PageColumn } from '@/components/shared/PageFrame'
+import { EmptyState } from '@/components/shared/EmptyState'
+import { SectionTitle } from '@/components/shared/typography'
 
 let cachedFormat: 'html' | 'markdown' | null = null
 async function getDocsFormat(): Promise<'html' | 'markdown'> {
@@ -107,24 +110,29 @@ export function DocEditor() {
   // "open", not "edit" — vault notes in the tree are read-only.
   if (!currentDoc) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-        <div className="space-y-1">
-          <p className="text-body-strong">Nothing open</p>
-          <p className="text-meta text-muted-foreground">Pick something from the tree, or start a new document.</p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          onClick={() => {
-            createDocument(useDocsStore.getState().selectedFolderId ?? undefined)
-              .catch((e) => toast.error(`Couldn't create the document — ${e}`))
-          }}
-        >
-          <Plus className="size-3.5" />
-          New document
-          <kbd aria-hidden="true" className="rounded bg-muted/60 px-1 font-mono text-label text-muted-foreground">N</kbd>
-        </Button>
+      <div className="flex flex-1 flex-col overflow-y-auto">
+        <PageColumn width="wide">
+          <EmptyState
+            icon={FileText}
+            action={
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => {
+                  createDocument(useDocsStore.getState().selectedFolderId ?? undefined)
+                    .catch((e) => toast.error(`Couldn't create the document — ${e}`))
+                }}
+              >
+                <Plus className="size-3.5" />
+                New document
+                <kbd aria-hidden="true" className="rounded bg-muted/60 px-1 font-mono text-label text-muted-foreground">N</kbd>
+              </Button>
+            }
+          >
+            Nothing open. Pick something from the tree, or start a new document.
+          </EmptyState>
+        </PageColumn>
       </div>
     )
   }
@@ -133,10 +141,10 @@ export function DocEditor() {
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-2xl p-6 space-y-4">
+      <PageColumn width="wide" className="space-y-4">
         {/* Folder badge */}
         {folder && (
-          <span className="text-meta text-muted-foreground">{folder.name}</span>
+          <p className="text-meta text-muted-foreground">{folder.name}</p>
         )}
 
         {/* Title */}
@@ -165,18 +173,20 @@ export function DocEditor() {
 
         {/* Notes section */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-label text-muted-foreground">
-              Notes
-            </h3>
-            <button
-              onClick={() => setNoteInputVisible(true)}
-              className="flex items-center gap-1 text-meta text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Plus className="size-3" />
-              Add
-            </button>
-          </div>
+          <SectionTitle
+            count={notes.length > 0 ? notes.length : undefined}
+            action={
+              <button
+                onClick={() => setNoteInputVisible(true)}
+                className="flex items-center gap-1 text-meta text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Plus className="size-3" />
+                Add
+              </button>
+            }
+          >
+            Notes
+          </SectionTitle>
 
           {notes.length > 0 && (
             <div className="space-y-0.5">
@@ -218,7 +228,7 @@ export function DocEditor() {
           <p>Created {new Date(currentDoc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
           <p>Updated {new Date(currentDoc.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
         </div>
-      </div>
+      </PageColumn>
     </div>
   )
 }
