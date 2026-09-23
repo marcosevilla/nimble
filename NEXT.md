@@ -9,9 +9,19 @@ Proposal: [docs/2026-09-23-task-cleanup-proposal.md](docs/2026-09-23-task-cleanu
 - [x] Root causes measured: token 401 since 2026-08-31 (silent); sections flattened into fake projects; no parent nesting; no immutable origin field.
 - [x] New Todoist token saved in Settings, sync **toggled off** (verified HTTP 200, nothing synced). Keep it off until phase 2 lands, because the old mapper would add more fake section projects.
 - [x] Outbox cleaned: dropped 3 test-task ops, the TEST project create and a stale Portola due-date update. 2 real creates remain (Queen Out figma adjustments → 👑 Queen Out — Website; Annotate changes → Inbox). TEST project deleted. `dt` rebuilt from main (the old binary refused schema v21); backup at `~/.local/bin/dt.bak-20260921`.
-- [ ] Phase 1: sync health chip + banner (last success > 1h or `last_error` set).
-- [ ] Phase 2: schema v22 (`origin`, sections from fake projects, `parent_id`, `archived_at`, one inbox) + mapper fix + full re-sync as dry-run report → approve → snapshot → apply.
-- [ ] Phase 3: Todoist-shaped sidebar (projects only, nested, sections as in-page headings), Nimble-origin mark + filter.
+- [x] **Built + merged 2026-09-23** (plan `docs/superpowers/plans/2026-09-23-todoist-reconcile.md`, subagent-driven, every task reviewed + final whole-branch review; main `13ae91e` → `258d9a2`). Schema v22 (`projects.archived_at`), real sections + nesting + rename/archive in the pull, section-aware push, temporary `nimble` origin label (auto-applied while Todoist sync is on; delete the label at cutover), `dt sync reconcile [--apply]`, sync-health banner, sidebar hides archived + one tri-state label filter ("Made in Nimble" / "From Todoist"). App installed at `13ae91e`; `dt` at `258d9a2` (backup of old dt: `~/.local/bin/dt.bak-13ae91e`).
+- [x] **Reconcile applied 2026-09-23 08:34** (Marco approved). 23 fake section projects → real sections (259 tasks), 14 fake archived, Inbox merged (100 tasks), 11 projects archived, 209 completed, 175 deleted (sampled: 404s = April-import tasks from projects deleted long ago), 9 kept, 381 created, 17 tasks labelled `nimble`. Verified: 0 active fake projects, 1 Inbox, 19 active projects (12 nested), 32 sections = Todoist. Backup: `backups/8d3c0bf4-6024-45db-ae38-e94e6edaa05c` (08:34). Reports: `reconcile-20260923-082836.json` (dry run), `reconcile-20260923-083431.json` (apply).
+- [x] "Phone test" set `local_only` (so enabling sync won't push it; kept for the deferred C2 phone test).
+- [ ] **Marco: turn Todoist sync back on** (Settings → Todoist sync). Expect the 2 queued tasks to appear in Todoist (Queen Out figma adjustments → 👑 Queen Out — Website; "Annotate changes" may land as a subtask of it — its create still carries that parent). Then check `dt sync status` / the banner shows no error.
+- [ ] Follow-ups from the final review (none block use):
+  - sync-on seeding (`seed_outbox_for_unlinked`) doesn't carry labels → an unlinked task pushed that way loses its `nimble` label on the next pull. Add label names to `task_create_payload`.
+  - the 9 kept Canary tasks sit in 💤 Someday locally (Todoist has them in archived "Work Tasks ARCHIVE"); reconcile ignores `Active.project_id`. Move/hide them or complete them.
+  - `fold_project_tx` doesn't rewrite pending outbox payloads pointing at a folded project.
+  - web-created and local_only→default tasks don't get the `nimble` label.
+  - Todoist section `is_archived` ignored; reconcile full sync omits `completed_info`.
+  - Settings copy: "they'll retry automatically" shows next to a 401 — misleading.
+  - `nimble/CLAUDE.md` schema line still says v20; add v21/v22.
+  - deferred test debt: section S→S2 remote move test; legacy `labelIds` migration test; inbox-dup-with-subtasks reconcile test.
 - [ ] Marco (optional, before phase 2 apply): clear dead Todoist projects ("⭐️ TODAY - September 9", "‼️ Complete Today (Sep 22)").
 
 ## Focus Queue absorption — 2026-09-22 (implementation complete; verification + live gates open)
