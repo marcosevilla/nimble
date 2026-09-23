@@ -263,6 +263,13 @@ pub enum Backup {
 pub enum Sync {
     Status,
     Now,
+    /// One-time Todoist reconcile. Without --apply: fetch, look up and report
+    /// only (nothing written). With --apply: back up through the running app,
+    /// then apply the plan in one transaction and run a full pull.
+    Reconcile {
+        #[arg(long)]
+        apply: bool,
+    },
 }
 #[derive(Args, Debug, Clone)]
 pub struct Gap {
