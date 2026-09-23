@@ -179,6 +179,19 @@ Still open after this session:
 
 Todoist C1–C5 and Instinct ownership are unchanged.
 
+## Final review fixes (2026-09-22)
+
+The final whole-branch review returned "with fixes". All six items are fixed test-first on `codex/focus-absorption` after `54e95df`:
+
+- **C1 — recurring double advance.** Enqueue (and import) store the task's due date in `focus_occurrences.scheduling_identity`; only a local user due edit refreshes it. Focus Complete checks it (`ensure_expected_due_tx`), so after a Todoist/Turso pull has advanced a recurring task, Complete returns `stale_occurrence`: due unchanged, nothing enqueued for Todoist. The occurrence stays open in the queue and the tray shows readable copy (remove and re-add to continue). Overturns the Task 7 ruling that `occurrence_id` binds the recurrence generation.
+- **I2 — replica churn.** Running heartbeats/checkpoints and periodic pulls that touch no focused work no longer write `focus_replica` sync_log rows; commands, pauses and boundary/gap stops still publish. Each publish deletes older unsynced `focus_replica/current` rows, so at most one waits for Turso.
+- **I3 — migration atomicity.** Each migration and its `schema_version` row run in one `BEGIN IMMEDIATE` transaction. An injected failure late in v21 leaves a populated v20 database byte-for-byte v20 in `sqlite_master`; a rerun succeeds.
+- **I4 — restored-profile dead end.** New explicit activation (`backup_activate_restored_profile`, Settings → Backups button shown only for a restored profile, `dt backup activate`). It clears the restore marker and makes this device the focus writer under a fresh epoch, only in the profile-owner process. It is idempotent and starts nothing. Runbook line added to `NEXT.md`.
+- **M-a — import double count.** Identical duplicate completion entries count once in the preview and `included_ms`; later copies are quarantined evidence (`<key>:duplicate:<n>`).
+- **M-b — Undo-delete labels.** Restored task labels get `task_labels` sync_log INSERT rows.
+
+Suites after the fixes: 488 Rust passed (1 ignored native-seed helper), 280 frontend, desktop and web builds, eslint clean on touched frontend files. The known `backup_git` bounded-output flake did not recur in this run.
+
 ## Acceptance tracking
 
 F01–F26 are mapped above. None is accepted for release until the controller's final whole-branch review, H1–H9 and the live gates are done. Product/native visual acceptance, live import, pending-operation decisions, installation, signed-in web checks, the daily-use trial and app retirement are separate gates.
