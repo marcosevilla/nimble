@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { format, parseISO } from 'date-fns'
 import { Plus, Volume2, VolumeX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -13,6 +14,7 @@ import { useFocusCache, retryFocusCommand } from '@/stores/focusStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import type { FocusRequestError } from '@/services/focus-events'
 import { buildFocusPrompt, copyFocusPrompt } from '@/lib/focusPrompt'
+import { showCopyContextToast, showDeletedToast, showRemovedToast } from '@/lib/focusToasts'
 import { candidateIds, queueTheseAction } from '@/lib/focusSources'
 import {
   localFailureMessage,
@@ -43,9 +45,6 @@ import type {
   Project,
   Section,
 } from '@nimble/types'
-
-const UNDO_MS = 10_000
-const ACK_MS = 2_500
 
 const isOpen = (task: LocalTask) => !task.completed && task.status !== 'complete'
 
@@ -198,13 +197,6 @@ export function FocusQueueTray({
   const [compact, setCompact] = useState(initialCompact)
   const [source, setSource] = useState<FocusSource>(initialSource)
   const [renamingEntryId, setRenamingEntryId] = useState<string | null>(null)
-  /** One undo slot: a deleted local task (durable token) or an Up next removal. */
-  const [undo, setUndo] = useState<
-    | { kind: 'delete'; token: string | null; title: string }
-    | { kind: 'remove'; title: string; entry: FocusEntry; index: number }
-    | null
-  >(null)
-  const [ack, setAck] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const [manualCopy, setManualCopy] = useState<{ text: string; message: string } | null>(null)
   const storeError = useFocusCache((s) => s.error)
@@ -215,20 +207,22 @@ export function FocusQueueTray({
   const dismissCelebration = useFocusSurface((s) => s.dismissCelebration)
   const headingRef = useRef<HTMLHeadingElement>(null)
 
-  useEffect(() => {
-    if (!undo) return
-    const id = setTimeout(() => setUndo(null), UNDO_MS)
-    return () => clearTimeout(id)
-  }, [undo])
-  useEffect(() => {
-    if (!ack) return
-    const id = setTimeout(() => setAck(null), ACK_MS)
-    return () => clearTimeout(id)
-  }, [ack])
-
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
   const projectName = useCallback((id: string) => projects.find((p) => p.id === id)?.name, [projects])
   const blocked = queueBlockedReason(capabilities)
+  // Toast actions outlive this render: read the latest gates when clicked.
+  const gates = useRef({ blocked, busy })
+  useEffect(() => {
+    gates.current = { blocked, busy }
+  }, [blocked, busy])
+  /** Undo may run now; a blocked queue says why, an in-flight command waits. */
+  const undoAllowed = (opts: { waitForPending: boolean }) => {
+    if (gates.current.blocked != null) {
+      toast.error(gates.current.blocked)
+      return false
+    }
+    return !(opts.waitForPending && gates.current.busy)
+  }
 
   /**
    * Every write goes through here so failures stay visible. Completion
@@ -279,7 +273,12 @@ export function FocusQueueTray({
     const index = snapshot.queue.findIndex((e) => e.id === entry.id)
     const ok = (await run({ kind: 'remove', occurrence_id: entry.occurrence_id })) != null
     const title = byId.get(entry.task_id)?.content
-    if (ok && title && index > 0) setUndo({ kind: 'remove', title, entry, index })
+    if (ok && title && index > 0) {
+      showRemovedToast(title, () => {
+        if (!undoAllowed({ waitForPending: true })) return false
+        void undoRemove(entry, index)
+      })
+    }
     // Removing the last Up next row leaves no row to refocus; land on the card
     // so a following Enter isn't read as "focus nowhere" and complete the task.
     if (ok && index > 0 && rows.length <= 1) focusCard()
@@ -316,8 +315,8 @@ export function FocusQueueTray({
             capabilities,
           })
           const result = await copyFocusPrompt(text, taskOps.writeClipboard)
-          if (result.ok) setAck('Assistant context copied.')
-          else setManualCopy({ text: result.text, message: result.message })
+          // A failure keeps the text one toast action away: the manual-copy panel.
+          showCopyContextToast(result, (text) => setManualCopy({ text, message: result.ok ? '' : result.message }))
           return
         }
         case 'open_details':
@@ -344,7 +343,15 @@ export function FocusQueueTray({
         }
         case 'delete': {
           const { undo_token } = await taskOps.remove(task)
-          setUndo({ kind: 'delete', token: undo_token, title: task.content })
+          showDeletedToast(
+            task.content,
+            undo_token
+              ? () => {
+                  if (!undoAllowed({ waitForPending: false })) return false
+                  void run(undoDeleteAction(undo_token))
+                }
+              : null,
+          )
           return
         }
       }
@@ -392,8 +399,9 @@ export function FocusQueueTray({
           busy={busy}
         />
 
-        {/* Feedback stays in both modes. Failures render above acknowledgement
-            and are never replaced by it. */}
+        {/* Feedback stays in both modes. Failures render above the
+            celebration and are never replaced by it; undo and copy
+            confirmations are toasts. */}
         <div className="flex flex-col gap-1.5 empty:hidden px-4 pt-2 last:pb-2">
           {failure && (
             <div role="alert" className="flex items-start justify-between gap-2 rounded-md bg-destructive/10 px-2.5 py-1.5 text-meta text-foreground">
@@ -420,46 +428,7 @@ export function FocusQueueTray({
           {snapshot.recovery_reason && (
             <Caption as="p" role="status">{`Timer paused and saved: ${snapshot.recovery_reason}`}</Caption>
           )}
-          {undo && (
-            <div role="status" className="flex items-center justify-between gap-2 rounded-md bg-muted px-2.5 py-1.5 text-meta text-foreground">
-              <span className="min-w-0 truncate">
-                {undo.kind === 'delete' ? `Deleted “${undo.title}”` : `Removed “${undo.title}” from queue`}
-              </span>
-              {undo.kind === 'remove' && (
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={blocked != null || busy}
-                  onClick={() => {
-                    setUndo(null)
-                    void undoRemove(undo.entry, undo.index)
-                  }}
-                >
-                  Undo
-                </Button>
-              )}
-              {undo.kind === 'delete' && undo.token && (
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={blocked != null}
-                  onClick={() => {
-                    const token = undo.token as string
-                    setUndo(null)
-                    void run(undoDeleteAction(token))
-                  }}
-                >
-                  Undo
-                </Button>
-              )}
-            </div>
-          )}
           {celebration && !failure && <FocusCelebration celebration={celebration} onDismiss={dismissCelebration} />}
-          {ack && !failure && (
-            <Caption as="p" role="status">
-              {ack}
-            </Caption>
-          )}
           {manualCopy && (
             <div role="alert" className="flex flex-col gap-1 rounded-md bg-muted px-2.5 py-1.5">
               <Caption as="p" tone="default">{`Couldn't copy (${manualCopy.message}). Select the text below and copy it.`}</Caption>

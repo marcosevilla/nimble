@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FocusQueueTray } from '@/components/focus/FocusQueueTray'
 import { FocusLoadState } from '@/components/focus/FocusLoadState'
+import { Toaster } from '@/components/ui/sonner'
 import { useFocusTrayData } from '@/hooks/useFocusTrayData'
 import { shouldIgnoreKey } from '@/lib/keyGuard'
 import { cn } from '@/lib/utils'
@@ -241,6 +242,10 @@ export function FocusCompanion({ windowApi }: { windowApi?: CompanionWindowApi }
           />
         </div>
       </div>
+      {/* Undo and copy feedback use the app's normal toast here too. The
+          companion is under 600px wide, so sonner lays toasts out edge to
+          edge with this small inset instead of the main window's offsets. */}
+      <Toaster position="bottom-center" offset={8} mobileOffset={8} />
     </div>
   )
 }
