@@ -23,15 +23,32 @@ Root causes shared by every surface (see `2026-09-22-loop1-plan.md`):
 4. Urgency-performing copy and color (red past-due dates, "needs attention", "Overdue Check-in", Title Case).
 5. Seven page frames, four card recipes, three ring recipes, ≈45 literal durations.
 
-## Loop 1 — after (to be filled by the re-score step)
+## Loop 1 — after (re-scored 2026-09-23 on main `988d048`)
+
+Scored after Stages A+B+C and Agentation passes 1+2, with the same rubric and anchor as the baseline. Per-surface files: `docs/audit-findings/<surface>/2026-09-23-loop1-rescore.md`. Screenshots: `screenshots/loop1-rescore/`.
 
 | Surface | UI | Int | UX | A11y | Avg | Δ | P1 left |
 |---|---|---|---|---|---|---|---|
-| Today | | | | | | | |
-| Tasks + detail | | | | | | | |
-| Inbox | | | | | | | |
-| Goals | | | | | | | |
-| Session | | | | | | | |
-| Docs | | | | | | | |
-| Settings + setup | | | | | | | |
-| Shell | | | | | | | |
+| Today | 4 | 3 | 3 | 4 | 3.50 | +1.00 | 6 (5 carried, 1 new) |
+| Tasks + detail | 4 | 4 | 3 | 3 | 3.50 | +1.00 | 2 (1 + 1) |
+| Inbox | 4 | 3 | 3 | 4 | 3.50 | +1.25 | 1 (0 + 1) |
+| Goals | 4 | 3 | 3 | 4 | 3.50 | +1.00 | 2 (1 + 1) |
+| Session | 3 | 4 | 3 | 4 | 3.50 | +1.25 | 1 (0 + 1) |
+| Docs | 3 | 3 | 4 | 3 | 3.25 | +0.75 | 2 (1 + 1) |
+| Settings + setup | 3 | 3 | 3 | 4 | 3.25 | +1.00 | 3 (2 + 1) |
+| Shell | 4 | 3 | 3 | 3 | 3.25 | +0.75 | 3 (1 + 2) |
+| **Grid** | 3.63 | 3.25 | 3.13 | 3.63 | **3.41** | **+1.00** | **20** (11 + 9) |
+
+P2 left ≈ 67 (per-surface counts; each includes new P2s found this pass). Baseline was 45 P1 / 87 P2.
+
+Stop-condition check (`docs/prompts/2026-09-22-design-facelift-loop.md`): P1 > 0 and the grid gained 1.00 (≥ 0.2), so loop 2 is warranted.
+
+What loop 1 bought: Interaction (+1.25) and Accessibility (+1.38) moved most — focus ring, reduced motion, the shortcut registry and keyboard rows landed everywhere. UX moved least (+0.50): it is held back by IA items already queued for Marco or loop 2 (Settings sub-pages, task-detail edit model, routing vocabulary).
+
+New P1 themes from the re-score (9 new P1s, most from the Agentation shell changes):
+1. **Key handlers fire outside their region.** Calendar rail eats `t`/`←`/`→` typed in Inbox capture while hovered (`CalendarPanel.tsx:446-466`); Docs-tree arrows also drive the Inbox/Tasks list handlers (`d` can dismiss a capture); Today's page-wide Enter handler (`TodayPage.tsx:150-163`) swallows Enter on every focused button in the review. One fix: scope global key handlers to the focused region.
+2. **Nav trees.** The Tasks project tree rows are click-only `<div>`s (Tab skips every project); an open tree pushes Goals/Activity off screen at the 800px default window (`NavSidebar.tsx:378`), worse with 63 real projects.
+3. **Habits behind a tab.** Habit check-off lives only in the right rail, which opens on Calendar with no shortcut to the Habits tab.
+4. **Token/weight leftovers.** Raw amber in the rail heatmap; `font-medium` in `CommandBarResults.tsx:268,285`; `font-bold` on the Goals ✓ badge; template-literal class in Settings.
+
+Also found (P2, real data only): the Activity log shows completed tasks as "Status changed" with no name and logs no focus sessions since `b48ee12` — the mock hides this because it logs `task_completed`, which the backend never writes (NEEDS RUST).
