@@ -39,7 +39,7 @@ Updated 2026-09-22 (Focus Queue: all 12 plan tasks implemented, Task 12 verifica
 - [ ] Known gaps before daily use/install: (1) after restore activation the web focus view stays on the old owner's replica (Turso upsert filters old epoch) — fix before relying on web focus after a restore; (2) restore activation has no separate confirmation step; (3) Todoist-recurring tasks with no local `recurrence_rule` close outright on completion — check real data (EDD) before install; (4) a stale recurring Focus card (task completed elsewhere) must be removed and re-added; (5) no other desktop may still run v20 against Turso.
 - [ ] Before future migration, verify source/installed parity, pause/quit Focus Queue for final snapshot, preview/deduplicate all saved state and reconcile pending close/comment intents. Roughly two weeks of accepted daily use precedes a separate reversible app-retirement decision; Todoist C1–C5 and Instinct ownership remain unchanged.
 
-## Design facelift — 2026-09-22 (loop 1, PAUSED before Stage C)
+## Design facelift — 2026-09-22 (loop 1, Stage C running 2026-09-23)
 
 Plan `docs/audit-findings/2026-09-22-loop1-plan.md` · audit brief `docs/audit-findings/2026-09-22-audit-brief.md` · baseline scorecard `docs/audit-findings/2026-09-22-scorecard.md` (grid 2.41/5, 45 P1 · 87 P2 · 42 P3) · before/after page `~/Developer/second-brain/outputs/2026/2026-09-22-nimble-facelift-before-after.html`.
 
@@ -47,7 +47,7 @@ Plan `docs/audit-findings/2026-09-22-loop1-plan.md` · audit brief `docs/audit-f
 - [x] Gate approved by Marco: all three stages; past-due dates go neutral.
 - [x] Stage A merged (`1c2caa7`): focus ring 1.44→4.2:1 light / 6.1:1 dark, global `:focus-visible`, `prefers-reduced-motion`, semantic color roles, `lib/shortcuts.ts` registry, `?` help, `g`-prefix nav, typography doc = live 8-token scale.
 - [x] Stage B merged, all six themes reviewed by fresh Opus reviewers and merged into main at `cc0263a` (97/97 frontend tests, desktop + web builds green): B2 no-guilt copy, B1 color semantics (palette literals 86→1 comment), B5 settings IA (5,559→4,663px, scroll-spy nav), B4 shell (no nested buttons, `--hover` token, hit areas), B3a Tasks/Inbox keyboard rows, B3b Docs/Goals/Session keyboard + states.
-- [ ] **Next: Marco says go on Stage C** (one PageFrame/SectionTitle/EmptyState on six pages — not Tasks/detail — plus motion tokens for ~45 literal durations, `Dashboard.tsx` scroller `flex-col` so sticky headers stick). Or re-score first.
+- [ ] **Stage C running (2026-09-23, Marco said go):** C1 page frame → C2 motion tokens, in `.worktrees/facelift-c-page-frame` (branch `facelift/c-page-frame`, base `53509bc`). Review after each; merge needs Marco's OK.
 - [ ] Re-score step (loop N.5) not run: after-columns in the scorecard are empty; take a combined screenshot set of main.
 - [x] Pushed 2026-09-22 (`5f290d0`, facelift A+B included; Vercel is not Git-linked, so no deploy). Still not installed to /Applications.
 - [ ] Prune worktrees when done: `.worktrees/facelift-{a,b1-color,b2-no-guilt,b3a-rows-tasks-inbox,b3b-docs-goals-session,b4-shell,b5-settings-ia}` (all merged).
@@ -60,6 +60,15 @@ Queued for Marco (Rust or decisions):
 - Decide: amend `ux-intent.md` §2.7 to describe the Cmd+K palette (not a docked bar); two-step review (no triage step) is intended?
 - Figma: task-detail edit models, PageFrame on Tasks/detail, row inline editing for priority/due/labels/project, settings sub-pages, bingo card/compass. `chrono-node` for NL dates needs dependency approval.
 - Deferred minors (loop 2): row focus drops to page after a status pick moves groups; due/label popovers lack finalFocus; Up-next toast Start doesn't guard an active session; low-contrast informational marks; Todoist dot + Urgent reuse `--destructive`; 17 off-grid spacing sites in settings children; mock doesn't persist habit/capture mutations.
+
+### After Stage C — roadmap (the 15 queued items, grouped by what unblocks them)
+
+- [ ] **1. Re-score (loop 1.5):** fill the after-columns of the scorecard from a combined light/dark screenshot set of main. Shows what loop 1 bought before choosing loop 2 scope.
+- [ ] **2. Decisions batch, Marco (~15 min):** (a) approve or drop `chrono-node` for natural-language dates in capture; (b) amend `ux-intent.md` §2.7 so Cmd+K palette is the intended design; (c) confirm two-step morning review (no triage step) is intended; (d) New Goal dialog color — preselect one or default to none; (e) row inline editing (priority/due/labels/project) — build in code now or wait for Figma.
+- [ ] **3. Small Rust batch (one plan, frontend already waiting):** drop `ical_feed_url` from `REQUIRED_SETTINGS` (skippable setup); persistent review escape hatch (`set_review_complete`); `dueOnOrBefore` filter → Today "Still open" group; energy-history query → 7-day sparkline; habit `log()` intensity (hold-to-complete); soft-delete/restore → Undo for label, route and doc delete.
+- [ ] **4. Loop 2 frontend (after 2):** Settings sub-pages (19 sections → 4–5 pages); one prefix-routing vocabulary across all three capture points (needs 2b); natural-language dates if 2a approved; row inline editing if 2e says code; deferred loop-1 minors (row focus after status pick, popover finalFocus, Up-next toast guard, low-contrast info text).
+- [ ] **5. Figma-gated (Marco designs first):** task-detail edit-model consolidation (fold Reminder into the chip row); PageFrame on Tasks list + task detail (reverses the scrolling-list-header decision); focus entry from the task-detail header; bingo card + resolutions compass (§2.6).
+- [ ] **6. Owned by C4, not the facelift:** label manager grouped by ENERGY / TIME / TYPE / CREATIVE (with indexed search).
 
 ## Session wrap — 2026-09-21
 
