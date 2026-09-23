@@ -18,10 +18,11 @@ echo "▸ Building release bundle (this takes a few minutes)…"
 cd apps/desktop
 npm run tauri build -- --bundles app
 
-# Match the exact app name — the bundle dir can contain stale pre-rebrand bundles
-APP_SRC="$(find "$ROOT/target/release/bundle/macos" "$ROOT/apps/desktop/src-tauri/target/release/bundle/macos" -maxdepth 1 -name "$APP_NAME.app" 2>/dev/null | head -1)"
-if [ -z "$APP_SRC" ]; then
-  echo "✗ Build output not found in expected bundle dirs" >&2
+# Exact app name in the Cargo workspace target — the bundle dir can contain stale pre-rebrand bundles.
+# (No `find` here: under pipefail a missing search dir aborted the script silently after bundling.)
+APP_SRC="$ROOT/target/release/bundle/macos/$APP_NAME.app"
+if [ ! -d "$APP_SRC" ]; then
+  echo "✗ Build output not found at $APP_SRC" >&2
   exit 1
 fi
 
