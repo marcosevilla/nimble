@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 // The capture strip is a separate always-on-top Tauri window: the event bus
 // and window sizing below are desktop shell machinery with no web equivalent,
 // so they deliberately sit outside the DataProvider seam.
@@ -13,6 +13,12 @@ import { useDataProvider } from '@/services/provider-context'
 // DataProvider — there is no window to dismiss on the web.
 // eslint-disable-next-line no-restricted-imports
 import { dismissCaptureStrip } from '@/services/tauri'
+import type { CaptureRoute } from '@nimble/types'
+import { parseRoutePrefix } from '@/lib/captureRoutes'
+import { routeWithDate } from '@/lib/captureActions'
+import { HighlightField } from '@/components/capture/HighlightField'
+import { RoutePill, DateChip } from '@/components/capture/CaptureTokens'
+import { useCaptureDate } from '@/hooks/useCaptureDate'
 
 // Mirror the main window's theme — localStorage is shared across windows,
 // and this window never mounts useTheme()
@@ -43,6 +49,11 @@ export function CaptureStrip() {
   const prefillRef = useRef<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
+  const [routes, setRoutes] = useState<CaptureRoute[]>([])
+
+  const parsed = useMemo(() => parseRoutePrefix(value, routes), [value, routes])
+  const taskBound = parsed.route?.target_type === 'task' && parsed.content.trim() !== ''
+  const capDate = useCaptureDate(value, parsed.content, taskBound)
 
   useEffect(() => {
     applyThemeFromStorage()
@@ -50,6 +61,12 @@ export function CaptureStrip() {
     document.documentElement.style.background = 'transparent'
     document.body.style.background = 'transparent'
   }, [])
+
+  // Load capture routes on mount and refresh on every summon, so a route
+  // added/edited in Settings while the strip was closed shows up next open.
+  useEffect(() => {
+    dp.captureRoutes.list().then(setRoutes).catch(() => setRoutes([]))
+  }, [dp])
 
   // Grow the textarea with its content, then size the window to hug the card
   // so the transparent dead zone below the strip never eats clicks
@@ -83,6 +100,7 @@ export function CaptureStrip() {
       setOpenCount((c) => c + 1)
       setPrefillContext(null)
       prefillRef.current = null
+      dp.captureRoutes.list().then(setRoutes).catch(() => setRoutes([]))
       requestAnimationFrame(() => textareaRef.current?.focus())
       // If macOS denied activation (window shown but never focused), don't
       // linger as an untouchable ghost — bow out
@@ -95,7 +113,7 @@ export function CaptureStrip() {
       clearTimeout(focusCheck)
       unlisten.then((fn) => fn())
     }
-  }, [])
+  }, [dp])
 
   // A selection grabbed from the previous app — arrives shortly after open
   useEffect(() => {
@@ -123,9 +141,13 @@ export function CaptureStrip() {
     const text = value.trim()
     if (!text) return
     try {
-      // A capture born from a grabbed selection keeps its source-app tag
-      // even if the user edited the text before saving
-      if (prefillRef.current) {
+      const { route, content } = parseRoutePrefix(text, routes)
+      if (route && content) {
+        const date = route.target_type === 'task' ? capDate.date : null
+        await routeWithDate(dp, route, content, date)
+      } else if (prefillRef.current) {
+        // A capture born from a grabbed selection keeps its source-app tag
+        // even if the user edited the text before saving
         await dp.captures.create(text, 'selection', prefillContext ?? undefined)
       } else {
         await dp.captures.create(text, 'quick_capture')
@@ -143,9 +165,10 @@ export function CaptureStrip() {
     } catch {
       setError(true)
     }
-  }, [value, dp, prefillContext])
+  }, [value, dp, prefillContext, routes, capDate.date])
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (capDate.onKeyDown(e)) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       submit()
@@ -163,17 +186,30 @@ export function CaptureStrip() {
         key={openCount}
         className="capture-strip-in flex w-full items-end gap-3 rounded-2xl border border-border bg-popover py-3 pl-5 pr-3 shadow-[0_1px_2px_rgba(0,0,0,0.08),0_8px_24px_rgba(0,0,0,0.18),0_20px_40px_rgba(0,0,0,0.10)]"
       >
-        <textarea
-          ref={textareaRef}
+        <HighlightField
+          multiline
+          fieldRef={textareaRef}
           autoFocus
           rows={1}
           value={value}
+          highlight={capDate.highlight}
+          wrapperClassName="flex-1 self-center"
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Capture anything…"
+          placeholder="Capture anything… (/t task, /i idea)"
           spellCheck={false}
-          className="max-h-28 flex-1 resize-none self-center bg-transparent py-1 text-[15px] leading-normal text-foreground outline-none placeholder:text-muted-foreground/80"
+          className="max-h-28 resize-none py-1 text-[15px] leading-normal text-foreground outline-none placeholder:text-muted-foreground/80"
         />
+        {parsed.route && parsed.content && (
+          <span className="mb-1.5 flex">
+            <RoutePill route={parsed.route} />
+          </span>
+        )}
+        {capDate.date && (
+          <span className="mb-1.5 flex">
+            <DateChip label={capDate.date.label} compact />
+          </span>
+        )}
         {error ? (
           <span className="mb-1.5 shrink-0 text-meta text-destructive">
             Couldn't save — ⏎ to retry
