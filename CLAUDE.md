@@ -66,7 +66,7 @@ nimble/
 - SQLite managed via sqlx (desktop Rust) and expo-sqlite (mobile TypeScript)
 - Versioned migration system in `nimble-core/src/db/migrations.rs` (Rust) and `apps/mobile/services/database.ts` (TypeScript mirror)
 - Both platforms share the same schema — keep migrations in sync
-- Current version: **20** (v1-13: core schema + v14: sync_log table + device_id + v15: external_id/external_source tracking on local_tasks/projects + v16: capture context column + v17: todoist_outbox, integration_sync_state, and remote_updated_at/synced_snapshot columns for two-way sync + v18: vault_notes/vault_links/vault_tags + device-local vault_fts (FTS5) + v19: labels/task_labels/sections tables, due_time/duration_minutes/recurrence_rule/section_id columns on local_tasks, and parent_id on projects for native Todoist-parity scheduling and project nesting; v20: reminder offset, Google publishing intent, label group, and device-local delivery/calendar state)
+- Current version: **23** (v1-13: core schema + v14: sync_log table + device_id + v15: external_id/external_source tracking on local_tasks/projects + v16: capture context column + v17: todoist_outbox, integration_sync_state, and remote_updated_at/synced_snapshot columns for two-way sync + v18: vault_notes/vault_links/vault_tags + device-local vault_fts (FTS5) + v19: labels/task_labels/sections tables, due_time/duration_minutes/recurrence_rule/section_id columns on local_tasks, and parent_id on projects for native Todoist-parity scheduling and project nesting; v20: reminder offset, Google publishing intent, label group, and device-local delivery/calendar state; v21: focus engine tables + sync_policy; v22: projects.archived_at; v23: briefs (per-day morning brief snapshots, synced by date))
 - `schema_version` table tracks what's been applied
 
 ## Key Tables
@@ -94,6 +94,7 @@ nimble/
 - `labels` — native task labels (id, name, color, position)
 - `task_labels` — many-to-many join between `local_tasks` and `labels` (task_id, label_id)
 - `sections` — named groupings of tasks within a project (id, project_id, name, position), with external_id/external_source for Todoist import
+- `briefs` — per-day morning brief snapshot (date PK, layout_json, snapshot_json), written once for today at first open with priorities patched in; synced by date, remote table gated by `turso_schema_v23_upgraded`
 
 ## Task Status Workflow
 - Statuses: `backlog` → `todo` → `in_progress` → `blocked` → `complete`
