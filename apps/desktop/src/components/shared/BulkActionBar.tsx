@@ -316,11 +316,13 @@ export function BulkActionBar() {
           />
         )}
 
+        {/* Red glyph, neutral label: --destructive text on the dark
+            popover fails AA contrast (axe), the icon carries the warning. */}
         <ActionButton
           icon={Trash2}
           label="Delete"
           onClick={handleDelete}
-          className="text-destructive hover:text-destructive"
+          className="[&_svg]:text-destructive"
         />
 
         <div className="mx-1 h-4 w-px bg-border/30" />
