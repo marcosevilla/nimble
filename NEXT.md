@@ -2,6 +2,11 @@
 
 Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + chunk 2 capture vocabulary/NL dates `649ca72` merged, installed with Lane B's install; 393 frontend tests). Updated 2026-09-23 eve (Lane B: Rust batch `bb6ac53` + brief phase 1 `e24daa4` merged; **installed at `649ca72`** = both lanes incl. capture-prefixes; DB migrated v22→v23, 1,335 tasks kept, today's brief snapshot written, `turso_schema_v23_upgraded` set). Before that 2026-09-23 (agentation-1 merged + installed at `0ad4bd5`). Before that 2026-09-22 (Focus Queue: all 12 plan tasks implemented, Task 12 verification recorded; awaiting final whole-branch review + Marco's 30-min human checklist; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
 
+## Vault-path toast on Today (2026-09-24)
+
+- [x] **Bug:** "File not found — check your vault path in Settings" toasted on every Today load though Obsidian is connected. Root cause: `useObsidian` still reads the legacy vault-root `today.md` (gone from the vault); `read_today_md` rejects "today.md: not found" and `friendlyError` maps any "not found" to the vault-path copy. Fix `e332dff`: a missing `today.md` = no daily note (no toast, header count from tasks only); other errors still toast. Test `tests/errors.test.mjs`; frozen-build browser check (main toasts, fix doesn't). Merged + installed 2026-09-24.
+- [ ] Follow-ups: `friendlyError` maps every "not found" (e.g. a 404 iCal feed) to the vault-path message; the `today.md` read itself is legacy — remove it (and `TodayPanel`/`HabitsPanel` if unused) when Today's brief no longer needs it; web `obsidian.readTodayMd` is `ni()` and may toast "Something went wrong" on web Today.
+
 ## Loop 2 polish + new icon (2026-09-24)
 
 - [x] **Activity → Settings sub-page** (`389e7de`): nav page `session` removed; `g s`, `?page=session` and persisted nav orders redirect to Settings → Activity (`lib/navTargets.ts`). Right-rail Activity tab unchanged.
