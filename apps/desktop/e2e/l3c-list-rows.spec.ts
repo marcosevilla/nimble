@@ -123,3 +123,82 @@ test('reopening a parent completed without a cascade (subtasks done earlier) sho
   await page.waitForTimeout(300)
   await expect(page.locator('[data-sonner-toast]').filter({ hasText: /reopen \d+ subtasks? too\?/i })).toHaveCount(0)
 })
+
+// ── Bulk Status → Todo (review finding 1): one combined offer ────────────
+
+/** On Today: give task-04 a subtask, complete task-01 (cascades task-02,
+ * task-03) and task-04 (cascades the new one) at 10:00, then move the clock
+ * a minute on. Returns the new subtask's id. */
+async function cascadeTwoParentsOnToday(app: { open(id: string): Promise<void> }, page: Page) {
+  await app.open('today')
+  const extra = await page.evaluate(async () => {
+    const inv = (window as unknown as HarnessWindow).__TAURI_INTERNALS__.invoke
+    const t = (await inv('create_local_task', { content: 'Check the NSPanel activation policy', projectId: 'proj-taskapp', parentId: 'task-04' })) as { id: string }
+    await inv('update_task_status', { id: 'task-01', status: 'complete' })
+    await inv('update_task_status', { id: 'task-04', status: 'complete' })
+    window.dispatchEvent(new Event('tasks-changed'))
+    return t.id
+  })
+  await page.clock.setFixedTime(new Date(MOCK_NOW.getTime() + 60_000))
+  await expect(rowStatus(row(page, 'task-01'))).toHaveAccessibleName('Status: Complete')
+  await expect(rowStatus(row(page, 'task-04'))).toHaveAccessibleName('Status: Complete')
+  return extra
+}
+
+async function select(page: Page, id: string) {
+  const r = row(page, id)
+  await r.hover()
+  await checkbox(r).click()
+}
+
+async function bulkTodo(page: Page) {
+  const count = page.getByText(/^\s*\d+ selected\s*$/).filter({ visible: true }).first()
+  await count.locator('xpath=..').getByRole('button', { name: /^\s*status\s*$/i }).click()
+  await page.getByRole('menuitem', { name: /^\s*todo\s*$/i }).first().click()
+}
+
+const reopenOffer = (page: Page) => page.locator('[data-sonner-toast]').filter({ hasText: /reopen \d+ subtasks? too\?/i })
+
+test('bulk Status → Todo on two cascaded parents shows ONE combined "Reopen 3 subtasks too?"; Reopen reopens exactly those', async ({ app, page }) => {
+  const extra = await cascadeTwoParentsOnToday(app, page)
+  await select(page, 'task-01')
+  await select(page, 'task-04')
+  const before = (await statusCalls(page)).length
+  await bulkTodo(page)
+  await expect(reopenOffer(page)).toHaveCount(1)
+  await expect(reopenOffer(page)).toContainText(/reopen 3 subtasks too\?/i)
+  const bulkCalls = (await statusCalls(page)).slice(before).map((c) => `${c.id}:${c.status}`).sort()
+  expect(bulkCalls, 'the bulk change touches only the selected parents').toEqual(['task-01:todo', 'task-04:todo'])
+
+  const mid = (await statusCalls(page)).length
+  await reopenOffer(page).getByRole('button', { name: 'Reopen', exact: true }).click()
+  await expect
+    .poll(async () => (await statusCalls(page)).slice(mid).map((c) => `${c.id}:${c.status}`).sort())
+    .toEqual([`${extra}:todo`, 'task-02:todo', 'task-03:todo'].sort())
+  await expect(reopenOffer(page)).toHaveCount(0)
+})
+
+test('bulk Status → Todo on one cascaded parent + an unrelated open task counts only the parent\'s subtasks', async ({ app, page }) => {
+  await app.open('today')
+  await page.evaluate(async () => {
+    const inv = (window as unknown as HarnessWindow).__TAURI_INTERNALS__.invoke
+    await inv('update_task_status', { id: 'task-01', status: 'complete' })
+    window.dispatchEvent(new Event('tasks-changed'))
+  })
+  await page.clock.setFixedTime(new Date(MOCK_NOW.getTime() + 60_000))
+  await expect(rowStatus(row(page, 'task-01'))).toHaveAccessibleName('Status: Complete')
+  await select(page, 'task-01')
+  await select(page, 'task-04')
+  await bulkTodo(page)
+  await expect(reopenOffer(page)).toHaveCount(1)
+  await expect(reopenOffer(page)).toContainText(/reopen 2 subtasks too\?/i)
+})
+
+test('bulk Status → Todo with nothing cascaded shows no offer', async ({ app, page }) => {
+  await app.open('today')
+  await select(page, 'task-04')
+  await bulkTodo(page)
+  await expect(rowStatus(row(page, 'task-04'))).toHaveAccessibleName('Status: Todo')
+  await page.waitForTimeout(300)
+  await expect(reopenOffer(page)).toHaveCount(0)
+})

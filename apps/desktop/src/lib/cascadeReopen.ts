@@ -54,3 +54,33 @@ export function cascadeReopenCandidates(
   }
   return out
 }
+
+export interface CascadeTask extends CascadeSubtask {
+  parent_id: string | null
+}
+
+/** One offer for a whole reopen (a bulk Status change can reopen several
+ * parents): the union, per reopened parent, of its cascade candidates
+ * (`cascadeReopenCandidates` against that parent's own pre-reopen stamp),
+ * minus any task that was itself part of the reopen — it already got the
+ * chosen status. `parents` maps each reopened id to its `completed_at` as it
+ * was BEFORE the reopen (null for a task that wasn't complete). `after` is
+ * the task list read after the reopen. Deduplicated, in parent order. */
+export function aggregateCascadeReopen(
+  parents: ReadonlyArray<readonly [id: string, completedAt: string | null]>,
+  after: readonly CascadeTask[],
+): string[] {
+  const reopened = new Set(parents.map(([id]) => id))
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const [id, completedAt] of parents) {
+    if (!completedAt) continue
+    const children = after.filter((t) => t.parent_id === id)
+    for (const childId of cascadeReopenCandidates(completedAt, children)) {
+      if (reopened.has(childId) || seen.has(childId)) continue
+      seen.add(childId)
+      out.push(childId)
+    }
+  }
+  return out
+}

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { STATUSES } from '@/components/tasks/StatusDropdown'
 import { useDeleteTasks } from '@/components/tasks/useDeleteTasks'
+import { setOpenStatuses } from '@/components/tasks/reopenTask'
 import { IconButton } from '@/components/shared/IconButton'
 import { playCompletionSound } from '@/lib/sound'
 import {
@@ -128,11 +129,10 @@ export function BulkActionBar() {
       return
     }
 
-    for (const id of ids) {
-      try { await dp.tasks.updateStatus(id, status) } catch { /* skip */ }
-    }
-    toast.success(`Set ${ids.length} task${ids.length !== 1 ? 's' : ''} to ${status.replace('_', ' ')}`)
-    emitTasksChanged()
+    // Leaving `complete` is a reopen: the shared path offers the reopened
+    // parents' cascaded subtasks back in one toast (C3).
+    const { done } = await setOpenStatuses(dp, ids, status)
+    toast.success(`Set ${done} task${done !== 1 ? 's' : ''} to ${status.replace('_', ' ')}`)
     clear()
   }, [selectedIds, selectionType, clear, dp, markTaskCompleting, clearTaskCompleting])
 
