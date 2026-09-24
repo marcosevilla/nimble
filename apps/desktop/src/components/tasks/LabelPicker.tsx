@@ -62,12 +62,21 @@ export function LabelChip({
 interface LabelPickerProps {
   value: string[]
   onChange: (labelIds: string[]) => void
+  /** Controlled state of the "Add label" search list. Omit both to let the
+   * picker own it (every current caller). */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
-export function LabelPicker({ value, onChange }: LabelPickerProps) {
+export function LabelPicker({ value, onChange, open: openProp, onOpenChange }: LabelPickerProps) {
   const labelVersion = useDataVersion('labels')
   const dp = useDataProvider()
-  const [open, setOpen] = useState(false)
+  const [openState, setOpenState] = useState(false)
+  const open = openProp ?? openState
+  const setOpen = (next: boolean) => {
+    setOpenState(next)
+    onOpenChange?.(next)
+  }
   const [labels, setLabels] = useState<Label[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')

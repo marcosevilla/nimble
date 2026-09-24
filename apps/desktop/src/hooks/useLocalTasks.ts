@@ -1,4 +1,5 @@
 import { subscribeDataChanges } from '@/lib/dataChanges'
+import { createListCache } from '@/lib/listCache'
 import { ownsTodoistPush } from '@/lib/windowSignals'
 import { displayedDueDate, rememberDisplayedTasks } from '@/lib/displayedTasks'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -160,6 +161,35 @@ export function useLocalTasks(opts?: { projectId?: string; dueDate?: string; inc
   return { tasks, loading, loadedFor, error, refresh, addTask, update, complete, uncomplete, remove }
 }
 
+// ── Shared active-projects list (row project pickers) ──
+//
+// Every task row mounts a project mark, and its menu mounts its items only
+// while open — a per-open useProjects() would refetch the whole project list
+// on each open and flash an empty menu first. The pickers share this
+// module-scope cache instead: loaded on the first open, kept until a project
+// or task change marks it stale (the stale list stays visible while the
+// fresh one loads). Same shape as LocalTaskRow's labels cache.
+const projectOptionsCache = createListCache<Project>(() => getDataProvider().projects.list())
+
+if (typeof window !== 'undefined') {
+  // Task changes cover Todoist/remote pulls, which can bring projects too.
+  window.addEventListener(TASKS_CHANGED, () => projectOptionsCache.invalidate())
+  subscribeDataChanges('projects', () => projectOptionsCache.invalidate())
+}
+
+/** Active projects for a picker; null until the first load resolves. */
+export function useProjectOptions(): Project[] | null {
+  const [all, setAll] = useState<Project[] | null>(() => projectOptionsCache.peek())
+
+  useEffect(() => {
+    const off = projectOptionsCache.subscribe(setAll)
+    projectOptionsCache.load().catch(() => {})
+    return off
+  }, [])
+
+  return useMemo(() => all?.filter((p) => !p.archived_at) ?? null, [all])
+}
+
 export function useProjects() {
   const dp = useDataProvider()
   const [allProjects, setAllProjects] = useState<Project[]>([])
@@ -186,6 +216,7 @@ export function useProjects() {
     try {
       const project = await dp.projects.create(name, color)
       setAllProjects((prev) => [...prev, project])
+      projectOptionsCache.invalidate()
       return project
     } catch (e) {
       toast.error(`Failed to create project: ${e}`)
@@ -197,6 +228,7 @@ export function useProjects() {
     try {
       await dp.projects.update(id, name)
       setAllProjects((prev) => prev.map((p) => p.id === id ? { ...p, name } : p))
+      projectOptionsCache.invalidate()
     } catch (e) {
       toast.error(`Failed to rename project: ${e}`)
     }
@@ -206,6 +238,7 @@ export function useProjects() {
     try {
       await dp.projects.update(id, undefined, color)
       setAllProjects((prev) => prev.map((p) => p.id === id ? { ...p, color } : p))
+      projectOptionsCache.invalidate()
     } catch (e) {
       toast.error(`Failed to update color: ${e}`)
     }
@@ -215,6 +248,7 @@ export function useProjects() {
     try {
       await dp.projects.delete(id)
       setAllProjects((prev) => prev.filter((p) => p.id !== id))
+      projectOptionsCache.invalidate()
     } catch (e) {
       toast.error(`Failed to delete project: ${e}`)
     }

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import { format, isToday, isTomorrow, parseISO } from 'date-fns'
+import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from 'react'
 import { Calendar, FileText, Plus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { labelColor } from '@/lib/labelColors'
+import { dueBadgeLabel } from '@/lib/dueLabel'
 import { useDataProvider } from '@/services/provider-context'
 import type { DataProvider } from '@/services/data-provider'
 import type { Document, Project, Section } from '@nimble/types'
@@ -65,16 +65,6 @@ const CHIP_FILLED = 'h-6 rounded-md bg-secondary border border-input pl-2.5 pr-1
 const CHIP_PLUS =
   'h-6 rounded-md border border-dashed border-input px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors inline-flex items-center justify-center'
 
-/** Relative due label, mirroring DueDateBadge's logic (TaskItem.tsx) — same
- * Today/Tomorrow/`MMM d` convention, kept in one place per that badge's own
- * date-math comment. */
-function formatDueLabel(dateStr: string): string {
-  const parsed = parseISO(dateStr)
-  if (isToday(parsed)) return 'Today'
-  if (isTomorrow(parsed)) return 'Tomorrow'
-  return format(parsed, 'MMM d')
-}
-
 /** Trailing ✕ shared by every filled chip — 12px icon in a size-4 hit area,
  * revealed on chip hover via the chip's own `group/chip`. stopPropagation
  * keeps the click from also opening/toggling the chip's picker. */
@@ -96,39 +86,60 @@ function ClearButton({ onClear, label }: { onClear: () => void; label: string })
 
 // ── Priority ──
 
+/**
+ * The priority picker: a menu of Normal/Medium/High/Urgent around the
+ * caller's trigger. Exported for the task row's priority mark (T1), which
+ * controls `open` so a row key can open it too; the detail chip below
+ * leaves it uncontrolled.
+ */
+export function PriorityMenu({
+  onChange,
+  open,
+  onOpenChange,
+  triggerProps,
+  contentProps,
+  children,
+}: {
+  onChange: (p: number) => void
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  triggerProps?: ComponentProps<typeof DropdownMenuTrigger>
+  contentProps?: Partial<ComponentProps<typeof DropdownMenuContent>>
+  children: ReactNode
+}) {
+  return (
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
+      <DropdownMenuTrigger {...triggerProps}>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent align="start" {...contentProps}>
+        {PRIORITY_OPTIONS.map((o) => (
+          <DropdownMenuItem key={o.value} onClick={() => onChange(o.value)}>
+            <PriorityBars priority={o.value} />
+            {o.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function PriorityChip({ value, onChange }: { value: number; onChange: (p: number) => void }) {
   const filled = value >= 2
   const opt = PRIORITY_OPTIONS.find((o) => o.value === value)
 
-  const menu = (
-    <DropdownMenuContent align="start">
-      {PRIORITY_OPTIONS.map((o) => (
-        <DropdownMenuItem key={o.value} onClick={() => onChange(o.value)}>
-          <PriorityBars priority={o.value} />
-          {o.label}
-        </DropdownMenuItem>
-      ))}
-    </DropdownMenuContent>
-  )
-
   if (!filled) {
     return (
-      <DropdownMenu>
-        <DropdownMenuTrigger className={CHIP_EMPTY}>Priority</DropdownMenuTrigger>
-        {menu}
-      </DropdownMenu>
+      <PriorityMenu onChange={onChange} triggerProps={{ className: CHIP_EMPTY }}>
+        Priority
+      </PriorityMenu>
     )
   }
 
   return (
     <div className={cn(CHIP_FILLED, 'group/chip')}>
-      <DropdownMenu>
-        <DropdownMenuTrigger className="flex items-center gap-[5px]">
-          <PriorityBars priority={value} />
-          {opt?.label}
-        </DropdownMenuTrigger>
-        {menu}
-      </DropdownMenu>
+      <PriorityMenu onChange={onChange} triggerProps={{ className: 'flex items-center gap-[5px]' }}>
+        <PriorityBars priority={value} />
+        {opt?.label}
+      </PriorityMenu>
       <ClearButton onClear={() => onChange(1)} label="Clear priority" />
     </div>
   )
@@ -160,7 +171,7 @@ function DueChip({ value, onChange }: { value: DueValue; onChange: (v: DueValue)
       <DueDatePopover value={value} onChange={onChange}>
         <button type="button" className="flex items-center gap-[5px]">
           <Calendar className="size-3" />
-          Due {formatDueLabel(value.dueDate)}
+          Due {dueBadgeLabel(value.dueDate)}
         </button>
       </DueDatePopover>
       <ClearButton onClear={() => onChange(EMPTY_DUE)} label="Clear due date" />
@@ -169,6 +180,38 @@ function DueChip({ value, onChange }: { value: DueValue; onChange: (v: DueValue)
 }
 
 // ── Labels ──
+
+/**
+ * The label picker popup (selected labels + "Add label" search list) around
+ * the caller's trigger. Exported for the task row's label marks (T1), which
+ * control `open`; the detail chips below pass their div-host trigger.
+ */
+export function LabelsPopover({
+  value,
+  onChange,
+  open,
+  onOpenChange,
+  triggerProps,
+  contentProps,
+  children,
+}: {
+  value: string[]
+  onChange: (ids: string[]) => void
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  triggerProps?: ComponentProps<typeof PopoverTrigger>
+  contentProps?: Partial<ComponentProps<typeof PopoverContent>>
+  children: ReactNode
+}) {
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger {...triggerProps}>{children}</PopoverTrigger>
+      <PopoverContent side="bottom" align="start" sideOffset={4} {...contentProps} className={cn('w-64 p-2', contentProps?.className)}>
+        <LabelPicker value={value} onChange={onChange} />
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 function LabelsChips({
   labelIds,
@@ -185,67 +228,117 @@ function LabelsChips({
     [labelIds, labels],
   )
 
-  const content = (
-    <PopoverContent side="bottom" align="start" sideOffset={4} className="w-64 p-2">
-      <LabelPicker value={labelIds} onChange={onChange} />
-    </PopoverContent>
-  )
+  /* nativeButton={false} + a <div> host avoids nesting <button> inside
+     the default <button> trigger (see the Due chip's comment). The host
+     must NOT be `display: contents`, though — floating-ui anchors the
+     popover on this element's own getBoundingClientRect(), and a
+     contents box collapses to a zero-size rect at (0,0), which pins
+     every popover to the viewport's top-left corner instead of the
+     chip. `inline-flex` keeps a real, correctly-sized box (verified via
+     harness: contents anchored at x:0,y:0; inline-flex anchors flush
+     under the chip) without disrupting the row's inline flow.
 
+     tabIndex={-1}: now that the host is a real (focusable) box instead
+     of an unfocusable `contents` one, useButton's unconditional
+     tabIndex=0 + role="button" on it becomes a REAL, redundant Tab
+     stop sitting directly in front of the real <button>s nested inside
+     (verified via harness: without this, Tab order was host → label1 →
+     clear1 → label2 → ..., an extra stop with no distinct action from
+     the first label chip). The host's own click listener still opens
+     the popover from a bubbled click or a real button's native
+     Enter/Space-synthesized click, so it doesn't need to be
+     independently tabbable. */
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      {/* nativeButton={false} + a <div> host avoids nesting <button> inside
-          the default <button> trigger (see the Due chip's comment). The host
-          must NOT be `display: contents`, though — floating-ui anchors the
-          popover on this element's own getBoundingClientRect(), and a
-          contents box collapses to a zero-size rect at (0,0), which pins
-          every popover to the viewport's top-left corner instead of the
-          chip. `inline-flex` keeps a real, correctly-sized box (verified via
-          harness: contents anchored at x:0,y:0; inline-flex anchors flush
-          under the chip) without disrupting the row's inline flow.
-
-          tabIndex={-1}: now that the host is a real (focusable) box instead
-          of an unfocusable `contents` one, useButton's unconditional
-          tabIndex=0 + role="button" on it becomes a REAL, redundant Tab
-          stop sitting directly in front of the real <button>s nested inside
-          (verified via harness: without this, Tab order was host → label1 →
-          clear1 → label2 → ..., an extra stop with no distinct action from
-          the first label chip). The host's own click listener still opens
-          the popover from a bubbled click or a real button's native
-          Enter/Space-synthesized click, so it doesn't need to be
-          independently tabbable. */}
-      <PopoverTrigger
-        className="inline-flex items-center gap-1.5"
-        nativeButton={false}
-        render={<div className="inline-flex items-center gap-1.5" tabIndex={-1} />}
-      >
-        {/* Real <button>s, not <div>s — see the Due chip's comment above:
-            display:contents trigger wrappers drop non-button children from
-            the tab order entirely. */}
-        {selected.length === 0 ? (
-          <button type="button" className={CHIP_EMPTY}>
-            Labels
-          </button>
-        ) : (
-          selected.map((label) => (
-            <div key={label.id} className={cn(CHIP_FILLED, 'group/chip')}>
-              <button type="button" className="flex items-center gap-[5px]">
-                <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: labelColor(label.color) }} />
-                {label.name}
-              </button>
-              <ClearButton
-                onClear={() => onChange(labelIds.filter((id) => id !== label.id))}
-                label={`Remove ${label.name}`}
-              />
-            </div>
-          ))
-        )}
-      </PopoverTrigger>
-      {content}
-    </Popover>
+    <LabelsPopover
+      value={labelIds}
+      onChange={onChange}
+      open={open}
+      onOpenChange={setOpen}
+      triggerProps={{
+        className: 'inline-flex items-center gap-1.5',
+        nativeButton: false,
+        render: <div className="inline-flex items-center gap-1.5" tabIndex={-1} />,
+      }}
+    >
+      {/* Real <button>s, not <div>s — see the Due chip's comment above:
+          display:contents trigger wrappers drop non-button children from
+          the tab order entirely. */}
+      {selected.length === 0 ? (
+        <button type="button" className={CHIP_EMPTY}>
+          Labels
+        </button>
+      ) : (
+        selected.map((label) => (
+          <div key={label.id} className={cn(CHIP_FILLED, 'group/chip')}>
+            <button type="button" className="flex items-center gap-[5px]">
+              <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: labelColor(label.color) }} />
+              {label.name}
+            </button>
+            <ClearButton
+              onClear={() => onChange(labelIds.filter((id) => id !== label.id))}
+              label={`Remove ${label.name}`}
+            />
+          </div>
+        ))
+      )}
+    </LabelsPopover>
   )
 }
 
 // ── Project / Section (shared shape: id + name) ──
+
+/**
+ * The project (or section) picker: a menu of entity names around the
+ * caller's trigger. Exported for the task row's project mark (T1); the
+ * detail/composer chip below wraps it the same way.
+ */
+export function EntityMenu<T extends { id: string; name: string }>({
+  options,
+  open,
+  onOpenChange,
+  onSelect,
+  triggerProps,
+  contentProps,
+  children,
+}: {
+  options: T[]
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  onSelect: (id: string) => void
+  triggerProps?: ComponentProps<typeof DropdownMenuTrigger>
+  contentProps?: Partial<ComponentProps<typeof DropdownMenuContent>>
+  children: ReactNode
+}) {
+  return (
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
+      <DropdownMenuTrigger {...triggerProps}>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent align="start" {...contentProps}>
+        <EntityMenuItems options={options} onSelect={onSelect} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** The picker's items — exported so a caller that loads its options only
+ * while the menu is open (the row's project mark) renders the same list. */
+export function EntityMenuItems<T extends { id: string; name: string }>({
+  options,
+  onSelect,
+}: {
+  options: T[]
+  onSelect: (id: string) => void
+}) {
+  return (
+    <>
+      {options.map((o) => (
+        <DropdownMenuItem key={o.id} onClick={() => onSelect(o.id)}>
+          {o.name}
+        </DropdownMenuItem>
+      ))}
+      {options.length === 0 && <p className="px-1.5 py-1 text-label text-muted-foreground">None available</p>}
+    </>
+  )
+}
 
 function EntityChip<T extends { id: string; name: string }>({
   entity,
@@ -266,32 +359,19 @@ function EntityChip<T extends { id: string; name: string }>({
   onClear: () => void
   clearLabel: string
 }) {
-  const menu = (
-    <DropdownMenuContent align="start">
-      {options.map((o) => (
-        <DropdownMenuItem key={o.id} onClick={() => onSelect(o.id)}>
-          {o.name}
-        </DropdownMenuItem>
-      ))}
-      {options.length === 0 && <p className="px-1.5 py-1 text-label text-muted-foreground">None available</p>}
-    </DropdownMenuContent>
-  )
-
   if (!entity) {
     return (
-      <DropdownMenu open={open} onOpenChange={onOpenChange}>
-        <DropdownMenuTrigger className={CHIP_EMPTY}>{emptyLabel}</DropdownMenuTrigger>
-        {menu}
-      </DropdownMenu>
+      <EntityMenu options={options} open={open} onOpenChange={onOpenChange} onSelect={onSelect} triggerProps={{ className: CHIP_EMPTY }}>
+        {emptyLabel}
+      </EntityMenu>
     )
   }
 
   return (
     <div className={cn(CHIP_FILLED, 'group/chip')}>
-      <DropdownMenu open={open} onOpenChange={onOpenChange}>
-        <DropdownMenuTrigger>{entity.name}</DropdownMenuTrigger>
-        {menu}
-      </DropdownMenu>
+      <EntityMenu options={options} open={open} onOpenChange={onOpenChange} onSelect={onSelect}>
+        {entity.name}
+      </EntityMenu>
       <ClearButton onClear={onClear} label={clearLabel} />
     </div>
   )

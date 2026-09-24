@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { format, parseISO } from 'date-fns'
 import { X } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
@@ -30,6 +30,16 @@ interface DueDatePopoverProps {
   value: DueValue
   onChange: (v: DueValue) => void
   children: ReactNode /* trigger */
+  /** Controlled open state (task row marks, T1). Omit both to let the
+   * popover own it, as the detail page's chip does. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /** Replaces the default `display: inline-flex` div host (see below) — a
+   * caller whose trigger is a single control passes its own button props
+   * here, and `children` becomes that button's content. */
+  triggerProps?: ComponentProps<typeof PopoverTrigger>
+  /** Extra popup props (finalFocus, align, onClick…), merged over the defaults. */
+  contentProps?: Partial<ComponentProps<typeof PopoverContent>>
 }
 
 const DURATION_PRESETS = [
@@ -87,8 +97,17 @@ const COLLAPSED_FILLED =
  * row is expanded, and the transient text buffers for the two custom
  * inputs (minutes / recurrence interval).
  */
-export function DueDatePopover({ value, onChange, children }: DueDatePopoverProps) {
-  const [open, setOpen] = useState(false)
+export function DueDatePopover({
+  value,
+  onChange,
+  children,
+  open: openProp,
+  onOpenChange,
+  triggerProps,
+  contentProps,
+}: DueDatePopoverProps) {
+  const [openState, setOpenState] = useState(false)
+  const open = openProp ?? openState
   const [expanded, setExpanded] = useState<ExpandedSection>(null)
   const [customMinutes, setCustomMinutes] = useState('')
   const [customInterval, setCustomInterval] = useState('1')
@@ -101,7 +120,8 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
   const selectedDate = value.dueDate ? parseISO(value.dueDate) : undefined
 
   const handleOpenChange = (next: boolean) => {
-    setOpen(next)
+    setOpenState(next)
+    onOpenChange?.(next)
     if (!next) setExpanded(null)
   }
 
@@ -191,9 +211,11 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
           the tab order doesn't break keyboard activation, only the extra
           stop. */}
       <PopoverTrigger
-        className="inline-flex items-center"
-        nativeButton={false}
-        render={<div className="inline-flex items-center" tabIndex={-1} />}
+        {...(triggerProps ?? {
+          className: 'inline-flex items-center',
+          nativeButton: false,
+          render: <div className="inline-flex items-center" tabIndex={-1} />,
+        })}
       >
         {children}
       </PopoverTrigger>
@@ -201,7 +223,11 @@ export function DueDatePopover({ value, onChange, children }: DueDatePopoverProp
         side="bottom"
         align="start"
         sideOffset={4}
-        className="w-[228px] rounded-[10px] border border-input bg-card p-2 shadow-[0px_6px_16px_-2px_rgba(0,0,0,0.12)] ring-0"
+        {...contentProps}
+        className={cn(
+          'w-[228px] rounded-[10px] border border-input bg-card p-2 shadow-[0px_6px_16px_-2px_rgba(0,0,0,0.12)] ring-0',
+          contentProps?.className,
+        )}
       >
         <Calendar
           mode="single"
