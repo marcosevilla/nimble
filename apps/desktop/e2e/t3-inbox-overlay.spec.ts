@@ -69,22 +69,7 @@ async function injectLongNote(page: Page) {
   }, LONG)
 }
 
-// The fixture's `theme` option only seeds localStorage, but the mock's
-// settings row says `theme: 'light'` and useTheme re-applies that on mount,
-// so dark never sticks. Serve the fixture's choice from get_setting instead.
-async function honorFixtureTheme(page: Page) {
-  await page.addInitScript(() => {
-    const w = window as unknown as { __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown, o?: unknown) => Promise<unknown> } }
-    const orig = w.__TAURI_INTERNALS__.invoke
-    w.__TAURI_INTERNALS__.invoke = (cmd, args, opts) =>
-      cmd === 'get_setting' && (args as { key?: string } | undefined)?.key === 'theme'
-        ? Promise.resolve(localStorage.getItem('theme') || 'light')
-        : orig(cmd, args, opts)
-  })
-}
-
 async function openInbox(page: Page, app: { open(id: string): Promise<void> }) {
-  await honorFixtureTheme(page)
   await injectLongNote(page)
   await app.open('inbox')
   await expect(noteRow(page, LONG.id)).toBeVisible()
