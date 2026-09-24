@@ -12,9 +12,10 @@ import {
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
 import { DateChip } from '@/components/capture/CaptureTokens'
+import type { BarMode } from '@/lib/commandBarMode'
 import type { LocalTask, Project, Document, Capture } from '@nimble/types'
 
-export type BarMode = 'search' | 'task' | 'capture' | 'breakdown' | 'doc' | 'route'
+export type { BarMode }
 
 // 24px icon actions in the selected row. Hit target is 24×36 via `after:` —
 // exactly the row's height, so it never reaches into the rows above/below

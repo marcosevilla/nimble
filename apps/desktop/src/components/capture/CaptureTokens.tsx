@@ -25,18 +25,22 @@ export function RoutePill({ route }: { route: CaptureRoute }) {
   )
 }
 
-/** The date a task-bound capture will get, with the ⌫ escape hatch. */
-export function DateChip({ label }: { label: string }) {
+/** The date a task-bound capture will get, with the ⌫ escape hatch.
+ *  `compact` drops the "keep as text" words (for tight spaces like the
+ *  Cmd+K input row) but keeps the hint reachable via title/aria-label. */
+export function DateChip({ label, compact }: { label: string; compact?: boolean }) {
   return (
     <span
       role="status"
       aria-live="polite"
+      title={compact ? 'Backspace keeps it as text' : undefined}
+      aria-label={compact ? `${label}. Backspace keeps it as text.` : undefined}
       className="flex shrink-0 items-center gap-1.5 rounded-full bg-secondary px-2 py-0.5 text-label text-muted-foreground"
     >
       <CalendarDays className="size-3" />
       <span className="text-foreground">{label}</span>
       <kbd className="font-mono">⌫</kbd>
-      <span>keep as text</span>
+      {!compact && <span>keep as text</span>}
     </span>
   )
 }
