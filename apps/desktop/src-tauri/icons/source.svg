@@ -1,18 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <defs>
-    <linearGradient id="check" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="#E0653A"/>
-      <stop offset="1" stop-color="#F5A623"/>
-    </linearGradient>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2A2723"/>
-      <stop offset="1" stop-color="#1B1917"/>
-    </linearGradient>
-  </defs>
-  <!-- macOS-style squircle -->
-  <rect x="0" y="0" width="1024" height="1024" rx="225" ry="225" fill="url(#bg)"/>
-  <!-- Subtle inner ring for depth -->
-  <rect x="10" y="10" width="1004" height="1004" rx="218" ry="218" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="8"/>
-  <!-- Checkmark -->
-  <polyline points="292,548 452,708 738,354" fill="none" stroke="url(#check)" stroke-width="96" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Nimble C3 "Stamp" mark (Figma 7CZR91ENBhMRrRDkKJSemR, node 8:436): dot-matrix n in terracotta, orange "now" dot -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#F4EFE6"/>
+  <g fill="#CC654F">
+    <circle cx="312" cy="379" r="36" fill="#D0735D"/>
+    <circle cx="322" cy="462" r="36"/>
+    <circle cx="333" cy="545" r="36"/>
+    <circle cx="343" cy="629" r="36" fill="#A24B39"/>
+    <circle cx="353" cy="712" r="36" fill="#27231E"/>
+    <circle cx="406" cy="452" r="36" fill="#D0735D"/>
+    <circle cx="479" cy="358" r="36"/>
+    <circle cx="562" cy="348" r="36"/>
+    <circle cx="656" cy="421" r="36"/>
+    <circle cx="666" cy="505" r="36"/>
+    <circle cx="676" cy="588" r="36"/>
+    <circle cx="687" cy="672" r="36" fill="#D07460"/>
+  </g>
+  <circle cx="722" cy="243" r="40" fill="#FF4F00"/>
 </svg>

@@ -1,4 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <!-- Template image: pure black + alpha; macOS recolors it to match the menu bar -->
-  <polyline points="8,16.5 13.5,22 24,9.5" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="262 190 520 520">
+  <!-- Template image: pure black + alpha; macOS recolors it to match the menu bar.
+       Nimble C3 dot-matrix n with the "now" dot (see public/favicon.svg). -->
+  <g fill="black">
+    <circle cx="312" cy="379" r="36"/>
+    <circle cx="322" cy="462" r="36"/>
+    <circle cx="333" cy="545" r="36"/>
+    <circle cx="343" cy="629" r="36"/>
+    <circle cx="353" cy="712" r="36"/>
+    <circle cx="406" cy="452" r="36"/>
+    <circle cx="479" cy="358" r="36"/>
+    <circle cx="562" cy="348" r="36"/>
+    <circle cx="656" cy="421" r="36"/>
+    <circle cx="666" cy="505" r="36"/>
+    <circle cx="676" cy="588" r="36"/>
+    <circle cx="687" cy="672" r="36"/>
+    <circle cx="722" cy="243" r="44"/>
+  </g>
 </svg>
