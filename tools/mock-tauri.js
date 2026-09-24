@@ -57,6 +57,9 @@
     turso_url: 'libsql://daily-triage-marco.turso.io',
     turso_token: 'turso-mock-token',
   }
+  // Test harnesses may seed settings (e.g. { theme: 'dark' }) before this
+  // script runs; see apps/desktop/e2e/fixtures.ts.
+  if (window.__MOCK_SETTINGS__) Object.assign(SETTINGS, window.__MOCK_SETTINGS__)
 
   // ── Projects ─────────────────────────────────────────────────────────────
 

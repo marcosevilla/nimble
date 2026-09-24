@@ -18,6 +18,8 @@ export const test = base.extend<{ theme: Theme; app: App }>({
   app: async ({ page, theme }, use) => {
     await page.addInitScript((mode) => {
       localStorage.setItem('theme', mode)
+      // The app re-reads `theme` from settings after boot; seed the mock too.
+      ;(window as unknown as { __MOCK_SETTINGS__: Record<string, string> }).__MOCK_SETTINGS__ = { theme: mode }
     }, theme)
     await page.addInitScript(MOCK)
     await use(new App(page))
@@ -106,9 +108,11 @@ function readBaseline(): Baseline {
 /**
  * WCAG 2.1 A/AA axe scan of the whole page. Fails on any rule that is new for
  * `pageKey`, or that now hits more nodes than the baseline recorded on main.
- * Run with UPDATE_AXE_BASELINE=1 (against a frozen main build) to re-record.
+ * Run with UPDATE_AXE_BASELINE=1 --workers=1 (against a frozen main build) to re-record.
  */
 export async function expectNoNewAxeViolations(page: Page, pageKey: string) {
+  // Dark mode has its own baseline row (`<page>:dark`).
+  if (await page.evaluate(() => document.documentElement.classList.contains('dark'))) pageKey += ':dark'
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
   const counts: Record<string, number> = {}
   for (const v of results.violations) counts[v.id] = v.nodes.length
