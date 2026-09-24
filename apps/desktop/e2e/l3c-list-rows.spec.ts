@@ -126,22 +126,23 @@ test('reopening a parent completed without a cascade (subtasks done earlier) sho
 
 // ── Bulk Status → Todo (review finding 1): one combined offer ────────────
 
-/** On Today: give task-04 a subtask, complete task-01 (cascades task-02,
- * task-03) and task-04 (cascades the new one) at 10:00, then move the clock
- * a minute on. Returns the new subtask's id. */
+/** On Today: give task-09 a subtask, complete task-01 (cascades task-02,
+ * task-03) and task-09 (cascades the new one) at 10:00, then move the clock
+ * a minute on. Returns the new subtask's id. (Not task-04: it recurs, and a
+ * recurring parent doesn't cascade.) */
 async function cascadeTwoParentsOnToday(app: { open(id: string): Promise<void> }, page: Page) {
   await app.open('today')
   const extra = await page.evaluate(async () => {
     const inv = (window as unknown as HarnessWindow).__TAURI_INTERNALS__.invoke
-    const t = (await inv('create_local_task', { content: 'Check the NSPanel activation policy', projectId: 'proj-taskapp', parentId: 'task-04' })) as { id: string }
+    const t = (await inv('create_local_task', { content: 'Book the smog check', projectId: 'proj-life', parentId: 'task-09' })) as { id: string }
     await inv('update_task_status', { id: 'task-01', status: 'complete' })
-    await inv('update_task_status', { id: 'task-04', status: 'complete' })
+    await inv('update_task_status', { id: 'task-09', status: 'complete' })
     window.dispatchEvent(new Event('tasks-changed'))
     return t.id
   })
   await page.clock.setFixedTime(new Date(MOCK_NOW.getTime() + 60_000))
   await expect(rowStatus(row(page, 'task-01'))).toHaveAccessibleName('Status: Complete')
-  await expect(rowStatus(row(page, 'task-04'))).toHaveAccessibleName('Status: Complete')
+  await expect(rowStatus(row(page, 'task-09'))).toHaveAccessibleName('Status: Complete')
   return extra
 }
 
@@ -162,13 +163,13 @@ const reopenOffer = (page: Page) => page.locator('[data-sonner-toast]').filter({
 test('bulk Status → Todo on two cascaded parents shows ONE combined "Reopen 3 subtasks too?"; Reopen reopens exactly those', async ({ app, page }) => {
   const extra = await cascadeTwoParentsOnToday(app, page)
   await select(page, 'task-01')
-  await select(page, 'task-04')
+  await select(page, 'task-09')
   const before = (await statusCalls(page)).length
   await bulkTodo(page)
   await expect(reopenOffer(page)).toHaveCount(1)
   await expect(reopenOffer(page)).toContainText(/reopen 3 subtasks too\?/i)
   const bulkCalls = (await statusCalls(page)).slice(before).map((c) => `${c.id}:${c.status}`).sort()
-  expect(bulkCalls, 'the bulk change touches only the selected parents').toEqual(['task-01:todo', 'task-04:todo'])
+  expect(bulkCalls, 'the bulk change touches only the selected parents').toEqual(['task-01:todo', 'task-09:todo'])
 
   const mid = (await statusCalls(page)).length
   await reopenOffer(page).getByRole('button', { name: 'Reopen', exact: true }).click()
