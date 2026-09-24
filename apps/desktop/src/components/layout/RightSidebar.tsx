@@ -60,7 +60,7 @@ function TabIndicator({ listRef, measureKey }: { listRef: React.RefObject<HTMLDi
 
 /** Tabs drop their own active fill; TabIndicator draws it. */
 const TRIGGER_CLASS =
-  'flex-none px-2 text-meta data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent'
+  'flex-none px-1.5 text-meta data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent'
 
 export function RightSidebar() {
   const collapsed = useLayoutStore((s) => s.rightCollapsed)

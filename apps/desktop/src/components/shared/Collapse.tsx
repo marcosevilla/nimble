@@ -24,7 +24,9 @@ type CollapseProps = {
 
 function tokenTransition(reduce: boolean) {
   const root = getComputedStyle(document.documentElement)
-  const ms = parseFloat(root.getPropertyValue('--transition-base')) || 0
+  // The built CSS may minify "220ms" to ".22s" — honour the unit.
+  const raw = root.getPropertyValue('--transition-base').trim()
+  const ms = (parseFloat(raw) || 0) * (raw.endsWith('ms') ? 1 : 1000)
   const bezier = root.getPropertyValue('--ease-entrance').match(/-?[\d.]+/g)?.map(Number)
   return {
     duration: reduce ? 0 : ms / 1000,
