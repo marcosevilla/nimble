@@ -4,6 +4,7 @@ import { format, parseISO } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Caption, Label } from '@/components/shared/typography'
 import { FocusTaskCard } from '@/components/focus/FocusTaskCard'
+import type { FocusTimerSize } from '@/components/focus/FocusTimeboxPicker'
 import { FocusQueueList, type FocusQueueRow } from '@/components/focus/FocusQueueList'
 import { FocusCompletedTray } from '@/components/focus/FocusCompletedTray'
 import { FocusAddPopover } from '@/components/focus/FocusAddPopover'
@@ -84,6 +85,8 @@ export interface FocusQueueTrayProps {
   headerActions?: ReactNode
   /** Surface-specific ⋯ items listed first (Pop out, Import…). */
   menuExtras?: PanelMenuExtra[]
+  /** Card timer size: `display` in the full view, `sm` (default) elsewhere. */
+  timerSize?: FocusTimerSize
 }
 
 /**
@@ -115,6 +118,7 @@ export function FocusQueueTray({
   title,
   headerActions,
   menuExtras,
+  timerSize,
 }: FocusQueueTrayProps) {
   const [compact, setCompact] = useState(initialCompact)
   const [source, setSource] = useState<FocusSource>(initialSource)
@@ -357,6 +361,7 @@ export function FocusQueueTray({
           onRenameCancel={() => setRenamingEntryId(null)}
           headingRef={headingRef}
           busy={busy}
+          timerSize={timerSize}
         />
 
         {/* Feedback stays in both modes. Failures render above the

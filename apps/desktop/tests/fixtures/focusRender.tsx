@@ -88,7 +88,7 @@ const taskOps: FocusTaskOps = {
 }
 const noop = () => {}
 
-export function renderFocusCard(opts: { missingTask?: boolean; live?: boolean; running?: boolean; resumable?: boolean; overtimeMs?: number; countUpMs?: number; plain?: boolean } = {}): string {
+export function renderFocusCard(opts: { missingTask?: boolean; live?: boolean; running?: boolean; resumable?: boolean; overtimeMs?: number; countUpMs?: number; plain?: boolean; timerSize?: 'sm' | 'display' } = {}): string {
   const snap = opts.countUpMs != null
     ? snapshot({ config: countUp, totalMs: opts.countUpMs })
     : snapshot({ totalMs: opts.overtimeMs != null ? 25 * MIN + opts.overtimeMs : undefined,
@@ -105,6 +105,7 @@ export function renderFocusCard(opts: { missingTask?: boolean; live?: boolean; r
       onAction={never}
       onCompleteSubtask={noop}
       onMenu={noop}
+      timerSize={opts.timerSize}
     />,
   )
 }
@@ -136,7 +137,7 @@ export function renderCompactFocus(): string {
 }
 
 /** The `+` popover body, fed by the same `focusAddState` the tray uses. */
-export function renderAddPanel(opts: { source?: 'project' | 'local'; readOnly?: boolean } = {}): string {
+export function renderAddPanel(opts: { source?: 'project' | 'local'; readOnly?: boolean; stillOpenExpanded?: boolean } = {}): string {
   const source: FocusSource = opts.source === 'project' ? { kind: 'project', project_id: 'p1' } : opts.source === 'local' ? { kind: 'local' } : { kind: 'today' }
   const state = focusAddState(tasks, source, TODAY, snapshot(), sections)
   const blocked = queueBlockedReason(opts.readOnly ? caps({ queue_write: false, reason: 'Replica is read-only' }) : caps())
@@ -155,6 +156,7 @@ export function renderAddPanel(opts: { source?: 'project' | 'local'; readOnly?: 
       onQuickAdd={never}
       draft=""
       onDraftChange={noop}
+      initialStillOpenExpanded={opts.stillOpenExpanded}
     />,
   )
 }

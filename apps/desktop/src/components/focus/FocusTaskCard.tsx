@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { Caption, Label, Meta } from '@/components/shared/typography'
-import { FocusTimeboxPicker } from '@/components/focus/FocusTimeboxPicker'
+import { FocusTimeboxPicker, type FocusTimerSize } from '@/components/focus/FocusTimeboxPicker'
 import { cn } from '@/lib/utils'
 import {
   cardCaption,
@@ -65,13 +65,6 @@ export function CompletionButton({
     </button>
   )
 }
-
-/**
- * Quiet task actions: the ⋯ shows on keyboard focus and while its menu is
- * open; pair it with the parent's `group-hover:opacity-100` variant.
- */
-export const TASK_MENU_REVEAL =
-  'opacity-0 transition-opacity duration-(--transition-fast) focus-within:opacity-100 has-[[data-popup-open]]:opacity-100 motion-reduce:transition-none'
 
 /** One "More actions" menu for the card and each row. Clicks never reach the row. */
 export function FocusTaskMenu({
@@ -241,13 +234,15 @@ export interface FocusTaskCardProps {
   headingRef?: Ref<HTMLHeadingElement>
   /** A focus action is awaiting its commit: gate the controls that would repeat it. */
   busy?: boolean
+  /** `display` (48px) for the full view; `sm` (36px) for the rail and companion. */
+  timerSize?: FocusTimerSize
 }
 
 /**
  * The focused task, quiet around a hero title: a small muted place label,
- * completion + title (full width — task actions live in one ⋯ revealed on
- * hover/focus at the top-right), inline subtasks, then the timer with one
- * caption line (budget · priority · due) and the circular Start/Pause.
+ * completion + title (full width — nothing sits beside it), inline
+ * subtasks, then the timer with one caption line (budget · priority · due)
+ * and, bottom-right, the task ⋯ beside the circular Start/Pause.
  * Surface controls (add, queue toggle, sounds) live in the surface header.
  * Rendering it never starts timing.
  */
@@ -267,6 +262,7 @@ export function FocusTaskCard({
   onRenameCancel,
   headingRef,
   busy = false,
+  timerSize = 'sm',
 }: FocusTaskCardProps) {
   const reasonId = useId()
   const displayExtra = useFocusDisplayExtra(snapshot, entry, capabilities?.live_timing === true)
@@ -317,9 +313,9 @@ export function FocusTaskCard({
   const description = task.description?.trim() ?? ''
 
   return (
-    <section aria-label="Focused task" className="group/card relative px-4 pt-1 pb-4">
+    <section aria-label="Focused task" className="px-4 pt-1 pb-4">
       {placeLabel && (
-        <Label as="p" data-slot="focus-place" className="block truncate pr-8">
+        <Label as="p" data-slot="focus-place" className="block truncate">
           {placeLabel}
         </Label>
       )}
@@ -338,26 +334,12 @@ export function FocusTaskCard({
             <InlineRename task={task} className="text-title" onCommit={(c) => onRename(task, c)} onCancel={onRenameCancel} />
           ) : (
             <h2 ref={headingRef} tabIndex={-1} className="text-title break-words text-foreground outline-none">
-              {/* Without a place label the ⋯ sits on the title's first line: keep that corner clear. */}
-              {!placeLabel && <span aria-hidden className="float-right h-5 w-6" />}
               {task.content}
             </h2>
           )}
           {description && <FocusTaskDescription key={task.id} text={description} />}
         </div>
       </div>
-      {/* Task actions sit top-right, out of the title's way until hover or
-          keyboard focus; in the DOM they follow the title, so Tab order
-          reads completion → title → actions. An explicit tabIndex keeps the
-          trigger a Tab stop in WKWebView, which skips plain buttons unless
-          macOS keyboard navigation is on (it now holds Copy context). */}
-      <FocusTaskMenu
-        task={task}
-        place="card"
-        tabIndex={0}
-        onSelect={(id) => onMenu(id, task, entry)}
-        className={cn('absolute top-0.5 right-3 group-hover/card:opacity-100', TASK_MENU_REVEAL)}
-      />
 
       {subtasks.length > 0 && (
         <ul aria-label="Subtasks" className="mt-2.5 ml-7.5 flex flex-col gap-1.5">
@@ -385,19 +367,27 @@ export function FocusTaskCard({
             ) : null
           }
           disabledReason={writeBlocked}
+          size={timerSize}
           onConfigure={(config) => void onAction({ kind: 'configure', occurrence_id: entry.occurrence_id, config })}
         />
-        <Button
-          aria-label={control.label}
-          aria-describedby={blocked ? reasonId : undefined}
-          aria-busy={busy || undefined}
-          disabled={blocked != null || busy}
-          variant={running ? 'secondary' : 'default'}
-          onClick={() => void onAction(control.action)}
-          className="mb-0.5 size-10 shrink-0 rounded-full p-0"
-        >
-          {running ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
-        </Button>
+        {/* Task actions sit with the controls: a quiet, always-visible ⋯
+            just left of Start/Pause. The explicit tabIndex keeps it a Tab
+            stop in WKWebView, which skips plain buttons unless macOS
+            keyboard navigation is on (it holds Copy assistant context). */}
+        <div className="mb-0.5 flex shrink-0 items-center gap-1.5">
+          <FocusTaskMenu task={task} place="card" tabIndex={0} onSelect={(id) => onMenu(id, task, entry)} />
+          <Button
+            aria-label={control.label}
+            aria-describedby={blocked ? reasonId : undefined}
+            aria-busy={busy || undefined}
+            disabled={blocked != null || busy}
+            variant={running ? 'secondary' : 'default'}
+            onClick={() => void onAction(control.action)}
+            className="size-10 shrink-0 rounded-full p-0"
+          >
+            {running ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
+          </Button>
+        </div>
       </div>
       {blocked && (
         <Caption as="p" id={reasonId} className="mt-1.5 text-right">

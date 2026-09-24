@@ -289,18 +289,31 @@ test('surface ⋯: extras first, queue toggle, mute checkbox, sync note; disable
   assert.equal(enabled.find((i) => i.kind === 'mute')?.checked, false)
 })
 
-test('+ panel: quick add field, source picker with Add all, still-open list with per-task add', () => {
+test('+ panel: quick add field, source picker with Add all, collapsed still-open toggle', () => {
   const html = rendered.renderAddPanel()
   assert.match(html, /<textarea\b[^>]*aria-label="Add task to Today"[^>]*placeholder="Add task to Today"/)
   assert.match(html, /aria-label="Add tasks from: Today"/)
   assert.match(html, />From: Today</)
   assert.match(html, /<button\b[^>]*title="Adds to the end of the queue"[^>]*>Add 1<\/button>/)
   assert.match(html, /aria-label="Still open"/)
-  assert.match(html, />Still open · 1</)
-  assert.match(html, /aria-label="Add Earlier thing to queue"/)
-  assert.match(html, />Queue all</)
+  // Collapsed on open: a real button (Enter/Space expand it), no list and no Queue all yet.
+  const toggle = html.match(/<button\b[^>]*aria-expanded="false"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? ''
+  assert.match(toggle, /Still open · 1/)
+  assert.match(toggle, /type="button"/)
+  assert.match(toggle, /aria-controls="[^"]+"/)
+  assert.doesNotMatch(html, /aria-label="Add Earlier thing to queue"/)
+  assert.doesNotMatch(html, />Queue all</)
   assert.doesNotMatch(html, /disabled=""/)
   assert.doesNotMatch(html, /candidate|Queue these|overdue/i)
+})
+
+test('+ panel still open, expanded: list with per-task add and Queue all, controlled by the toggle', () => {
+  const html = rendered.renderAddPanel({ stillOpenExpanded: true })
+  const toggle = html.match(/<button\b[^>]*aria-expanded="true"[^>]*>/)?.[0] ?? ''
+  const controls = toggle.match(/aria-controls="([^"]+)"/)?.[1]
+  assert.ok(controls)
+  assert.match(html, new RegExp(`<ul\\b[^>]*id="${controls}"[^>]*>[\\s\\S]*aria-label="Add Earlier thing to queue"`))
+  assert.match(html, />Queue all</)
 })
 
 test('+ panel follows the source: project placeholder and count, no still-open outside Today', () => {
@@ -313,8 +326,10 @@ test('+ panel follows the source: project placeholder and count, no still-open o
 })
 
 test('+ panel read-only: every add control is disabled with the reason shown, nothing hidden', () => {
-  const html = rendered.renderAddPanel({ readOnly: true })
+  const html = rendered.renderAddPanel({ readOnly: true, stillOpenExpanded: true })
   assert.match(html, /role="note"[^>]*>Replica is read-only</)
+  // Expanding the list is a view toggle, not a write: it stays usable.
+  assert.doesNotMatch(html.match(/<button\b[^>]*aria-expanded="true"[^>]*>/)?.[0] ?? '', /disabled/)
   assert.match(html.match(/<textarea\b[^>]*>/)?.[0] ?? '', /disabled=""/)
   assert.match(html.match(/<button\b[^>]*>Add 1<\/button>/)?.[0] ?? '', /disabled=""[^>]*title="Replica is read-only"|title="Replica is read-only"[^>]*disabled=""/)
   assert.match(html.match(/<button\b[^>]*>Queue all<\/button>/)?.[0] ?? '', /disabled=""/)

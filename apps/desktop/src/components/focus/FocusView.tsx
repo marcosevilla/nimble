@@ -120,6 +120,7 @@ export function FocusView() {
             </IconButton>
           }
           menuExtras={menuExtras}
+          timerSize="display"
         />
       </div>
       {importOpen && <FocusImportDialog open={importOpen} onOpenChange={setImportOpen} />}

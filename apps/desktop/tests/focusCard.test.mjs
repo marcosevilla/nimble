@@ -35,11 +35,11 @@ test('task identity precedes prominent timer and compact keeps the header + and 
   assert.doesNotMatch(html, /Up next/)
 })
 
-test('card order: place label, completion, title, description, actions, inline subtask, timer, caption, Start', () => {
+test('card order: place label, completion, title, description, inline subtask, timer, caption, task ⋯, Start', () => {
   const html = rendered.renderFocusCard()
   const order = ['Deep work / Writing', 'Complete Example task', '>Example task</h2>', 'Draft the outline',
-    'More actions for Example task', 'Complete Outline sections', 'Outline sections', 'Focus timer', '25m timebox', '2:00 PM',
-    'aria-label="Start"']
+    'Complete Outline sections', 'Outline sections', 'Focus timer', '25m timebox', '2:00 PM',
+    'More actions for Example task', 'aria-label="Start"']
     .map((label) => html.indexOf(label))
   assert.ok(order.every((x, i) => x >= 0 && (i === 0 || x >= order[i - 1])), `order ${order}`)
 })
@@ -52,15 +52,20 @@ test('nothing sits beside the title: no copy button and no queue toggle on the c
   assert.doesNotMatch(h2, /<button/)
 })
 
-test('task ⋯ is revealed on card hover, keyboard focus or while open, and follows the title in Tab order', () => {
-  const html = rendered.renderFocusCard()
-  const section = html.match(/<section\b[^>]*aria-label="Focused task"[^>]*>/)?.[0] ?? ''
-  assert.match(section, /group\/card/)
-  const wrapper = html.match(/<div\b[^>]*class="([^"]*)"[^>]*><button\b[^>]*aria-label="More actions for Example task"/)?.[1] ?? ''
-  for (const cls of ['absolute', 'opacity-0', 'group-hover/card:opacity-100', 'focus-within:opacity-100', 'has-[[data-popup-open]]:opacity-100']) {
-    assert.ok(wrapper.split(/\s+/).includes(cls), `${cls} in ${wrapper}`)
+test('task ⋯ sits immediately left of Start/Pause, always visible and a Tab stop; one ⋯ on the card', () => {
+  for (const html of [rendered.renderFocusCard(), rendered.renderFocusCard({ running: true })]) {
+    assert.equal((html.match(/aria-label="More actions for Example task"/g) ?? []).length, 1)
+    const trigger = html.match(/<button\b[^>]*aria-label="More actions for Example task"[^>]*>/)?.[0] ?? ''
+    assert.match(trigger, /tabindex="0"/)
+    // Same control cluster as the play circle, and nothing between them.
+    const cluster = html.match(/<div\b[^>]*class="[^"]*"[^>]*><div\b[^>]*><button\b[^>]*aria-label="More actions for Example task"[\s\S]*?aria-label="(Start|Pause)"/)?.[0] ?? ''
+    assert.ok(cluster, 'menu and play share one wrapper')
+    const between = cluster.slice(cluster.indexOf('More actions'), cluster.lastIndexOf('aria-label="'))
+    assert.equal((between.match(/<button\b/g) ?? []).length, 1, 'no other control between ⋯ and play')
+    // Never hover-hidden or absolutely placed any more.
+    const wrapper = html.match(/<div\b[^>]*class="([^"]*)"[^>]*><button\b[^>]*aria-label="More actions for Example task"/)?.[1] ?? ''
+    for (const cls of ['absolute', 'opacity-0']) assert.ok(!wrapper.split(/\s+/).includes(cls), `${cls} not in ${wrapper}`)
   }
-  assert.ok(html.indexOf('>Example task</h2>') < html.indexOf('More actions for Example task'))
 })
 
 test('copy assistant context moved into the task menu, first', () => {
@@ -76,6 +81,15 @@ test('title is multiline heading text, timer is tabular (one step under display)
   const timer = html.match(/<button\b[^>]*aria-label="Focus timer[^"]*"[^>]*>[^<]*/)?.[0] ?? ''
   assert.match(timer, /\btext-timer-sm\b/)
   assert.match(timer, /12:34/)
+})
+
+test('timer size: 36px text-timer-sm by default (rail, companion); 48px text-timer for the full view', () => {
+  const timerOf = (html) => html.match(/<button\b[^>]*aria-label="Focus timer[^"]*"[^>]*>/)?.[0] ?? ''
+  const display = timerOf(rendered.renderFocusCard({ timerSize: 'display' }))
+  assert.match(display, /\btext-timer\b(?!-)/)
+  assert.doesNotMatch(display, /text-timer-sm/)
+  assert.match(timerOf(rendered.renderCompactFocus()), /\btext-timer-sm\b/)
+  assert.match(timerOf(rendered.renderQueueTray()), /\btext-timer-sm\b/)
 })
 
 test('one caption line under the timer joins the budget, priority and due', () => {

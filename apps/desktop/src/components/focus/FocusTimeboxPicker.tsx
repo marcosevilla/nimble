@@ -21,7 +21,11 @@ const PHASE_CLASS: Record<TimerPhase, string> = {
   overtime: 'text-destructive',
 }
 
+/** `display` = --text-timer (48, full view); `sm` = --text-timer-sm (36, rail and companion). */
+export type FocusTimerSize = 'sm' | 'display'
+
 interface FocusTimeboxPickerProps {
+  size?: FocusTimerSize
   config: FocusConfig
   presentation: TimerPresentation
   /** The line under the timer (budget caption joined with the task's meta). */
@@ -36,7 +40,7 @@ interface FocusTimeboxPickerProps {
  * 15/25/45/60, custom minutes and count-up; Pomodoro is a secondary option.
  * Changing a budget never starts, pauses or resets timing.
  */
-export function FocusTimeboxPicker({ config, presentation, caption, disabledReason, onConfigure }: FocusTimeboxPickerProps) {
+export function FocusTimeboxPicker({ config, presentation, caption, disabledReason, onConfigure, size = 'sm' }: FocusTimeboxPickerProps) {
   const [open, setOpen] = useState(false)
   const [custom, setCustom] = useState('')
   const [customError, setCustomError] = useState<string | null>(null)
@@ -64,7 +68,8 @@ export function FocusTimeboxPicker({ config, presentation, caption, disabledReas
           disabled={disabledReason != null}
           data-phase={presentation.phase}
           className={cn(
-            'rounded-md text-timer-sm transition-opacity duration-(--transition-fast) hover:opacity-70 focus-ring disabled:hover:opacity-100 motion-reduce:transition-none',
+            size === 'display' ? 'text-timer' : 'text-timer-sm',
+            'rounded-md transition-opacity duration-(--transition-fast) hover:opacity-70 focus-ring disabled:hover:opacity-100 motion-reduce:transition-none',
             PHASE_CLASS[presentation.phase],
           )}
         >

@@ -1,5 +1,5 @@
-import { useRef, useState, type RefObject } from 'react'
-import { ChevronDown, Plus } from 'lucide-react'
+import { useId, useRef, useState, type RefObject } from 'react'
+import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -56,6 +56,8 @@ export interface FocusAddPanelProps {
   draft: string
   onDraftChange: (text: string) => void
   inputRef?: RefObject<HTMLTextAreaElement | null>
+  /** Still open starts collapsed each time the panel opens (tests may start it open). */
+  initialStillOpenExpanded?: boolean
 }
 
 /**
@@ -79,9 +81,12 @@ export function FocusAddPanel({
   draft,
   onDraftChange,
   inputRef,
+  initialStillOpenExpanded = false,
 }: FocusAddPanelProps) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [stillOpenExpanded, setStillOpenExpanded] = useState(initialStillOpenExpanded)
+  const stillOpenId = useId()
   const label = sourceLabel(source, displayProjects ?? projects)
   const placeholder = source.kind === 'today' ? 'Add task to Today' : source.kind === 'local' ? 'Add a Nimble-only task' : `Add task to ${label}`
   const addLabel = addToQueueLabel(newCount, sourceCount)
@@ -180,35 +185,49 @@ export function FocusAddPanel({
 
       {stillOpen.length > 0 && (
         <section aria-label="Still open" className="-mx-2.5 border-t border-border px-2.5 pt-2">
-          <div className="flex items-center justify-between gap-2">
-            <Label>{`Still open · ${stillOpen.length}`}</Label>
-            <Button
-              size="xs"
-              variant="ghost"
-              disabled={blockedReason != null}
-              title={blockedReason ?? undefined}
-              onClick={() => onAddStillOpen(stillOpen.map((t) => t.id))}
+          <div className="flex min-h-6 items-center justify-between gap-2">
+            {/* Collapsed on every open: earlier work is offered, never pushed. */}
+            <button
+              type="button"
+              aria-expanded={stillOpenExpanded}
+              aria-controls={stillOpenId}
+              onClick={() => setStillOpenExpanded((v) => !v)}
+              className="-ml-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-muted-foreground transition-colors duration-(--transition-fast) hover:text-foreground focus-ring"
             >
-              Queue all
-            </Button>
+              <Label tone={null} className="text-inherit">{`Still open · ${stillOpen.length}`}</Label>
+              <ChevronRight className={cn('size-3 shrink-0 transition-transform duration-(--transition-fast) motion-reduce:transition-none', stillOpenExpanded && 'rotate-90')} aria-hidden />
+            </button>
+            {stillOpenExpanded && (
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={blockedReason != null}
+                title={blockedReason ?? undefined}
+                onClick={() => onAddStillOpen(stillOpen.map((t) => t.id))}
+              >
+                Queue all
+              </Button>
+            )}
           </div>
-          <ul className="-mx-1 mt-1 max-h-40 overflow-y-auto">
-            {stillOpen.map((task) => (
-              <li key={task.id} className="flex min-w-0 items-center gap-2 px-1 py-0.5">
-                <span className="min-w-0 flex-1 truncate text-meta text-foreground">{task.content}</span>
-                <Meta className="shrink-0">{dueLabel(task, today)}</Meta>
-                <IconButton
-                  aria-label={`Add ${task.content} to queue`}
-                  disabled={blockedReason != null}
-                  title={blockedReason ?? undefined}
-                  onClick={() => onAddStillOpen([task.id])}
-                  className="focus-ring disabled:opacity-50"
-                >
-                  <Plus className="size-3" aria-hidden />
-                </IconButton>
-              </li>
-            ))}
-          </ul>
+          {stillOpenExpanded && (
+            <ul id={stillOpenId} className="-mx-1 mt-1 max-h-40 overflow-y-auto">
+              {stillOpen.map((task) => (
+                <li key={task.id} className="flex min-w-0 items-center gap-2 px-1 py-0.5">
+                  <span className="min-w-0 flex-1 truncate text-meta text-foreground">{task.content}</span>
+                  <Meta className="shrink-0">{dueLabel(task, today)}</Meta>
+                  <IconButton
+                    aria-label={`Add ${task.content} to queue`}
+                    disabled={blockedReason != null}
+                    title={blockedReason ?? undefined}
+                    onClick={() => onAddStillOpen([task.id])}
+                    className="focus-ring disabled:opacity-50"
+                  >
+                    <Plus className="size-3" aria-hidden />
+                  </IconButton>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
     </div>
