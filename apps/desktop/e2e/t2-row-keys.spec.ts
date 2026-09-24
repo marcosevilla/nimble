@@ -629,7 +629,12 @@ test('AC5 the ? help panel lists p, ⇧D, l and m under Tasks', async ({ app, pa
   const heading = page.getByRole('heading', { name: 'Tasks', exact: true, level: 3 })
   await expect(heading).toBeVisible()
   const rows = await heading.evaluate((h) =>
-    Array.from(h.parentElement!.querySelectorAll('kbd')).map((k) => ({ keys: k.textContent!.trim(), label: k.parentElement!.textContent!.replace(k.textContent!, '').trim() })),
+    // Label = the row's text minus the kbd element's own text node (a plain
+    // string replace also ate the first "p" in "Set priority").
+    Array.from(h.parentElement!.querySelectorAll('kbd')).map((k) => ({
+      keys: k.textContent!.trim(),
+      label: Array.from(k.parentElement!.childNodes).filter((n) => n !== k).map((n) => n.textContent).join('').trim(),
+    })),
   )
   const want: [string, RegExp][] = [['p', /priority/i], ['⇧D', /due/i], ['l', /label/i], ['m', /project/i]]
   for (const [k, label] of want) {
