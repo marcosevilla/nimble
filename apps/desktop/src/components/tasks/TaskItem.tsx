@@ -222,13 +222,14 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
       {(showGrip || selectable) && (
         <div className="absolute right-[calc(100%-0.75rem)] top-0 flex h-9 items-center gap-0.5">
           {/* dnd-kit's attributes make the grip a focusable button — so it
-              reveals on focus-within too, never an invisible tab stop. The
-              ring is inset: the grip sits at the scroller's edge. */}
+              reveals on focus-within too, never an invisible tab stop, and
+              shows at once (no fade) when it holds keyboard focus itself.
+              The ring is inset: the grip sits at the scroller's edge. */}
           {showGrip && (
             <button
               type="button"
               aria-label="Drag to reorder"
-              className="flex h-6 w-4 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:-outline-offset-2"
+              className="flex h-6 w-4 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:transition-none focus-visible:-outline-offset-2"
               onClick={(e) => e.stopPropagation()}
               {...dragHandleProps}
             >

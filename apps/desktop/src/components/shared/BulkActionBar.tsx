@@ -320,7 +320,7 @@ export function BulkActionBar() {
           icon={Trash2}
           label="Delete"
           onClick={handleDelete}
-          className="text-destructive/60 hover:text-destructive"
+          className="text-destructive hover:text-destructive"
         />
 
         <div className="mx-1 h-4 w-px bg-border/30" />
