@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { CalendarPanel } from '@/components/calendar/CalendarPanel'
-import { RIGHT_TABS, useLayoutStore, type RightTab } from '@/stores/layoutStore'
+import { RIGHT_TABS, rightRailWidth, useLayoutStore, type RightTab } from '@/stores/layoutStore'
 import { IconButton } from '@/components/shared/IconButton'
 import { Activity, CalendarDays, PanelRightClose, PanelRightOpen, Sparkles, Timer, type LucideIcon } from 'lucide-react'
 import { Icon } from '@/components/shared/Icon'
@@ -29,6 +29,7 @@ export function RightSidebar() {
   const collapsed = useLayoutStore((s) => s.rightCollapsed)
   const setCollapsed = useLayoutStore((s) => s.setRightCollapsed)
   const width = useLayoutStore((s) => s.rightWidth)
+  const railWidth = useLayoutStore(rightRailWidth)
   const setRightWidth = useLayoutStore((s) => s.setRightWidth)
   // One tabbed column on every page that has it (Agentation pass 1):
   // Calendar, Habits, Activity and the Focus queue.
@@ -83,7 +84,7 @@ export function RightSidebar() {
   return (
     <aside
       className="relative flex flex-col border-l border-secondary bg-background overflow-hidden transition-[width] duration-(--transition-slow) ease-(--ease-entrance)"
-      style={{ width: collapsed ? 36 : width }}
+      style={{ width: railWidth }}
     >
       {/* Collapsed state — expand button, then one button per tab */}
       {collapsed && (
@@ -181,4 +182,12 @@ export function RightSidebar() {
       )}
     </aside>
   )
+}
+
+/** The rail's slot, empty — for pages that show no rail (Settings). Same
+ *  width as the rail in its current state, so the page's centered column
+ *  starts at exactly the same x as on every other page. */
+export function RightRailSpacer() {
+  const railWidth = useLayoutStore(rightRailWidth)
+  return <div aria-hidden className="shrink-0" style={{ width: railWidth }} />
 }

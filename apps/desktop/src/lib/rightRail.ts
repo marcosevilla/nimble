@@ -3,7 +3,7 @@ import { useDetailStore } from '@/stores/detailStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 
-/** Pages that give the full width to their content and show no right column. */
+/** Pages that show no right column (its slot stays reserved — RightRailSpacer). */
 export function pageHidesRightRail(page: string): boolean {
   return page === 'settings'
 }

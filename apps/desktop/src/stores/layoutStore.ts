@@ -24,6 +24,15 @@ function loadNavTrees(): Record<NavTreeId, boolean> {
 
 // Right sidebar defaults (from RightSidebar.tsx)
 const RIGHT_DEFAULT_WIDTH = 288 // w-72
+/** Width of the collapsed right rail (icon strip). */
+export const RIGHT_COLLAPSED_WIDTH = 36
+
+/** The width the right rail occupies in its current state. Pages without the
+ *  rail (Settings) reserve this same width so their column lands on the same
+ *  x as every other page. */
+export function rightRailWidth(s: { rightCollapsed: boolean; rightWidth: number }): number {
+  return s.rightCollapsed ? RIGHT_COLLAPSED_WIDTH : s.rightWidth
+}
 
 // Default nav order — page IDs in display order (lib/navTargets owns it)
 export { DEFAULT_NAV_ORDER }

@@ -10,7 +10,7 @@ import { useAppStore } from '@/stores/appStore'
 import { navigateTo } from '@/stores/settingsNavStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { NavSidebar } from './NavSidebar'
-import { RightSidebar } from './RightSidebar'
+import { RightRailSpacer, RightSidebar } from './RightSidebar'
 import { CommandBar } from '@/components/shared/CommandBar'
 import { HelpPanel } from '@/components/shared/HelpPanel'
 import { useHelpPanelStore } from '@/stores/helpPanelStore'
@@ -347,12 +347,14 @@ export function Dashboard() {
       </div>
 
       {/* Right: Sidebar — detail view replaces Schedule/Habits when in sidebar mode */}
-      {!hideSidebar && (
-        detailTarget && detailMode === 'sidebar' ? (
-          <DetailSidebar />
-        ) : (
-          <RightSidebar />
-        )
+      {/* Settings shows no rail but keeps its slot, so its column shares
+          every other page's x (Marco 2026-09-24). */}
+      {hideSidebar ? (
+        <RightRailSpacer />
+      ) : detailTarget && detailMode === 'sidebar' ? (
+        <DetailSidebar />
+      ) : (
+        <RightSidebar />
       )}
 
       {/* Quick create task dialog — self-contained via useQuickCreateStore */}
