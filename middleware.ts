@@ -22,7 +22,8 @@
  */
 
 /**
- * Everything except the login endpoint itself. `/api/*` IS gated (that is the
+ * Everything except the login endpoint and `/api/capture` (the phone Shortcut
+ * has no cookie; that handler checks its own bearer token). `/api/*` IS gated (that is the
  * point — `/api/turso` is a full-database proxy), and so are the built assets;
  * the login page below is entirely self-contained (inline CSS, no scripts, no
  * images) so a logged-out visitor never needs an asset to reach the form.
@@ -33,7 +34,7 @@
  * rewrites, so it sees the real request path (`/tasks`), which is what we want.
  */
 export const config = {
-  matcher: ['/((?!api/login|_vercel/).*)'],
+  matcher: ['/((?!api/login|api/capture|_vercel/).*)'],
 }
 
 /** Must match api/login.ts, which mints it. */
@@ -183,8 +184,9 @@ export default async function middleware(request: Request): Promise<Response> {
   const isApi = url.pathname.startsWith('/api/')
 
   // Belt and braces: the matcher already skips this, but a matcher typo must
-  // not be able to lock the only unlock route behind the gate.
-  if (url.pathname === '/api/login') return proceed()
+  // not be able to lock the only unlock route behind the gate. /api/capture
+  // authenticates itself with CAPTURE_TOKEN.
+  if (url.pathname === '/api/login' || url.pathname === '/api/capture') return proceed()
 
   const secret = process.env.COOKIE_SECRET
   if (!secret) {
