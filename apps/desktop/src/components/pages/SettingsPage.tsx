@@ -64,6 +64,7 @@ import { useSettingsNavStore } from '@/stores/settingsNavStore'
 import { settingsFailure, settingsMessage } from '@/lib/settingsMessage'
 import type { SettingsFailure } from '@/lib/settingsMessage'
 import { validateRoutePrefix } from '@/lib/captureRoutes'
+import { useDeferredDeletes } from '@/hooks/useDeferredDeletes'
 
 // ── Types ──
 
@@ -727,14 +728,18 @@ function CaptureRoutesSection() {
     }
   }
 
-  const handleDelete = async (id: string) => {
-    try {
-      await dp.captureRoutes.delete(id)
-      setRoutes((prev) => prev.filter((r) => r.id !== id))
-      toast.success('Route deleted')
-    } catch (e) {
-      toastFailure(e)
-    }
+  // Deferred commit (T4): the row hides at once, the real delete runs when
+  // the Undo toast closes (or when Settings unmounts).
+  const { hidden, defer } = useDeferredDeletes()
+  const handleDelete = (route: CaptureRoute) => {
+    defer(route.id, `Route "${route.label}" deleted`, async () => {
+      try {
+        await dp.captureRoutes.delete(route.id)
+        setRoutes((prev) => prev.filter((r) => r.id !== route.id))
+      } catch (e) {
+        toastFailure(e)
+      }
+    })
   }
 
   if (loading) {
@@ -755,7 +760,7 @@ function CaptureRoutesSection() {
 
       {/* Route list */}
       <div className="space-y-2">
-        {routes.map((route) => {
+        {routes.filter((route) => !hidden.has(route.id)).map((route) => {
           const IconComponent = ROUTE_ICON_MAP[route.icon] ?? FileText
           const linkedDoc = docs.find((d) => d.id === route.doc_id)
           return (
@@ -802,13 +807,13 @@ function CaptureRoutesSection() {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Delete the "{route.label}" route?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        Captures starting with <code className="font-mono">{route.prefix}</code> will no longer route to {route.target_type === 'task' ? 'a task' : linkedDoc ? `"${linkedDoc.title}"` : 'this doc'}. Existing captures stay where they are. This can't be undone.
+                        Captures starting with <code className="font-mono">{route.prefix}</code> will no longer route to {route.target_type === 'task' ? 'a task' : linkedDoc ? `"${linkedDoc.title}"` : 'this doc'}. Existing captures stay where they are. You can undo this for a few seconds.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
                       <AlertDialogAction
-                        onClick={() => handleDelete(route.id)}
+                        onClick={() => handleDelete(route)}
                         className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                       >
                         Delete route
@@ -820,7 +825,7 @@ function CaptureRoutesSection() {
             </div>
           )
         })}
-        {routes.length === 0 && (
+        {routes.every((route) => hidden.has(route.id)) && (
           <p className="text-body text-muted-foreground">No capture routes configured yet.</p>
         )}
       </div>

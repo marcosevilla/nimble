@@ -22,6 +22,7 @@ import { IconButton } from '@/components/shared/IconButton'
 import { Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { settingsFailure } from '@/lib/settingsMessage'
+import { useDeferredDeletes } from '@/hooks/useDeferredDeletes'
 
 function toastFailure(error: unknown) {
   const failure = settingsFailure(error)
@@ -83,15 +84,20 @@ export function LabelManager() {
     }
   }, [dp])
 
-  const handleDelete = useCallback(async (label: Label) => {
-    try {
-      await dp.labels.delete(label.id)
-      setLabels((prev) => prev.filter((l) => l.id !== label.id))
-      toast.success(`Label deleted: "${label.name}"`)
-    } catch (e) {
-      toastFailure(e)
-    }
-  }, [dp])
+  // Deferred commit (T4): the row hides at once, the real delete runs when
+  // the Undo toast closes (or when Settings unmounts).
+  const { hidden, defer } = useDeferredDeletes()
+  const handleDelete = useCallback((label: Label) => {
+    defer(label.id, `Label "${label.name}" deleted`, async () => {
+      try {
+        await dp.labels.delete(label.id)
+        setLabels((prev) => prev.filter((l) => l.id !== label.id))
+      } catch (e) {
+        toastFailure(e)
+      }
+    })
+  }, [dp, defer])
+  const visibleLabels = labels.filter((l) => !hidden.has(l.id))
 
   if (loading) {
     return (
@@ -106,7 +112,7 @@ export function LabelManager() {
     <div className="space-y-4">
       {/* Label list */}
       <div className="space-y-0.5">
-        {labels.map((label) => (
+        {visibleLabels.map((label) => (
           <LabelRow
             key={label.id}
             label={label}
@@ -115,7 +121,7 @@ export function LabelManager() {
             onDelete={() => handleDelete(label)}
           />
         ))}
-        {labels.length === 0 && (
+        {visibleLabels.length === 0 && (
           <p className="text-body text-muted-foreground">No labels yet.</p>
         )}
       </div>
@@ -254,7 +260,7 @@ function LabelRow({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete "{label.name}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the label from any tasks that use it. This can't be undone.
+              This removes the label from any tasks that use it. You can undo this for a few seconds.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

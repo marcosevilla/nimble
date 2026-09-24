@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { toast } from 'sonner'
 import type { ReminderCatchUpItem } from '@nimble/types'
 import { useDataProvider } from '@/services/provider-context'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataVersion } from '@/hooks/useDataVersion'
 import { formatReminderTime } from '@/lib/reminderTime'
 import { createUndoable } from '@/lib/undoable'
+import { showUndoToast } from '@/components/shared/undoToast'
 import { Button } from '@/components/ui/button'
 import { Meta, SectionTitle } from '@/components/shared/typography'
 
@@ -68,19 +68,10 @@ export function ReminderCatchUp() {
       },
     })
 
-    // The toast owns the window: Sonner pauses its timer while hovered or
-    // while the window is hidden, so the commit follows the toast closing
-    // rather than a parallel wall-clock timer. The toast lives in the global
-    // Toaster, so leaving Today mid-window still commits once.
-    toast(keys.length === 1 ? 'Reminder dismissed' : `${keys.length} reminders dismissed`, {
-      duration: UNDO_WINDOW_MS,
-      onAutoClose: () => { pending.commit() },
-      onDismiss: () => { pending.commit() },
-      action: {
-        label: 'Undo',
-        onClick: () => { pending.undo() },
-      },
-    })
+    // The toast owns the window (showUndoToast: commit on close, Undo is a
+    // Tab-reachable button). It lives in the global Toaster, so leaving
+    // Today mid-window still commits once.
+    showUndoToast(keys.length === 1 ? 'Reminder dismissed' : `${keys.length} reminders dismissed`, pending, UNDO_WINDOW_MS)
   }
 
   return (
