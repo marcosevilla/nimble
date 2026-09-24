@@ -111,7 +111,7 @@ export function DocEditor() {
   if (!currentDoc) {
     return (
       <div className="flex flex-1 flex-col overflow-y-auto">
-        <PageColumn width="wide">
+        <PageColumn>
           <EmptyState
             icon={FileText}
             action={
@@ -141,7 +141,9 @@ export function DocEditor() {
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
-      <PageColumn width="wide" className="space-y-4">
+      {/* Page column (960) so the eyebrow and title align with every other
+          page; the document itself keeps a 720 reading measure, left-aligned. */}
+      <PageColumn className="[&>*]:max-w-measure space-y-4">
         {/* Folder badge */}
         {folder && (
           <p className="text-meta text-muted-foreground">{folder.name}</p>

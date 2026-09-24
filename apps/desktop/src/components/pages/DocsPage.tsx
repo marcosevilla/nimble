@@ -75,7 +75,6 @@ export function DocsPage() {
       {/* Main column: PageHeader + editor */}
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
         <PageHeader
-          width="wide"
           title="Docs"
           meta={currentVaultNote ? currentVaultNote.title : currentDoc ? currentDoc.title : undefined}
         />

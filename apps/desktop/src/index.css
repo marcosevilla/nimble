@@ -53,11 +53,13 @@
        box under-reports the painted digits and tight fits clip them. */
     --text-timer--line-height: 1.2;
 
-    /* Page frame widths (facelift C1). One reading column for every page;
-       `wide` only for Settings and the document editor. Border-box: the
-       frame's px-6 gutter sits inside these widths. */
-    --container-page:      40rem;   /* 640 */
-    --container-page-wide: 48rem;   /* 768 */
+    /* Page frame width (loop 2, Marco 2026-09-24): ONE column for every
+       page, page header and detail view. Border-box: the frame's px-6
+       gutter sits inside it, so content is 912px wide at most. */
+    --container-page:      60rem;   /* 960 */
+    /* Reading measure for long-form prose (the Docs / vault editor) —
+       left-aligned inside the page column, never centred on its own. */
+    --container-measure:   45rem;   /* 720 */
 }
 
 @theme inline {

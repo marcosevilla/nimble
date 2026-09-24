@@ -34,6 +34,7 @@ import { FocusView } from '@/components/focus/FocusView'
 import { FocusBanner } from '@/components/focus/FocusBanner'
 import { FocusResumeDialog } from '@/components/focus/FocusResumeDialog'
 import { SyncHealthBanner } from '@/components/shared/SyncHealthBanner'
+import { PageColumn } from '@/components/shared/PageFrame'
 import { useDetailStore } from '@/stores/detailStore'
 import { TaskDetailPage } from '@/components/detail/TaskDetailPage'
 import { CaptureDetailPage } from '@/components/detail/CaptureDetailPage'
@@ -284,7 +285,6 @@ export function Dashboard() {
   }, [])
 
   const hideSidebar = pageHidesRightRail(currentPage)
-  const contentMaxW = hideSidebar ? 'max-w-3xl' : 'max-w-2xl'
   const pageOwnsScroll = currentPage === 'tasks' || currentPage === 'docs'
 
   return (
@@ -309,7 +309,14 @@ export function Dashboard() {
             `sticky top-0` holds for the whole scroll (settings P2-3). Tasks
             and Docs own an inner scroller, so their <main> is pinned to the
             viewport height instead (min-h-0). */}
-        <div ref={scrollRef} data-page-scroller className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+        {/* Tasks reserves its scrollbar gutter on its own inner scrollers;
+            reserving one here too would narrow its column by a second
+            gutter and knock it off the shared axis. */}
+        <div
+          ref={scrollRef}
+          data-page-scroller
+          className={cn('flex flex-1 flex-col overflow-x-hidden overflow-y-auto', currentPage !== 'tasks' && '[scrollbar-gutter:stable]')}
+        >
           {focusExpanded ? (
             <FocusView />
           ) : detailTarget && detailMode === 'body' && !(currentPage === 'tasks' && detailTarget.type === 'task') ? (
@@ -319,10 +326,11 @@ export function Dashboard() {
             // round 3, item 4). Every other body-mode detail — including
             // task details opened from other pages — keeps this full-width
             // replacement behavior.
-            <main key={`detail-${detailTarget.id}`} className="flex-1 min-w-0 p-6">
-              <div className={cn('mx-auto w-full', contentMaxW)}>
+            // Same 960 column + 24px gutter as every page (PageColumn).
+            <main key={`detail-${detailTarget.id}`} className="flex-1 min-w-0">
+              <PageColumn>
                 {detailTarget.type === 'task' ? <TaskDetailPage /> : detailTarget.type === 'goal' ? <GoalDetailPage /> : <CaptureDetailPage />}
-              </div>
+              </PageColumn>
             </main>
           ) : (
             <main

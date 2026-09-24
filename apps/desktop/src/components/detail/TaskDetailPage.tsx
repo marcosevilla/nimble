@@ -419,7 +419,7 @@ export function TaskDetailPage() {
   return (
     <>
     {deleteDialog}
-    <div className="mx-auto w-full max-w-[600px] pt-[30px] flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       {/* Top row: breadcrumb (left) + Focus control and gear trigger
           (right) — no paperclip (Decision 13). */}
       <div className="flex items-center justify-between gap-2 min-h-6">
@@ -506,8 +506,10 @@ export function TaskDetailPage() {
         labels={labels}
       />
 
-      {/* Description + Subtasks — 48px gap between the two blocks (frame 79:2009) */}
-      <div className="flex flex-col gap-12">
+      {/* Description + Subtasks — 48px gap between the two blocks (frame 79:2009).
+          The description (first child, any of its three states) keeps the
+          720 reading measure inside the 960 column; subtasks use the full row. */}
+      <div className="flex flex-col gap-12 [&>*:first-child]:max-w-measure">
         {/* Description — rich text with @mentions. Markdown-canonical
             (descFormat === 'markdown'): display is a read-only rendered
             markdown view; clicking anywhere swaps to a raw auto-grown
