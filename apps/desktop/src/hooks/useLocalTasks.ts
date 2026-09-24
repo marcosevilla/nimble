@@ -37,6 +37,10 @@ export function useLocalTasks(opts?: { projectId?: string; dueDate?: string; inc
   const [tasks, setTasks] = useState<LocalTask[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // The `dueDate` the current list was loaded for. `loading` is only true on
+  // the first load, so after a date change this is how a caller knows the
+  // list is still the previous day's.
+  const [loadedFor, setLoadedFor] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -58,6 +62,7 @@ export function useLocalTasks(opts?: { projectId?: string; dueDate?: string; inc
       setError(String(e))
     } finally {
       setLoading(false)
+      setLoadedFor(opts?.dueDate ?? null)
     }
   }, [dp, opts?.projectId, opts?.dueDate, opts?.includeCompleted])
 
@@ -151,7 +156,7 @@ export function useLocalTasks(opts?: { projectId?: string; dueDate?: string; inc
     }
   }, [dp, refresh])
 
-  return { tasks, loading, error, refresh, addTask, update, complete, uncomplete, remove }
+  return { tasks, loading, loadedFor, error, refresh, addTask, update, complete, uncomplete, remove }
 }
 
 export function useProjects() {

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocalToday } from '@/hooks/useLocalToday'
 import { useAppStore } from '@/stores/appStore'
-import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
+import { useProjects } from '@/hooks/useLocalTasks'
 import { useDataProvider } from '@/services/provider-context'
-import type { Priority } from '@nimble/types'
+import type { CalendarEvent, LocalTask, Priority } from '@nimble/types'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
@@ -98,24 +98,29 @@ export function PrioritiesSkeleton() {
   )
 }
 
-/** Top priorities. Live, it auto-generates at most once per mount when the
- *  day has no cached set (TodayPage keys it by date, so a new day starts
- *  fresh); without a key it shows a calm line and never retries on its own.
+/** Top priorities. Live, it auto-generates at most once per day when the
+ *  day has no cached set (TodayPage keys it by date and mounts it only once
+ *  the day's data has loaded); without a key it shows a calm line and never
+ *  retries on its own. It generates from exactly the `events` and `tasks`
+ *  TodayPage shows, so a new day can't use yesterday's schedule.
  *  `readOnly` (snapshots) renders the given set and never generates. */
 export function PrioritiesBox({
   priorities: initial,
+  events = [],
+  tasks = [],
   onGenerated,
   readOnly = false,
 }: {
   priorities: Priority[] | null
+  /** Today's events and tasks, the generation input. Unused when `readOnly`. */
+  events?: CalendarEvent[]
+  tasks?: LocalTask[]
   onGenerated?: (priorities: Priority[]) => void
   readOnly?: boolean
 }) {
   const dp = useDataProvider()
-  const calendarEvents = useAppStore((s) => s.calendarEvents)
   const obsidianToday = useAppStore((s) => s.obsidianToday)
   const today = useLocalToday() // local date, like the Due today list (C2)
-  const { tasks, loading: tasksLoading } = useLocalTasks({ dueDate: today, includeCompleted: false })
   // Display-only lookup (resolving a task's own project name), not a
   // picker — `allProjects` so a task still in an archived project doesn't
   // lose its name here.
@@ -138,19 +143,21 @@ export function PrioritiesBox({
     autoTried = { date: today, noKey: false }
     try {
       const result = await dp.dailyState.generatePriorities(
-        buildCalendarSummary(calendarEvents), buildTasksSummary(tasks, projectNames), buildObsidianSummary(obsidianToday))
+        buildCalendarSummary(events), buildTasksSummary(tasks, projectNames), buildObsidianSummary(obsidianToday))
       setPriorities(result); onGenerated?.(result)
     } catch (e) {
       if (String(e).includes('not configured')) { setNoKey(true); autoTried = { date: today, noKey: true } }
       else setError('Couldn’t reach the AI just now.')
     } finally { setLoading(false) }
-  }, [dp, today, calendarEvents, tasks, projectNames, obsidianToday, onGenerated])
+  }, [dp, today, events, tasks, projectNames, obsidianToday, onGenerated])
 
-  // Wait for the task list: generating over an empty first render would
-  // tell the AI nothing is due.
+  // `autoTried` is re-checked here, not only via `tried` state: an effect
+  // that runs twice before re-rendering (StrictMode's mount check) would
+  // otherwise see a stale `tried` and call twice.
   useEffect(() => {
-    if (!readOnly && !tasksLoading && shouldAutoGenerate({ cached: priorities !== null, tried, noKey })) void generate()
-  }, [readOnly, tasksLoading, priorities, tried, noKey, generate])
+    const triedToday = tried || autoTried?.date === today
+    if (!readOnly && shouldAutoGenerate({ cached: priorities !== null, tried: triedToday, noKey })) void generate()
+  }, [readOnly, today, priorities, tried, noKey, generate])
 
   // Always reachable while live, so a key added in Settings can be used
   // today without waiting for tomorrow's auto-generation.

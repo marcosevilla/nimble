@@ -2,18 +2,22 @@ import type { CalendarEvent, Priority } from '@nimble/types'
 import { ChevronDown } from 'lucide-react'
 import { IconButton } from '@/components/shared/IconButton'
 import { Meta } from '@/components/shared/typography'
+import { Skeleton } from '@/components/ui/skeleton'
 import { hhmm, nextEvent, nowHHMM } from '@/lib/todayBrief'
 
 /** The compact brief: one line with the next event and up to three
- *  priority titles, so the task list below stays in view. */
+ *  priority titles, so the task list below stays in view. While the day's
+ *  calendar is `loading`, the event segment is a skeleton, not a guess. */
 export function BriefStrip({
   events,
   priorities,
   onExpand,
+  loading = false,
 }: {
   events: CalendarEvent[]
   priorities: Priority[] | null | undefined
   onExpand: () => void
+  loading?: boolean
 }) {
   const next = nextEvent(events, nowHHMM())
   const top = (priorities ?? []).slice(0, 3)
@@ -21,7 +25,9 @@ export function BriefStrip({
   return (
     <div className="surface-panel flex min-w-0 items-center gap-3 px-4 py-2">
       <span className="min-w-0 shrink truncate text-body">
-        {next ? (
+        {loading ? (
+          <Skeleton className="inline-block h-4 w-40 align-middle" />
+        ) : next ? (
           <>
             <Meta className="tabular-nums">Next: {hhmm(next.start_time)}</Meta> {next.summary}
           </>

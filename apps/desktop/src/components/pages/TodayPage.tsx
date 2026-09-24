@@ -22,7 +22,7 @@ import { useGreeting } from '@/hooks/useGreeting'
 import { useDataProvider } from '@/services/provider-context'
 import { shiftIsoDate } from '@/lib/briefDate'
 import { todayKey } from '@/lib/keyGuard'
-import { loadTodayCompact, saveTodayCompact, splitDueTasks } from '@/lib/todayBrief'
+import { briefReady, loadTodayCompact, saveTodayCompact, splitDueTasks } from '@/lib/todayBrief'
 import { cn } from '@/lib/utils'
 
 /** The greeting lives in the header's meta slot — one title per page
@@ -62,7 +62,7 @@ export function TodayPage() {
   const [compact, setCompact] = useState(loadTodayCompact)
   const toggleCompact = useCallback(() => setCompact((c) => { saveTodayCompact(!c); return !c }), [])
 
-  const { events, loading: calLoading, selectedDate: calDate, goToToday } = useCalendar()
+  const { events, loadedDate: calLoadedFor, goToToday } = useCalendar()
   // Calendar follows the new day (`goToToday` is a stable useCallback).
   useEffect(() => { goToToday() }, [today, goToToday])
   const [tomorrow, setTomorrow] = useState<CalendarEvent[]>([])
@@ -74,8 +74,17 @@ export function TodayPage() {
     return () => { live = false }
   }, [dp, today])
 
-  const { tasks, loading: tasksLoading, remove, addTask, refresh } = useLocalTasks({ dueDate: today, includeCompleted: false })
+  // Completed tasks are fetched so a checked-off task stays in Due today
+  // (struck through) and counts toward the progress bar; splitDueTasks keeps
+  // them out of Still open.
+  const { tasks, loadedFor: tasksLoadedFor, remove, addTask, refresh } = useLocalTasks({ dueDate: today, includeCompleted: true })
   const { dueToday, stillOpen } = useMemo(() => splitDueTasks(tasks, today), [tasks, today])
+
+  // Date-aware readiness: each hook reports the date its data belongs to, so
+  // just past midnight yesterday's lists read as loading, never as today's.
+  const calReady = calLoadedFor === today
+  const tasksReady = tasksLoadedFor === today
+  const ready = briefReady({ today, calendarLoadedFor: calLoadedFor, tasksLoadedFor })
 
   const [cached, setCached] = useState<{ date: string; priorities: Priority[] | null } | null>(null)
   useEffect(() => {
@@ -88,20 +97,15 @@ export function TodayPage() {
   // A fresh set replaces the cached one, so the compact strip shows it too.
   const handleGenerated = useCallback((p: Priority[]) => setCached({ date: today, priorities: p }), [today])
 
-  // The day's live data has landed: the calendar is on `today` and done
-  // loading, and the task list has loaded. Latched per date, so a later
-  // calendar refresh never unmounts Top priorities (which would reset its
-  // once-a-day generation guard).
-  const [readyFor, setReadyFor] = useState<string | null>(null)
-  if (readyFor !== today && !calLoading && !tasksLoading && calDate === today) setReadyFor(today)
-
-  // Snapshot once the live data has landed (Review Focus 2).
+  // Snapshot once the day's live data has landed (Review Focus 1 and 2).
+  // `ready` stays true for the rest of the day: a calendar revalidation
+  // keeps `loadedDate` on today.
   const snappedFor = useRef<string | null>(null)
   useEffect(() => {
-    if (readyFor !== today || snappedFor.current === today) return
+    if (!ready || snappedFor.current === today) return
     snappedFor.current = today
     dp.brief.ensureSnapshot(today).catch(() => {})
-  }, [dp, today, readyFor])
+  }, [dp, today, ready])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -147,14 +151,15 @@ export function TodayPage() {
     [tasks, addTask, refresh, today],
   )
 
-  // Header count, as before: top-level local tasks plus the Obsidian daily
-  // note's checkboxes.
+  // Header count: today's top-level tasks (checked-off ones included) and the
+  // open ones still carried from before, plus the Obsidian daily note's
+  // checkboxes. Completed tasks from past days are not part of today.
   const { todayData } = useObsidian()
-  const topLevel = tasks.filter((t) => !t.parent_id)
+  const dueTodayOpen = dueToday.filter((t) => !t.completed).length
   const obsidianChecked = todayData?.tasks.filter((t) => t.checked).length ?? 0
   const obsidianTotal = todayData?.tasks.length ?? 0
-  const completed = obsidianChecked + topLevel.filter((t) => t.completed).length
-  const total = obsidianTotal + topLevel.length
+  const completed = obsidianChecked + (dueToday.length - dueTodayOpen)
+  const total = obsidianTotal + dueToday.length + stillOpen.length
   const remaining = total - completed
 
   return (
@@ -180,25 +185,26 @@ export function TodayPage() {
       <ReminderCatchUp />
 
       {compact ? (
-        <BriefStrip events={events} priorities={priorities} onExpand={toggleCompact} />
+        <BriefStrip events={events} priorities={priorities} onExpand={toggleCompact} loading={!calReady} />
       ) : (
         <>
-          <ScheduleBox events={events} loading={calLoading} tomorrow={tomorrow} today={today} live />
+          <ScheduleBox events={events} loading={!calReady} tomorrow={tomorrow} today={today} live />
           {/* Never mounted before the cache read, so it can't auto-generate
               over a set that is already stored; with nothing stored, it also
-              waits for the day's calendar so generation sees the schedule. */}
-          {priorities === undefined || (priorities === null && readyFor !== today) ? (
+              waits until today's calendar and tasks have loaded, and
+              generates from exactly those. */}
+          {priorities === undefined || (priorities === null && !ready) ? (
             <BriefBox title="Top priorities">
               <PrioritiesSkeleton />
             </BriefBox>
           ) : (
-            <PrioritiesBox key={today} priorities={priorities} onGenerated={handleGenerated} />
+            <PrioritiesBox key={today} priorities={priorities} events={events} tasks={tasks} onGenerated={handleGenerated} />
           )}
         </>
       )}
 
-      <CollapsibleSection title="Due today" count={dueToday.length} defaultOpen={true} className="-mt-3!">
-        {tasksLoading ? (
+      <CollapsibleSection title="Due today" count={tasksReady ? dueTodayOpen : undefined} defaultOpen={true} className="-mt-3!">
+        {!tasksReady ? (
           <div className="space-y-1.5 pt-1">
             {[...Array(3)].map((_, i) => (
               <Skeleton key={i} className="h-8" />
@@ -229,7 +235,7 @@ export function TodayPage() {
         )}
       </CollapsibleSection>
 
-      <StillOpenBox tasks={stillOpen.slice(0, 5)} total={stillOpen.length} today={today} />
+      <StillOpenBox tasks={stillOpen.slice(0, 5)} total={stillOpen.length} today={today} loading={!tasksReady} />
 
       <VaultBox date={today} />
     </PageFrame>

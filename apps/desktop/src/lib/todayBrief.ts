@@ -11,11 +11,13 @@ export function hhmm(time: string): string {
 const toMin = (t: string) => { const [h, m] = hhmm(t).split(':').map(Number); return h * 60 + m }
 const fromMin = (n: number) => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`
 
-export function splitDueTasks<T extends { due_date: string | null; parent_id: string | null }>(tasks: T[], today: string) {
+/** Top-level tasks due today (checked-off ones stay, struck through) and the
+ *  open ones from before today, oldest first. */
+export function splitDueTasks<T extends { due_date: string | null; parent_id: string | null; completed: boolean }>(tasks: T[], today: string) {
   const top = tasks.filter((t) => !t.parent_id && t.due_date)
   return {
     dueToday: top.filter((t) => t.due_date === today),
-    stillOpen: top.filter((t) => (t.due_date as string) < today)
+    stillOpen: top.filter((t) => !t.completed && (t.due_date as string) < today)
       .sort((a, b) => (a.due_date as string).localeCompare(b.due_date as string)),
   }
 }
@@ -66,6 +68,13 @@ export function nextEvent<E extends { start_time: string; all_day: boolean }>(ev
 
 export function greetingFor(hour: number): string {
   return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+}
+
+/** The live brief may snapshot and auto-generate only once the calendar and
+ *  the task list have both loaded `today` — not merely stopped loading, since
+ *  just past midnight both still hold yesterday's data (Review Focus 1). */
+export function briefReady(s: { today: string; calendarLoadedFor: string | null; tasksLoadedFor: string | null }): boolean {
+  return s.calendarLoadedFor === s.today && s.tasksLoadedFor === s.today
 }
 
 /** Priorities auto-generate once per day: never over a cached set, never

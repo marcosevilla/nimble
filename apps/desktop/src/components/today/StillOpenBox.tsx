@@ -1,5 +1,6 @@
 import { useDetailStore } from '@/stores/detailStore'
 import { Meta } from '@/components/shared/typography'
+import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { ageLabel } from '@/lib/todayBrief'
 import { BriefBox } from './BriefBox'
@@ -10,21 +11,33 @@ type StillOpenTask = { id: string; content: string; due_date: string | null }
 
 /** The oldest open tasks from before `today`, with neutral grey age tags and
  *  the total. Live rows open the task in the detail sidebar; a snapshot
- *  (`readOnly`) renders the same rows without interaction. */
+ *  (`readOnly`) renders the same rows without interaction. `loading` shows
+ *  row-shaped skeletons instead of an empty state that isn't known yet. */
 export function StillOpenBox({
   tasks,
   total,
   today,
+  loading = false,
   readOnly = false,
 }: {
   tasks: StillOpenTask[]
   total: number
   today: string
+  loading?: boolean
   readOnly?: boolean
 }) {
   return (
-    <BriefBox title="Still open" count={total}>
-      {total === 0 ? (
+    <BriefBox title="Still open" count={loading ? undefined : total}>
+      {loading ? (
+        <div className="space-y-1.5">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="flex items-center gap-3 py-1">
+              <Skeleton className="h-4 flex-1" />
+              <Skeleton className="h-3 w-6 shrink-0" />
+            </div>
+          ))}
+        </div>
+      ) : total === 0 ? (
         <Meta as="p">Everything's current.</Meta>
       ) : (
         <div className="-mx-2">
