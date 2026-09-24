@@ -309,7 +309,11 @@ test.describe('T4 acceptance', () => {
     test(`AC8 ${s.name}: no new axe violations with the Undo toast visible`, async ({ app, page }) => {
       await s.open(page, app)
       await s.del(page, a.name)
-      await expect(undoToast(page, s.toastText)).toBeVisible()
+      const toast = undoToast(page, s.toastText)
+      await expect(toast).toBeVisible()
+      // Scan the settled toast: mid fade-in (0.4 s) axe reads its half-opaque
+      // text as a contrast failure.
+      await expect(toast).toHaveCSS('opacity', '1')
       await expectNoNewAxeViolations(page, s.axeKey)
     })
   }
