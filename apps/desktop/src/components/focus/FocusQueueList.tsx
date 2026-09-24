@@ -69,6 +69,9 @@ interface FocusQueueListProps {
 const UNAVAILABLE = 'Task no longer available'
 /** Keys the current row answers (see `queueRowKeyIntent`). */
 const ROW_KEYS = 'ArrowUp ArrowDown Alt+ArrowUp Alt+ArrowDown Home End Enter Delete Backspace'
+/** Row actions (Move to top, Focus now, ⋯): zero width and hidden until the row is hovered or focused, or its menu is open. */
+const ROW_ACTIONS =
+  'flex w-0 shrink-0 items-center gap-0.5 overflow-hidden opacity-0 transition-opacity duration-(--transition-fast) group-hover:w-auto group-hover:overflow-visible group-hover:opacity-100 group-focus-within:w-auto group-focus-within:overflow-visible group-focus-within:opacity-100 has-[[data-popup-open]]:w-auto has-[[data-popup-open]]:overflow-visible has-[[data-popup-open]]:opacity-100 motion-reduce:transition-none'
 
 interface RowFocus {
   id: string | null
@@ -142,7 +145,7 @@ function QueueRowItem({
         if (!renaming) onRowClick()
       }}
       className={cn(
-        'group relative flex min-w-0 items-center gap-2.5 border-b border-border bg-background py-2 pr-3 pl-5 transition-colors duration-(--transition-fast) hover:bg-hover focus:outline-2 focus:-outline-offset-2 focus:outline-ring motion-reduce:transition-none',
+        'group relative flex min-w-0 items-center gap-2.5 bg-background py-1.5 pr-2.5 pl-5 transition-colors duration-(--transition-fast) hover:bg-hover focus:outline-2 focus:-outline-offset-2 focus:outline-ring motion-reduce:transition-none',
         current && 'group-focus-within/queue:bg-accent/10',
         isDragging && 'z-10 opacity-90 shadow-md',
       )}
@@ -179,41 +182,42 @@ function QueueRowItem({
           {due}
         </Meta>
       )}
+      {/* Quiet rows: the actions take no width until hover, row focus or an
+          open menu, so titles use the full row the rest of the time. */}
       {task && (
-        <button
-          type="button"
-          tabIndex={stop}
-          aria-label={`Move ${title} to top`}
-          title={blocked ?? 'Move to top'}
-          disabled={blocked != null || busy}
-          onClick={(e) => {
-            e.stopPropagation()
-            onPromote()
-          }}
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity duration-(--transition-fast) group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-hover hover:text-foreground focus-ring disabled:cursor-default disabled:hover:bg-transparent"
-        >
-          <ArrowUpToLine className="size-3" aria-hidden />
-        </button>
+        <div className={ROW_ACTIONS}>
+          <button
+            type="button"
+            tabIndex={stop}
+            aria-label={`Move ${title} to top`}
+            title={blocked ?? 'Move to top'}
+            disabled={blocked != null || busy}
+            onClick={(e) => {
+              e.stopPropagation()
+              onPromote()
+            }}
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground focus-ring disabled:cursor-default disabled:hover:bg-transparent"
+          >
+            <ArrowUpToLine className="size-3" aria-hidden />
+          </button>
+          <button
+            type="button"
+            tabIndex={stop}
+            aria-label={`Focus ${title} now`}
+            title={focusNowBlocked ?? 'Focus now'}
+            disabled={focusNowBlocked != null || busy}
+            onClick={(e) => {
+              e.stopPropagation()
+              onFocusNow()
+            }}
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground focus-ring disabled:cursor-default disabled:hover:bg-transparent"
+          >
+            <Play className="size-3" aria-hidden />
+          </button>
+          <FocusTaskMenu task={task} place="row" tabIndex={stop} onSelect={(id) => onMenu(id, task)} />
+        </div>
       )}
-      {task && (
-        <button
-          type="button"
-          tabIndex={stop}
-          aria-label={`Focus ${title} now`}
-          title={focusNowBlocked ?? 'Focus now'}
-          disabled={focusNowBlocked != null || busy}
-          onClick={(e) => {
-            e.stopPropagation()
-            onFocusNow()
-          }}
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity duration-(--transition-fast) group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-hover hover:text-foreground focus-ring disabled:cursor-default disabled:hover:bg-transparent"
-        >
-          <Play className="size-3" aria-hidden />
-        </button>
-      )}
-      {task ? (
-        <FocusTaskMenu task={task} place="row" tabIndex={stop} onSelect={(id) => onMenu(id, task)} />
-      ) : (
+      {!task && (
         <button
           type="button"
           tabIndex={stop}
@@ -356,7 +360,7 @@ export function FocusQueueList({
 
   return (
     <div>
-      <Label as="h3" className="px-4 pt-2.5 pb-1">
+      <Label as="h3" className="px-4 pt-3 pb-1">
         Up next
       </Label>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>

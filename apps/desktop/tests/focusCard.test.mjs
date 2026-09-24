@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { build } from 'vite'
 import react from '@vitejs/plugin-react'
+import { cardCaption, focusPanelMenuItems, taskMenuItems } from '../src/lib/focusQueueIntents.ts'
 
 let output, rendered
 before(async () => {
@@ -22,30 +23,85 @@ before(async () => {
 })
 after(async () => { if (output) await rm(output, { recursive: true, force: true }) })
 
-test('task identity precedes prominent timer and compact retains controls', () => {
+test('task identity precedes prominent timer and compact keeps the header + and ⋯', () => {
   const html = rendered.renderCompactFocus()
   assert.ok(html.indexOf('Example task') < html.indexOf('Focus timer'))
-  assert.match(html, /Start/); assert.match(html, /Show queue/)
+  assert.match(html, /Start/)
+  // Card-only mode keeps the surface header: add and the menu with "Show queue".
+  assert.match(html, /<button\b[^>]*aria-label="Add to queue"/)
+  assert.match(html, /<button\b[^>]*aria-label="Focus options"/)
+  assert.equal(focusPanelMenuItems({ compact: true, soundMuted: false, canMute: false, syncNote: null })
+    .find((i) => i.kind === 'toggle_queue')?.label, 'Show queue')
   assert.doesNotMatch(html, /Up next/)
 })
 
-test('card order: completion, place label, title, controls, description, due metadata, inline subtask, timer left, Start right', () => {
+test('card order: place label, completion, title, description, inline subtask, timer, caption, task ⋯, Start', () => {
   const html = rendered.renderFocusCard()
-  const order = ['Complete Example task', 'Deep work / Writing', '>Example task</h2>', 'Copy assistant context for Example task',
-    'More actions for Example task', 'Hide queue', 'Draft the outline',
-    '2:00 PM', 'Complete Outline sections', 'Outline sections', 'Focus timer', 'aria-label="Start"']
+  const order = ['Deep work / Writing', 'Complete Example task', '>Example task</h2>', 'Draft the outline',
+    'Complete Outline sections', 'Outline sections', 'Focus timer', '25m timebox', '2:00 PM',
+    'More actions for Example task', 'aria-label="Start"']
     .map((label) => html.indexOf(label))
   assert.ok(order.every((x, i) => x >= 0 && (i === 0 || x >= order[i - 1])), `order ${order}`)
 })
 
-test('title is multiline heading text, timer is tabular and paused total is shown', () => {
+test('nothing sits beside the title: no copy button and no queue toggle on the card', () => {
+  const html = rendered.renderFocusCard()
+  assert.doesNotMatch(html, /Copy assistant context for/)
+  assert.doesNotMatch(html, /Hide queue|Show queue/)
+  const h2 = html.match(/<h2\b[^>]*>[\s\S]*?<\/h2>/)?.[0] ?? ''
+  assert.doesNotMatch(h2, /<button/)
+})
+
+test('task ⋯ sits immediately left of Start/Pause, always visible and a Tab stop; one ⋯ on the card', () => {
+  for (const html of [rendered.renderFocusCard(), rendered.renderFocusCard({ running: true })]) {
+    assert.equal((html.match(/aria-label="More actions for Example task"/g) ?? []).length, 1)
+    const trigger = html.match(/<button\b[^>]*aria-label="More actions for Example task"[^>]*>/)?.[0] ?? ''
+    assert.match(trigger, /tabindex="0"/)
+    // Same control cluster as the play circle, and nothing between them.
+    const cluster = html.match(/<div\b[^>]*class="[^"]*"[^>]*><div\b[^>]*><button\b[^>]*aria-label="More actions for Example task"[\s\S]*?aria-label="(Start|Pause)"/)?.[0] ?? ''
+    assert.ok(cluster, 'menu and play share one wrapper')
+    const between = cluster.slice(cluster.indexOf('More actions'), cluster.lastIndexOf('aria-label="'))
+    assert.equal((between.match(/<button\b/g) ?? []).length, 1, 'no other control between ⋯ and play')
+    // Never hover-hidden or absolutely placed any more.
+    const wrapper = html.match(/<div\b[^>]*class="([^"]*)"[^>]*><button\b[^>]*aria-label="More actions for Example task"/)?.[1] ?? ''
+    for (const cls of ['absolute', 'opacity-0']) assert.ok(!wrapper.split(/\s+/).includes(cls), `${cls} not in ${wrapper}`)
+  }
+})
+
+test('copy assistant context moved into the task menu, first', () => {
+  const card = taskMenuItems({ sync_policy: 'default' }, 'card')
+  assert.equal(card[0].id, 'copy_context')
+  assert.equal(card[0].label, 'Copy assistant context')
+})
+
+test('title is multiline heading text, timer is tabular (one step under display) and paused total is shown', () => {
   const html = rendered.renderFocusCard()
   assert.match(html, /<h2\b[^>]*class="[^"]*text-title[^"]*"[^>]*>Example task<\/h2>/)
   assert.doesNotMatch(html.match(/<h2\b[^>]*>Example task/)?.[0] ?? '', /truncate/)
   const timer = html.match(/<button\b[^>]*aria-label="Focus timer[^"]*"[^>]*>[^<]*/)?.[0] ?? ''
-  assert.match(timer, /text-timer/)
+  assert.match(timer, /\btext-timer-sm\b/)
   assert.match(timer, /12:34/)
-  assert.match(html, /25m timebox/)
+})
+
+test('timer size: 36px text-timer-sm by default (rail, companion); 48px text-timer for the full view', () => {
+  const timerOf = (html) => html.match(/<button\b[^>]*aria-label="Focus timer[^"]*"[^>]*>/)?.[0] ?? ''
+  const display = timerOf(rendered.renderFocusCard({ timerSize: 'display' }))
+  assert.match(display, /\btext-timer\b(?!-)/)
+  assert.doesNotMatch(display, /text-timer-sm/)
+  assert.match(timerOf(rendered.renderCompactFocus()), /\btext-timer-sm\b/)
+  assert.match(timerOf(rendered.renderQueueTray()), /\btext-timer-sm\b/)
+})
+
+test('one caption line under the timer joins the budget, priority and due', () => {
+  const html = rendered.renderFocusCard()
+  const caption = html.match(/<div\b[^>]*data-slot="focus-timer-caption"[^>]*>[\s\S]*?<\/div><\/div>/)?.[0] ?? ''
+  assert.ok(caption, 'caption rendered')
+  assert.match(caption, /25m timebox/)
+  assert.match(caption, /aria-label="Priority 3"/)
+  assert.match(caption, /2:00 PM/)
+  assert.ok(caption.indexOf('25m timebox') < caption.indexOf('Priority 3') && caption.indexOf('Priority 3') < caption.indexOf('2:00 PM'))
+  assert.deepEqual(cardCaption(null, { sync_policy: 'local_only', due_date: null, due_time: null }, '2026-09-22'), { timing: null, meta: 'Nimble only' })
+  assert.deepEqual(cardCaption('Round 1 of 4', { sync_policy: 'default', due_date: null, due_time: null }, '2026-09-22'), { timing: 'Round 1 of 4', meta: null })
 })
 
 test('live timing unavailable: Start is disabled with a visible reason, not hidden', () => {
@@ -66,30 +122,28 @@ test('running session shows Pause; phases color by semantic tokens with overtime
   assert.match(amber.match(/<button\b[^>]*aria-label="Focus timer[^"]*"[^>]*>/)?.[0] ?? '', /text-warning/)
 })
 
-test('compact card-only mode unmounts queue, add, tray, drawer and footer tab stops', () => {
+test('compact card-only mode unmounts queue and tray tab stops; no footer rows exist in any mode', () => {
   const html = rendered.renderCompactFocus()
-  for (const gone of ['Drag to reorder', 'Add task', '1 done', 'Still open', 'Add tasks from', 'to queue', 'All added', 'Nothing to add']) {
+  for (const gone of ['Drag to reorder', '1 done', 'Up next']) {
     assert.ok(!html.includes(gone), `${gone} is unmounted`)
   }
   assert.match(html, /Complete Outline sections/) // inline subtasks stay completable
+  for (const tray of [html, rendered.renderQueueTray()]) {
+    for (const gone of ['Still open', 'Add tasks from', 'From: ', 'Add all', '>Add task<', 'Nothing to add', 'All added']) {
+      assert.ok(!tray.includes(gone), `${gone} is not a tray row`)
+    }
+  }
 })
 
-test('assistant context is a visible secondary control on the card, not only in the menu', () => {
-  const html = rendered.renderFocusCard()
-  const button = html.match(/<button\b[^>]*aria-label="Copy assistant context for Example task"[^>]*>/)?.[0]
-  assert.ok(button, 'copy control rendered')
-  assert.doesNotMatch(button, /disabled=""/)
-})
-
-test('a queued task missing from storage keeps Remove, Skip and Show queue instead of an empty card', () => {
+test('a queued task missing from storage keeps Remove and Skip instead of an empty card', () => {
   const html = rendered.renderFocusCard({ missingTask: true })
   assert.match(html, /Task no longer available/)
   assert.doesNotMatch(html, /Queue is clear/)
   assert.match(html, /<button\b[^>]*>Remove from queue<\/button>/)
   assert.match(html, /<button\b[^>]*>Skip<\/button>/)
-  assert.match(html, /aria-label="Hide queue"/)
   assert.doesNotMatch(html, /Focus timer/)
 })
+
 
 // ── Checklist H1 design asks (2026-09-23): place label above the title, one-line description ──
 

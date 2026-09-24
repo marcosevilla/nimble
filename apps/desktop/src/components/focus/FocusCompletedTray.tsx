@@ -14,7 +14,7 @@ interface FocusCompletedTrayProps {
 }
 
 /**
- * Completed tray under Add: struck-through title with spent time, and
+ * Completed tray under Up next: struck-through title with spent time, and
  * Show/Hide/Clear. Clear archives the tray entries — the task ledger and
  * recorded time are kept.
  */
@@ -24,8 +24,8 @@ export function FocusCompletedTray({ rows, capabilities, onAction }: FocusComple
   const blocked = queueBlockedReason(capabilities)
 
   return (
-    <section aria-label="Completed" className="border-t border-border">
-      <div className="flex items-center justify-between px-4 py-1.5">
+    <section aria-label="Completed">
+      <div className="flex items-center justify-between pt-3 pr-2.5 pb-1 pl-4">
         <Label>{`${rows.length} done`}</Label>
         <div className="flex items-center gap-1">
           <Button size="xs" variant="ghost" aria-expanded={show} onClick={() => setShow((v) => !v)}>
@@ -45,7 +45,7 @@ export function FocusCompletedTray({ rows, capabilities, onAction }: FocusComple
       {show && (
         <ul>
           {rows.map((row) => (
-            <li key={row.occurrence_id} className="flex min-w-0 items-center gap-2.5 border-t border-border px-4 py-2">
+            <li key={row.occurrence_id} className="flex min-w-0 items-center gap-2.5 py-1.5 pr-4 pl-5">
               <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-success/15 text-success">
                 <Check className="size-2.5" strokeWidth={3} aria-hidden />
               </span>

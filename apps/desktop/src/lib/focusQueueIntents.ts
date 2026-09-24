@@ -77,12 +77,77 @@ export function sourceLabel(source: FocusSource, projects: Project[]): string {
 }
 
 /**
- * Footer add button copy. `newCount` = source tasks not yet queued;
- * `sourceCount` = all tasks the source offers. Plain, no guilt.
+ * The add panel's append-from-source button. `newCount` = source tasks not
+ * yet queued; `sourceCount` = all tasks the source offers. Plain, no guilt.
  */
 export function addToQueueLabel(newCount: number, sourceCount: number): string {
-  if (newCount > 0) return `Add ${newCount} to queue`
+  if (newCount > 1) return `Add all ${newCount}`
+  if (newCount === 1) return 'Add 1'
   return sourceCount > 0 ? 'All added' : 'Nothing to add'
+}
+
+/**
+ * The line under the card timer: the budget caption ("25m timebox",
+ * "Round 2 of 4") first, then where the task stands ("Nimble only", due).
+ * Either side may be missing; the card draws priority bars between them.
+ */
+export function cardCaption(
+  timingCaption: string | null,
+  task: LocalTask,
+  today: string,
+): { timing: string | null; meta: string | null } {
+  const meta = [isLocalOnly(task) ? NIMBLE_ONLY : null, dueLabel(task, today)].filter(Boolean).join(' · ')
+  return { timing: timingCaption, meta: meta || null }
+}
+
+// ── Surface menu (the focus surface's own ⋯) ──
+
+export interface PanelMenuExtra {
+  id: string
+  label: string
+  onSelect: () => void
+  /** Why it is unavailable; the item stays listed, disabled, with this reason. */
+  disabledReason?: string | null
+}
+
+export interface PanelMenuItem {
+  kind: 'extra' | 'toggle_queue' | 'mute' | 'sync_note'
+  key: string
+  label: string
+  /** Shown under the label (why an item is disabled). */
+  detail?: string | null
+  disabled?: boolean
+  /** Mute is a checkbox item. */
+  checked?: boolean
+  onSelect?: () => void
+}
+
+/**
+ * The surface-level ⋯ menu: surface extras (Pop out, Import…) first, then
+ * the queue toggle, sounds, and a read-only sync note. None of these is a
+ * queue write, so read-only mode keeps them all (extras carry their own
+ * disabled reasons).
+ */
+export function focusPanelMenuItems(opts: {
+  extras?: PanelMenuExtra[]
+  compact: boolean
+  soundMuted: boolean
+  /** Mute is offered only where the surface can persist it. */
+  canMute: boolean
+  syncNote: string | null
+}): PanelMenuItem[] {
+  const items: PanelMenuItem[] = (opts.extras ?? []).map((extra) => ({
+    kind: 'extra',
+    key: `extra:${extra.id}`,
+    label: extra.label,
+    detail: extra.disabledReason ?? null,
+    disabled: extra.disabledReason != null,
+    onSelect: extra.onSelect,
+  }))
+  items.push({ kind: 'toggle_queue', key: 'toggle_queue', label: opts.compact ? 'Show queue' : 'Hide queue' })
+  if (opts.canMute) items.push({ kind: 'mute', key: 'mute', label: 'Mute sounds', checked: opts.soundMuted })
+  if (opts.syncNote) items.push({ kind: 'sync_note', key: 'sync_note', label: opts.syncNote, disabled: true })
+  return items
 }
 
 // ── Timer control ──

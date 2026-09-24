@@ -182,16 +182,23 @@ async function run() {
 
     // 1. Narrow expanded queue, running count-up.
     let { context, page } = await open(browser, { queue: QUEUE, running: true, history: HISTORY }, { mode, accent })
-    await shoot(page, t('01-expanded-running'), meta('Narrow expanded queue (340×560), running', 'Card, timer, Up next, Add, completed tray, source footer'))
+    await shoot(page, t('01-expanded-running'), meta('Narrow expanded queue (340×560), running', 'Header (+, ⋯), card, timer, Up next, completed tray'))
     // 5. Timebox picker.
     await page.getByRole('button', { name: /^Focus timer/ }).first().click()
     await shoot(page, t('05-timebox-picker'), meta('Timebox picker', 'Presets, custom minutes, count-up'))
     await page.keyboard.press('Escape')
-    // 8. Source picker + still-open drawer.
-    const stillOpen = page.getByRole('region', { name: 'Still open' }).getByRole('button').first()
-    if (await stillOpen.count()) { await stillOpen.click(); await page.waitForTimeout(200) }
+    // 8. The header + panel (quick add, source + Add all, still open), then its source menu.
+    await page.getByRole('button', { name: 'Add to queue' }).first().click()
+    await page.waitForTimeout(300)
+    await shoot(page, t('08a-add-panel'), meta('Header + panel', 'Quick add, source with Add all, still-open list'))
     await page.getByRole('button', { name: /^Add tasks from:/ }).first().click()
-    await shoot(page, t('08-source-still-open'), meta('Source picker + still-open drawer', 'Candidate selection, explicit add'))
+    await shoot(page, t('08b-add-source-menu'), meta('+ panel source menu', 'Today, Nimble only, projects'))
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
+    // 8c. The surface ⋯ (queue toggle, mute; Pop out in the main window).
+    await page.getByRole('button', { name: 'Focus options' }).first().click()
+    await shoot(page, t('08c-surface-menu'), meta('Surface ⋯ menu', 'Show/Hide queue, Mute sounds'))
+    await page.keyboard.press('Escape')
     await context.close()
 
     // Overtime / amber timer semantics.
@@ -254,13 +261,19 @@ async function run() {
       await context.close()
     }
 
-    // 10. Main window: banner, then expanded FocusView (⇧F).
+    // 10. Main window: banner, the rail Focus tab (⇧F), then the full view (Expand).
     ;({ context, page } = await open(browser, { queue: QUEUE, running: true, history: HISTORY }, { mode, accent, url: '/?page=today', viewport: { width: 1200, height: 800 } }))
     await shoot(page, t('10a-main-banner'), meta('Main window with focus banner', '1200×800'))
     await page.mouse.click(700, 400)
     await page.keyboard.press('Shift+F')
     await page.waitForTimeout(500)
-    await shoot(page, t('10b-main-expanded'), meta('Main window expanded FocusView (⇧F)', '1200×800'))
+    await shoot(page, t('10b-main-rail-tab'), meta('Main window, rail Focus tab (⇧F)', '1200×800'))
+    const expand = page.getByRole('button', { name: 'Expand' })
+    if (await expand.count()) {
+      await expand.first().click()
+      await page.waitForTimeout(500)
+      await shoot(page, t('10c-main-expanded'), meta('Main window expanded FocusView (Expand)', '1200×800'))
+    }
     await context.close()
   }
 

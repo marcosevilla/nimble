@@ -52,6 +52,11 @@
     /* 1.2, not 1: the mono face's ascent+descent is ~1.17em, so a 1em line
        box under-reports the painted digits and tight fits clip them. */
     --text-timer--line-height: 1.2;
+    /* 36 — the focus card timer in the rail, companion and full view: one
+       step under the display timer so the task title stays the hero. Same
+       mono payload as .text-timer (it shares the --typo-timer-* vars). */
+    --text-timer-sm:     2.25rem;
+    --text-timer-sm--line-height: 1.2;
 
     /* Page frame width (loop 2, Marco 2026-09-24): ONE column for every
        page, page header and detail view. Border-box: the frame's px-6
@@ -236,7 +241,8 @@
     font-weight: var(--typo-display-weight, 600);
     letter-spacing: var(--typo-display-tracking, -0.015em);
   }
-  .text-timer {
+  .text-timer,
+  .text-timer-sm {
     font-family: var(--typo-timer-family, var(--font-mono));
     font-weight: var(--typo-timer-weight, 500);
     letter-spacing: var(--typo-timer-tracking, -0.02em);
@@ -258,7 +264,8 @@
 [data-highlight-type="title"] .tiptap-editor h2,
 [data-highlight-type="display"] .text-display,
 [data-highlight-type="display"] .tiptap-editor h1,
-[data-highlight-type="timer"] .text-timer {
+[data-highlight-type="timer"] .text-timer,
+[data-highlight-type="timer"] .text-timer-sm {
   outline: 2px dashed oklch(from var(--accent) l c h / 0.9);
   outline-offset: 3px;
   background: oklch(from var(--accent) l c h / 0.08);

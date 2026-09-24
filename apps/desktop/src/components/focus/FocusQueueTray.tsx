@@ -1,27 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { format, parseISO } from 'date-fns'
-import { Plus, Volume2, VolumeX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { IconButton } from '@/components/shared/IconButton'
-import { Caption } from '@/components/shared/typography'
+import { Caption, Label } from '@/components/shared/typography'
 import { FocusTaskCard } from '@/components/focus/FocusTaskCard'
+import type { FocusTimerSize } from '@/components/focus/FocusTimeboxPicker'
 import { FocusQueueList, type FocusQueueRow } from '@/components/focus/FocusQueueList'
 import { FocusCompletedTray } from '@/components/focus/FocusCompletedTray'
-import { FocusSourcePicker, FocusStillOpenDrawer } from '@/components/focus/FocusSourcePicker'
+import { FocusAddPopover } from '@/components/focus/FocusAddPopover'
+import { FocusPanelMenu } from '@/components/focus/FocusPanelMenu'
 import { FocusCelebration } from '@/components/focus/FocusCelebration'
 import { useFocusCache, retryFocusCommand } from '@/stores/focusStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import type { FocusRequestError } from '@/services/focus-events'
 import { buildFocusPrompt, copyFocusPrompt } from '@/lib/focusPrompt'
 import { showCopyContextToast, showDeletedToast, showRemovedToast } from '@/lib/focusToasts'
-import { candidateIds, queueTheseAction } from '@/lib/focusSources'
+import { focusAddState } from '@/lib/focusSources'
 import {
+  focusPanelMenuItems,
   localFailureMessage,
   menuFocusAction,
   queueBlockedReason,
   runQuickAdd,
-  sourceLabel,
   stillOpenAction,
   taskPlaceLabel,
   undoDeleteAction,
@@ -29,9 +29,9 @@ import {
   restoreEntryAction,
   visibleFailure,
   type FocusTaskOps,
+  type PanelMenuExtra,
   type TaskMenuId,
 } from '@/lib/focusQueueIntents'
-import { cn } from '@/lib/utils'
 import type {
   FocusAction,
   FocusCapabilities,
@@ -53,7 +53,7 @@ export interface FocusQueueTrayProps {
   capabilities: FocusCapabilities | null
   /** Native tasks (including children) the queue and candidates resolve against. */
   tasks: LocalTask[]
-  /** Active-only — feeds FocusSourcePicker (choosing which project to pull
+  /** Active-only — feeds the + panel's source picker (choosing which project to pull
    * candidates from); archived projects shouldn't be offered there. */
   projects: Project[]
   /** Every project, archived included — feeds name lookups for tasks that
@@ -79,108 +79,23 @@ export interface FocusQueueTrayProps {
   error?: FocusRequestError | null
   /** In-flight action; defaults to the shared focus cache's `pending`. */
   pending?: FocusAction | null
-}
-
-/** Inline Add: Enter submits (Shift+Enter for a batch line); focus stays for rapid entry. */
-function FocusQuickAdd({
-  source,
-  projects,
-  blockedReason,
-  onSubmit,
-}: {
-  source: FocusSource
-  projects: Project[]
-  blockedReason: string | null
-  onSubmit: (text: string) => Promise<{ remaining: string; error: string | null }>
-}) {
-  const [editing, setEditing] = useState(false)
-  const [text, setText] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => {
-    if (editing) ref.current?.focus()
-  }, [editing])
-
-  const placeholder =
-    source.kind === 'today' ? 'Add task to Today' : source.kind === 'local' ? 'Add a Nimble-only task' : `Add task to ${sourceLabel(source, projects)}`
-
-  const submit = async () => {
-    if (busy) return
-    setBusy(true)
-    try {
-      const result = await onSubmit(text)
-      setText(result.remaining)
-      setError(result.error)
-    } finally {
-      setBusy(false)
-      ref.current?.focus()
-    }
-  }
-
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        disabled={blockedReason != null}
-        title={blockedReason ?? undefined}
-        onClick={() => setEditing(true)}
-        className="flex w-full items-center gap-2.5 px-4 py-2 text-left text-body text-muted-foreground transition-colors duration-(--transition-fast) hover:text-foreground focus-ring focus-visible:-outline-offset-2 disabled:opacity-50"
-      >
-        <Plus className="size-4 shrink-0" aria-hidden />
-        Add task
-      </button>
-    )
-  }
-
-  return (
-    <div className="border-b border-border px-4 py-2">
-      <div className="flex items-start gap-2.5">
-        <Plus className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <textarea
-          ref={ref}
-          rows={Math.min(4, Math.max(1, text.split('\n').length))}
-          aria-label={placeholder}
-          aria-invalid={error ? true : undefined}
-          aria-busy={busy || undefined}
-          readOnly={busy}
-          placeholder={placeholder}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value)
-            setError(null)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              void submit()
-            } else if (e.key === 'Escape') {
-              e.preventDefault()
-              setText('')
-              setError(null)
-              setEditing(false)
-            }
-          }}
-          onBlur={() => {
-            if (!text.trim() && !busy) setEditing(false)
-          }}
-          className={cn('min-w-0 flex-1 resize-none bg-transparent text-body outline-none placeholder:text-muted-foreground', busy && 'opacity-60')}
-        />
-      </div>
-      {error && (
-        <Caption as="p" role="alert" className="mt-1 pl-6.5 text-destructive">
-          {error}
-        </Caption>
-      )}
-    </div>
-  )
+  /** Header title (the rail's "Focus"); the companion's native titlebar already names it. */
+  title?: ReactNode
+  /** Surface-specific header icons between `+` and ⋯ (Expand, Minimize). */
+  headerActions?: ReactNode
+  /** Surface-specific ⋯ items listed first (Pop out, Import…). */
+  menuExtras?: PanelMenuExtra[]
+  /** Card timer size: `display` in the full view, `sm` (default) elsewhere. */
+  timerSize?: FocusTimerSize
 }
 
 /**
- * The ambient focus tray: familiar card, Up next, inline Add, completed tray,
- * still-open drawer and bottom-anchored source footer. Card-only mode
- * unmounts everything below the card (and its tab stops) but keeps feedback
- * and "Show queue". It renders provider snapshots; it never starts timing.
+ * The ambient focus tray: a slim header (title, `+` add, surface icons, ⋯),
+ * the focused card, then Up next and today's completed tray. Everything that
+ * adds to the queue lives behind `+`; view and sound toggles live in ⋯.
+ * Card-only mode unmounts everything below the card (and its tab stops) but
+ * keeps the header and feedback. It renders provider snapshots; it never
+ * starts timing.
  */
 export function FocusQueueTray({
   snapshot,
@@ -200,6 +115,10 @@ export function FocusQueueTray({
   onSoundMutedChange,
   error,
   pending,
+  title,
+  headerActions,
+  menuExtras,
+  timerSize,
 }: FocusQueueTrayProps) {
   const [compact, setCompact] = useState(initialCompact)
   const [source, setSource] = useState<FocusSource>(initialSource)
@@ -217,7 +136,7 @@ export function FocusQueueTray({
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
   // Display-only lookups (task/source labels) use `allProjects` so a task
   // still in an archived project keeps its name; `projects` (active-only)
-  // stays reserved for FocusSourcePicker's own project list below.
+  // stays reserved for the + panel's source list.
   const displayProjects = allProjects ?? projects
   const projectName = useCallback(
     (id: string) => displayProjects.find((p) => p.id === id)?.name,
@@ -260,16 +179,7 @@ export function FocusQueueTray({
   const rows: FocusQueueRow[] = rest.map((entry) => ({ entry, task: byId.get(entry.task_id) ?? null }))
   const childrenOf = (id: string) => tasks.filter((t) => t.parent_id === id)
 
-  const sourceSections = source.kind === 'project' ? sections.filter((s) => s.project_id === source.project_id) : []
-  const queueThese = queueTheseAction(tasks, source, today, snapshot, { sections: sourceSections })
-  const sourceCount = candidateIds(tasks, source, today, sourceSections).ids.length
-  const queuedTaskIds = new Set(snapshot.queue.map((e) => e.task_id))
-  const stillOpen =
-    source.kind === 'today'
-      ? candidateIds(tasks, source, today)
-          .still_open_ids.filter((id) => !queuedTaskIds.has(id))
-          .flatMap((id) => byId.get(id) ?? [])
-      : []
+  const { queueThese, newCount, sourceCount, stillOpen } = focusAddState(tasks, source, today, snapshot, sections)
 
   const focusCard = () => requestAnimationFrame(() => headingRef.current?.focus())
   /** `keepFocus`: a keyboard promote from Up next keeps focus in the list while rows remain. */
@@ -385,9 +295,55 @@ export function FocusQueueTray({
 
   const failure = visibleFailure(cacheError, localError)
   const syncNote = snapshot.replica ? `Last synced ${format(parseISO(snapshot.as_of), 'h:mm a')}` : null
+  const toggleCompact = () => {
+    const next = !compact
+    setCompact(next)
+    onCompactChange?.(next)
+  }
+  const menuItems = focusPanelMenuItems({
+    extras: menuExtras,
+    compact,
+    soundMuted,
+    canMute: onSoundMutedChange != null,
+    syncNote,
+  })
+  const hasBelow = !compact && (rows.length > 0 || completed.length > 0)
+  const placeLabel = firstTask ? taskPlaceLabel(firstTask, displayProjects, sections) : null
+  // An untitled surface (the companion: its titlebar already names it)
+  // spends the header row on the place label instead of an empty strip.
+  const placeInHeader = title == null
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
+      <header className="flex h-10 shrink-0 items-center gap-0.5 pr-2.5 pl-4">
+        <div className="min-w-0 flex-1">
+          {placeInHeader
+            ? placeLabel && (
+                <Label as="p" data-slot="focus-place" className="block truncate">
+                  {placeLabel}
+                </Label>
+              )
+            : title}
+        </div>
+        <FocusAddPopover
+          source={source}
+          projects={projects}
+          displayProjects={displayProjects}
+          onSourceChange={setSource}
+          newCount={newCount}
+          sourceCount={sourceCount}
+          onQueueThese={() => {
+            if (queueThese) void run(queueThese)
+          }}
+          stillOpen={stillOpen}
+          today={today}
+          onAddStillOpen={(taskIds) => void run(stillOpenAction(taskIds))}
+          blockedReason={blocked}
+          onQuickAdd={(text) => runQuickAdd(text, source, today, { create: taskOps.create, onAction })}
+        />
+        {headerActions}
+        <FocusPanelMenu items={menuItems} onToggleQueue={toggleCompact} onMutedChange={onSoundMutedChange} />
+      </header>
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <FocusTaskCard
           snapshot={snapshot}
@@ -395,14 +351,8 @@ export function FocusQueueTray({
           entry={first ?? null}
           task={firstTask}
           subtasks={firstTask ? childrenOf(firstTask.id).filter(isOpen) : []}
-          placeLabel={firstTask ? taskPlaceLabel(firstTask, displayProjects, sections) : null}
+          placeLabel={placeInHeader ? null : placeLabel}
           today={today}
-          compact={compact}
-          onToggleCompact={() => {
-            const next = !compact
-            setCompact(next)
-            onCompactChange?.(next)
-          }}
           onAction={run}
           onCompleteSubtask={(sub) => void completeSubtask(sub)}
           onMenu={(id, task, entry) => void handleMenu(id, task, entry)}
@@ -411,6 +361,7 @@ export function FocusQueueTray({
           onRenameCancel={() => setRenamingEntryId(null)}
           headingRef={headingRef}
           busy={busy}
+          timerSize={timerSize}
         />
 
         {/* Feedback stays in both modes. Failures render above the
@@ -460,8 +411,9 @@ export function FocusQueueTray({
           )}
         </div>
 
-        {!compact && (
-          <>
+        {/* One divider: between the focused card and what comes after it. */}
+        {hasBelow && (
+          <div className="border-t border-border pb-2">
             <FocusQueueList
               snapshot={snapshot}
               capabilities={capabilities}
@@ -477,52 +429,10 @@ export function FocusQueueTray({
               onRename={rename}
               onRenameCancel={() => setRenamingEntryId(null)}
             />
-            <FocusQuickAdd
-              source={source}
-              projects={displayProjects}
-              blockedReason={blocked}
-              onSubmit={(text) => runQuickAdd(text, source, today, { create: taskOps.create, onAction })}
-            />
             <FocusCompletedTray rows={completed} capabilities={capabilities} onAction={run} />
-          </>
+          </div>
         )}
       </div>
-
-      {!compact && (
-        <div className="shrink-0">
-          <FocusStillOpenDrawer
-            tasks={stillOpen}
-            today={today}
-            blockedReason={blocked}
-            onAdd={(taskIds) => void run(stillOpenAction(taskIds))}
-          />
-          <FocusSourcePicker
-            source={source}
-            projects={projects}
-            onSourceChange={setSource}
-            newCount={queueThese?.task_ids.length ?? 0}
-            sourceCount={sourceCount}
-            onQueueThese={() => {
-              if (queueThese) void run(queueThese)
-            }}
-            blockedReason={blocked}
-            doneCount={completed.length}
-            syncNote={syncNote}
-            trailing={
-              onSoundMutedChange && (
-                <IconButton
-                  aria-label={soundMuted ? 'Unmute focus sounds' : 'Mute focus sounds'}
-                  aria-pressed={soundMuted}
-                  onClick={() => onSoundMutedChange(!soundMuted)}
-                  className="focus-ring"
-                >
-                  {soundMuted ? <VolumeX className="size-3.5" aria-hidden /> : <Volume2 className="size-3.5" aria-hidden />}
-                </IconButton>
-              )
-            }
-          />
-        </div>
-      )}
     </div>
   )
 }

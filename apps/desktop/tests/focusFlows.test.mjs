@@ -339,5 +339,6 @@ test('the permanent entry opens the tray with an empty queue and issues no focus
     assert.equal(isFocusTrayShortcut(e), false, JSON.stringify(e))
   }
   const html = r.renderEmptyTray()
-  for (const reachable of ['Queue is clear', 'Add tasks from', 'Add \\d+ to queue|All added|Nothing to add', 'Add task']) assert.match(html, new RegExp(reachable))
+  // Adding (type a task, add from a source, still-open) lives behind the header +.
+  for (const reachable of ['Queue is clear', 'aria-label="Add to queue"', 'aria-label="Focus options"', 'Use \\+ to add']) assert.match(html, new RegExp(reachable))
 })
