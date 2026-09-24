@@ -4,7 +4,7 @@ Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + 
 
 ## Vault-path toast on Today (2026-09-24)
 
-- [x] **Bug:** "File not found — check your vault path in Settings" toasted on every Today load though Obsidian is connected. Root cause: `useObsidian` still reads the legacy vault-root `today.md` (gone from the vault); `read_today_md` rejects "today.md: not found" and `friendlyError` maps any "not found" to the vault-path copy. Fix `e332dff`: a missing `today.md` = no daily note (no toast, header count from tasks only); other errors still toast. Test `tests/errors.test.mjs`; frozen-build browser check (main toasts, fix doesn't). Merged + installed 2026-09-24.
+- [x] **Bug:** "File not found — check your vault path in Settings" toasted on every Today load though Obsidian is connected. Root cause: `useObsidian` still reads the legacy vault-root `today.md` (gone from the vault); `read_today_md` rejects "today.md: not found" and `friendlyError` maps any "not found" to the vault-path copy. Fix `e332dff`: a missing `today.md` = no daily note (no toast, header count from tasks only); other errors still toast. Test `tests/errors.test.mjs`; frozen-build browser check (main toasts, fix doesn't). Merged + installed 2026-09-24 at `b758284` (bundle `index-B6-Wn9T_` = dist; rollback `Nimble Rollbacks/20260924-122656-today-md-toast/`).
 - [ ] Follow-ups: `friendlyError` maps every "not found" (e.g. a 404 iCal feed) to the vault-path message; the `today.md` read itself is legacy — remove it (and `TodayPanel`/`HabitsPanel` if unused) when Today's brief no longer needs it; web `obsidian.readTodayMd` is `ni()` and may toast "Something went wrong" on web Today.
 
 ## Loop 2 polish + new icon (2026-09-24)
