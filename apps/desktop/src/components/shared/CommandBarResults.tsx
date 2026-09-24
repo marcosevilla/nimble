@@ -11,9 +11,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
+import { DateChip } from '@/components/capture/CaptureTokens'
 import type { LocalTask, Project, Document, Capture } from '@nimble/types'
 
-export type BarMode = 'search' | 'task' | 'capture' | 'breakdown' | 'doc'
+export type BarMode = 'search' | 'task' | 'capture' | 'breakdown' | 'doc' | 'route'
 
 // 24px icon actions in the selected row. Hit target is 24×36 via `after:` —
 // exactly the row's height, so it never reaches into the rows above/below
@@ -38,6 +39,8 @@ interface CommandBarResultsProps {
   onCreateTask: () => void
   onCapture: () => void
   onSelect: (index: number) => void
+  createTitle?: string
+  createDate?: { label: string } | null
   // Breakdown state
   breakdownTask: LocalTask | null
   breakdownLoading: boolean
@@ -64,6 +67,8 @@ export function CommandBarResults({
   onCreateTask,
   onCapture,
   onSelect,
+  createTitle,
+  createDate,
   breakdownTask,
   breakdownLoading,
   breakdownItems,
@@ -265,7 +270,8 @@ export function CommandBarResults({
             >
               <Plus className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="text-muted-foreground">Create task</span>
-              <span className="flex-1 min-w-0 truncate text-body-strong">"{query}"</span>
+              <span className="flex-1 min-w-0 truncate text-body-strong">"{createTitle ?? query}"</span>
+              {createDate && <DateChip label={createDate.label} />}
               {selectedIndex === createIndex && (
                 <kbd className="rounded-sm bg-muted px-1 py-0.5 text-label text-muted-foreground">Enter</kbd>
               )}
