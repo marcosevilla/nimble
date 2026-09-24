@@ -121,6 +121,7 @@ export function RightSidebar() {
 
   return (
     <aside
+      data-right-rail
       className="relative flex flex-col border-l border-secondary bg-background overflow-hidden transition-[width] duration-(--transition-slow) ease-(--ease-entrance)"
       style={{ width: railWidth }}
     >
@@ -231,5 +232,5 @@ export function RightSidebar() {
  *  starts at exactly the same x as on every other page. */
 export function RightRailSpacer() {
   const railWidth = useLayoutStore(rightRailWidth)
-  return <div aria-hidden className="shrink-0" style={{ width: railWidth }} />
+  return <div data-right-rail aria-hidden className="shrink-0" style={{ width: railWidth }} />
 }

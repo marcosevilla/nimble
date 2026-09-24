@@ -55,6 +55,7 @@ export function DetailSidebar() {
 
   return (
     <aside
+      data-right-rail
       className="relative flex flex-col border-l border-border/20 bg-muted/10 overflow-hidden"
       style={{ width }}
     >

@@ -598,6 +598,7 @@ test.describe('A3 tree motion', () => {
   })
 
   test('A3 reduced motion: tree toggles are instant', async ({ app, page }) => {
+    // Assumes a rAF cadence (~16 ms) longer than Collapse's 1 ms reduced-motion tween (reviewer note, it2).
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await app.open('docs')
     const group = 'nav [role="group"][aria-label="Docs list"]'
@@ -660,6 +661,105 @@ test.describe('A4 sync toast', () => {
         expect(hits, `toast covers rail controls on ${tab}`).toEqual([])
       }
       await expectNoClipping(t)
+    })
+  }
+
+  // ── it2: the notice follows the right column and never covers the page ──
+
+  /** Every visible task row and the page's <main> — the notice must clear them all. */
+  async function expectClearOfPage(page: Page, t: Locator, what: string) {
+    const tb = await box(t)
+    const vp = page.viewportSize()!
+    expect(tb.x, `${what}: in viewport (left)`).toBeGreaterThanOrEqual(0)
+    expect(tb.y, `${what}: in viewport (top)`).toBeGreaterThanOrEqual(0)
+    expect(tb.x + tb.width, `${what}: in viewport (right)`).toBeLessThanOrEqual(vp.width)
+    expect(tb.y + tb.height, `${what}: in viewport (bottom)`).toBeLessThanOrEqual(vp.height)
+    expect(intersects(tb, await box(helpBtn(page))), `${what}: overlaps the ? button`).toBe(false)
+    const hits = await page.evaluate((tbox) => {
+      const els = [...Array.from(document.querySelectorAll<HTMLElement>('[data-nav-row]')), ...Array.from(document.querySelectorAll<HTMLElement>('main'))]
+      return els
+        .filter((e) => e.getClientRects().length)
+        .filter((e) => {
+          const r = e.getBoundingClientRect()
+          return r.width > 0 && r.left < tbox.x + tbox.width && tbox.x < r.right && r.top < tbox.y + tbox.height && tbox.y < r.bottom
+        })
+        .map((e) => e.getAttribute('data-nav-row') ?? e.tagName.toLowerCase())
+    }, tb)
+    expect(hits, `${what}: covers page rows / main`).toEqual([])
+  }
+
+  test('A4 rail collapsed: a compact notice in the rail strip, clear of the task rows', async ({ app, page }) => {
+    await stubSync(page, 'stale')
+    await app.open('tasks')
+    await expect(page.locator('[data-nav-row]').first()).toBeVisible()
+    await railCollapse(page).click()
+    await expect.poll(async () => Math.round((await box(page.locator('aside').first())).width)).toBe(36)
+    const t = syncSurface(page)
+    await expect(t).toBeVisible()
+    await expectClearOfPage(page, t, 'collapsed rail')
+    // Its button opens the rail, where the full notice shows.
+    await t.getByRole('button').click()
+    await expect(syncSurface(page).getByRole('button', { name: 'Sync now' })).toBeVisible()
+    await expectClearOfPage(page, syncSurface(page), 'rail reopened')
+  })
+
+  test('A4 rail at its 200px minimum: the notice fits inside the rail, clear of the task rows', async ({ app, page }) => {
+    await stubSync(page, 'stale')
+    await app.open('tasks')
+    await expect(page.locator('[data-nav-row]').first()).toBeVisible()
+    const aside = page.locator('aside').first()
+    const h = await box(aside.locator('.cursor-col-resize').first())
+    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2)
+    await page.mouse.down()
+    await expect.poll(() => page.evaluate(() => document.body.style.cursor)).toBe('col-resize')
+    await page.mouse.move(h.x + 160, h.y + h.height / 2, { steps: 8 })
+    await page.mouse.up()
+    await expect.poll(async () => Math.round((await box(aside)).width)).toBe(200)
+    const t = syncSurface(page)
+    await expect(t).toBeVisible()
+    await expect(t.getByRole('button', { name: 'Sync now' })).toBeVisible()
+    await expectClearOfPage(page, t, 'rail at 200')
+    const ab = await box(aside)
+    const tb = await box(t)
+    expect(tb.x, 'inside the rail').toBeGreaterThanOrEqual(ab.x)
+    await expectNoClipping(t)
+  })
+
+  test('A4 Settings (rail slot kept, rail hidden): the notice sits in the empty slot', async ({ app, page }) => {
+    await stubSync(page, 'stale')
+    await app.open('settings')
+    const t = syncSurface(page)
+    await expect(t).toBeVisible()
+    await expectClearOfPage(page, t, 'settings')
+  })
+
+  for (const railState of ['open', 'collapsed'] as const) {
+    test(`A4 a sonner toast stacks clear of the notice (rail ${railState})`, async ({ app, page }) => {
+      await stubSync(page, 'stale')
+      await app.open('tasks')
+      await expect(page.locator('[data-nav-row]').first()).toBeVisible()
+      if (railState === 'collapsed') {
+        await railCollapse(page).click()
+        await expect.poll(async () => Math.round((await box(page.locator('aside').first())).width)).toBe(36)
+      }
+      const t = syncSurface(page)
+      await expect(t).toBeVisible()
+      // f on a focused row answers with a sonner toast in the harness (see t1 AC6).
+      await page.keyboard.press('j')
+      await page.keyboard.press('f')
+      const toastEl = page.locator('[data-sonner-toast]').filter({ hasText: /focus/i }).first()
+      await expect(toastEl).toBeVisible()
+      await page.waitForTimeout(600) // sonner's own 400ms enter transition
+      const tb = await box(t)
+      const sb = await box(toastEl)
+      const vp = page.viewportSize()!
+      expect(intersects(tb, sb), `sonner toast ${JSON.stringify(sb)} overlaps the notice ${JSON.stringify(tb)}`).toBe(false)
+      for (const [name, b] of [['notice', tb], ['toast', sb]] as const) {
+        expect(b.x, `${name} in viewport`).toBeGreaterThanOrEqual(0)
+        expect(b.y, `${name} in viewport`).toBeGreaterThanOrEqual(0)
+        expect(b.x + b.width, `${name} in viewport`).toBeLessThanOrEqual(vp.width)
+        expect(b.y + b.height, `${name} in viewport`).toBeLessThanOrEqual(vp.height)
+      }
     })
   }
 
