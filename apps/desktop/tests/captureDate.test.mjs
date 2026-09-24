@@ -111,9 +111,18 @@ test('recurrence anywhere in the text yields no date at all', () => {
     'hike friday every week',
     'gym every mon and fri',
     'standup weekdays at 9am',
+    'everyday at 9am meds',
+    'pay rent biweekly friday',
+    'fortnightly sync friday',
+    'nightly backup tomorrow',
+    'hourly check today at 3pm',
   ]) {
     assert.equal(parseCaptureDate(text, ref), null, text)
   }
+})
+
+test('a normal sentence still parses alongside the wider recurrence list', () => {
+  assert.equal(parseCaptureDate('call everyone friday', ref).dueDate, '2026-09-25')
 })
 
 test('a possessive right after the match is not a date reference', () => {

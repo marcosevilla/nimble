@@ -21,15 +21,14 @@ import { useRowNavigation } from '@/hooks/useTaskNavigation'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
-import { taskToast } from '@/lib/taskToast'
 import { Inbox as InboxIcon, PenLine, ArrowRight, FileText, Download, Search, X } from 'lucide-react'
 import { PageFrame } from '@/components/shared/PageFrame'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { RoutePill, DateChip } from '@/components/capture/CaptureTokens'
 import { HighlightField } from '@/components/capture/HighlightField'
 import { useCaptureDate } from '@/hooks/useCaptureDate'
-import { routeWithDate, convertWithDate } from '@/lib/captureActions'
-import { isTextEntry } from '@/lib/keyGuard'
+import { routeWithDate, routedToastMessage } from '@/lib/captureActions'
+import { convertCaptureWithUndo } from '@/components/capture/convertWithUndo'
 import type { LocalTask, Capture, DocFolder, Document } from '@nimble/types'
 
 // ── Unified inbox item type ──
@@ -46,35 +45,6 @@ type InboxItem =
 
 // Row ids for keyboard navigation — unique across the two kinds.
 const rowId = (item: InboxItem) => `${item.kind}:${item.data.id}`
-
-// Fix round 1: converting note A then note B inside A's undo window used to
-// register two independent `keydown` listeners, so one ⌘Z ran BOTH keeps —
-// both tasks lost their dates. A single module-level slot always points at
-// the latest dated convert; a single listener (installed once, since the
-// toast — and any future convert — outlives InboxPage's own lifetime) fires
-// only that one. Each toast's own "Keep as text" button still calls its own
-// `keep`, unaffected by which entry currently holds the slot.
-let latestKeep: { run: () => void } | null = null
-let undoListenerInstalled = false
-function installUndoListener() {
-  if (undoListenerInstalled) return
-  undoListenerInstalled = true
-  window.addEventListener('keydown', (e) => {
-    if (
-      e.key !== 'z' ||
-      !(e.metaKey || e.ctrlKey) ||
-      e.shiftKey ||
-      e.altKey ||
-      e.repeat ||
-      e.defaultPrevented ||
-      isTextEntry(e.target as Element | null)
-    ) {
-      return
-    }
-    e.preventDefault()
-    latestKeep?.run()
-  })
-}
 
 function isEditableTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
@@ -243,9 +213,9 @@ export function InboxPage() {
         const date = route.target_type === 'task' ? capDate.date : null
         const { result, dateSet, dateFailed } = await routeWithDate(dp, route, content, date)
         if (result.target_type === 'task') emitTasksChanged()
-        if (dateSet && date) toast.success(`Saved to ${result.label} · due ${date.label}`)
-        else if (dateFailed) toast(`Saved to ${result.label}. The date didn't stick. Set it on the task.`)
-        else toast.success(`Saved to ${result.label}`)
+        const msg = routedToastMessage(result.label, { dateSet, dateFailed }, date)
+        if (msg.kind === 'success') toast.success(msg.text)
+        else toast(msg.text)
         refreshCaptures()
       } catch (e) {
         setInputValue(text)
@@ -280,43 +250,7 @@ export function InboxPage() {
     if (capture.id.startsWith('temp-')) return
     setCaptures((prev) => prev.filter((c) => c.id !== capture.id))
     try {
-      const { task, date, keepAsText } = await convertWithDate(dp, capture, new Date())
-      emitTasksChanged()
-      if (!date || !keepAsText) {
-        taskToast(`Converted to task: "${capture.content}"`, task.id)
-        return
-      }
-      // "Keep as text": click this toast's own action, or ⌘Z while it's the
-      // MOST RECENT dated convert still showing (see `latestKeep` above) —
-      // converting a second note reassigns the slot, so an earlier toast's
-      // ⌘Z no longer fires; its own button still works regardless.
-      installUndoListener()
-      // `entry`'s identity (not its contents) is the slot key — `.run` is
-      // filled in below once `keep` exists, but the object itself is created
-      // first so `cleanup` can compare `latestKeep === entry` from the start.
-      const entry: { run: () => void } = { run: () => {} }
-      let done = false
-      const cleanup = () => { if (latestKeep === entry) latestKeep = null }
-      const keep = async () => {
-        if (done) return
-        done = true
-        cleanup()
-        toast.dismiss(toastId)
-        try {
-          await keepAsText()
-          emitTasksChanged()
-          toast(`Kept "${capture.content}" as written`)
-        } catch (e) {
-          toast.error(`Couldn't restore the text: ${e}`)
-        }
-      }
-      entry.run = () => void keep()
-      latestKeep = entry
-      const toastId = toast.success(`Converted · due ${date.label}`, {
-        action: { label: 'Keep as text', onClick: () => void keep() },
-        onDismiss: cleanup,
-        onAutoClose: cleanup,
-      })
+      await convertCaptureWithUndo(dp, capture)
     } catch (e) {
       setCaptures((prev) => [capture, ...prev])
       toast.error(`Failed to convert: ${e}`)

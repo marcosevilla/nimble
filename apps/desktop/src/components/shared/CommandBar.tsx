@@ -13,7 +13,7 @@ import { CommandBarResults } from './CommandBarResults'
 import { toast } from 'sonner'
 import { taskToast } from '@/lib/taskToast'
 import { parseMode } from '@/lib/commandBarMode'
-import { routeWithDate } from '@/lib/captureActions'
+import { routeWithDate, routedToastMessage } from '@/lib/captureActions'
 import { HighlightField } from '@/components/capture/HighlightField'
 import { RoutePill, DateChip, RouteIcon } from '@/components/capture/CaptureTokens'
 import { useCaptureDate } from '@/hooks/useCaptureDate'
@@ -183,9 +183,9 @@ export function CommandBar() {
       const date = route.target_type === 'task' ? capDate.date : null
       const { result, dateSet, dateFailed } = await routeWithDate(dp, route, text, date)
       if (result.target_type === 'task') emitTasksChanged()
-      if (dateSet && date) toast.success(`Saved to ${result.label} · due ${date.label}`)
-      else if (dateFailed) toast(`Saved to ${result.label}. The date didn't stick. Set it on the task.`)
-      else toast.success(`Saved to ${result.label}`)
+      const msg = routedToastMessage(result.label, { dateSet, dateFailed }, date)
+      if (msg.kind === 'success') toast.success(msg.text)
+      else toast(msg.text)
       closeBar()
     } catch (e) {
       submittingRef.current = false

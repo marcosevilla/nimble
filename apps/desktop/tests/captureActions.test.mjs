@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { routeWithDate, convertWithDate, dueFields } from '../src/lib/captureActions.ts'
+import { routeWithDate, convertWithDate, dueFields, routedToastMessage } from '../src/lib/captureActions.ts'
 import { parseCaptureDate } from '../src/lib/captureDate.ts'
 
 const ref = new Date(2026, 8, 23, 10, 0)
@@ -106,6 +106,25 @@ test('convertWithDate with no date words makes one call and offers no keep-as-te
   assert.deepEqual(dp.calls, [['convert', 'cap-2']])
   assert.equal(out.date, null)
   assert.equal(out.keepAsText, null)
+})
+
+test('routedToastMessage: dated success', () => {
+  const date = parseCaptureDate('call mom friday', ref)
+  assert.deepEqual(routedToastMessage('Task', { dateSet: true, dateFailed: false }, date), {
+    kind: 'success', text: 'Saved to Task · due Fri, Sep 25',
+  })
+})
+
+test('routedToastMessage: dating failed', () => {
+  assert.deepEqual(routedToastMessage('Task', { dateSet: false, dateFailed: true }, null), {
+    kind: 'neutral', text: "Saved to Task. The date didn't stick. Set it on the task.",
+  })
+})
+
+test('routedToastMessage: plain save, no date', () => {
+  assert.deepEqual(routedToastMessage('Ideas', { dateSet: false, dateFailed: false }, null), {
+    kind: 'success', text: 'Saved to Ideas',
+  })
 })
 
 test('convertWithDate falls back to the plain conversion when dating fails', async () => {

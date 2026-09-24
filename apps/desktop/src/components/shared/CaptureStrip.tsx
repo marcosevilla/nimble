@@ -41,6 +41,10 @@ export function CaptureStrip() {
   const [value, setValue] = useState('')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState(false)
+  // Set when a task route saved but its date didn't stick (the update after
+  // routing threw) — the save itself worked, so this isn't `error`: no ✓,
+  // no auto-dismiss, but the field still clears and Escape still dismisses.
+  const [dateNote, setDateNote] = useState<string | null>(null)
   // Bumped on every summon so the entrance animation replays
   const [openCount, setOpenCount] = useState(0)
   // Set when the strip was summoned with a grabbed selection — the name of
@@ -97,6 +101,7 @@ export function CaptureStrip() {
       applyThemeFromStorage()
       setSaved(false)
       setError(false)
+      setDateNote(null)
       setOpenCount((c) => c + 1)
       setPrefillContext(null)
       prefillRef.current = null
@@ -142,9 +147,11 @@ export function CaptureStrip() {
     if (!text) return
     try {
       const { route, content } = parseRoutePrefix(text, routes)
+      let dateFailed = false
       if (route && content) {
         const date = route.target_type === 'task' ? capDate.date : null
-        await routeWithDate(dp, route, content, date)
+        const out = await routeWithDate(dp, route, content, date)
+        dateFailed = out.dateFailed
       } else if (prefillRef.current) {
         // A capture born from a grabbed selection keeps its source-app tag
         // even if the user edited the text before saving
@@ -153,16 +160,24 @@ export function CaptureStrip() {
         await dp.captures.create(text, 'quick_capture')
       }
       setError(false)
-      setSaved(true)
       setValue('')
       setPrefillContext(null)
       prefillRef.current = null
       emit('captures-changed')
-      setTimeout(() => {
-        setSaved(false)
-        dismissCaptureStrip('saved')
-      }, 450)
+      if (dateFailed) {
+        // The save worked — only the date didn't stick. No ✓, no
+        // auto-dismiss; the note stays up until Escape (see handleKeyDown).
+        setDateNote("Saved. The date didn't stick. Set it on the task.")
+      } else {
+        setDateNote(null)
+        setSaved(true)
+        setTimeout(() => {
+          setSaved(false)
+          dismissCaptureStrip('saved')
+        }, 450)
+      }
     } catch {
+      setDateNote(null)
       setError(true)
     }
   }, [value, dp, prefillContext, routes, capDate.date])
@@ -213,6 +228,10 @@ export function CaptureStrip() {
         {error ? (
           <span className="mb-1.5 shrink-0 text-meta text-destructive">
             Couldn't save — ⏎ to retry
+          </span>
+        ) : dateNote ? (
+          <span className="mb-1.5 shrink-0 text-meta text-muted-foreground">
+            {dateNote}
           </span>
         ) : (
           prefillContext && (

@@ -148,6 +148,8 @@ export function BulkActionBar() {
     clear()
   }, [selectedIds, selectionType, projects, clear, dp])
 
+  // Bulk convert keeps text as-is; single converts parse dates, see
+  // convertWithUndo — a toast per note here would be noise.
   const handleConvertToTasks = useCallback(async () => {
     if (selectionType !== 'capture') return
     const ids = Array.from(selectedIds)

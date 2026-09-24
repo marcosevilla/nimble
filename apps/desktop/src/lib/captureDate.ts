@@ -6,8 +6,9 @@
    - A bare hour with no meridiem/noon/midnight ("at 3", "at 10:30") rejects
      the whole match, even alongside a day ("fri at 3") — too ambiguous.
    - Any recurrence word anywhere in the text ("every", "each", "daily",
-     "weekly", "monthly", "yearly", "weekdays", "weekends") disqualifies the
-     whole input, not just the words immediately before the match.
+     "weekly", "monthly", "yearly", "weekdays", "weekends", "everyday",
+     "biweekly", "fortnightly", "nightly", "hourly") disqualifies the whole
+     input, not just the words immediately before the match.
    - A possessive right after the match ("today's", "friday's") means the
      words aren't a date reference — skip that match.
    - A resolved date before ref's local day is skipped (captures don't
@@ -36,7 +37,7 @@ export interface ParsedCaptureDate {
 }
 
 const CONNECTOR_BEFORE = /\b(on|by|due|at|for)\s+$/i
-const RECURRENCE_ANYWHERE = /\b(every|each|daily|weekly|monthly|yearly|weekdays|weekends)\b/i
+const RECURRENCE_ANYWHERE = /\b(every|each|daily|weekly|monthly|yearly|weekdays|weekends|everyday|biweekly|fortnightly|nightly|hourly)\b/i
 const POSSESSIVE_AFTER = /^['’]s\b/i
 const NOON_OR_MIDNIGHT = /\b(noon|midnight)\b/i
 

@@ -2,7 +2,6 @@ import { subscribeDataChanges } from '@/lib/dataChanges'
 import { useState, useCallback, useEffect } from 'react'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataProvider } from '@/services/provider-context'
-import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { DetailBreadcrumbs } from './DetailBreadcrumbs'
@@ -10,7 +9,7 @@ import { TaskActivityLog } from './TaskActivityLog'
 import { IconButton } from '@/components/shared/IconButton'
 import { PanelRight, X, Trash2, ArrowRight } from 'lucide-react'
 import { toast } from 'sonner'
-import { taskToast } from '@/lib/taskToast'
+import { convertCaptureWithUndo } from '@/components/capture/convertWithUndo'
 import type { Capture } from '@nimble/types'
 
 export function CaptureDetailPage() {
@@ -45,9 +44,7 @@ export function CaptureDetailPage() {
   const handleConvert = useCallback(async () => {
     if (!capture) return
     try {
-      const task = await dp.captures.convertToTask(capture.id)
-      taskToast(`Converted to task: "${capture.content}"`, task.id)
-      emitTasksChanged()
+      const task = await convertCaptureWithUndo(dp, capture)
       // Open the new task detail
       useDetailStore.getState().openTask(task.id)
     } catch (e) {
