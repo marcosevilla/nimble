@@ -10,7 +10,7 @@
    Tested by tests/shortcuts.test.mjs — plain TS, no JSX, so node imports
    it directly. */
 
-import type { Page } from '@/stores/appStore'
+import type { Page } from './navTargets'
 
 export type ShortcutSection =
   | 'Navigation'
@@ -33,14 +33,15 @@ export interface Shortcut {
   label: string
 }
 
-/** `g` + one of these keys navigates; the prefix expires after G_PREFIX_TIMEOUT_MS. */
-export const G_PREFIX_PAGES: Record<string, Page> = {
+/** `g` + one of these keys navigates (through `navigateTo`); the prefix
+ *  expires after G_PREFIX_TIMEOUT_MS. `activity` is Settings → Activity. */
+export const G_PREFIX_PAGES: Record<string, Page | 'activity'> = {
   t: 'today',
   k: 'tasks',
   i: 'inbox',
   d: 'docs',
   g: 'goals',
-  s: 'session',
+  s: 'activity',
   ',': 'settings',
 }
 
@@ -53,10 +54,10 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Navigation', keys: 'g i', label: 'Go to Inbox' },
   { section: 'Navigation', keys: 'g d', label: 'Go to Docs' },
   { section: 'Navigation', keys: 'g g', label: 'Go to Goals' },
-  { section: 'Navigation', keys: 'g s', label: 'Go to Session' },
+  { section: 'Navigation', keys: 'g s', label: 'Go to Activity (in Settings)' },
   { section: 'Navigation', keys: 'g ,', label: 'Go to Settings' },
-  { section: 'Navigation', keys: '1–6', label: 'Jump to page (sidebar order)' },
-  { section: 'Navigation', keys: '⌘1–6', label: 'Jump to page, even while typing' },
+  { section: 'Navigation', keys: '1–5', label: 'Jump to page (sidebar order)' },
+  { section: 'Navigation', keys: '⌘1–5', label: 'Jump to page, even while typing' },
   { section: 'Navigation', keys: '⌘K', label: 'Command bar' },
   { section: 'Navigation', keys: '⌘,', label: 'Settings' },
   { section: 'Navigation', keys: '?', label: 'Keyboard shortcuts' },

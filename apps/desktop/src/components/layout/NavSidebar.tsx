@@ -5,7 +5,7 @@ import { NAV_MAX_WIDTH, NAV_MIN_WIDTH, useLayoutStore, type NavTreeId } from '@/
 import { useDetailStore } from '@/stores/detailStore'
 import { useDataProvider } from '@/services/provider-context'
 import { cn } from '@/lib/utils'
-import { Sun, CheckSquare, Inbox, FileText, Target, BookOpen, Settings, Command, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Sun, CheckSquare, Inbox, FileText, Target, Settings, Command, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { IconButton } from '@/components/shared/IconButton'
 import { NavDocsTree, NavTasksTree } from './NavTrees'
 import type { LucideIcon } from 'lucide-react'
@@ -44,7 +44,6 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   inbox: Inbox,
   docs: FileText,
   goals: Target,
-  session: BookOpen,
 }
 
 const NAV_LABELS: Record<string, string> = {
@@ -53,7 +52,6 @@ const NAV_LABELS: Record<string, string> = {
   inbox: 'Inbox',
   docs: 'Docs',
   goals: 'Goals',
-  session: 'Activity',
 }
 
 /* One class recipe for every rail item (shell P2-10, P3-4, P2-9):

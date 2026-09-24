@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Page } from './appStore'
+import { PAGE_IDS } from '@/lib/navTargets'
 
 export type DetailMode = 'body' | 'sidebar'
 export type DetailType = 'task' | 'capture' | 'doc' | 'goal'
@@ -45,7 +46,7 @@ interface DetailStore {
   syncToPage: (page: Page) => void
 }
 
-const ALL_PAGES: Page[] = ['today', 'tasks', 'inbox', 'docs', 'goals', 'session', 'settings']
+const ALL_PAGES: readonly Page[] = PAGE_IDS
 
 function buildInitialPageDetails(): Record<Page, PageDetailState> {
   const details = {} as Record<Page, PageDetailState>

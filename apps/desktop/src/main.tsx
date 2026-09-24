@@ -11,6 +11,7 @@ import { DataProviderRoot, setDataProvider } from '@/services/provider-context'
 import { useAppStore } from '@/stores/appStore'
 import { useDetailStore } from '@/stores/detailStore'
 import { useSelectionStore } from '@/stores/selectionStore'
+import { navigateTo, useSettingsNavStore } from '@/stores/settingsNavStore'
 
 // DEV-only: expose stores on window so the audit-loop Playwright session can
 // bypass onboarding (no Tauri runtime in a plain browser → invoke() throws →
@@ -18,7 +19,7 @@ import { useSelectionStore } from '@/stores/selectionStore'
 // detail/selection stores let capture scripts open the task detail page and
 // the inline task composer card deterministically.
 if (import.meta.env.DEV) {
-  ;(window as unknown as { __stores: unknown }).__stores = { useAppStore, useDetailStore, useSelectionStore }
+  ;(window as unknown as { __stores: unknown }).__stores = { useAppStore, useDetailStore, useSelectionStore, useSettingsNavStore, navigateTo }
 }
 
 // Initialize the DataProvider before anything renders.

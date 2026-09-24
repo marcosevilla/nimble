@@ -1932,18 +1932,26 @@
 
 // ── Deep-link shim: ?page=X selects the page via the DEV __stores hatch ──
 // The store isn't loaded yet when this init script runs, so poll for it.
+// `?page=activity` (or the retired `?page=session`) opens Settings → Activity
+// through the app's own `navigateTo`; `&settings=<sub-page id>` picks any
+// other Settings sub-page.
 ;(function () {
   var params = new URLSearchParams(window.location.search)
   var page = params.get('page')
+  var settingsPage = params.get('settings')
   var tries = 0
   var timer = setInterval(function () {
     tries++
     var stores = window.__stores
     if (stores && stores.useAppStore) {
       clearInterval(timer)
-      var patch = { setupComplete: true }
-      if (page) patch.currentPage = page
-      stores.useAppStore.setState(patch)
+      stores.useAppStore.setState({ setupComplete: true })
+      if (page && !(stores.navigateTo && stores.navigateTo(page))) {
+        stores.useAppStore.setState({ currentPage: page })
+      }
+      if (settingsPage && stores.useSettingsNavStore) {
+        stores.useSettingsNavStore.getState().showPage(settingsPage)
+      }
       console.debug('[mock-tauri] deep-link applied:', page || '(default)')
     } else if (tries > 100) {
       clearInterval(timer)

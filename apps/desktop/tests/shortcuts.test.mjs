@@ -25,8 +25,8 @@ test('registry contains ?, g t, q and ⌘K', () => {
   for (const k of ['?', 'g t', 'q', '⌘K']) assert.ok(keys.includes(k), `missing ${k}`)
 })
 
-test('g-prefix map covers the seven pages with a 600ms window', () => {
-  assert.deepEqual(G_PREFIX_PAGES, { t: 'today', k: 'tasks', i: 'inbox', d: 'docs', g: 'goals', s: 'session', ',': 'settings' })
+test('g-prefix map covers the six pages plus Settings → Activity with a 600ms window', () => {
+  assert.deepEqual(G_PREFIX_PAGES, { t: 'today', k: 'tasks', i: 'inbox', d: 'docs', g: 'goals', s: 'activity', ',': 'settings' })
   assert.equal(G_PREFIX_TIMEOUT_MS, 600)
   for (const [k, page] of Object.entries(G_PREFIX_PAGES)) {
     assert.ok(SHORTCUTS.some((s) => s.keys === `g ${k}`), `registry lists g ${k} → ${page}`)
@@ -120,4 +120,15 @@ test('Capture section is appended last with routes, ⌫ and ⌘Z', () => {
   assert.equal(SHORTCUT_SECTIONS[SHORTCUT_SECTIONS.length - 1], 'Capture')
   const keys = SHORTCUTS.filter((s) => s.section === 'Capture').map((s) => s.keys)
   assert.deepEqual(keys, ['/i /q /t', '⌫', '⌘Z'])
+})
+
+// ── Loop 2: Activity moved into Settings ──
+
+test('g s is labelled as Activity in Settings, and number keys match the five-page nav', () => {
+  const gs = SHORTCUTS.find((s) => s.keys === 'g s')
+  assert.match(gs.label, /Activity/)
+  assert.doesNotMatch(gs.label, /Session/)
+  const keys = SHORTCUTS.map((s) => s.keys)
+  assert.ok(keys.includes('1–5') && keys.includes('⌘1–5'))
+  assert.ok(!keys.includes('1–6') && !keys.includes('⌘1–6'))
 })

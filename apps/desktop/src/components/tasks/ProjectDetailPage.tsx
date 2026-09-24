@@ -137,7 +137,8 @@ export function ProjectDetailPage({
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
       <PageDragRegion />
-      <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0">
+      {/* Same gutter rule as All tasks: the column never shifts sideways */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 [scrollbar-gutter:stable]">
         <div className="pb-6 min-w-0">
           <div className="w-full max-w-page mx-auto px-6 min-w-0">
             <TaskListHeader

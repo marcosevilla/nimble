@@ -4,7 +4,6 @@ import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ActivityTimeline } from '@/components/activity/ActivityTimeline'
-import { PageFrame } from '@/components/shared/PageFrame'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { Terminal } from 'lucide-react'
 
@@ -245,24 +244,25 @@ function SessionsTab() {
   )
 }
 
-// ── Main page ──
+// ── Activity log (Settings → Activity) ──
 
-export function SessionPage() {
+/** The timeline + session-log tabs. Once its own nav page ("Activity",
+ *  page id `session`); now the body of the Settings → Activity sub-page,
+ *  which supplies the frame and heading. */
+export function ActivityLog() {
   return (
-    <PageFrame title="Activity">
-      <Tabs defaultValue="timeline">
-        <TabsList>
-          <TabsTrigger value="timeline">Timeline</TabsTrigger>
-          <TabsTrigger value="sessions">Sessions</TabsTrigger>
-        </TabsList>
+    <Tabs defaultValue="timeline">
+      <TabsList>
+        <TabsTrigger value="timeline">Timeline</TabsTrigger>
+        <TabsTrigger value="sessions">Sessions</TabsTrigger>
+      </TabsList>
 
-        <TabsContent value="timeline">
-          <ActivityTimeline />
-        </TabsContent>
-        <TabsContent value="sessions">
-          <SessionsTab />
-        </TabsContent>
-      </Tabs>
-    </PageFrame>
+      <TabsContent value="timeline">
+        <ActivityTimeline />
+      </TabsContent>
+      <TabsContent value="sessions">
+        <SessionsTab />
+      </TabsContent>
+    </Tabs>
   )
 }

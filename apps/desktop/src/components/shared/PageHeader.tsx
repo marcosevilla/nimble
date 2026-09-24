@@ -2,16 +2,6 @@ import { cn } from '@/lib/utils'
 import { ChevronLeft } from 'lucide-react'
 import { Icon } from '@/components/shared/Icon'
 
-/** `default`/`wide` align the header with PageFrame's content column
- *  (640/768, same 24px gutter); `full` spans the pane (Docs). */
-export type PageHeaderWidth = 'default' | 'wide' | 'full'
-
-const WIDTH_CLASS: Record<PageHeaderWidth, string> = {
-  default: 'mx-auto max-w-page px-6',
-  wide: 'mx-auto max-w-page-wide px-6',
-  full: 'px-6',
-}
-
 /** The one page-title recipe, shared with the Tasks list header: a 20px
  *  display title with its controls on the right of the same row, and any
  *  back link or breadcrumb on a small row above it. */
@@ -29,7 +19,6 @@ interface PageHeaderProps {
     label: string
     onClick: () => void
   }
-  width?: PageHeaderWidth
   className?: string
 }
 
@@ -39,7 +28,6 @@ export function PageHeader({
   actions,
   secondary,
   backAction,
-  width = 'full',
   className,
 }: PageHeaderProps) {
   return (
@@ -50,7 +38,8 @@ export function PageHeader({
       )}
       data-tauri-drag-region
     >
-      <div className={cn('w-full min-w-0 pt-6', WIDTH_CLASS[width])} data-tauri-drag-region>
+      {/* Same column as PageColumn (960, 24px gutter), so titles line up with content */}
+      <div className="mx-auto w-full min-w-0 max-w-page px-6 pt-6" data-tauri-drag-region>
         {backAction && (
           <div className={PAGE_CRUMB_ROW}>
             <button onClick={backAction.onClick} className={cn('flex items-center gap-1', PAGE_CRUMB)}>

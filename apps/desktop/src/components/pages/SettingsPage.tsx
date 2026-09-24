@@ -50,6 +50,7 @@ import { DocsMigrationSection } from '@/components/settings/DocsMigrationSection
 import { TasksMigrationSection } from '@/components/settings/TasksMigrationSection'
 import { VaultSection } from '@/components/settings/VaultSection'
 import { LabelManager } from '@/components/settings/LabelManager'
+import { ActivityLog } from '@/components/activity/ActivityLog'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
 import {
   visibleSections,
@@ -1826,6 +1827,18 @@ export function SettingsPage() {
         </details>
       </section>
     ),
+
+    /* Formerly its own nav page (Activity, page id `session`); same
+       timeline + session-log tabs, framed by Settings now. `g s` lands here. */
+    activity: (
+      <section id="activity" className={SECTION_CLASS}>
+        <SectionHeader
+          title="Activity"
+          description="What happened in Nimble, and today's work-session log."
+        />
+        <ActivityLog />
+      </section>
+    ),
   }
 
   // A section renders only when it has a body; `today-brief` stays null
@@ -1910,7 +1923,7 @@ export function SettingsPage() {
     )
 
   return (
-    <PageFrame title="Settings" width="wide" bodyClassName="flex gap-8">
+    <PageFrame title="Settings" bodyClassName="flex gap-8">
       {/* Left rail — the sub-pages; the current page's sections nest under it */}
       <nav
         aria-label="Settings pages"
@@ -1959,10 +1972,12 @@ export function SettingsPage() {
 
       {/* Main content — the current page's sections, in registry order.
           Section offset on every direct child, so the standalone Backups /
-          Reminders / Phone alerts components land like the rest. */}
+          Reminders / Phone alerts components land like the rest. Capped at
+          the 720 measure so forms never stretch the full 960 column (below
+          md, where the rail hides). */}
       <div
         ref={contentRef}
-        className="flex-1 min-w-0 space-y-8 [&>section]:scroll-mt-[calc(var(--page-header-h)+1.5rem)]"
+        className="flex-1 min-w-0 max-w-measure space-y-8 [&>section]:scroll-mt-[calc(var(--page-header-h)+1.5rem)]"
       >
         {/* Below md the rail is hidden; keep every page reachable */}
         <nav aria-label="Settings pages" className="flex flex-wrap gap-1 md:hidden">

@@ -28,12 +28,13 @@ import { DataProviderRoot, setDataProvider } from '@/services/provider-context'
 import { useAppStore } from '@/stores/appStore'
 import { useDetailStore } from '@/stores/detailStore'
 import { useSelectionStore } from '@/stores/selectionStore'
+import { navigateTo, useSettingsNavStore } from '@/stores/settingsNavStore'
 
 // DEV-only: same store hatch as main.tsx, so the Playwright audit loop can
 // drive the web build the same way it drives the desktop one.
 // See nimble/docs/audit-loop-playbook.md.
 if (import.meta.env.DEV) {
-  ;(window as unknown as { __stores: unknown }).__stores = { useAppStore, useDetailStore, useSelectionStore }
+  ;(window as unknown as { __stores: unknown }).__stores = { useAppStore, useDetailStore, useSelectionStore, useSettingsNavStore, navigateTo }
 }
 
 // Initialize the DataProvider before anything renders.

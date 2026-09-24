@@ -7,9 +7,10 @@ import { listen } from '@tauri-apps/api/event'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useAppStore } from '@/stores/appStore'
+import { navigateTo } from '@/stores/settingsNavStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { NavSidebar } from './NavSidebar'
-import { RightSidebar } from './RightSidebar'
+import { RightRailSpacer, RightSidebar } from './RightSidebar'
 import { CommandBar } from '@/components/shared/CommandBar'
 import { HelpPanel } from '@/components/shared/HelpPanel'
 import { useHelpPanelStore } from '@/stores/helpPanelStore'
@@ -21,7 +22,6 @@ import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { TodayPage } from '@/components/pages/TodayPage'
 import { TasksPage } from '@/components/pages/TasksPage'
 import { InboxPage } from '@/components/pages/InboxPage'
-import { SessionPage } from '@/components/pages/SessionPage'
 import { SettingsPage } from '@/components/pages/SettingsPage'
 import { DocsPage } from '@/components/pages/DocsPage'
 import { GoalsPage } from '@/components/pages/GoalsPage'
@@ -34,6 +34,7 @@ import { FocusView } from '@/components/focus/FocusView'
 import { FocusBanner } from '@/components/focus/FocusBanner'
 import { FocusResumeDialog } from '@/components/focus/FocusResumeDialog'
 import { SyncHealthBanner } from '@/components/shared/SyncHealthBanner'
+import { PageColumn } from '@/components/shared/PageFrame'
 import { useDetailStore } from '@/stores/detailStore'
 import { TaskDetailPage } from '@/components/detail/TaskDetailPage'
 import { CaptureDetailPage } from '@/components/detail/CaptureDetailPage'
@@ -55,8 +56,6 @@ function PageContent({ page }: { page: string }) {
       return <DocsPage />
     case 'goals':
       return <GoalsPage />
-    case 'session':
-      return <SessionPage />
     case 'settings':
       return <SettingsPage />
     default:
@@ -227,16 +226,16 @@ export function Dashboard() {
         const num = parseInt(e.key, 10)
         if (num >= 1 && num <= pages.length) {
           e.preventDefault()
-          setCurrentPage(pages[num - 1] as typeof currentPage)
+          navigateTo(pages[num - 1])
           return
         }
       }
 
-      // Cmd+1-6 for navigation (works even in inputs)
+      // Cmd+1–5 for navigation (works even in inputs)
       if (meta && e.key >= '1' && e.key <= String(pages.length)) {
         e.preventDefault()
         const idx = parseInt(e.key, 10) - 1
-        if (idx < pages.length) setCurrentPage(pages[idx] as typeof currentPage)
+        if (idx < pages.length) navigateTo(pages[idx])
         return
       }
     }
@@ -246,6 +245,7 @@ export function Dashboard() {
   }, [setCurrentPage, detailTarget, closeDetail])
 
   // G-prefix navigation (§1.5, shell P1-5): `g` then t/k/i/d/g/s/, within
+  // (`g s` opens Settings → Activity)
   // 600ms. Registered in the capture phase so the second key never reaches
   // the page-level handlers (`k` = previous task, `s` = snooze, `t` =
   // calendar today). Number keys and ⌘1–6 are untouched — this is additive.
@@ -265,11 +265,11 @@ export function Dashboard() {
       if (pending !== null) {
         pendingGRef.current = null
         if (Date.now() - pending <= G_PREFIX_TIMEOUT_MS) {
-          const page = G_PREFIX_PAGES[e.key]
-          if (page) {
+          const target = G_PREFIX_PAGES[e.key]
+          if (target) {
             e.preventDefault()
             e.stopPropagation()
-            setCurrentPage(page)
+            navigateTo(target)
             return
           }
         }
@@ -282,10 +282,9 @@ export function Dashboard() {
     }
     window.addEventListener('keydown', handleChord, true)
     return () => window.removeEventListener('keydown', handleChord, true)
-  }, [setCurrentPage])
+  }, [])
 
   const hideSidebar = pageHidesRightRail(currentPage)
-  const contentMaxW = hideSidebar ? 'max-w-3xl' : 'max-w-2xl'
   const pageOwnsScroll = currentPage === 'tasks' || currentPage === 'docs'
 
   return (
@@ -310,7 +309,14 @@ export function Dashboard() {
             `sticky top-0` holds for the whole scroll (settings P2-3). Tasks
             and Docs own an inner scroller, so their <main> is pinned to the
             viewport height instead (min-h-0). */}
-        <div ref={scrollRef} data-page-scroller className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+        {/* Tasks reserves its scrollbar gutter on its own inner scrollers;
+            reserving one here too would narrow its column by a second
+            gutter and knock it off the shared axis. */}
+        <div
+          ref={scrollRef}
+          data-page-scroller
+          className={cn('flex flex-1 flex-col overflow-x-hidden overflow-y-auto', currentPage !== 'tasks' && '[scrollbar-gutter:stable]')}
+        >
           {focusExpanded ? (
             <FocusView />
           ) : detailTarget && detailMode === 'body' && !(currentPage === 'tasks' && detailTarget.type === 'task') ? (
@@ -320,10 +326,11 @@ export function Dashboard() {
             // round 3, item 4). Every other body-mode detail — including
             // task details opened from other pages — keeps this full-width
             // replacement behavior.
-            <main key={`detail-${detailTarget.id}`} className="flex-1 min-w-0 p-6">
-              <div className={cn('mx-auto w-full', contentMaxW)}>
+            // Same 960 column + 24px gutter as every page (PageColumn).
+            <main key={`detail-${detailTarget.id}`} className="flex-1 min-w-0">
+              <PageColumn>
                 {detailTarget.type === 'task' ? <TaskDetailPage /> : detailTarget.type === 'goal' ? <GoalDetailPage /> : <CaptureDetailPage />}
-              </div>
+              </PageColumn>
             </main>
           ) : (
             <main
@@ -340,12 +347,14 @@ export function Dashboard() {
       </div>
 
       {/* Right: Sidebar — detail view replaces Schedule/Habits when in sidebar mode */}
-      {!hideSidebar && (
-        detailTarget && detailMode === 'sidebar' ? (
-          <DetailSidebar />
-        ) : (
-          <RightSidebar />
-        )
+      {/* Settings shows no rail but keeps its slot, so its column shares
+          every other page's x (Marco 2026-09-24). */}
+      {hideSidebar ? (
+        <RightRailSpacer />
+      ) : detailTarget && detailMode === 'sidebar' ? (
+        <DetailSidebar />
+      ) : (
+        <RightSidebar />
       )}
 
       {/* Quick create task dialog — self-contained via useQuickCreateStore */}

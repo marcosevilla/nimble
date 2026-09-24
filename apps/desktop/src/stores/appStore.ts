@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import type { CalendarEvent } from '@nimble/types'
+import type { Page } from '@/lib/navTargets'
 
-export type Page = 'today' | 'tasks' | 'inbox' | 'docs' | 'goals' | 'session' | 'settings'
+export type { Page }
 
 interface AppState {
   // Setup

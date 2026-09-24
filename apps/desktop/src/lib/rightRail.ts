@@ -3,9 +3,9 @@ import { useDetailStore } from '@/stores/detailStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 
-/** Pages that give the full width to their content and show no right column. */
+/** Pages that show no right column (its slot stays reserved — RightRailSpacer). */
 export function pageHidesRightRail(page: string): boolean {
-  return page === 'settings' || page === 'session'
+  return page === 'settings'
 }
 
 /** The tabbed right column is on screen (not replaced by a detail sidebar). */
@@ -46,7 +46,7 @@ export function toggleFocusQueue(): void {
 /**
  * ⇧H: show today's habits in the right column, or hide the column if the
  * Habits tab is already showing. Where the column isn't on screen it is
- * brought back first: Settings / Session switch to Today — syncing the
+ * brought back first: Settings switches to Today — syncing the
  * detail store to that switch (as Dashboard.tsx's own page-change effect
  * does) so a sidebar-mode detail saved for Today is seen and closed below
  * instead of rendering over the tab on the next page-change effect — and

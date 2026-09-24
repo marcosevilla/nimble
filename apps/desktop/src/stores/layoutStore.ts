@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { getDataProvider } from '@/services/provider-context'
+import { DEFAULT_NAV_ORDER, normalizeNavOrder } from '@/lib/navTargets'
 
 // Nav sidebar defaults (from NavSidebar.tsx). Labeled by default; the
 // Tasks and Docs trees live under their nav buttons (Agentation pass 2).
@@ -23,9 +24,18 @@ function loadNavTrees(): Record<NavTreeId, boolean> {
 
 // Right sidebar defaults (from RightSidebar.tsx)
 const RIGHT_DEFAULT_WIDTH = 288 // w-72
+/** Width of the collapsed right rail (icon strip). */
+export const RIGHT_COLLAPSED_WIDTH = 36
 
-// Default nav order — page IDs in display order
-export const DEFAULT_NAV_ORDER = ['today', 'tasks', 'inbox', 'docs', 'goals', 'session'] as const
+/** The width the right rail occupies in its current state. Pages without the
+ *  rail (Settings) reserve this same width so their column lands on the same
+ *  x as every other page. */
+export function rightRailWidth(s: { rightCollapsed: boolean; rightWidth: number }): number {
+  return s.rightCollapsed ? RIGHT_COLLAPSED_WIDTH : s.rightWidth
+}
+
+// Default nav order — page IDs in display order (lib/navTargets owns it)
+export { DEFAULT_NAV_ORDER }
 export type NavPageId = (typeof DEFAULT_NAV_ORDER)[number]
 
 // Right column tabs, in display order
@@ -96,15 +106,9 @@ export const useLayoutStore = create<LayoutState>((set) => ({
       const dp = getDataProvider()
       const saved = await dp.settings.get('nav_order')
       if (saved) {
-        const parsed = JSON.parse(saved) as string[]
-        // Validate: must contain all default IDs (handle new pages added later)
-        const validIds = new Set<string>(DEFAULT_NAV_ORDER)
-        const filtered = parsed.filter((id) => validIds.has(id))
-        // Add any missing pages at the end
-        for (const id of DEFAULT_NAV_ORDER) {
-          if (!filtered.includes(id)) filtered.push(id)
-        }
-        set({ navOrder: filtered })
+        // Drops retired ids (the old `session` Activity page), duplicates and
+        // anything unknown; appends pages added since the order was saved.
+        set({ navOrder: normalizeNavOrder(JSON.parse(saved)) })
       }
     } catch {
       // Use default order on any error

@@ -102,9 +102,9 @@ export function VaultNoteEditor() {
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
-      {/* Same shell as a native doc (docs P2-3): one centered wide column,
-          the path as the eyebrow where DocEditor shows the folder. */}
-      <PageColumn width="wide" className="space-y-4">
+      {/* Same shell as a native doc (docs P2-3): the page column with a 720
+          reading measure, the path as the eyebrow where DocEditor shows the folder. */}
+      <PageColumn className="[&>*]:max-w-measure space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             <Meta as="p" className="truncate" title={note.path}>{note.path}</Meta>

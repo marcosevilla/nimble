@@ -5,6 +5,7 @@ import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
 import { TaskListHeader } from '@/components/tasks/TaskListHeader'
 import { SelectionActionBar } from '@/components/tasks/SelectionActionBar'
 import { PageDragRegion } from '@/components/shared/PageDragRegion'
+import { PageColumn } from '@/components/shared/PageFrame'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Plus } from 'lucide-react'
 import { useTaskNavigation } from '@/hooks/useTaskNavigation'
@@ -84,7 +85,9 @@ function AllTasksView({
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
       <PageDragRegion />
       {/* scrollbar-gutter keeps centered content from shifting when the
-          classic 6px scrollbar appears after async content loads */}
+          classic 6px scrollbar appears after async content loads. Dashboard
+          reserves no outer gutter on Tasks, so this box matches every other
+          page's and the column lines up with theirs. */}
       <div className="flex-1 overflow-y-auto min-w-0 [scrollbar-gutter:stable]">
         <div className="pb-6">
           <div className="w-full max-w-page mx-auto px-6 min-w-0">
@@ -240,11 +243,15 @@ export function TasksPage() {
       {showingDetail && detailTarget ? (
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <PageDragRegion />
-          <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 p-6">
-            {/* Keyed by task id — same remount-per-task semantics Dashboard
+          <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 [scrollbar-gutter:stable]">
+            {/* The page column, like the list; PageDragRegion above already
+                gives the 24px top, so no top padding here.
+                Keyed by task id — same remount-per-task semantics Dashboard
                 used to provide via its own `key={`detail-${id}`}` wrapper,
                 now that this page stays mounted across detail open/close. */}
-            <TaskDetailPage key={detailTarget.id} />
+            <PageColumn className="pt-0">
+              <TaskDetailPage key={detailTarget.id} />
+            </PageColumn>
           </div>
         </div>
       ) : selectedProject ? (
