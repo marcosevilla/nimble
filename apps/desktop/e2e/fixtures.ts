@@ -65,7 +65,17 @@ export async function findClipped(scope: Locator, opts: { allowEllipsis?: boolea
           const cs = getComputedStyle(el)
           if (cs.display === 'none' || cs.visibility === 'hidden' || el.getClientRects().length === 0) continue
           if (allowEllipsis && cs.textOverflow === 'ellipsis') continue
-          const clipsX = el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0
+          // scrollWidth alone also counts invisible hit-area pseudo-elements;
+          // confirm with the laid-out width of the element's own text.
+          let textW = 0
+          for (const n of Array.from(el.childNodes)) {
+            if (n.nodeType !== 3 || !n.textContent!.trim()) continue
+            const r = document.createRange()
+            r.selectNodeContents(n)
+            for (const rect of Array.from(r.getClientRects())) textW = Math.max(textW, rect.right - el.getBoundingClientRect().left - el.clientLeft)
+          }
+          const contentRight = el.clientWidth - parseFloat(cs.paddingRight)
+          const clipsX = el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0 && textW > contentRight + 1
           const clipsY = cs.overflowY !== 'visible' && el.scrollHeight > el.clientHeight + 1 && el.clientHeight > 0
           if (clipsX || clipsY) {
             out.push(`${el.tagName.toLowerCase()}${el.className ? '.' + String(el.className).split(/\s+/).slice(0, 3).join('.') : ''} "${el.textContent!.trim().slice(0, 40)}" (${el.scrollWidth}x${el.scrollHeight} > ${el.clientWidth}x${el.clientHeight})`)
