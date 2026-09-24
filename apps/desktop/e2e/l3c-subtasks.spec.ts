@@ -297,6 +297,28 @@ async function clickCheckbox(page: Page, id: string, modifiers: ('Shift' | 'Meta
   await checkbox(row).click({ modifiers, timeout: 2000 })
 }
 
+/** After a pointer drop: the reorder is recorded, no row is still being
+ * dragged, and dnd-kit's post-drop click suppression (a capture-phase
+ * document listener it removes ~50ms after the drop) has lifted — probed
+ * with a real click on a throwaway element rather than a blind sleep. */
+async function waitForDropToSettle(page: Page) {
+  await expect.poll(async () => (await invokes(page, 'reorder_local_tasks')).length).toBeGreaterThan(0)
+  await expect(page.locator('main [aria-roledescription="sortable"][aria-pressed="true"]')).toHaveCount(0)
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        let got = false
+        const probe = document.createElement('div')
+        probe.addEventListener('click', () => { got = true })
+        document.body.appendChild(probe)
+        probe.click()
+        probe.remove()
+        return got
+      }),
+    )
+    .toBe(true)
+}
+
 async function dragAbove(page: Page, fromId: string, toId: string) {
   const from = subRow(page, fromId)
   await from.hover()
@@ -369,6 +391,7 @@ test('C1 the new order survives leaving the detail and coming back', async ({ ap
   await dragAbove(page, before[2], before[0])
   const expected = [before[2], before[0], before[1], before[3]]
   await expect.poll(() => subIds(page)).toEqual(expected)
+  await waitForDropToSettle(page) // Back within ~50ms of the drop was swallowed (flake, it2)
   await leaveAndReturn(page)
   await expect.poll(() => subIds(page)).toEqual(expected)
 })

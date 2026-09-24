@@ -138,7 +138,7 @@ function AllTasksView({
             {/* Same "Add a task" row a project view has, with the shortcut
                 it stands in for (tasks audit P2-7). */}
             {filteredTasks.length > 0 && (
-              <div className="pt-5 pl-4">
+              <div className="pt-5 pl-8">
                 <button
                   type="button"
                   onClick={() => useQuickCreateStore.getState().openCreate()}

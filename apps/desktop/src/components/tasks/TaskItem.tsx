@@ -209,18 +209,18 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
       )}
     >
       {/* Hover cluster — grip then checkbox, absolutely positioned so it
-          never occupies an in-flow slot: the status icon below stays flush
-          with the section/page title's `pl-4` edge whether or not the
-          cluster is revealed (Marco QA round 3, item 1).
-          It lives in the 40px strip left of the status icon — the column's
-          24px gutter plus the row's own 16px content inset — and ends 4px
-          short of the icon. It used to hang wholly outside the row
-          (`right-full`, 52px wide), which at 1440 put the grip past the
-          list's `overflow-x-hidden` scroller edge: clipped and unclickable
-          (Agentation pass 3, C4). Hence the compact grip (16×24) and the
-          2px gap — 34px in all, 2px clear of the scroller edge. */}
+          never occupies an in-flow slot: the status icon's x is the same
+          whether or not the cluster is revealed (Marco QA round 3, item 1).
+          It lives in the strip left of the status icon — the column's 24px
+          gutter plus the row's 32px content inset (Marco 2026-09-24 option A:
+          +16px so the grip is a full 24×24 target). Hit areas abut, never
+          overlap: grip [-22, +2), checkbox (24px ::after) [+2, +26), status
+          trigger from +26 (its glyph at +32). It used to hang wholly outside
+          the row (`right-full`), which at 1440 put the grip past the list's
+          `overflow-x-hidden` scroller edge: clipped and unclickable
+          (Agentation pass 3, C4). */}
       {(showGrip || selectable) && (
-        <div className="absolute right-[calc(100%-0.75rem)] top-0 flex h-9 items-center gap-0.5">
+        <div className="absolute right-[calc(100%-1.375rem)] top-0 flex h-9 items-center gap-1">
           {/* dnd-kit's attributes make the grip a focusable button — so it
               reveals on focus-within too, never an invisible tab stop, and
               shows at once (no fade) when it holds keyboard focus itself.
@@ -229,7 +229,7 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
             <button
               type="button"
               aria-label="Drag to reorder"
-              className="flex h-6 w-4 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:transition-none focus-visible:-outline-offset-2"
+              className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:transition-none focus-visible:-outline-offset-2"
               onClick={(e) => e.stopPropagation()}
               {...dragHandleProps}
             >
@@ -241,10 +241,10 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
       )}
 
       {/* Content — offset via margin (not padding) so the border below
-          starts exactly at the status icon's left edge (matching the
-          section/page title's `pl-4` inset) instead of under the gutter or
-          the overhanging hover cluster. */}
-      <div className="flex flex-1 h-9 items-center gap-3 min-w-0 ml-4 border-b border-secondary">
+          starts exactly at the status icon's left edge instead of under the
+          gutter or the hover cluster. 32px: room for the cluster's 24px
+          targets (Marco 2026-09-24 option A). */}
+      <div className="flex flex-1 h-9 items-center gap-3 min-w-0 ml-8 border-b border-secondary">
         {/* Status (before priority per updated row anatomy) */}
         {task.source === 'local' && task.status ? (
           <StatusDropdown taskId={task.id} status={task.status} dueDate={task.dueDate} />

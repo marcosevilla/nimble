@@ -6,7 +6,7 @@
 //   • the parent-reopen toast fires from a list row's status menu too (the
 //     shared reopenTask path), and its "Reopen" is a Tab stop in WebKit.
 import type { Locator, Page } from '@playwright/test'
-import { test, expect } from './fixtures'
+import { test, expect, expectNoClipping } from './fixtures'
 
 const MOCK_NOW = new Date('2026-08-01T10:00:00')
 
@@ -72,6 +72,59 @@ test('project list rows: hovered grip and checkbox are pointer-reachable at 1440
   await expect(checkbox(r)).toHaveCount(1)
   expect(await hittable(grip(r)), 'grip not clipped').toBe(true)
   expect(await hittable(checkbox(r)), 'checkbox not clipped').toBe(true)
+})
+
+/** What elementFromPoint hits at (x, row centre): 'grip' | 'checkbox' | 'status' | other. */
+async function hitAt(r: Locator, x: number) {
+  return r.evaluate((row, px) => {
+    const y = row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2
+    const hit = document.elementFromPoint(px, y)
+    const btn = hit?.closest('button')
+    const name = btn?.getAttribute('aria-label') ?? ''
+    if (name === 'Drag to reorder') return 'grip'
+    if (/^(Select|Deselect)$/.test(name)) return 'checkbox'
+    if (name.startsWith('Status:')) return 'status'
+    return hit ? hit.tagName.toLowerCase() : 'none'
+  }, x)
+}
+
+// Marco 2026-09-24 option A: row content +16px so the grip is a full 24px
+// target; grip, checkbox (24px ::after) and status icon targets abut, never overlap.
+test('project list rows: grip is a ≥24px target whose edges hit the grip, abutting (not overlapping) checkbox and status', async ({ app, page }) => {
+  await app.open('tasks')
+  await openPortfolio(page)
+  const r = row(page, 'task-01')
+  await r.hover()
+  await expect(grip(r)).toHaveCount(1)
+  const g = (await grip(r).boundingBox())!
+  const c = (await checkbox(r).boundingBox())!
+  const st = (await rowStatus(r).boundingBox())!
+  expect(g.width, 'grip hit width').toBeGreaterThanOrEqual(24)
+  expect(g.height, 'grip hit height').toBeGreaterThanOrEqual(24)
+  expect(await hitAt(r, g.x + 1), 'grip left edge').toBe('grip')
+  expect(await hitAt(r, g.x + g.width - 1), 'grip right edge').toBe('grip')
+  // The checkbox's hit area (16px box + 4px ::after each side) starts where the grip ends…
+  expect(await hitAt(r, g.x + g.width + 1), 'just right of the grip').toBe('checkbox')
+  expect(await hitAt(r, c.x - 3), 'checkbox hit left edge').toBe('checkbox')
+  expect(await hitAt(r, c.x + c.width + 3), 'checkbox hit right edge').toBe('checkbox')
+  // …and ends where the status trigger's begins.
+  expect(await hitAt(r, st.x + 1), 'status trigger left edge').toBe('status')
+  expect(c.x - 4, 'checkbox target starts at/after the grip end').toBeGreaterThanOrEqual(g.x + g.width - 0.5)
+  expect(c.x + c.width + 4, 'checkbox target ends at/before the status target').toBeLessThanOrEqual(st.x + 0.5)
+})
+
+test('at 1024 wide, project rows keep their right cluster unclipped and the hover cluster reachable', async ({ app, page }) => {
+  await page.setViewportSize({ width: 1024, height: 700 })
+  await app.open('tasks')
+  await openPortfolio(page)
+  const r = row(page, 'task-01')
+  await expectNoClipping(r, { allowEllipsis: true })
+  await r.hover()
+  expect(await hittable(grip(r)), 'grip reachable').toBe(true)
+  expect(await hittable(checkbox(r)), 'checkbox reachable').toBe(true)
+  const rb = (await r.boundingBox())!
+  const main = (await page.locator('main').first().boundingBox())!
+  expect(rb.x + rb.width, 'row ends inside main').toBeLessThanOrEqual(main.x + main.width + 0.5)
 })
 
 test('All tasks rows: hovered checkbox is pointer-reachable at 1440 (not clipped)', async ({ app, page }) => {
