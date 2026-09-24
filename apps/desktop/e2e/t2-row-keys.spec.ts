@@ -23,8 +23,9 @@
 //   • Anchoring: when the row shows the mark, the key-opened popup sits
 //     where the click-opened one does (same box within 4px), vertically
 //     adjacent to the mark and overlapping it horizontally. When the mark is
-//     missing (Normal priority, no due date, no labels, Inbox rows have no
-//     project) the popup's right edge is within 16px of the row's right edge
+//     missing (no due date, no labels, Inbox rows have no project; Marco
+//     2026-09-24: Normal gets an empty icon, so priority always has a mark)
+//     the popup's right edge is within 16px of the row's right edge
 //     and it sits just below (or, flipped, just above) the row. Either way
 //     every popup is fully inside the viewport and does not intersect the
 //     row's title box (the element named by the row's `aria-labelledby`),
@@ -71,11 +72,13 @@ const SURFACES: Record<Surface['key'], Surface> = {
   project: { key: 'project', pageId: 'tasks', row: 'task-05', title: 'Ship v1.5: quick-capture polish', nav: 'j' },
   // task-04: high, due today, bug + deep-work, Nimble.
   today: { key: 'today', pageId: 'today', row: 'task-04', title: 'Fix capture strip focus bug on second monitor', nav: 'tab' },
-  // task-14 unseeded: Normal priority, no due, no labels, and Inbox rows never show a project.
+  // task-14 unseeded: Normal priority (an empty-icon mark — Marco 2026-09-24: Normal gets an
+  // empty icon), no due, no labels, and Inbox rows never show a project.
   inbox: { key: 'inbox', pageId: 'inbox', row: 'task:task-14', title: 'Research pedalboard flight case options', nav: 'j' },
 }
 
-/** task-10 "Book dentist appointment": Normal priority, no due, no labels, project Life Admin. */
+/** task-10 "Book dentist appointment": Normal priority (empty-icon mark — Marco 2026-09-24:
+ * Normal gets an empty icon), no due, no labels, project Life Admin. */
 const BARE = { row: 'task-10', title: 'Book dentist appointment' }
 
 // ── helpers ──────────────────────────────────────────────────────────────
@@ -374,7 +377,10 @@ for (const key of ['tasks', 'today'] as const) {
   }
 }
 
-for (const kind of ['priority', 'due', 'label'] as const) {
+// Marco 2026-09-24: Normal gets an empty icon — every row has a priority
+// mark now (p anchors to it, covered in l3b-task-detail.spec.ts B4), so the
+// right-end path is exercised by the kinds BARE still lacks: due and label.
+for (const kind of ['due', 'label'] as const) {
   test(`AC2 tasks: with no ${kind} mark the ${KEY_NAME[kind]} picker anchors to the row's right end`, async ({ app, page }) => {
     const s = SURFACES.tasks
     await openSurface(app, page, s)
@@ -482,7 +488,9 @@ for (const key of ['tasks', 'project'] as const) {
   }
 }
 
-test('AC3 tasks: Escape from a right-end-anchored picker (no mark) returns focus to the row', async ({ app, page }) => {
+// Marco 2026-09-24: Normal gets an empty icon — BARE's priority picker now
+// opens at its (empty) mark; due and label are still right-end-anchored.
+test('AC3 tasks: Escape from the pickers of a sparse row (due/label at the right end, priority at its empty mark) returns focus to the row', async ({ app, page }) => {
   await openSurface(app, page, SURFACES.tasks)
   await focusByJ(page, BARE.row)
   for (const kind of ['priority', 'due', 'label'] as const) {
@@ -781,13 +789,18 @@ test('sanity: click-focus (mark click, Escape) lands on the row', async ({ app, 
   await focusByClick(page, rowOf(page, 'task-05'), 'task-05')
 })
 
-test('sanity: task-10 has only a project mark; Inbox task-14 has none', async ({ app, page }) => {
+// Marco 2026-09-24: Normal gets an empty icon — both rows now carry a
+// priority mark ("Priority: normal") and nothing else changed.
+test('sanity: task-10 has only priority and project marks; Inbox task-14 has only a priority mark', async ({ app, page }) => {
   await openSurface(app, page, SURFACES.tasks)
   const bare = rowOf(page, BARE.row)
-  for (const k of ['priority', 'due', 'label'] as const) await expect(mark(bare, k)).toHaveCount(0)
+  for (const k of ['due', 'label'] as const) await expect(mark(bare, k)).toHaveCount(0)
+  await expect(mark(bare, 'priority')).toHaveAccessibleName(/^\s*priority\W*normal/i)
   await expect(mark(bare, 'project')).toHaveCount(1)
   await openSurface(app, page, SURFACES.inbox)
-  for (const k of KINDS) await expect(mark(rowOf(page, SURFACES.inbox.row), k)).toHaveCount(0)
+  const inbox = rowOf(page, SURFACES.inbox.row)
+  for (const k of ['due', 'label', 'project'] as const) await expect(mark(inbox, k)).toHaveCount(0)
+  await expect(mark(inbox, 'priority')).toHaveAccessibleName(/^\s*priority\W*normal/i)
 })
 
 // ── Screenshots (before/after evidence; never fail on missing states) ───

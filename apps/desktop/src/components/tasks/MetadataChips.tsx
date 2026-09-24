@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from 'react'
-import { Calendar, FileText, Plus, X } from 'lucide-react'
+import { Bell, Calendar, FileText, Plus, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { labelColor } from '@/lib/labelColors'
 import { dueBadgeLabel } from '@/lib/dueLabel'
 import { useDataProvider } from '@/services/provider-context'
+import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import type { DataProvider } from '@/services/data-provider'
 import type { Document, Project, Section } from '@nimble/types'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { LabelPicker } from '@/components/tasks/LabelPicker'
 import { DueDatePopover, type DueValue } from '@/components/tasks/DueDatePopover'
+import { ReminderPicker, type ReminderTask } from '@/components/tasks/ReminderPicker'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   DropdownMenu,
@@ -36,6 +39,9 @@ interface MetadataChipsProps {
   projects?: Project[]
   sections?: Section[]
   labels: { id: string; name: string; color: string }[]
+  /** Details only: the task whose reminder the Reminder chip edits (it saves
+   * straight through dp.tasks.update, not through `onChange`). */
+  reminderTask?: ReminderTask
 }
 
 // Normal 1 / Medium 2 / High 3 / Urgent 4.
@@ -126,9 +132,11 @@ function PriorityChip({ value, onChange }: { value: number; onChange: (p: number
   const filled = value >= 2
   const opt = PRIORITY_OPTIONS.find((o) => o.value === value)
 
+  // Normal still shows the (empty) bars — every priority has an icon.
   if (!filled) {
     return (
-      <PriorityMenu onChange={onChange} triggerProps={{ className: CHIP_EMPTY }}>
+      <PriorityMenu onChange={onChange} triggerProps={{ className: cn(CHIP_EMPTY, 'gap-[5px]') }}>
+        <PriorityBars priority={value} />
         Priority
       </PriorityMenu>
     )
@@ -175,6 +183,68 @@ function DueChip({ value, onChange }: { value: DueValue; onChange: (v: DueValue)
         </button>
       </DueDatePopover>
       <ClearButton onClear={() => onChange(EMPTY_DUE)} label="Clear due date" />
+    </div>
+  )
+}
+
+// ── Reminder ──
+
+/** Chip text for an offset: "15 min before", "2 hr before", "1 day before"; 0 is the task time. */
+function reminderOffsetLabel(minutes: number): string {
+  if (minutes === 0) return 'at task time'
+  if (minutes % 1440 === 0) return `${minutes / 1440} ${minutes === 1440 ? 'day' : 'days'} before`
+  if (minutes >= 60 && minutes % 60 === 0) return `${minutes / 60} hr before`
+  return `${minutes} min before`
+}
+
+/**
+ * The reminder, folded into the chip row (Agentation pass 3, B1): "Reminder"
+ * when off, "Remind 15 min before" when set, opening ReminderPicker in a
+ * popover. The trigger is the chip itself — a native button with an
+ * explicit tabIndex, since WebKit (and so WKWebView) skips plain buttons on
+ * Tab. The ✕ clears through the same update the picker's blank Save sends.
+ */
+function ReminderChip({ task }: { task: ReminderTask }) {
+  const dp = useDataProvider()
+  const [open, setOpen] = useState(false)
+  const minutes = task.reminder_offset_minutes
+
+  const clear = async () => {
+    try {
+      await dp.tasks.update({ id: task.id, clearReminder: true, googleCalendarEnabled: false })
+      emitTasksChanged()
+    } catch (e) {
+      toast.error(`Failed to clear reminder: ${e}`)
+    }
+  }
+
+  const popover = (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        tabIndex={0}
+        className={minutes == null ? cn(CHIP_EMPTY, 'focus-ring') : 'focus-ring flex items-center gap-[5px] rounded-sm'}
+      >
+        {minutes == null ? (
+          'Reminder'
+        ) : (
+          <>
+            <Bell className="size-3" />
+            Remind {reminderOffsetLabel(minutes)}
+          </>
+        )}
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="start" sideOffset={4}>
+        <ReminderPicker task={task} onSaved={() => setOpen(false)} />
+      </PopoverContent>
+    </Popover>
+  )
+
+  if (minutes == null) return popover
+
+  return (
+    <div className={cn(CHIP_FILLED, 'group/chip')}>
+      {popover}
+      <ClearButton onClear={() => void clear()} label="Clear reminder" />
     </div>
   )
 }
@@ -501,13 +571,14 @@ function LinkedDocChip({
 
 /**
  * Shared metadata chip row consumed by Task 8's composer and Task 9's
- * details page. Priority/Due/Labels are always visible (empty or filled);
+ * details page. Priority/Due/Labels (and, given `reminderTask`, Reminder)
+ * are always visible (empty or filled);
  * Project/Section/LinkedDoc only render once set, and are otherwise reached
  * via the `[+]` menu, which lists only the not-yet-set extra fields for the
  * current context (Decision 17) and immediately opens the chosen field's
  * own picker.
  */
-export function MetadataChips({ values, onChange, context, projects = [], sections = [], labels }: MetadataChipsProps) {
+export function MetadataChips({ values, onChange, context, projects = [], sections = [], labels, reminderTask }: MetadataChipsProps) {
   const dp = useDataProvider()
   const [openField, setOpenField] = useState<ExtraField | null>(null)
 
@@ -532,6 +603,7 @@ export function MetadataChips({ values, onChange, context, projects = [], sectio
     <div className={cn('flex flex-wrap items-center gap-1.5')}>
       <PriorityChip value={values.priority} onChange={(priority) => onChange({ priority })} />
       <DueChip value={values.due} onChange={(due) => onChange({ due })} />
+      {reminderTask && <ReminderChip task={reminderTask} />}
       <LabelsChips labelIds={values.labelIds} labels={labels} onChange={(labelIds) => onChange({ labelIds })} />
 
       {extraFields.map((field) => {

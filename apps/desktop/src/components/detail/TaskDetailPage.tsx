@@ -1,18 +1,17 @@
-import { ReminderPicker } from '@/components/tasks/ReminderPicker'
 import { useDataVersion } from '@/hooks/useDataVersion'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useDetailStore } from '@/stores/detailStore'
 import { useTaskDetail } from '@/hooks/useTaskDetail'
 import { useProjects } from '@/hooks/useLocalTasks'
 import { useDataProvider } from '@/services/provider-context'
-import type { Project, Section, Label } from '@nimble/types'
+import type { Section, Label } from '@nimble/types'
 import { useAppStore } from '@/stores/appStore'
 import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { cn } from '@/lib/utils'
 import { StatusDropdown } from '@/components/tasks/StatusDropdown'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Sparkles, Plus, Settings, ChevronLeft } from 'lucide-react'
+import { Sparkles, Plus, Ellipsis, ChevronLeft } from 'lucide-react'
 import { taskToast } from '@/lib/taskToast'
 import { useDeleteTasks } from '@/components/tasks/useDeleteTasks'
 import { predictReschedule } from '@/lib/recurrence'
@@ -27,7 +26,8 @@ import { labelColor } from '@/lib/labelColors'
 import { DetailBreadcrumbs } from './DetailBreadcrumbs'
 import { TaskActivityLog } from './TaskActivityLog'
 import { FocusTaskHistory } from '@/components/focus/FocusTaskHistory'
-import { TaskFocusControls } from '@/components/focus/FocusTaskEntry'
+import { FocusTaskMenuItems } from '@/components/focus/FocusTaskEntry'
+import { useFocusTaskEntry, type FocusEntryTask } from '@/components/focus/useFocusTaskEntry'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -54,10 +54,8 @@ export function TaskDetailPage() {
   const { task, subtasks, project, loading } = useTaskDetail(target?.id ?? null)
   const { task: parentTask } = useTaskDetail(task?.parent_id ?? null)
   // `projects` (active-only) feeds the "Move to project…" picker below —
-  // archived projects shouldn't be a move target. `allProjects` feeds the
-  // breadcrumb's ancestor walk (a display-only lookup) so a chain through
-  // an archived parent still resolves instead of truncating.
-  const { projects, allProjects } = useProjects()
+  // archived projects shouldn't be a move target.
+  const { projects } = useProjects()
 
   const [breakingDown, setBreakingDown] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
@@ -223,47 +221,34 @@ export function TaskDetailPage() {
     linkedDocId: task?.linked_doc_id ?? null,
   }), [task])
 
-  // Breadcrumb (Decisions 2/3): full project ancestry chain (via parent_id,
-  // walked through useProjects) + the parent task if this is a subtask.
-  // Unlike the shared DetailBreadcrumbs (which replays the store's manually
-  // pushed drillDown history), this is derived fresh from task/project data
-  // every render — correct no matter how the viewer arrived at this task.
-  const projectChain = useMemo<Project[]>(() => {
-    if (!project) return []
-    const chain: Project[] = []
-    const seen = new Set<string>()
-    let current: Project | null = project
-    while (current && !seen.has(current.id)) {
-      chain.unshift(current)
-      seen.add(current.id)
-      current = current.parent_id ? allProjects.find((p) => p.id === current!.parent_id) ?? null : null
+  // Back control (Agentation pass 3, B3): one button to the nearest
+  // ancestor — the parent task for a subtask, else the task's project.
+  // Derived fresh from task/project data every render (unlike the shared
+  // DetailBreadcrumbs, which replays the store's drillDown history), so it
+  // is right no matter how the viewer arrived at this task. The full
+  // project trail it replaced is one step up from there (the parent task's
+  // own back control, or the sidebar's project tree).
+  const backSegment = useMemo<{ label: string; onClick: () => void } | null>(() => {
+    if (parentTask) {
+      return {
+        label: parentTask.content,
+        onClick: () => useDetailStore.getState().openTask(parentTask.id, mode),
+      }
     }
-    return chain
-  }, [project, allProjects])
-
-  interface BreadcrumbSegment { label: string; onClick: () => void }
-
-  const breadcrumbSegments = useMemo<BreadcrumbSegment[]>(() => {
-    const segments: BreadcrumbSegment[] = projectChain.map((p) => ({
-      label: p.name,
+    if (!project) return null
+    return {
+      label: project.name,
       // TasksPage's selected-project is local state (and the component is
       // unmounted while a body-mode detail is open), so the target project
       // travels through the one-shot tasksNavStore handoff instead of a
       // prop or shared selection.
       onClick: () => {
-        useTasksNavStore.getState().requestProject(p.id)
+        useTasksNavStore.getState().requestProject(project.id)
         close()
         useAppStore.getState().setCurrentPage('tasks')
       },
-    }))
-    if (parentTask) {
-      segments.push({
-        label: parentTask.content,
-        onClick: () => useDetailStore.getState().openTask(parentTask.id, mode),
-      })
     }
-    return segments
-  }, [projectChain, parentTask, mode, close])
+  }, [project, parentTask, mode, close])
 
   const handleMoveToProject = useCallback(async (projectId: string) => {
     if (!task) return
@@ -369,39 +354,38 @@ export function TaskDetailPage() {
     <>
     {deleteDialog}
     <div className="flex flex-col gap-6">
-      {/* Top row: breadcrumb (left) + Focus control and gear trigger
-          (right) — no paperclip (Decision 13). */}
+      {/* Top row: back control (left) + task actions "…" menu (right) —
+          no paperclip (Decision 13); the Focus actions live in the menu
+          (Agentation pass 3, B2). */}
       <div className="flex items-center justify-between gap-2 min-h-6">
-        {breadcrumbSegments.length > 0 ? (
-          <div className="flex min-w-0 items-center gap-1">
-            <ChevronLeft className="size-3 shrink-0 text-muted-foreground/70" />
-            {breadcrumbSegments.map((seg, i) => (
-              <span key={i} className="flex min-w-0 items-center gap-1">
-                {i > 0 && <span className="text-meta text-muted-foreground/70">/</span>}
-                <button
-                  type="button"
-                  onClick={seg.onClick}
-                  className="truncate max-w-[160px] text-meta text-muted-foreground/70 transition-colors hover:text-foreground"
-                >
-                  {seg.label}
-                </button>
-              </span>
-            ))}
-          </div>
+        {backSegment ? (
+          // One control, one tab stop: chevron and text both go back to the
+          // nearest ancestor (the parent task, else the project). h-7 gives
+          // a 28px hit area; -my-0.5 keeps the row at 24px. tabIndex={0}
+          // because WebKit skips plain buttons on Tab.
+          <button
+            type="button"
+            tabIndex={0}
+            onClick={backSegment.onClick}
+            aria-label={`Back to ${backSegment.label}`}
+            className="focus-ring -my-0.5 -ml-1.5 flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-body text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ChevronLeft className="size-3.5 shrink-0" />
+            <span className="truncate max-w-[240px]">{backSegment.label}</span>
+          </button>
         ) : (
           <div />
         )}
 
-        <div className="flex shrink-0 items-center gap-2">
-        <TaskFocusControls task={task} />
         <DropdownMenu>
           <DropdownMenuTrigger
             aria-label="Task actions"
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            <Settings className="size-3" />
+            <Ellipsis className="size-3.5" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" sideOffset={4} className="w-44">
+          <DropdownMenuContent align="end" sideOffset={4} className="w-56">
+            <TaskFocusMenuSection task={task} />
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Move to project…</DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
@@ -426,7 +410,6 @@ export function TaskDetailPage() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        </div>
       </div>
 
       {/* Status + Title — status icon matches the row size (StatusDropdown's
@@ -444,8 +427,7 @@ export function TaskDetailPage() {
         </div>
       </div>
 
-      <ReminderPicker task={task} />
-      {/* Metadata chips */}
+      {/* Metadata chips — the reminder is one of them (B1) */}
       <MetadataChips
         values={chipValues}
         onChange={handleChipChange}
@@ -453,6 +435,7 @@ export function TaskDetailPage() {
         projects={projects}
         sections={sections}
         labels={labels}
+        reminderTask={task}
       />
 
       {/* Description + Subtasks — 48px gap between the two blocks (frame 79:2009).
@@ -587,6 +570,19 @@ export function TaskDetailPage() {
         </DialogContent>
       </Dialog>
     </div>
+    </>
+  )
+}
+
+/** The task menu's Focus section — the same items (and read-only reasons)
+ * as a row's overflow menu; a completed task has none. */
+function TaskFocusMenuSection({ task }: { task: FocusEntryTask }) {
+  const { controls, toggle, start } = useFocusTaskEntry(task)
+  if (!controls.visible) return null
+  return (
+    <>
+      <FocusTaskMenuItems controls={controls} onToggle={toggle} onFocusNow={start} />
+      <DropdownMenuSeparator />
     </>
   )
 }

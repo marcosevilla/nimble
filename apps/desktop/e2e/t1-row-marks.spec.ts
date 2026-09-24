@@ -8,6 +8,8 @@
 //   • Accessible names carry the kind word then the current value
 //     (case-insensitive, punctuation between is free):
 //       priority → "Priority: urgent" | "Priority: high" | "Priority: medium"
+//                  | "Priority: normal" (Marco 2026-09-24: Normal gets an
+//                  empty icon, so every row has a priority mark)
 //       due      → "Due Aug 3" | "Due Today" | "Due Jul 31"  (same text as the badge)
 //       label    → "Label quick-win"   (one control per visible chip)
 //       project  → "Project Nimble"
@@ -494,6 +496,8 @@ for (const key of ['tasks', 'today'] as const) {
 }
 
 // ── AC5 — pickers fully in the viewport, nothing clips ──────────────────
+// Marco 2026-09-24: Normal gets an empty icon — every row has a priority
+// mark, so lastRowWithMark(page, 'priority') is now the list's last row.
 
 async function lastRowWithMark(page: Page, kind: Kind) {
   const rows = page.locator('[data-nav-row]')

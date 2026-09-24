@@ -15,15 +15,16 @@ interface PriorityBarsProps {
  * Linear-style cell-signal priority indicator: three bars of increasing
  * height. Filled bars = urgency level.
  *
- * - Normal (1):  nothing (blank spacer)
- * - Medium (2):  ▁▁▁ → ▂
+ * - Normal (1):  all three bars empty (Marco 2026-09-24: every level has
+ *                 an icon, so rows and pickers never show a blank slot)
+ * - Medium (2):  ▂
  * - High   (3):  ▂▄
  * - Urgent (4):  ▂▄▆
  *
  * Color-agnostic — all bars share the foreground / muted-foreground tokens.
  */
 export function PriorityBars({ priority, size = 'sm', className, label }: PriorityBarsProps) {
-  const filled = priority >= 2 ? Math.min(3, priority - 1) : 0
+  const filled = Math.max(0, Math.min(3, priority - 1))
 
   // Trigger a micro-pulse on the bars whenever the priority changes.
   // Skip the initial render so rows don't all pulse when a list mounts.
@@ -61,27 +62,20 @@ export function PriorityBars({ priority, size = 'sm', className, label }: Priori
         pulseKey > 0 && 'animate-count-pulse',
         className,
       )}
-      aria-label={label ?? (priority >= 2 ? `Priority ${priority}` : undefined)}
-      role={priority >= 2 ? 'img' : undefined}
+      aria-label={label ?? `Priority ${priority}`}
+      role="img"
     >
-      {priority >= 2 && (
-        <>
-          {[0, 1, 2].map((i) => {
-            const isActive = i < filled
-            return (
-              <span
-                key={i}
-                className={cn(
-                  'rounded-sm',
-                  barWidth,
-                  heights[i],
-                  isActive ? 'bg-foreground' : 'bg-muted-foreground/30',
-                )}
-              />
-            )
-          })}
-        </>
-      )}
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className={cn(
+            'rounded-sm',
+            barWidth,
+            heights[i],
+            i < filled ? 'bg-foreground' : 'bg-muted-foreground/30',
+          )}
+        />
+      ))}
     </div>
   )
 }
