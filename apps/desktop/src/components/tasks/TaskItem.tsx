@@ -7,7 +7,7 @@ import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { PriorityMark, DueMark, LabelMarks, ProjectMark, RowEndPicker, type RowMarkTask } from './RowMarks'
 import { rowPickerKind, type RowPickerKind } from '@/lib/rowPickerKeys'
-import { decideRowKey } from '@/lib/rowNav'
+import { decideRowKey, hasOpenOverlay } from '@/lib/rowNav'
 import { useRowPickerStore } from '@/stores/rowPickerStore'
 import { dueBadgeLabel } from '@/lib/dueLabel'
 import type { TaskStatus } from '@nimble/types'
@@ -178,11 +178,12 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
       onKeyDown={(e) => {
         // p · ⇧D · l · m open this row's pickers (T2) — from the row or a
         // control in it, never from a field, an open popup (React bubbles
-        // portal keys through here) or while another row picker is open.
+        // portal keys through here), while any popup is showing (even before
+        // it takes focus) or while another row picker is open.
         const pickerKind = markTask ? rowPickerKind(e) : null
         if (pickerKind) {
           const decision = decideRowKey(e.target, e.key)
-          if (decision.handle && decision.rowId === rowId && !useRowPickerStore.getState().open) {
+          if (decision.handle && decision.rowId === rowId && !useRowPickerStore.getState().open && !hasOpenOverlay()) {
             e.preventDefault()
             useRowPickerStore.getState().openPicker(rowId, pickerKind, hasMark[pickerKind] ? 'mark' : 'row')
           }
