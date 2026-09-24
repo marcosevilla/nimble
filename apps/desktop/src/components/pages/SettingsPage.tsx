@@ -62,6 +62,7 @@ import {
 import { useSettingsNavStore } from '@/stores/settingsNavStore'
 import { settingsFailure, settingsMessage } from '@/lib/settingsMessage'
 import type { SettingsFailure } from '@/lib/settingsMessage'
+import { validateRoutePrefix } from '@/lib/captureRoutes'
 
 // ── Types ──
 
@@ -676,12 +677,13 @@ function CaptureRoutesSection() {
   }
 
   const handleSave = async () => {
-    if (!formPrefix.trim() || !formLabel.trim()) {
-      toast.error('Prefix and label are required')
+    const prefixError = validateRoutePrefix(formPrefix, routes, editingId)
+    if (prefixError) {
+      toast.error(prefixError)
       return
     }
-    if (!formPrefix.startsWith('/')) {
-      toast.error('Prefix must start with /')
+    if (!formLabel.trim()) {
+      toast.error('Label is required')
       return
     }
     setSaving(true)
