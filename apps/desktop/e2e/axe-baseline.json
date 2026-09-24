@@ -1,0 +1,45 @@
+{
+  "docs": {
+    "aria-required-children": 1,
+    "button-name": 8,
+    "label": 2,
+    "link-name": 1,
+    "nested-interactive": 1,
+    "scrollable-region-focusable": 1
+  },
+  "goals": {
+    "button-name": 9,
+    "label": 2,
+    "link-name": 1,
+    "nested-interactive": 1,
+    "scrollable-region-focusable": 1
+  },
+  "inbox": {
+    "button-name": 8,
+    "label": 2,
+    "link-name": 1,
+    "nested-interactive": 8,
+    "scrollable-region-focusable": 1
+  },
+  "settings": {
+    "button-name": 8,
+    "label": 2,
+    "link-name": 1,
+    "nested-interactive": 1
+  },
+  "tasks": {
+    "aria-required-children": 1,
+    "button-name": 8,
+    "label": 2,
+    "link-name": 1,
+    "nested-interactive": 16,
+    "scrollable-region-focusable": 1
+  },
+  "today": {
+    "button-name": 8,
+    "label": 2,
+    "link-name": 1,
+    "nested-interactive": 1,
+    "scrollable-region-focusable": 1
+  }
+}

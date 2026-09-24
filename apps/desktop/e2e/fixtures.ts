@@ -32,6 +32,14 @@ export class App {
   /** Open a page by its nav id (`today`, `tasks`, `inbox`, `docs`, `goals`, `settings`). */
   async open(pageId: string, query = '') {
     await this.page.goto(`/?page=${pageId}${query ? '&' + query : ''}`, { waitUntil: 'load' })
+    // mock-tauri.js applies ?page= through the DEV-only window.__stores hatch.
+    await this.page.waitForFunction(
+      (id) => {
+        const s = (window as unknown as { __stores?: { useAppStore: { getState(): { currentPage: string } } } }).__stores
+        return !!s && s.useAppStore.getState().currentPage === id
+      },
+      pageId === 'activity' ? 'settings' : pageId,
+    )
     await this.page.locator('main').first().waitFor({ state: 'visible' })
     // Let async loaders settle (mock resolves on the microtask queue).
     await this.page.waitForLoadState('networkidle').catch(() => {})

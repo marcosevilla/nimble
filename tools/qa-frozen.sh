@@ -8,7 +8,8 @@
 # <dest-dir> must be outside the repository (a scratch folder), so the build
 # stamp can't pick up this checkout's HEAD. node_modules is borrowed by symlink
 # from the checkout running the script. Prints the URL; the server keeps
-# running in the background (pid in <dest-dir>/preview.pid).
+# running in the background (pid in <dest-dir>/preview.pid). Built with
+# --mode development so the DEV-only `window.__stores` deep-link hatch exists.
 set -euo pipefail
 
 sha=${1:?commit}
@@ -22,6 +23,7 @@ case "$(cd "$(dirname "$dest")" 2>/dev/null && pwd)/" in
 esac
 
 if [ -f "$dest/preview.pid" ]; then kill "$(cat "$dest/preview.pid")" 2>/dev/null || true; fi
+[ -d "$dest" ] && chmod -R u+w "$dest"
 rm -rf "$dest"
 mkdir -p "$dest"
 git -C "$repo" archive "$full" | tar -x -C "$dest"
@@ -30,7 +32,7 @@ echo "$full" > "$dest/COMMIT"
 chmod -R a-w "$dest/apps/desktop/src" "$dest/tools"
 
 cd "$dest/apps/desktop"
-npx vite build --logLevel warn >"$dest/build.log" 2>&1 || { cat "$dest/build.log" >&2; exit 1; }
+NODE_ENV=development npx vite build --mode development --logLevel warn >"$dest/build.log" 2>&1 || { cat "$dest/build.log" >&2; exit 1; }
 nohup npx vite preview --port "$port" --strictPort >"$dest/preview.log" 2>&1 &
 echo $! > "$dest/preview.pid"
 for _ in $(seq 1 50); do
