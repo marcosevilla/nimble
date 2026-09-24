@@ -60,7 +60,7 @@ test('Inbox section lists capture and row keys', () => {
 })
 
 test('Inbox is appended after General (then B3b sections), existing order untouched', () => {
-  assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox', 'Docs', 'Goals', 'Session', 'Today'])
+  assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox', 'Docs', 'Goals', 'Session', 'Today', 'Capture'])
 })
 
 test('Space is not a Tasks row key — it stays Focus pause/resume (review I2)', () => {
@@ -112,4 +112,12 @@ test('Today rows use plain lowercase keys, matching todayKey (which rejects Shif
   const today = SHORTCUTS.filter((s) => s.section === 'Today').map((s) => s.keys)
   assert.ok(today.includes('b'), 'b toggles the brief')
   assert.ok(!today.includes('B'), 'B would read as Shift+B')
+})
+
+// ── Loop 2 chunk 2: Capture section ──
+
+test('Capture section is appended last with routes, ⌫ and ⌘Z', () => {
+  assert.equal(SHORTCUT_SECTIONS[SHORTCUT_SECTIONS.length - 1], 'Capture')
+  const keys = SHORTCUTS.filter((s) => s.section === 'Capture').map((s) => s.keys)
+  assert.deepEqual(keys, ['/i /q /t', '⌫', '⌘Z'])
 })

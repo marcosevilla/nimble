@@ -25,6 +25,7 @@ export type ShortcutSection =
   | 'Goals'
   | 'Session'
   | 'Today'
+  | 'Capture'
 
 export interface Shortcut {
   section: ShortcutSection
@@ -147,6 +148,10 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Today', keys: 'b', label: 'Expand / compact the brief' },
   { section: 'Today', keys: '[', label: "Previous day's brief" },
   { section: 'Today', keys: ']', label: "Next day's brief" },
+  // ── Capture (Inbox field, ⌘K, quick-capture strip; loop 2 chunk 2) ──
+  { section: 'Capture', keys: '/i /q /t', label: 'Send to one of your capture routes (Settings → Tasks & capture)' },
+  { section: 'Capture', keys: '⌫', label: 'Right after a detected date: keep the words as text' },
+  { section: 'Capture', keys: '⌘Z', label: 'After converting a note with a date: keep the words as text' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [
@@ -162,6 +167,7 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
   'Goals',
   'Session',
   'Today',
+  'Capture',
 ]
 
 export function shortcutsBySection(): { title: ShortcutSection; rows: Shortcut[] }[] {

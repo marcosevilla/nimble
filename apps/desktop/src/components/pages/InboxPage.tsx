@@ -21,25 +21,15 @@ import { useRowNavigation } from '@/hooks/useTaskNavigation'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
-import { taskToast } from '@/lib/taskToast'
-import { Inbox as InboxIcon, PenLine, ArrowRight, FileText, Download, Search, Lightbulb, Quote, CheckSquare, X } from 'lucide-react'
+import { Inbox as InboxIcon, PenLine, ArrowRight, FileText, Download, Search, X } from 'lucide-react'
 import { PageFrame } from '@/components/shared/PageFrame'
 import { EmptyState } from '@/components/shared/EmptyState'
+import { RoutePill, DateChip } from '@/components/capture/CaptureTokens'
+import { HighlightField } from '@/components/capture/HighlightField'
+import { useCaptureDate } from '@/hooks/useCaptureDate'
+import { routeWithDate, routedToastMessage } from '@/lib/captureActions'
+import { convertCaptureWithUndo } from '@/components/capture/convertWithUndo'
 import type { LocalTask, Capture, DocFolder, Document } from '@nimble/types'
-
-// ── Route icon map ──
-
-const ROUTE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  Lightbulb,
-  Quote,
-  CheckSquare,
-  FileText,
-}
-
-function RouteIcon({ name, className }: { name: string; className?: string }) {
-  const Icon = ROUTE_ICONS[name] ?? FileText
-  return <Icon className={className} />
-}
 
 // ── Unified inbox item type ──
 
@@ -97,6 +87,8 @@ export function InboxPage() {
     () => parseRoutePrefix(inputValue, routes),
     [inputValue, routes],
   )
+  const taskBound = parsedRoute.route?.target_type === 'task' && parsedRoute.content.trim() !== ''
+  const capDate = useCaptureDate(inputValue, parsedRoute.content, taskBound)
 
   const loading = tasksLoading || capturesLoading
 
@@ -218,9 +210,12 @@ export function InboxPage() {
       // Routed captures never show in the triage list, so there is no row
       // to add optimistically — just keep the field free for the next one.
       try {
-        const result = await dp.captureRoutes.route(route.prefix, content)
+        const date = route.target_type === 'task' ? capDate.date : null
+        const { result, dateSet, dateFailed } = await routeWithDate(dp, route, content, date)
         if (result.target_type === 'task') emitTasksChanged()
-        toast.success(`Saved to ${result.label}`)
+        const msg = routedToastMessage(result.label, { dateSet, dateFailed }, date)
+        if (msg.kind === 'success') toast.success(msg.text)
+        else toast(msg.text)
         refreshCaptures()
       } catch (e) {
         setInputValue(text)
@@ -249,15 +244,13 @@ export function InboxPage() {
       setInputValue(text)
       toast.error(`Failed: ${e}`)
     }
-  }, [inputValue, routes, refreshCaptures, dp])
+  }, [inputValue, routes, refreshCaptures, dp, capDate.date])
 
   const handleConvert = useCallback(async (capture: Capture) => {
     if (capture.id.startsWith('temp-')) return
     setCaptures((prev) => prev.filter((c) => c.id !== capture.id))
     try {
-      const task = await dp.captures.convertToTask(capture.id)
-      taskToast(`Converted to task: "${capture.content}"`, task.id)
-      emitTasksChanged()
+      await convertCaptureWithUndo(dp, capture)
     } catch (e) {
       setCaptures((prev) => [capture, ...prev])
       toast.error(`Failed to convert: ${e}`)
@@ -365,27 +358,23 @@ export function InboxPage() {
           the point (inbox audit P1-4); the ring is the focus state (P2-7). */}
       <div className="flex h-10 items-center gap-2 surface-inset border border-transparent px-3 transition-colors focus-within:border-ring">
         <Search className="size-3.5 shrink-0 text-muted-foreground" />
-        <input
-          ref={inputRef}
+        <HighlightField
+          fieldRef={inputRef}
           value={inputValue}
+          highlight={capDate.highlight}
+          wrapperClassName="flex-1"
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={(e) => {
+            if (capDate.onKeyDown(e)) return
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit() }
             if (e.key === 'Escape') { e.preventDefault(); e.currentTarget.blur() }
           }}
           placeholder="Write a note… (/i idea, /q quote, /t task)"
           aria-label="Capture a note"
-          className="flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
+          className="text-body outline-none placeholder:text-muted-foreground"
         />
-        {/* LabelChipPill recipe (inbox P2-8): the user's route color is a dot,
-            the text stays on a theme token so contrast never depends on data. */}
-        {parsedRoute.route && parsedRoute.content && (
-          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-secondary px-2 py-0.5 text-label text-muted-foreground">
-            <span className="size-1.5 rounded-full" style={{ backgroundColor: parsedRoute.route.color }} />
-            <RouteIcon name={parsedRoute.route.icon} className="size-3" />
-            {parsedRoute.route.label}
-          </span>
-        )}
+        {parsedRoute.route && parsedRoute.content && <RoutePill route={parsedRoute.route} />}
+        {capDate.date && <DateChip label={capDate.date.label} />}
         {inputValue.trim() ? (
           <button
             type="button"

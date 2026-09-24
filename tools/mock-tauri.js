@@ -380,10 +380,14 @@
 
   // ── Capture routes ───────────────────────────────────────────────────────
 
+  // Prefixes carry the leading '/' — parseRoutePrefix (and validateRoutePrefix,
+  // which every real route is created through) requires it. Found while
+  // verifying Task 5 live: with a bare letter here, no "/x word" ever
+  // matched a route in the browser harness.
   var CAPTURE_ROUTES = [
     {
       id: 'route-01',
-      prefix: 'i',
+      prefix: '/i',
       target_type: 'doc',
       doc_id: 'doc-ideas',
       label: 'Ideas',
@@ -394,7 +398,7 @@
     },
     {
       id: 'route-02',
-      prefix: 't',
+      prefix: '/t',
       target_type: 'task',
       doc_id: null,
       label: 'Task',
@@ -405,7 +409,7 @@
     },
     {
       id: 'route-03',
-      prefix: 'p',
+      prefix: '/p',
       target_type: 'doc',
       doc_id: 'doc-shotlist',
       label: 'Photo notes',
@@ -1433,7 +1437,7 @@
     },
     convert_capture_to_task: function (args) {
       var cap = CAPTURES.find(function (c) { return c.id === (args && args.captureId) })
-      return task({
+      var t = task({
         id: newId('task'),
         content: cap ? cap.content : 'Converted capture',
         project_id: (args && args.projectId) || 'inbox',
@@ -1441,6 +1445,13 @@
         created_at: iso(TODAY, '09:50:00'),
         updated_at: iso(TODAY, '09:50:00'),
       })
+      // Must land in TASKS (same reasoning as route_capture above) — Task 5's
+      // convertWithDate follows this with an update_local_task keyed on the
+      // returned id, which otherwise falls through findTask's TASKS[0] fallback.
+      TASKS.push(t)
+      // Mirrors Rust's mark_capture_converted (nimble-core convert flow).
+      if (cap) cap.converted_to_task_id = t.id
+      return t
     },
     delete_capture: function () { return null },
     import_obsidian_captures: function () { return 0 },
@@ -1464,10 +1475,18 @@
     delete_capture_route: function () { return null },
     route_capture: function (args) {
       var route = CAPTURE_ROUTES.find(function (r) { return r.prefix === (args && args.prefix) }) || CAPTURE_ROUTES[0]
+      if (route.target_type === 'task') {
+        // Rust creates a real task and returns its id (capture_routes.rs), so a
+        // follow-up update_local_task lands on it instead of TASKS[0]. Named
+        // `created`, not `task` — the latter shadows the file-level `task()`
+        // record-builder helper used throughout this file.
+        var created = commands.create_local_task({ content: args.content })
+        return { routed_to: created.id, target_type: 'task', created_id: created.id, label: route.label }
+      }
       return {
-        routed_to: route.target_type === 'doc' ? route.doc_id || 'doc-ideas' : newId('task'),
+        routed_to: route.doc_id || 'doc-ideas',
         target_type: route.target_type,
-        created_id: newId(route.target_type === 'doc' ? 'note' : 'task'),
+        created_id: newId('note'),
         label: route.label,
       }
     },

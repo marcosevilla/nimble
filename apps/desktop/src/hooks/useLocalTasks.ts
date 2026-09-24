@@ -78,7 +78,7 @@ export function useLocalTasks(opts?: { projectId?: string; dueDate?: string; inc
   }, [refresh])
 
   const addTask = useCallback(
-    async (content: string, extra?: { parentId?: string; projectId?: string; priority?: number; dueDate?: string; description?: string }) => {
+    async (content: string, extra?: { parentId?: string; projectId?: string; priority?: number; dueDate?: string; dueTime?: string; description?: string }) => {
       try {
         const task = await dp.tasks.create({
           content,
@@ -86,6 +86,7 @@ export function useLocalTasks(opts?: { projectId?: string; dueDate?: string; inc
           parentId: extra?.parentId,
           priority: extra?.priority,
           dueDate: extra?.dueDate,
+          dueTime: extra?.dueTime,
           description: extra?.description,
         })
         setTasks((prev) => [...prev, task])

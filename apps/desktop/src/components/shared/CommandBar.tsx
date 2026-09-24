@@ -9,10 +9,15 @@ import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { useDocsStore } from '@/stores/docsStore'
 import { useAppStore } from '@/stores/appStore'
 import { useDetailStore } from '@/stores/detailStore'
-import { CommandBarResults, type BarMode } from './CommandBarResults'
+import { CommandBarResults } from './CommandBarResults'
 import { toast } from 'sonner'
 import { taskToast } from '@/lib/taskToast'
-import type { LocalTask, Document, Capture } from '@nimble/types'
+import { parseMode } from '@/lib/commandBarMode'
+import { routeWithDate, routedToastMessage } from '@/lib/captureActions'
+import { HighlightField } from '@/components/capture/HighlightField'
+import { RoutePill, DateChip, RouteIcon } from '@/components/capture/CaptureTokens'
+import { useCaptureDate } from '@/hooks/useCaptureDate'
+import type { LocalTask, Document, Capture, CaptureRoute } from '@nimble/types'
 
 const MAX_RESULTS = 8
 
@@ -23,16 +28,6 @@ const ACTION_VERBS = new Set([
 ])
 
 const CAPTURE_PREFIXES = ['note:', 'idea:', 'remember']
-
-function parseMode(raw: string): { mode: BarMode; query: string } {
-  const trimmed = raw.trimStart()
-  if (trimmed.startsWith('/task ')) return { mode: 'task', query: trimmed.slice(6) }
-  if (trimmed.startsWith('/capture ')) return { mode: 'capture', query: trimmed.slice(9) }
-  if (trimmed.startsWith('/note ')) return { mode: 'capture', query: trimmed.slice(6) }
-  if (trimmed.startsWith('/doc ')) return { mode: 'doc', query: trimmed.slice(5) }
-  if (trimmed.startsWith('/search ')) return { mode: 'search', query: trimmed.slice(8) }
-  return { mode: 'search', query: trimmed }
-}
 
 function inferDefaultIndex(query: string, matchCount: number): number {
   const createIndex = matchCount
@@ -63,11 +58,15 @@ export function CommandBar() {
   const { projects } = useProjects()
   const [docResults, setDocResults] = useState<Document[]>([])
   const [captureResults, setCaptureResults] = useState<Capture[]>([])
+  const [routes, setRoutes] = useState<CaptureRoute[]>([])
 
-  const { mode, query } = useMemo(() => parseMode(rawQuery), [rawQuery])
+  const { mode, query, route } = useMemo(() => parseMode(rawQuery, routes), [rawQuery, routes])
+  // A lone '/' never shows its placeholder (the field already has a value),
+  // so it gets its own hint row instead of running through search mode.
+  const isBareSlash = rawQuery.trim() === '/'
 
   const filteredTasks = useMemo(() => {
-    if (!query.trim() || mode === 'doc') return []
+    if (!query.trim() || mode === 'doc' || mode === 'route') return []
     const q = query.toLowerCase()
     return tasks
       .filter((t) => !t.completed && t.content.toLowerCase().includes(q))
@@ -108,14 +107,28 @@ export function CommandBar() {
   const captureActionIndex = createIndex + 1
   const totalItems = captureActionIndex + 1
 
+  // Dates parse only where Enter makes a task (decisions 2026-09-23).
+  const taskBound =
+    !isBareSlash &&
+    (mode === 'task' ||
+      (mode === 'route' && route?.target_type === 'task') ||
+      (mode === 'search' && selectedIndex === createIndex))
+  const capDate = useCaptureDate(rawQuery, query, taskBound && query.trim() !== '')
+
+  // Guards a double Enter (route/create) from firing twice inside closeBar's
+  // 200ms close window — reset whenever the bar reopens.
+  const submittingRef = useRef(false)
+
   // Open/close
   const openBar = useCallback(() => {
     setOpen(true)
+    submittingRef.current = false
     refresh()
+    dp.captureRoutes.list().then(setRoutes).catch(() => setRoutes([]))
     requestAnimationFrame(() => {
       requestAnimationFrame(() => inputRef.current?.focus())
     })
-  }, [refresh])
+  }, [refresh, dp])
 
   const closeBar = useCallback(() => {
     setClosing(true)
@@ -149,13 +162,36 @@ export function CommandBar() {
 
   const handleCreateTask = useCallback(async () => {
     const text = query.trim()
-    if (!text) return
-    const task = await addTask(text)
+    if (!text || submittingRef.current) return
+    submittingRef.current = true
+    const date = capDate.date
+    const task = await addTask(date ? date.title : text, date ? { dueDate: date.dueDate, dueTime: date.dueTime ?? undefined } : undefined)
     if (task) {
-      taskToast(`Task created: "${text}"`, task.id)
+      taskToast(date ? `Task created: "${date.title}" · due ${date.label}` : `Task created: "${text}"`, task.id)
       closeBar()
+    } else {
+      submittingRef.current = false
     }
-  }, [query, addTask, closeBar])
+  }, [query, addTask, closeBar, capDate.date])
+
+  const handleRoute = useCallback(async () => {
+    if (!route || submittingRef.current) return
+    const text = query.trim()
+    if (!text) return
+    submittingRef.current = true
+    try {
+      const date = route.target_type === 'task' ? capDate.date : null
+      const { result, dateSet, dateFailed } = await routeWithDate(dp, route, text, date)
+      if (result.target_type === 'task') emitTasksChanged()
+      const msg = routedToastMessage(result.label, { dateSet, dateFailed }, date)
+      if (msg.kind === 'success') toast.success(msg.text)
+      else toast(msg.text)
+      closeBar()
+    } catch (e) {
+      submittingRef.current = false
+      toast.error(`Couldn't save to ${route.label}: ${e}`)
+    }
+  }, [route, query, capDate.date, dp, closeBar])
 
   const handleCapture = useCallback(async () => {
     const text = query.trim()
@@ -229,7 +265,9 @@ export function CommandBar() {
   }, [breakdownTask, breakdownItems, closeBar, dp])
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (capDate.onKeyDown(e)) return
+
       if (breakdownTask && !breakdownLoading) {
         if (e.key === 'Escape') { e.preventDefault(); setBreakdownTask(null); setBreakdownItems([]); return }
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleBreakdownConfirm(); return }
@@ -237,6 +275,13 @@ export function CommandBar() {
       }
 
       if (e.key === 'Escape') { e.preventDefault(); closeBar(); return }
+
+      // A lone '/' shows the route hint row instead of a results list —
+      // nothing here to select or submit.
+      if (isBareSlash) {
+        if (e.key === 'Enter') e.preventDefault()
+        return
+      }
 
       if (!query.trim()) {
         if (e.key === 'Enter') e.preventDefault()
@@ -264,6 +309,7 @@ export function CommandBar() {
 
       if (e.key === 'Enter') {
         e.preventDefault()
+        if (mode === 'route') { handleRoute(); return }
         if (mode === 'capture') { handleCapture(); return }
         if (mode === 'task') { handleCreateTask(); return }
         if (selectedIndex < filteredTasks.length) handleComplete(filteredTasks[selectedIndex].id)
@@ -273,22 +319,23 @@ export function CommandBar() {
         else if (selectedIndex === captureActionIndex) handleCapture()
       }
     },
-    [query, mode, totalItems, selectedIndex, filteredTasks, docResults, captureResults, docStartIndex, captureStartIndex, createIndex, captureActionIndex, breakdownTask, breakdownLoading, handleComplete, handleBreakDown, handleBreakdownConfirm, handleCreateTask, handleCapture, handleOpenDoc, handleOpenCapture, closeBar],
+    [query, mode, totalItems, selectedIndex, filteredTasks, docResults, captureResults, docStartIndex, captureStartIndex, createIndex, captureActionIndex, breakdownTask, breakdownLoading, capDate, isBareSlash, handleComplete, handleBreakDown, handleBreakdownConfirm, handleCreateTask, handleRoute, handleCapture, handleOpenDoc, handleOpenCapture, closeBar],
   )
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setRawQuery(e.target.value)
-    const { mode: m, query: q } = parseMode(e.target.value)
+    const { mode: m, query: q } = parseMode(e.target.value, routes)
     const q2 = q.trim()
     if (q2) {
-      const matches = tasks.filter((t) => !t.completed && t.content.toLowerCase().includes(q2.toLowerCase())).slice(0, MAX_RESULTS)
-      if (m === 'task') setSelectedIndex(matches.length)
+      // Route mode has no search results — there is nothing to match against.
+      const matches = m === 'route' ? [] : tasks.filter((t) => !t.completed && t.content.toLowerCase().includes(q2.toLowerCase())).slice(0, MAX_RESULTS)
+      if (m === 'task' || m === 'route') setSelectedIndex(matches.length)
       else if (m === 'capture') setSelectedIndex(matches.length + 1)
       else setSelectedIndex(inferDefaultIndex(q2, matches.length))
     } else {
       setSelectedIndex(0)
     }
-  }, [tasks])
+  }, [tasks, routes])
 
   if (!open) return null
 
@@ -297,7 +344,6 @@ export function CommandBar() {
   else if (rawQuery.startsWith('/capture ') || rawQuery.startsWith('/note ')) placeholder = 'Save a note...'
   else if (rawQuery.startsWith('/doc ')) placeholder = 'Search docs...'
   else if (rawQuery.startsWith('/search ')) placeholder = 'Search tasks...'
-  else if (rawQuery === '/') placeholder = 'task, capture, doc, search...'
 
   const showResults = query.trim().length > 0
 
@@ -313,21 +359,58 @@ export function CommandBar() {
       <div role="dialog" aria-label="Command bar" className={cn('fixed inset-x-0 top-[28%] z-50 mx-auto w-full max-w-lg px-4', closing ? 'command-bar-flyout-out' : 'command-bar-flyout')}>
         <div className="flex h-11 items-center gap-2 px-4 rounded-xl border border-border/50 bg-popover shadow-lg shadow-black/10">
           <Icon icon={Search} className="text-muted-foreground" />
-          <input
-            ref={inputRef}
+          <HighlightField
+            fieldRef={inputRef}
             type="text"
             value={rawQuery}
+            highlight={capDate.highlight}
+            wrapperClassName="flex-1"
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
-            className="flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
+            className="text-body outline-none placeholder:text-muted-foreground"
           />
+          {mode === 'route' && route && <RoutePill route={route} />}
+          {capDate.date && mode !== 'search' && <DateChip label={capDate.date.label} compact />}
           <kbd className="rounded-sm border border-border/30 px-1.5 py-0.5 text-label font-mono text-muted-foreground">
             Esc
           </kbd>
         </div>
 
-        {showResults && (
+        {showResults && isBareSlash && (
+          <div className="mt-1">
+            <div className="animate-in fade-in slide-in-from-top-1 duration-(--transition-fast)">
+              <div className="rounded-xl border border-border/50 bg-popover shadow-lg overflow-hidden">
+                <div className="px-2 py-1.5 text-meta text-muted-foreground">
+                  {[...routes.map((r) => `${r.prefix} ${r.label}`), '/task', '/doc', '/search'].join(' · ')}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showResults && !isBareSlash && mode === 'route' && route && (
+          <div className="mt-1">
+            <div className="animate-in fade-in slide-in-from-top-1 duration-(--transition-fast)">
+              <div className="rounded-xl border border-border/50 bg-popover shadow-lg overflow-hidden">
+                <div className="p-1">
+                  <button
+                    type="button"
+                    onClick={handleRoute}
+                    className="flex w-full items-center gap-2 rounded-md bg-hover px-2 py-1.5 text-left text-body"
+                  >
+                    <RouteIcon name={route.icon} className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="text-muted-foreground">Save to {route.label}</span>
+                    <span className="min-w-0 flex-1 truncate text-body-strong">"{capDate.date ? capDate.date.title : query.trim()}"</span>
+                    <kbd className="rounded-sm bg-muted px-1 py-0.5 text-label text-muted-foreground">Enter</kbd>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showResults && !isBareSlash && mode !== 'route' && (
           <div className="mt-1">
             <CommandBarResults
               query={query.trim()}
@@ -345,6 +428,8 @@ export function CommandBar() {
               onCreateTask={handleCreateTask}
               onCapture={handleCapture}
               onSelect={setSelectedIndex}
+              createTitle={capDate.date?.title}
+              createDate={mode === 'search' ? capDate.date : null}
               breakdownTask={breakdownTask}
               breakdownLoading={breakdownLoading}
               breakdownItems={breakdownItems}
