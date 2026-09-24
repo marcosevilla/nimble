@@ -65,6 +65,23 @@ fn now() -> String {
 fn id() -> String {
     Uuid::new_v4().to_string()
 }
+/// The config a freshly queued entry starts with.
+fn default_entry_config() -> FocusConfig {
+    FocusConfig {
+        mode: FocusMode::CountUp,
+        budget_ms: None,
+        work_ms: 1_500_000,
+        break_ms: 300_000,
+        rounds: 4,
+    }
+}
+/// `completed_at` (RFC 3339) falls on today's date in the device time zone —
+/// the same rule the completed tray uses.
+fn completed_today_local(completed_at: &str) -> bool {
+    chrono::DateTime::parse_from_rfc3339(completed_at)
+        .map(|at| at.with_timezone(&chrono::Local).date_naive() == chrono::Local::now().date_naive())
+        .unwrap_or(false)
+}
 fn checked(v: u64, add: u64) -> crate::Result<u64> {
     v.checked_add(add)
         .filter(|n| *n <= MAX_SAFE_INTEGER)
@@ -1590,13 +1607,7 @@ async fn apply_action_tx(
                     added_at: stamp.into(),
                     source: source.clone(),
                     explicit_still_open: *explicit_still_open,
-                    config: FocusConfig {
-                        mode: FocusMode::CountUp,
-                        budget_ms: None,
-                        work_ms: 1_500_000,
-                        break_ms: 300_000,
-                        rounds: 4,
-                    },
+                    config: default_entry_config(),
                 });
                 *changed = true;
             }
@@ -2122,6 +2133,8 @@ async fn reconcile_task_effects_inner_tx(
     if selected.as_ref().is_some_and(|oid| remove.contains(oid)) {
         selected = entries.first().map(|e| e.occurrence_id.clone());
     }
+    let restored = restore_reopened_tx(conn, effects, &mut entries, &mut selected, &stamp).await?;
+    touched |= restored;
     // Only a LOCAL user due edit re-binds an open occurrence to the new due;
     // a remote due change leaves it stale for Complete to refuse.
     if origin == EffectOrigin::Local {
@@ -2139,7 +2152,7 @@ async fn reconcile_task_effects_inner_tx(
     // Queued/open tasks also count when nothing visible changed, so a focused
     // task's edit still invalidates its surfaces; unrelated tasks never do.
     touched |= entries.iter().any(|e| affected.contains(e.task_id.as_str()));
-    if !remove.is_empty() {
+    if !remove.is_empty() || restored {
         save_queue_tx(conn, &entries, selected.as_deref(), &stamp).await?;
     }
     // Only a change to focused work advances the engine revision (and hence
@@ -2151,6 +2164,85 @@ async fn reconcile_task_effects_inner_tx(
             .await?;
     }
     Ok(())
+}
+
+/// Reopening a task whose LATEST focus occurrence completed today (local
+/// day) puts that same occurrence back at the top of Up next: state open
+/// again, completion cleared, un-archived from the tray, sessions (and so
+/// totals) still attached. It lands right after the selected card, or becomes
+/// the only (selected, paused — no session) card of an empty queue. Only an
+/// explicit reopen signal counts (`TaskEffects::reopened`): a Focus-completed
+/// repeat is open with a completed latest occurrence too, and never returns.
+/// Earlier-day completions, removed occurrences and tasks already queued
+/// again are left alone. Returns whether anything was restored.
+async fn restore_reopened_tx(
+    conn: &mut SqliteConnection,
+    effects: &TaskEffects,
+    entries: &mut Vec<FocusEntry>,
+    selected: &mut Option<String>,
+    stamp: &str,
+) -> crate::Result<bool> {
+    let mut insert_at = selected
+        .as_ref()
+        .and_then(|oid| entries.iter().position(|e| &e.occurrence_id == oid))
+        .map_or(0, |p| p + 1);
+    let mut restored = false;
+    for task in &effects.changed {
+        if task.completed
+            || task.status == "complete"
+            || !effects.reopened.contains(&task.id)
+            || entries.iter().any(|e| e.task_id == task.id)
+        {
+            continue;
+        }
+        let latest: Option<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT id,state,completed_at FROM focus_occurrences WHERE task_id=? ORDER BY generation DESC LIMIT 1",
+        )
+        .bind(&task.id)
+        .fetch_optional(&mut *conn)
+        .await?;
+        let Some((oid, state, Some(completed_at))) = latest else {
+            continue;
+        };
+        if state != "completed" || !completed_today_local(&completed_at) {
+            continue;
+        }
+        let reopened = sqlx::query("UPDATE focus_occurrences SET state='open',completed_at=NULL,completion_reason=NULL,archived=0 WHERE id=? AND state='completed'")
+            .bind(&oid).execute(&mut *conn).await?;
+        if reopened.rows_affected() != 1 {
+            continue;
+        }
+        crate::integrations::todoist::focus_delivery::cancel_unsent_completion_tx(conn, &oid).await?;
+        // Keep the mode/budget it was worked with; a never-started one gets
+        // the default.
+        let config = sqlx::query_scalar::<_, String>(
+            "SELECT config_json FROM focus_sessions WHERE occurrence_id=? ORDER BY rowid DESC LIMIT 1",
+        )
+        .bind(&oid)
+        .fetch_optional(&mut *conn)
+        .await?
+        .and_then(|json| serde_json::from_str::<FocusConfig>(&json).ok())
+        .filter(|c| schema::validate_config(c).is_ok())
+        .unwrap_or_else(default_entry_config);
+        entries.insert(
+            insert_at.min(entries.len()),
+            FocusEntry {
+                id: id(),
+                task_id: task.id.clone(),
+                occurrence_id: oid.clone(),
+                added_at: stamp.into(),
+                source: FocusSource::Local,
+                explicit_still_open: false,
+                config,
+            },
+        );
+        insert_at += 1;
+        if selected.is_none() {
+            *selected = Some(oid);
+        }
+        restored = true;
+    }
+    Ok(restored)
 }
 
 async fn capture_undo_tx(

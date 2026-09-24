@@ -216,6 +216,24 @@ pub async fn enqueue_completion_tx(
     Ok((inserted.rows_affected() == 1).then_some(intent))
 }
 
+/// Called when a completed occurrence is restored (its task was reopened the
+/// same day): an armed but never-delivered time comment (`pending`, or a
+/// definite `retryable-error` failure) is withdrawn, so Todoist is not told
+/// about time on a task that is open again, and a later completion of the
+/// same occurrence can queue a fresh one with the updated total. Anything that
+/// may have reached Todoist (`sending`/`acknowledged`/`uncertain`) or is
+/// awaiting review stays as it is. Returns the number of intents withdrawn.
+pub async fn cancel_unsent_completion_tx(
+    conn: &mut SqliteConnection,
+    occurrence_id: &str,
+) -> crate::Result<u64> {
+    let removed = sqlx::query(
+        "DELETE FROM focus_delivery WHERE occurrence_id=? AND purpose=? AND state IN ('pending','retryable-error') AND import_record_id IS NULL")
+        .bind(occurrence_id).bind(TIME_COMMENT)
+        .execute(&mut *conn).await?;
+    Ok(removed.rows_affected())
+}
+
 // ── review / reconciliation ───────────────────────────────────────────────
 
 struct TaskInfo {

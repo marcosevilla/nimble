@@ -607,6 +607,8 @@ pub(crate) async fn apply_pull_tx(
 ) -> crate::Result<PulledRows> {
     // Rows removed by this pull, captured before deletion for focus effects.
     let mut deleted_tasks: Vec<crate::types::LocalTask> = Vec::new();
+    // Tasks this pull un-checked while complete locally (focus restore signal).
+    let mut reopened: Vec<String> = Vec::new();
     // (local_task_id, snapshot) pairs to sync_log AFTER commit
     let mut logged: Vec<(String, &'static str)> = Vec::new();
     // (task_id, label_id, op) pairs for `task_labels` rows to sync_log AFTER
@@ -1058,6 +1060,9 @@ pub(crate) async fn apply_pull_tx(
                     } else {
                         sqlx::query("UPDATE local_tasks SET completed = 0, status = 'todo', completed_at = NULL WHERE id = ?")
                             .bind(&local_task.id).execute(&mut *tx).await?;
+                        if local_task.completed || local_task.status == "complete" {
+                            reopened.push(local_task.id.clone());
+                        }
                     }
                 }
                 sqlx::query("UPDATE local_tasks SET synced_snapshot = ?, remote_updated_at = ?, updated_at = datetime('now','localtime') WHERE id = ?")
@@ -1145,6 +1150,7 @@ pub(crate) async fn apply_pull_tx(
     // title/project changes) plus the rows it deleted.
     let mut effects = crate::db::task_tx::TaskEffects {
         deleted: deleted_tasks,
+        reopened,
         ..Default::default()
     };
     let mut seen = std::collections::HashSet::new();
