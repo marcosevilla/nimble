@@ -1,7 +1,7 @@
 use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager};
-use crate::google_credentials::{client_secret_account, GoogleCredentials, KeychainClientCredentials, KeychainCredentials};
+use crate::google_credentials::{client_secret_account, GoogleCredentials};
 
 #[derive(Debug,Serialize)]
 #[serde(rename_all="camelCase")]
@@ -22,10 +22,10 @@ pub async fn google_calendar_status(app:AppHandle)->Result<GoogleConnectionStatu
     } else {
         let profile=crate::google_calendar_runner::profile_identity(&app)?;
         let configured=match crate::google_calendar_runner::client_id(pool.inner()).await {
-            Ok(id)=>KeychainClientCredentials.load(&client_secret_account(&profile,&id)).map_err(str::to_owned)?.is_some(),
+            Ok(id)=>crate::google_calendar_runner::client_secret_store(&app)?.load(&client_secret_account(&profile,&id)).map_err(str::to_owned)?.is_some(),
             Err(_)=>false,
         };
-        let connected=configured && should_reuse_session(state.calendar_id.is_some(),KeychainCredentials.load(&profile).map_err(str::to_owned)?.is_some(),state.error_code.as_deref());
+        let connected=configured && should_reuse_session(state.calendar_id.is_some(),crate::google_calendar_runner::token_store(&app)?.load(&profile).map_err(str::to_owned)?.is_some(),state.error_code.as_deref());
         (connected,configured)
     };
     Ok(GoogleConnectionStatus { connected, client_secret_configured, calendar_label:state.calendar_id.map(|_|"Nimble".into()), timezone:state.timezone, error_code:state.error_code })
@@ -40,8 +40,8 @@ pub async fn google_calendar_connect(app:AppHandle)->Result<GoogleConnectionStat
     let client_id=crate::google_calendar_runner::client_id(pool.inner()).await?;
     let state=nimble_core::db::google_calendar::state(pool.inner()).await.map_err(|_|"google_status_failed")?;
     let profile=crate::google_calendar_runner::profile_identity(&app)?;
-    let client_secret=KeychainClientCredentials.load(&client_secret_account(&profile,&client_id)).map_err(str::to_owned)?.ok_or("google_client_config_missing")?;
-    let credentials=KeychainCredentials;
+    let client_secret=crate::google_calendar_runner::client_secret_store(&app)?.load(&client_secret_account(&profile,&client_id)).map_err(str::to_owned)?.ok_or("google_client_config_missing")?;
+    let credentials=crate::google_calendar_runner::token_store(&app)?;
     let has_credential=credentials.load(&profile).map_err(str::to_owned)?.is_some();
     if should_reuse_session(state.calendar_id.is_some(),has_credential,state.error_code.as_deref()) {
         return google_calendar_status(app).await;
@@ -101,7 +101,7 @@ pub async fn google_calendar_disconnect(app:AppHandle)->Result<GoogleConnectionS
     if !crate::google_calendar_runner::network_allowed(&app) { return Err("google_live_network_disabled".into()) }
     nimble_core::db::recovery::require_activation_clear(app.state::<SqlitePool>().inner()).await.map_err(|_|"restore_activation_required")?;
     let profile=crate::google_calendar_runner::profile_identity(&app)?;
-    let credentials=KeychainCredentials;
+    let credentials=crate::google_calendar_runner::token_store(&app)?;
     if let Some(token)=credentials.load(&profile).map_err(str::to_owned)? {
         if let Ok(client)=reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build() {
             let _=client.post("https://oauth2.googleapis.com/revoke").form(&[("token",token.as_str())]).send().await;
@@ -161,8 +161,8 @@ pub async fn google_calendar_configure(app:AppHandle,client_id:String,client_sec
     nimble_core::db::recovery::require_activation_clear(pool.inner()).await.map_err(|_|"restore_activation_required")?;
     let profile=crate::google_calendar_runner::profile_identity(&app)?;
     let state=nimble_core::db::google_calendar::state(pool.inner()).await.map_err(|_|"google_status_failed")?;
-    let bound=state.calendar_id.is_some() || KeychainCredentials.load(&profile).map_err(str::to_owned)?.is_some();
-    save_client_configuration(pool.inner(),&profile,&client_id,&client_secret,bound,&KeychainClientCredentials).await?;
+    let bound=state.calendar_id.is_some() || crate::google_calendar_runner::token_store(&app)?.load(&profile).map_err(str::to_owned)?.is_some();
+    save_client_configuration(pool.inner(),&profile,&client_id,&client_secret,bound,&crate::google_calendar_runner::client_secret_store(&app)?).await?;
     google_calendar_status(app).await
 }
 

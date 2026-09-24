@@ -1,6 +1,6 @@
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
-use crate::google_credentials::{client_secret_account, GoogleCredentials, KeychainClientCredentials, KeychainCredentials};
+use crate::google_credentials::{client_secret_account, FileCredentials, GoogleCredentials};
 static GOOGLE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub async fn lock() -> tokio::sync::MutexGuard<'static,()> { GOOGLE_LOCK.lock().await }
@@ -10,6 +10,14 @@ pub fn profile_identity(app: &AppHandle) -> Result<String, String> {
     let path=app.path().app_data_dir().map_err(|_|"google_profile_failed")?;
     let digest=Sha256::digest(path.to_string_lossy().as_bytes());
     Ok(format!("nimble-{:x}", digest))
+}
+
+pub fn token_store(app: &AppHandle) -> Result<FileCredentials, String> {
+    Ok(FileCredentials::tokens(&app.path().app_data_dir().map_err(|_|"credential_store_failed")?))
+}
+
+pub fn client_secret_store(app: &AppHandle) -> Result<FileCredentials, String> {
+    Ok(FileCredentials::client_secrets(&app.path().app_data_dir().map_err(|_|"credential_store_failed")?))
 }
 
 pub fn network_allowed(app:&AppHandle)->bool {
@@ -45,8 +53,8 @@ pub async fn tick(app:&AppHandle)->Result<nimble_core::integrations::google_cale
     }
     let client_id=client_id(pool.inner()).await?;
     let profile=profile_identity(app)?;
-    let client_secret=KeychainClientCredentials.load(&client_secret_account(&profile,&client_id)).map_err(str::to_owned)?.ok_or("google_client_config_missing")?;
-    let credentials=KeychainCredentials;
+    let client_secret=client_secret_store(app)?.load(&client_secret_account(&profile,&client_id)).map_err(str::to_owned)?.ok_or("google_client_config_missing")?;
+    let credentials=token_store(app)?;
     let refresh_token=credentials.load(&profile).map_err(str::to_owned)?.ok_or("google_connection_needed")?;
     let client=reqwest::Client::builder().timeout(std::time::Duration::from_secs(20))
         .connect_timeout(std::time::Duration::from_secs(10)).build().map_err(|_|"google_transport_failed")?;
