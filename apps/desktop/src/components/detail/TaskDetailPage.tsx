@@ -357,18 +357,20 @@ export function TaskDetailPage() {
       {/* Top row: back control (left) + task actions "…" menu (right) —
           no paperclip (Decision 13); the Focus actions live in the menu
           (Agentation pass 3, B2). */}
-      <div className="flex items-center justify-between gap-2 min-h-6">
+      <div className="flex items-center justify-between gap-2 min-h-7">
         {backSegment ? (
           // One control, one tab stop: chevron and text both go back to the
-          // nearest ancestor (the parent task, else the project). h-7 gives
-          // a 28px hit area; -my-0.5 keeps the row at 24px. tabIndex={0}
-          // because WebKit skips plain buttons on Tab.
+          // nearest ancestor (the parent task, else the project). h-7 is the
+          // 28px hit area — no negative margin, the page's scroll container
+          // starts right above and would clip it; the ::after adds a little
+          // below for edge clicks. tabIndex={0} because WebKit skips plain
+          // buttons on Tab.
           <button
             type="button"
             tabIndex={0}
             onClick={backSegment.onClick}
             aria-label={`Back to ${backSegment.label}`}
-            className="focus-ring -my-0.5 -ml-1.5 flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-body text-muted-foreground transition-colors hover:text-foreground"
+            className="focus-ring relative -ml-1.5 flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-body text-muted-foreground transition-colors hover:text-foreground after:absolute after:inset-x-0 after:top-0 after:-bottom-1 after:content-['']"
           >
             <ChevronLeft className="size-3.5 shrink-0" />
             <span className="truncate max-w-[240px]">{backSegment.label}</span>
