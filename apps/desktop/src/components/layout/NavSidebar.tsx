@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils'
 import { Sun, CheckSquare, Inbox, FileText, Target, Settings, Command, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { IconButton } from '@/components/shared/IconButton'
 import { NavDocsTree, NavTasksTree } from './NavTrees'
+import { NimbleMark } from './NimbleMark'
+import { Collapse } from '@/components/shared/Collapse'
 import type { LucideIcon } from 'lucide-react'
 import { Icon } from '@/components/shared/Icon'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -206,20 +208,24 @@ function SortableNavItem({
           aria-expanded={treeOpen}
           className="absolute right-1.5 top-1.5"
         >
-          <ChevronRight className={cn('size-3.5 transition-transform duration-(--transition-fast)', treeOpen && 'rotate-90')} />
+          <ChevronRight className={cn('size-3.5 transition-transform duration-(--transition-fast) ease-(--ease-entrance)', treeOpen && 'rotate-90')} />
         </IconButton>
       )}
       {/* Own scroll region that shrinks (min-h-0) and gives ground first, so every
           page item stays in view even with a tall tree (re-score shell N-P1-1).
-          py-1/pr-1 keep the focus ring from clipping against the scroll edge. */}
-      {showTree && (
-        <div
-          className="mt-0.5 mb-1 min-h-0 max-h-[40vh] overflow-y-auto overflow-x-hidden overscroll-contain py-1 pl-4 pr-1 [scrollbar-width:thin]"
+          pt-1/pb-1/pr-1 keep the focus ring from clipping against the scroll
+          edge; the old mt-0.5/mb-1 are folded into that padding so the gap
+          animates with the height rather than snapping at the end. */}
+      {expanded && treeId && (
+        <Collapse
+          open={treeOpen}
           role="group"
           aria-label={`${label} list`}
+          className="min-h-0 max-h-[40vh] overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-width:thin]"
+          innerClassName="pt-1.5 pb-2 pl-4 pr-1"
         >
           {treeId === 'tasks' ? <NavTasksTree /> : <NavDocsTree />}
-        </div>
+        </Collapse>
       )}
     </div>
   )
@@ -355,8 +361,17 @@ export function NavSidebar() {
         </div>
       )}
 
-      {/* Collapse to icons / expand to labels */}
-      <div className={cn('mb-1 flex', expanded ? 'justify-end px-2' : 'justify-center')}>
+      {/* Wordmark + collapse to icons / expand to labels. Same 28px row as the
+          button alone, so nothing below moves; snapped to icons, the mark
+          stacks above the expand button. The wordmark is decorative — no
+          focus stop — and the mark lines up with the nav icons (pl-2.25). */}
+      <div className={cn('mb-1 flex items-center', expanded ? 'justify-between gap-2 px-2' : 'flex-col gap-2')}>
+        <div data-wordmark className={cn('flex min-w-0 items-center gap-2 text-foreground', expanded && 'pl-2.25')}>
+          <NimbleMark className="size-4.5 shrink-0" />
+          {expanded && (
+            <span className="font-heading text-(length:--text-body-strong) leading-tight font-semibold">Nimble</span>
+          )}
+        </div>
         <IconButton
           onClick={() => setNavCollapsed(expanded)}
           size="lg"

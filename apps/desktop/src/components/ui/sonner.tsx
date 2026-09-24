@@ -10,8 +10,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme}
       className="toaster group"
-      // Clear of the floating help button (size-9 at bottom-4/right-4 → 52px tall band).
-      offset={{ bottom: 64, right: 24 }}
+      // Clear of the floating help button (size-9 at bottom-4/right-4 → 52px tall band),
+      // and stacked above the sync notice while it shows (SyncHealthBanner
+      // sets --sync-notice-space to its height + gap).
+      offset={{ bottom: 'calc(64px + var(--sync-notice-space, 0px))', right: 24 }}
       icons={{
         success: (
           <CircleCheckIcon className="size-4" />

@@ -295,7 +295,10 @@ export function Dashboard() {
       {/* Center: Main content area */}
       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
         {/* Sync health: mounted once for every page, renders nothing while
-            Todoist sync is off or healthy (Task 5). */}
+            Todoist sync is off or healthy (Task 5). A fixed bottom-right
+            notice, not a top banner, so the page never shifts (Agentation
+            pass 3, A4). First in DOM order so Tab reaches it right after
+            the nav, not after a long page. */}
         <SyncHealthBanner />
 
         {/* Focus banner: coexists with shell navigation while anything is queued */}
