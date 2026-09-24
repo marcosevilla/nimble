@@ -22,24 +22,11 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
 import { taskToast } from '@/lib/taskToast'
-import { Inbox as InboxIcon, PenLine, ArrowRight, FileText, Download, Search, Lightbulb, Quote, CheckSquare, X } from 'lucide-react'
+import { Inbox as InboxIcon, PenLine, ArrowRight, FileText, Download, Search, X } from 'lucide-react'
 import { PageFrame } from '@/components/shared/PageFrame'
 import { EmptyState } from '@/components/shared/EmptyState'
+import { RouteIcon } from '@/components/capture/CaptureTokens'
 import type { LocalTask, Capture, DocFolder, Document } from '@nimble/types'
-
-// ── Route icon map ──
-
-const ROUTE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  Lightbulb,
-  Quote,
-  CheckSquare,
-  FileText,
-}
-
-function RouteIcon({ name, className }: { name: string; className?: string }) {
-  const Icon = ROUTE_ICONS[name] ?? FileText
-  return <Icon className={className} />
-}
 
 // ── Unified inbox item type ──
 
