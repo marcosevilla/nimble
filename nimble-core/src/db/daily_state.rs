@@ -47,8 +47,8 @@ pub async fn save_priorities(
     let priorities_json = serde_json::to_string(priorities).unwrap_or_default();
 
     sqlx::query(
-        "INSERT INTO daily_state (date, top_priorities, first_opened_at)
-         VALUES (?, ?, datetime('now'))
+        "INSERT INTO daily_state (date, energy_level, top_priorities, first_opened_at)
+         VALUES (?, NULL, ?, datetime('now'))
          ON CONFLICT(date) DO UPDATE SET top_priorities = excluded.top_priorities",
     )
     .bind(&today)
@@ -128,5 +128,11 @@ mod tests {
         let b = crate::db::briefs::get_brief(&pool, &today).await.unwrap().unwrap();
         assert_eq!(b.snapshot["priorities"][0]["title"], "One");
         assert_eq!(super::get_daily_state(&pool).await.unwrap().priorities.unwrap()[0].title, "One");
+        let energy: Option<String> = sqlx::query_scalar("SELECT energy_level FROM daily_state WHERE date = ?")
+            .bind(&today)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(energy, None);
     }
 }
