@@ -60,7 +60,7 @@ test('Inbox section lists capture and row keys', () => {
 })
 
 test('Inbox is appended after General (then B3b sections), existing order untouched', () => {
-  assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox', 'Docs', 'Goals', 'Session'])
+  assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox', 'Docs', 'Goals', 'Session', 'Today'])
 })
 
 test('Space is not a Tasks row key — it stays Focus pause/resume (review I2)', () => {
