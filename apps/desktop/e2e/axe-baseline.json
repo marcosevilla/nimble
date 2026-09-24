@@ -36,6 +36,13 @@
     "nested-interactive": 8,
     "scrollable-region-focusable": 1
   },
+  "inbox-marks": {
+    "button-name": 8,
+    "label": 2,
+    "link-name": 1,
+    "nested-interactive": 8,
+    "scrollable-region-focusable": 1
+  },
   "inbox:dark": {
     "button-name": 8,
     "label": 2,
@@ -76,6 +83,13 @@
     "label": 2,
     "link-name": 1,
     "nested-interactive": 1,
+    "scrollable-region-focusable": 1
+  },
+  "today-rows": {
+    "button-name": 8,
+    "label": 2,
+    "link-name": 1,
+    "nested-interactive": 4,
     "scrollable-region-focusable": 1
   },
   "today:dark": {
