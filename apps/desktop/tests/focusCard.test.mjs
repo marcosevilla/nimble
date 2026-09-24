@@ -104,6 +104,22 @@ test('one caption line under the timer joins the budget, priority and due', () =
   assert.deepEqual(cardCaption('Round 1 of 4', { sync_policy: 'default', due_date: null, due_time: null }, '2026-09-22'), { timing: 'Round 1 of 4', meta: null })
 })
 
+test('a Normal task still shows the priority icon: three empty bars, dot only after the timing', () => {
+  // Marco 2026-09-24: Normal gets an empty icon.
+  const html = rendered.renderFocusCard({ priority: 1 })
+  const caption = html.match(/<div\b[^>]*data-slot="focus-timer-caption"[^>]*>[\s\S]*?<\/div><\/div>/)?.[0] ?? ''
+  const icon = caption.match(/<div\b[^>]*aria-label="Priority 1"[^>]*>([\s\S]*?)<\/div>/)
+  assert.ok(icon, 'Priority 1 icon in the caption')
+  const bars = icon[1].match(/<span\b[^>]*>/g) ?? []
+  assert.equal(bars.length, 3)
+  for (const bar of bars) {
+    assert.match(bar, /bg-muted-foreground\/30/)
+    assert.doesNotMatch(bar, /\bbg-foreground\b/)
+  }
+  assert.equal((caption.match(/aria-hidden="true">·</g) ?? []).length, 1, 'one dot, between the timing and the icon')
+  assert.ok(caption.indexOf('25m timebox') < caption.indexOf('Priority 1') && caption.indexOf('Priority 1') < caption.indexOf('2:00 PM'))
+})
+
 test('live timing unavailable: Start is disabled with a visible reason, not hidden', () => {
   const html = rendered.renderFocusCard({ live: false })
   const start = html.match(/<button\b[^>]*aria-label="Start"[^>]*>/)?.[0]

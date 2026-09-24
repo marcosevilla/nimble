@@ -157,9 +157,10 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
   const visibleLabels = task.labels?.slice(0, 2) ?? []
   const overflowCount = (task.labels?.length ?? 0) - visibleLabels.length
   /** Which marks the row shows: a row key opens its picker on the mark,
-   * or on the row's right end when there is none (T2). */
+   * or on the row's right end when there is none (T2). Every priority has
+   * a mark — Normal's is the empty glyph (Marco 2026-09-24). */
   const hasMark: Record<RowPickerKind, boolean> = {
-    priority: task.priority >= 2,
+    priority: true,
     due: !!task.dueDate,
     label: visibleLabels.length > 0,
     project: !!task.projectName,
@@ -250,8 +251,9 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
           <div className="w-4 shrink-0" />
         )}
 
-        {/* Priority — Normal has no bars, so no mark (just the spacer) */}
-        {markTask && task.priority >= 2 ? (
+        {/* Priority — every level has bars (Normal's are all empty), so
+            every row with marks gets the clickable priority mark */}
+        {markTask ? (
           <PriorityMark task={markTask} rowId={rowId} />
         ) : (
           <PriorityBars priority={task.priority} />

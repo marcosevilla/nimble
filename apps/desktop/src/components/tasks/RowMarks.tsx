@@ -94,7 +94,7 @@ interface MarkProps {
 
 // ── Priority ──
 
-/** Bars for Medium/High/Urgent. Normal has no bars, so no mark. The button
+/** Bars for every priority (Normal's are all empty, Marco 2026-09-24). The button
  * is 24×24 around the 12×8 bars; -mx-1.5/-my-2 hands the extra back so the
  * row lays out exactly as the bare bars did. */
 export function PriorityMark({ task, rowId }: MarkProps) {

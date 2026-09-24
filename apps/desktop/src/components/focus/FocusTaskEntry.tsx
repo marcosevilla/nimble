@@ -16,8 +16,9 @@ import {
 
 /**
  * Visible focus entry points for one task — the row's hover icon and
- * overflow menu, and the task detail's Focus control. Every write goes
- * through the focus store; nothing starts except the explicit Focus now.
+ * overflow menu, and the focus section of the task detail's actions menu
+ * (FocusTaskMenuItems). Every write goes through the focus store; nothing
+ * starts except the explicit Focus now.
  */
 
 // ── Task row ──
@@ -150,76 +151,4 @@ export function TaskRowActions({ task, focusShortcut = false }: { task: FocusEnt
       </DropdownMenu>
     </div>
   )
-}
-
-// ── Task detail ──
-
-const DETAIL_BUTTON =
-  'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-meta transition-colors aria-disabled:cursor-default aria-disabled:opacity-50'
-
-/**
- * Detail header Focus control: primary Add to focus queue (or "In focus
- * queue" with Remove), secondary Focus now. Blocked controls stay visible,
- * `aria-disabled` so the reason tooltip still shows on hover.
- */
-export function TaskFocusControlsView({
-  controls,
-  onToggle,
-  onFocusNow,
-}: {
-  controls: FocusTaskControls
-  onToggle: () => void
-  onFocusNow: () => void
-}) {
-  const { toggle, focusNow: now } = controls
-  if (!controls.visible) return null
-  return (
-    <div className="flex items-center gap-1" role="group" aria-label="Focus">
-      {toggle.kind === 'remove' ? (
-        <>
-          <span className="inline-flex h-6 items-center gap-1.5 rounded-md bg-accent-blue/10 px-2 text-meta text-foreground">
-            <ListCheck className="size-3 text-accent-blue" />
-            {controls.status}
-          </span>
-          <button
-            type="button"
-            aria-label={toggle.label}
-            aria-disabled={toggle.disabled || undefined}
-            title={toggle.reason ?? toggle.label}
-            className={cn(DETAIL_BUTTON, 'text-muted-foreground hover:bg-hover hover:text-foreground')}
-            onClick={() => { if (!toggle.disabled) onToggle() }}
-          >
-            <ListX className="size-3" />
-            Remove
-          </button>
-        </>
-      ) : (
-        <button
-          type="button"
-          aria-disabled={toggle.disabled || undefined}
-          title={toggle.reason ?? undefined}
-          className={cn(DETAIL_BUTTON, 'border border-border bg-card text-foreground hover:bg-hover')}
-          onClick={() => { if (!toggle.disabled) onToggle() }}
-        >
-          <ListPlus className="size-3" />
-          {toggle.label}
-        </button>
-      )}
-      <button
-        type="button"
-        aria-disabled={now.disabled || undefined}
-        title={now.reason ?? undefined}
-        className={cn(DETAIL_BUTTON, 'text-muted-foreground hover:bg-hover hover:text-foreground')}
-        onClick={() => { if (!now.disabled) onFocusNow() }}
-      >
-        <Play className="size-3" />
-        {now.label}
-      </button>
-    </div>
-  )
-}
-
-export function TaskFocusControls({ task }: { task: FocusEntryTask }) {
-  const { controls, toggle, start } = useFocusTaskEntry(task)
-  return <TaskFocusControlsView controls={controls} onToggle={toggle} onFocusNow={start} />
 }

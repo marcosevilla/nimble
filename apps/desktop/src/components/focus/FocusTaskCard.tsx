@@ -309,7 +309,6 @@ export function FocusTaskCard({
   const timing = cardTiming(snapshot, entry, displayExtra)
   const running = control.label === 'Pause' || control.label === 'End break'
   const caption = cardCaption(timing.caption, task, today)
-  const showBars = task.priority >= 2
   const description = task.description?.trim() ?? ''
 
   return (
@@ -356,15 +355,15 @@ export function FocusTaskCard({
         <FocusTimeboxPicker
           config={timing.config}
           presentation={timing.presentation}
+          // Every priority has bars (Normal's are all empty), so the caption
+          // always has at least the icon; the dot only separates timing from it.
           caption={
-            caption.timing || caption.meta || showBars ? (
-              <>
-                {caption.timing && <span className="shrink-0">{caption.timing}</span>}
-                {caption.timing && (showBars || caption.meta) && <span aria-hidden>·</span>}
-                {showBars && <PriorityBars priority={task.priority} />}
-                {caption.meta && <span className="min-w-0 truncate">{caption.meta}</span>}
-              </>
-            ) : null
+            <>
+              {caption.timing && <span className="shrink-0">{caption.timing}</span>}
+              {caption.timing && <span aria-hidden>·</span>}
+              <PriorityBars priority={task.priority} />
+              {caption.meta && <span className="min-w-0 truncate">{caption.meta}</span>}
+            </>
           }
           disabledReason={writeBlocked}
           size={timerSize}
