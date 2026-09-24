@@ -123,7 +123,13 @@ function readBaseline(): Baseline {
 export async function expectNoNewAxeViolations(page: Page, pageKey: string) {
   // Dark mode has its own baseline row (`<page>:dark`).
   if (await page.evaluate(() => document.documentElement.classList.contains('dark'))) pageKey += ':dark'
-  const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    // Base UI injects unnamed `role=button` focus guards (6) whenever any
+    // popup is open — library-internal, present on main with any popover, so
+    // a no-popup baseline can't account for them.
+    .exclude('[data-base-ui-focus-guard]')
+    .analyze()
   const counts: Record<string, number> = {}
   for (const v of results.violations) counts[v.id] = v.nodes.length
   if (process.env.UPDATE_AXE_BASELINE) {
