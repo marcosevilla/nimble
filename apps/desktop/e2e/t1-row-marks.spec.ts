@@ -294,6 +294,39 @@ for (const s of Object.values(SURFACES)) {
   }
 }
 
+// Review (iteration 2): the project picker reads one page-wide project list —
+// opening it on several rows loads projects at most once after page load,
+// and it never shows "None available" while projects exist.
+test('AC2 tasks: project pickers on two rows share one projects load and never show "None available"', async ({ app, page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown, o?: unknown) => unknown }
+      __projectLoads: number
+      __sawNoneAvailable: boolean
+    }
+    w.__projectLoads = 0
+    w.__sawNoneAvailable = false
+    const orig = w.__TAURI_INTERNALS__.invoke
+    w.__TAURI_INTERNALS__.invoke = (cmd, args, opts) => {
+      if (cmd === 'get_projects') w.__projectLoads++
+      return orig(cmd, args, opts)
+    }
+    new MutationObserver(() => {
+      if (document.body?.textContent?.includes('None available')) w.__sawNoneAvailable = true
+    }).observe(document.documentElement, { childList: true, subtree: true, characterData: true })
+  })
+  await openSurface(app, page, SURFACES.tasks)
+  const loads = () => page.evaluate(() => (window as unknown as { __projectLoads: number }).__projectLoads)
+  const before = await loads()
+  for (const id of ['task-05', 'task-04', 'task-05']) {
+    await openMark(page, rowOf(page, id), 'project')
+    await expect(popups(page).getByRole('menuitem', { name: 'Portfolio', exact: true })).toBeVisible()
+    await closeAllPopups(page)
+  }
+  expect((await loads()) - before, 'projects list calls after page load').toBeLessThanOrEqual(1)
+  expect(await page.evaluate(() => (window as unknown as { __sawNoneAvailable: boolean }).__sawNoneAvailable), '"None available" shown').toBe(false)
+})
+
 // ── AC3 — choosing updates the row and closes; Escape closes; focus back ─
 
 const CHOICES: { kind: Kind; pick: (page: Page) => Promise<void>; expectValue: string; stored: (t: any) => boolean; closes: boolean }[] = [

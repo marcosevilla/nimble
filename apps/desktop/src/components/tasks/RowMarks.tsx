@@ -2,13 +2,14 @@ import { useCallback, useRef, useState, type MouseEvent, type RefObject } from '
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useDataProvider } from '@/services/provider-context'
-import { emitTasksChanged, useProjects } from '@/hooks/useLocalTasks'
+import { emitTasksChanged, useProjectOptions } from '@/hooks/useLocalTasks'
 import { taskToast } from '@/lib/taskToast'
 import { rowMarkName } from '@/lib/rowMarks'
 import { dueBadgeLabel } from '@/lib/dueLabel'
 import { taskPatchToUpdate, type TaskPatch } from '@/lib/taskPatch'
 import { useRowPicker } from '@/stores/rowPickerStore'
 import { PriorityBars } from '@/components/shared/PriorityBars'
+import { Skeleton } from '@/components/ui/skeleton'
 import { PriorityMenu, LabelsPopover, EntityMenuItems } from '@/components/tasks/MetadataChips'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { DueDatePopover, type DueValue } from '@/components/tasks/DueDatePopover'
@@ -228,8 +229,8 @@ export function LabelMarks({
 
 // ── Project ──
 
-/** Project swatch + name. The menu's items are the active projects, loaded
- * only while it is open (every row mounts this mark). */
+/** Project swatch + name. The menu's items are the active projects from a
+ * page-wide cache, so opening pickers on many rows loads them once. */
 export function ProjectMark({
   task,
   rowId,
@@ -264,8 +265,20 @@ export function ProjectMark({
   )
 }
 
+/** Items from the shared projects cache (useProjectOptions): the first open
+ * on a page loads it, every later open on any row reuses it. Until the
+ * first load lands, skeleton rows stand in (never "None available"). */
 function ProjectMenuItems({ onSelect }: { onSelect: (id: string, name: string) => void }) {
-  const { projects } = useProjects()
+  const projects = useProjectOptions()
+  if (!projects) {
+    return (
+      <div className="flex flex-col gap-1 p-1" aria-hidden>
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-5 w-full rounded-md" />
+        ))}
+      </div>
+    )
+  }
   return (
     <EntityMenuItems
       options={projects}
