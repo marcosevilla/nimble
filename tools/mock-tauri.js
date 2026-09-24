@@ -1869,6 +1869,10 @@
     return id
   }
 
+  function ipcClone(r) {
+    return r == null ? r : JSON.parse(JSON.stringify(r))
+  }
+
   function mockInvoke(cmd, args) {
     // Built-in event plugin: listen() expects a numeric event id back.
     if (cmd === 'plugin:event|listen') {
@@ -1891,7 +1895,9 @@
     var handler = commands[cmd]
     if (handler) {
       try {
-        return Promise.resolve(handler(args || {}))
+        // Real IPC serializes results, so the app never holds the mock's own
+        // objects (shared references hid re-renders after edits).
+        return Promise.resolve(handler(args || {})).then(ipcClone)
       } catch (e) {
         console.debug('[mock-tauri] handler error for', cmd, e)
         return Promise.resolve(null)
