@@ -363,14 +363,14 @@ export function TaskDetailPage() {
           // nearest ancestor (the parent task, else the project). h-7 is the
           // 28px hit area — no negative margin, the page's scroll container
           // starts right above and would clip it; the ::after adds a little
-          // below for edge clicks. tabIndex={0} because WebKit skips plain
-          // buttons on Tab.
+          // below for edge clicks. The ring is inset for the same reason.
+          // tabIndex={0} because WebKit skips plain buttons on Tab.
           <button
             type="button"
             tabIndex={0}
             onClick={backSegment.onClick}
             aria-label={`Back to ${backSegment.label}`}
-            className="focus-ring relative -ml-1.5 flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-body text-muted-foreground transition-colors hover:text-foreground after:absolute after:inset-x-0 after:top-0 after:-bottom-1 after:content-['']"
+            className="focus-ring focus-visible:-outline-offset-2 relative -ml-1.5 flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-body text-muted-foreground transition-colors hover:text-foreground after:absolute after:inset-x-0 after:top-0 after:-bottom-1 after:content-['']"
           >
             <ChevronLeft className="size-3.5 shrink-0" />
             <span className="truncate max-w-[240px]">{backSegment.label}</span>
