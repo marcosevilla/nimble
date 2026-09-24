@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { hhmm, splitDueTasks, ageLabel, largestFreeBlock, formatFreeBlock, nextEvent, greetingFor, shouldAutoGenerate } from '../src/lib/todayBrief.ts'
+import { hhmm, splitDueTasks, ageLabel, largestFreeBlock, formatFreeBlock, nextEvent, greetingFor, shouldAutoGenerate, nowHHMM } from '../src/lib/todayBrief.ts'
 
 test('hhmm reads both the real "HH:MM" and the mock ISO shape', () => {
   assert.equal(hhmm('10:05'), '10:05')
@@ -50,4 +50,9 @@ test('auto-generate at most once a day, never without a key', () => {
   assert.equal(shouldAutoGenerate({ cached: true, tried: false, noKey: false }), false)
   assert.equal(shouldAutoGenerate({ cached: false, tried: true, noKey: false }), false)
   assert.equal(shouldAutoGenerate({ cached: false, tried: false, noKey: true }), false)
+})
+
+test('nowHHMM is the local clock as zero-padded "HH:MM"', () => {
+  assert.equal(nowHHMM(new Date(2026, 8, 23, 7, 5)), '07:05')
+  assert.equal(nowHHMM(new Date(2026, 8, 23, 18, 30)), '18:30')
 })

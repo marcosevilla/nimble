@@ -55,6 +55,11 @@ export function formatFreeBlock(b: { start: string; end: string; minutes: number
   return `${len} open, ${b.start}–${b.end}`
 }
 
+/** The local clock as "HH:MM", the shape `nextEvent` and `largestFreeBlock` take. */
+export function nowHHMM(now: Date = new Date()): string {
+  return fromMin(now.getHours() * 60 + now.getMinutes())
+}
+
 export function nextEvent<E extends { start_time: string; all_day: boolean }>(events: E[], now: string): E | null {
   return events.find((e) => !e.all_day && e.start_time && toMin(e.start_time) >= toMin(now)) ?? null
 }
