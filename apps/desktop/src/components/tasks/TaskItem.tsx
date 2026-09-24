@@ -130,12 +130,8 @@ interface TaskItemProps {
    * drag reordering is disabled and a dead grip icon would be misleading.
    * Defaults to true so other call sites are unaffected. */
   showGrip?: boolean
-  /** Hides the SelectionCheckbox entirely — used by TaskDetailPage's subtask
-   * rows, which have no action bar mountable in body-mode detail (BulkActionBar
-   * is gated to the tasks list page, SelectionActionBar lives on list pages
-   * that are unmounted here), so a hover-revealed checkbox there would be a
-   * dead end only escapable via Escape. Defaults to true so list-page call
-   * sites keep selecting. */
+  /** Hides the SelectionCheckbox entirely, for a surface with no bulk action
+   * bar to act on the selection. Defaults to true. */
   selectable?: boolean
   /** Trailing row actions (focus-queue icon + overflow menu) rendered after
    * the metadata. Interactive children must stop click propagation. */
@@ -212,23 +208,27 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
         className,
       )}
     >
-      {/* Hover cluster — grip then checkbox, absolutely positioned to hang
-          OUTSIDE the list column to the left (Marco QA round 3, item 1).
-          They no longer occupy in-flow slots, so the status icon below stays
-          flush with the section/page title's `pl-4` left edge whether or
-          not the cluster is revealed. `right-full` pins the cluster's right
-          edge to this row's own left edge (before the content's `ml-4`), so
-          it never nudges the border or the status icon. */}
+      {/* Hover cluster — grip then checkbox, absolutely positioned so it
+          never occupies an in-flow slot: the status icon below stays flush
+          with the section/page title's `pl-4` edge whether or not the
+          cluster is revealed (Marco QA round 3, item 1).
+          It lives in the 40px strip left of the status icon — the column's
+          24px gutter plus the row's own 16px content inset — and ends 4px
+          short of the icon. It used to hang wholly outside the row
+          (`right-full`, 52px wide), which at 1440 put the grip past the
+          list's `overflow-x-hidden` scroller edge: clipped and unclickable
+          (Agentation pass 3, C4). Hence the compact grip (16×24) and the
+          2px gap — 34px in all, 2px clear of the scroller edge. */}
       {(showGrip || selectable) && (
-        <div className="absolute right-full top-0 flex h-9 items-center gap-1 pr-2">
+        <div className="absolute right-[calc(100%-0.75rem)] top-0 flex h-9 items-center gap-0.5">
           {/* dnd-kit's attributes make the grip a focusable button — so it
-              reveals on focus-within too, never an invisible tab stop, and
-              the 12px glyph gets a 24px target (P1-2, P3-3). */}
+              reveals on focus-within too, never an invisible tab stop. The
+              ring is inset: the grip sits at the scroller's edge. */}
           {showGrip && (
             <button
               type="button"
               aria-label="Drag to reorder"
-              className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+              className="flex h-6 w-4 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:-outline-offset-2"
               onClick={(e) => e.stopPropagation()}
               {...dragHandleProps}
             >

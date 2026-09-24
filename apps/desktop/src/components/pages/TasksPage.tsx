@@ -4,6 +4,7 @@ import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
 import { TaskListHeader } from '@/components/tasks/TaskListHeader'
 import { SelectionActionBar } from '@/components/tasks/SelectionActionBar'
+import { BulkActionBar } from '@/components/shared/BulkActionBar'
 import { PageDragRegion } from '@/components/shared/PageDragRegion'
 import { PageColumn } from '@/components/shared/PageFrame'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -253,6 +254,11 @@ export function TasksPage() {
               <TaskDetailPage key={detailTarget.id} />
             </PageColumn>
           </div>
+          {/* The detail page's subtask selection (C2) is acted on by the
+              app-wide bar — status (Complete/Todo…), move, delete — the
+              one every page but Tasks mounts from Dashboard; Tasks' own
+              in-list SelectionActionBar belongs to the lists, unmounted here. */}
+          <BulkActionBar />
         </div>
       ) : selectedProject ? (
         <ProjectDetailPage

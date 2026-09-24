@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   DndContext,
   closestCenter,
@@ -46,6 +46,36 @@ export function SortableTaskItem({
   onFocusRow,
   focusShortcut,
 }: SortableTaskItemProps) {
+  return (
+    <SortableRow id={task.id}>
+      {(dragHandleProps) => (
+        <LocalTaskRow
+          task={task}
+          projectName={projectName}
+          projectColor={projectColor}
+          subtaskStats={subtaskStats}
+          onDelete={onDelete}
+          onAddSubtask={onAddSubtask}
+          focused={focused}
+          onFocusRow={onFocusRow}
+          focusShortcut={focusShortcut}
+          dragHandleProps={dragHandleProps}
+        />
+      )}
+    </SortableRow>
+  )
+}
+
+/** One sortable row: the dnd-kit wrapper every task list shares. The row
+ * gets `dragHandleProps` (attributes + listeners) for its grip, so only the
+ * grip — never the whole row — starts a drag (pointer or keyboard). */
+export function SortableRow({
+  id,
+  children,
+}: {
+  id: string
+  children: (dragHandleProps: Record<string, unknown>) => ReactNode
+}) {
   const {
     attributes,
     listeners,
@@ -53,7 +83,7 @@ export function SortableTaskItem({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: task.id })
+  } = useSortable({ id })
 
   // Override dnd-kit's default ease with our canonical entrance curve so
   // displaced neighbours settle into place instead of snapping linearly.
@@ -73,63 +103,33 @@ export function SortableTaskItem({
         isDragging && 'z-10 opacity-80 bg-accent/30 rounded-md',
       )}
     >
-      {/* Only the row's grip (rendered inside TaskItem via dragHandleProps)
-          initiates a drag — listeners are not spread on this container. */}
-      <LocalTaskRow
-        task={task}
-        projectName={projectName}
-        projectColor={projectColor}
-        subtaskStats={subtaskStats}
-        onDelete={onDelete}
-        onAddSubtask={onAddSubtask}
-        focused={focused}
-        onFocusRow={onFocusRow}
-        focusShortcut={focusShortcut}
-        dragHandleProps={{ ...attributes, ...listeners }}
-      />
+      {children({ ...attributes, ...listeners })}
     </div>
   )
 }
 
-interface SortableTaskListProps {
-  tasks: LocalTask[]
-  allTasks: LocalTask[]
-  projectName?: string
-  projectColor?: string
-  onDelete: (id: string) => void
-  onAddSubtask: (parentId: string, content: string) => void
-}
-
-export function SortableTaskList({
-  tasks,
-  allTasks,
-  projectName,
-  projectColor,
-  onDelete,
-  onAddSubtask,
-}: SortableTaskListProps) {
+/** A flat, reorderable list of ids (pointer drag on the grip, or keyboard:
+ * grip → Space → arrows → Space). Holds the order optimistically, persists
+ * it with `dp.tasks.reorder(ids)` (position = index) and rolls back if that
+ * fails. Used by SortableTaskList and the task detail page's subtasks. */
+export function SortableRows({
+  ids,
+  onReordered,
+  children,
+}: {
+  ids: string[]
+  /** After the new order is persisted. */
+  onReordered?: (ids: string[]) => void
+  /** Renders the rows, in the current order, each inside a `SortableRow`. */
+  children: (orderedIds: string[]) => ReactNode
+}) {
   const dp = useDataProvider()
-  const topLevel = useMemo(() => tasks.filter((t) => !t.parent_id), [tasks])
-  const [items, setItems] = useState(topLevel.map((t) => t.id))
+  const [items, setItems] = useState(ids)
 
-  const topLevelIds = useMemo(() => topLevel.map((t) => t.id).join(','), [topLevel])
+  const idsKey = ids.join(',')
   useEffect(() => {
-    setItems(topLevel.map((t) => t.id))
-  }, [topLevelIds])
-
-  // Build subtask map from the full task set (not just this project slice) so
-  // subtasks of parents-in-this-list are found even if the hook only fetched
-  // top-level tasks.
-  const subtaskMap = useMemo(() => {
-    const map: Record<string, LocalTask[]> = {}
-    for (const t of allTasks) {
-      if (t.parent_id) {
-        if (!map[t.parent_id]) map[t.parent_id] = []
-        map[t.parent_id].push(t)
-      }
-    }
-    return map
-  }, [allTasks])
+    setItems(idsKey ? idsKey.split(',') : [])
+  }, [idsKey])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -152,24 +152,66 @@ export function SortableTaskList({
 
       try {
         await dp.tasks.reorder(newItems)
+        onReordered?.(newItems)
       } catch {
         setItems(items)
       }
     },
-    [items, dp],
+    [items, dp, onReordered],
   )
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={items} strategy={verticalListSortingStrategy}>
+        {children(items)}
+      </SortableContext>
+    </DndContext>
+  )
+}
+
+interface SortableTaskListProps {
+  tasks: LocalTask[]
+  allTasks: LocalTask[]
+  projectName?: string
+  projectColor?: string
+  onDelete: (id: string) => void
+  onAddSubtask: (parentId: string, content: string) => void
+}
+
+export function SortableTaskList({
+  tasks,
+  allTasks,
+  projectName,
+  projectColor,
+  onDelete,
+  onAddSubtask,
+}: SortableTaskListProps) {
+  const topLevel = useMemo(() => tasks.filter((t) => !t.parent_id), [tasks])
+
+  // Build subtask map from the full task set (not just this project slice) so
+  // subtasks of parents-in-this-list are found even if the hook only fetched
+  // top-level tasks.
+  const subtaskMap = useMemo(() => {
+    const map: Record<string, LocalTask[]> = {}
+    for (const t of allTasks) {
+      if (t.parent_id) {
+        if (!map[t.parent_id]) map[t.parent_id] = []
+        map[t.parent_id].push(t)
+      }
+    }
+    return map
+  }, [allTasks])
 
   const taskMap: Record<string, LocalTask> = {}
   for (const t of topLevel) taskMap[t.id] = t
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <SortableContext items={items} strategy={verticalListSortingStrategy}>
-        {/* No left gutter needed — the drag handle is now absolutely
-            positioned outside the row (TaskItem's hover cluster). Subtasks
-            no longer render as nested rows here either (Marco QA round 3,
-            item 2) — `subtaskMap` is only consulted for each row's
-            `SubtaskSummary` count chip. */}
+    <SortableRows ids={topLevel.map((t) => t.id)}>
+      {(items) => (
+        /* No left gutter needed — the drag handle sits in the row's own
+           hover cluster (TaskItem). Subtasks no longer render as nested rows
+           here either (Marco QA round 3, item 2) — `subtaskMap` is only
+           consulted for each row's `SubtaskSummary` count chip. */
         <div>
           {items.flatMap((id) => {
             const task = taskMap[id]
@@ -196,7 +238,7 @@ export function SortableTaskList({
             ]
           })}
         </div>
-      </SortableContext>
-    </DndContext>
+      )}
+    </SortableRows>
   )
 }

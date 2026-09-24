@@ -1,6 +1,6 @@
 import { toast } from 'sonner'
 import type { Undoable } from '@/lib/undoable'
-import { cn } from '@/lib/utils'
+import { ToastAction } from './ToastAction'
 
 let seq = 0
 
@@ -14,8 +14,8 @@ let seq = 0
  * The Undo is our own button, not sonner's `action: { label, onClick }`:
  * sonner renders that without a tabindex and WebKit (the app's WKWebView)
  * skips a tabindex-less <button> on Tab, so the Undo was unreachable by
- * keyboard. This one carries tabIndex={0} and the app's focus ring, dressed
- * like sonner's action button (inverted popover colours, 24px, 12px/500).
+ * keyboard. `ToastAction` below carries tabIndex={0} and the app's focus
+ * ring instead.
  */
 export function showUndoToast(message: string, pending: Undoable, duration: number): string {
   const id = `undo-toast-${++seq}`
@@ -25,20 +25,14 @@ export function showUndoToast(message: string, pending: Undoable, duration: numb
     onAutoClose: () => { pending.commit() },
     onDismiss: () => { pending.commit() },
     action: (
-      <button
-        type="button"
-        tabIndex={0}
+      <ToastAction
         onClick={() => {
           pending.undo()
           toast.dismiss(id)
         }}
-        className={cn(
-          'focus-ring ml-auto flex h-6 shrink-0 cursor-pointer items-center rounded-sm px-2',
-          'bg-popover-foreground text-meta-strong text-popover transition-opacity duration-(--transition-fast) hover:opacity-90',
-        )}
       >
         Undo
-      </button>
+      </ToastAction>
     ),
   })
   return id

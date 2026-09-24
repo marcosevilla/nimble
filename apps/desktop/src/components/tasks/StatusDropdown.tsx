@@ -9,6 +9,7 @@ import { useSelectionStore } from '@/stores/selectionStore'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { playCompletionSound } from '@/lib/sound'
 import { toast } from 'sonner'
+import { reopenTask } from './reopenTask'
 import type { DataProvider, TaskStatus } from '@nimble/types'
 import type { LucideIcon } from 'lucide-react'
 
@@ -92,6 +93,17 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete, dueDat
   const current = getStatusConfig(status)
   const Icon = current.icon
 
+  // Any non-complete status. Leaving `complete` is a reopen, which goes
+  // through reopenTask so a cascaded parent offers its subtasks back (C3).
+  const setOpenStatus = useCallback(async (next: TaskStatus, reason?: string) => {
+    if (status === 'complete') {
+      await reopenTask(dp, taskId, next, reason)
+      return
+    }
+    await dp.tasks.updateStatus(taskId, next, reason)
+    emitTasksChanged()
+  }, [dp, taskId, status])
+
   const handleSelect = useCallback(async (newStatus: TaskStatus) => {
     if (newStatus === status) { setOpen(false); return }
 
@@ -123,24 +135,22 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete, dueDat
     }
 
     try {
-      await dp.tasks.updateStatus(taskId, newStatus)
-      emitTasksChanged()
+      await setOpenStatus(newStatus)
     } catch (e) {
       toast.error(`Failed to update status: ${e}`)
     }
-  }, [taskId, status, dp, markTaskCompleting, clearTaskCompleting, onComplete, dueDate])
+  }, [taskId, status, dp, markTaskCompleting, clearTaskCompleting, onComplete, dueDate, setOpenStatus])
 
   const handleBlockedSubmit = useCallback(async () => {
     try {
-      await dp.tasks.updateStatus(taskId, 'blocked', blockedReason.trim() || undefined)
-      emitTasksChanged()
+      await setOpenStatus('blocked', blockedReason.trim() || undefined)
     } catch (e) {
       toast.error(`Failed to update status: ${e}`)
     }
     setShowBlockedInput(false)
     setBlockedReason('')
     setOpen(false)
-  }, [taskId, blockedReason, dp])
+  }, [blockedReason, setOpenStatus])
 
   const iconSize = size === 'md' ? 'size-5' : 'size-4'
 
