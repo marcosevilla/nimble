@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import { useGoalsStore } from '@/stores/goalsStore'
 import { useDataProvider } from '@/services/provider-context'
@@ -90,8 +90,9 @@ function renderHabitIcon(icon: string, name: string, category: string | null): s
 
 // ── Habit Circle ──
 
-const HOLD_DURATION = 500 // ms; the hold ring is optional flourish — a click completes too (decided 2026-09-22)
-
+/* One click (or Enter/Space) toggles: log at the backend's default
+   intensity 5, or unlog. The hold-to-complete ring is gone (decided
+   2026-09-24, option b) — it only ever did what the click already did. */
 function HabitCircle({
   name,
   icon,
@@ -111,46 +112,6 @@ function HabitCircle({
 }) {
   const Icon = lucideFor(icon)
   const emoji = Icon ? null : renderHabitIcon(icon, name, category)
-  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null)
-  // Set when the hold itself completed the habit, so the click that follows
-  // pointerup does not toggle it straight back.
-  const firedByHold = useRef(false)
-  const [holding, setHolding] = useState(false)
-  const [progress, setProgress] = useState(0)
-
-  const cancelHold = useCallback(() => {
-    if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null }
-    if (progressInterval.current) { clearInterval(progressInterval.current); progressInterval.current = null }
-    setHolding(false)
-    setProgress(0)
-  }, [])
-
-  const startHold = useCallback((e: React.PointerEvent) => {
-    if (completed || e.button !== 0) return
-    firedByHold.current = false
-    setHolding(true)
-    setProgress(0)
-    const startTime = Date.now()
-    progressInterval.current = setInterval(() => {
-      setProgress(Math.min((Date.now() - startTime) / HOLD_DURATION, 1))
-    }, 16)
-    holdTimer.current = setTimeout(() => {
-      cancelHold()
-      firedByHold.current = true
-      onToggle()
-    }, HOLD_DURATION)
-  }, [completed, onToggle, cancelHold])
-
-  // Mouse click completes at default intensity; the hold is optional
-  // (goals P1-1, P1-4). Keyboard goes through handleKeyDown below.
-  const handleClick = useCallback(() => {
-    if (firedByHold.current) { firedByHold.current = false; return }
-    cancelHold()
-    onToggle()
-  }, [onToggle, cancelHold])
-
-  useEffect(() => cancelHold, [cancelHold])
 
   // Enter/Space toggle on keydown and stay local: stopPropagation keeps the
   // Dashboard's window-level Space (pause a focus session) from eating the
@@ -160,45 +121,27 @@ function HabitCircle({
     e.preventDefault()
     e.stopPropagation()
     if (e.repeat) return
-    cancelHold()
     onToggle()
-  }, [onToggle, cancelHold])
+  }, [onToggle])
 
   return (
     <div className="flex w-14 flex-col items-center gap-1.5">
+      {/* tabIndex: WKWebView skips a plain <button> in the Tab order. */}
       <button
         type="button"
-        onClick={handleClick}
+        tabIndex={0}
+        onClick={onToggle}
         onKeyDown={handleKeyDown}
-        onPointerDown={startHold}
-        onPointerUp={cancelHold}
-        onPointerLeave={cancelHold}
-        onPointerCancel={cancelHold}
         aria-pressed={completed}
-        aria-label={`${name}${completed ? ', done today' : ''}`}
-        title={completed ? `${name} — done today. Click to unmark.` : `${name} — click or hold to complete.`}
+        aria-label={`${name}, ${completed ? 'done' : 'not done'} today`}
+        title={completed ? `${name} — done today. Click to unmark.` : `${name} — click to mark done.`}
         className={cn(
           'relative flex size-10 select-none items-center justify-center rounded-full border text-title transition-[background-color,border-color,scale] duration-(--transition-fast) active:scale-[0.96] motion-reduce:active:scale-100',
           completed
             ? 'border-success/40 bg-success/10 text-foreground'
             : 'border-border bg-card text-foreground hover:bg-hover',
-          holding && 'scale-[0.96]',
         )}
       >
-        {/* Hold progress ring */}
-        {holding && !completed && (
-          <svg className="absolute inset-0 size-10 -rotate-90 pointer-events-none" viewBox="0 0 40 40" aria-hidden="true">
-            <circle
-              cx="20" cy="20" r="18"
-              fill="none"
-              stroke={color}
-              strokeWidth="2.5"
-              strokeDasharray={`${progress * 113} 113`}
-              strokeLinecap="round"
-              className="transition-none"
-            />
-          </svg>
-        )}
         {Icon ? <Icon className="size-4" aria-hidden="true" /> : <span aria-hidden="true">{emoji}</span>}
         {completed && (
           <span aria-hidden="true" className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full flex items-center justify-center text-label text-success-fg bg-success">

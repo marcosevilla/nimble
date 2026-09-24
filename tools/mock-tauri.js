@@ -542,12 +542,20 @@
     { id: 'habit-walk', name: 'Walk', category: 'Health', icon: 'footprints', color: '#d46a9e', active: true, position: 3, created_at: iso('2026-03-02'), rate: 0.8 },
   ]
 
+  // log_habit / unlog_habit this session, keyed `habitId|date` → intensity
+  // (0 = unlogged). Overrides the seeded history so a toggle survives reload.
+  var HABIT_LOG_OVERRIDES = {}
+
   // Deterministic: did `habit` get logged on `date`, and at what intensity?
   function habitDone(habitId, date) {
+    var o = HABIT_LOG_OVERRIDES[habitId + '|' + date]
+    if (o !== undefined) return o > 0
     var h = HABITS.find(function (x) { return x.id === habitId })
     return hash01(habitId + '|' + date) < (h ? h.rate : 0.5)
   }
   function habitIntensity(habitId, date) {
+    var o = HABIT_LOG_OVERRIDES[habitId + '|' + date]
+    if (o) return o
     return 1 + Math.floor(hash01('int|' + habitId + '|' + date) * 5) // 1..5
   }
 
@@ -1675,16 +1683,26 @@
       }
     },
     delete_habit: function () { return null },
+    // Mirrors nimble-core `log_habit(habit_id, date?, intensity?)`: date
+    // defaults to today, intensity to 5, and a re-log replaces the day's log.
     log_habit: function (args) {
+      var habitId = (args && args.habitId) || 'habit-gym'
+      var date = (args && args.date) || TODAY
+      var intensity = (args && args.intensity) || 5
+      HABIT_LOG_OVERRIDES[habitId + '|' + date] = intensity
       return {
         id: newId('hlog'),
-        habit_id: (args && args.habitId) || 'habit-gym',
-        date: (args && args.date) || TODAY,
-        intensity: (args && args.intensity) || 3,
+        habit_id: habitId,
+        date: date,
+        intensity: intensity,
         created_at: iso(TODAY, '21:00:00'),
       }
     },
-    unlog_habit: function () { return null },
+    unlog_habit: function (args) {
+      var habitId = (args && args.habitId) || 'habit-gym'
+      HABIT_LOG_OVERRIDES[habitId + '|' + ((args && args.date) || TODAY)] = 0
+      return null
+    },
     get_habit_logs: function (args) {
       return buildHabitLogs(args && args.habitId, args && args.days)
     },
