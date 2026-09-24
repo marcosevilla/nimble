@@ -5,8 +5,9 @@ Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + 
 ## iPhone quick capture (2026-09-24)
 
 - [x] **`/api/capture` live in production** (`fe976ca`, on main, not pushed; Vercel prod deployed by hand). Bearer `CAPTURE_TOKEN` (Vercel env, Production + Preview), exempt from the cookie gate; writes capture + sync_log to Turso like the web `createCapture`; `source = 'iphone'`, `created_at` in `CAPTURE_TZ` (default America/Los_Angeles). Verified: 401 without token, `/api/turso` still gated, capture reached the Mac Inbox on the next Turso pull.
-- [ ] Marco: build the "Nimble Capture" Shortcut, assign to the Action button, delete the two "safe to delete" test captures.
-- [ ] Lag: the Mac pulls Turso every 5 min (`lib.rs` 300 s loop) or on window focus. If captures need to land faster while Nimble is in the background, shorten the Turso tick.
+- [x] **Turso sync every 60 s in its own loop** (`e841239`, installed 2026-09-24; rollback `Nimble Rollbacks/20260924-153834-turso-60s/`). Verified: background capture arrived in 40 s, `turso_last_sync_at` advances every 60 s. Todoist/calendar stay on 5 min.
+- [x] Marco built the "Nimble Capture" Shortcut; first real capture landed. Body field uses **Clipboard** (Provided Input wasn't offered).
+- [ ] Marco: delete the test captures from the Inbox ("safe to delete" ×3 + "This is a nimble test").
 - [ ] Not mirrored (same gap as web): `item_captured` activity_log entry for phone captures.
 
 ## Keychain prompt fix (2026-09-24)
