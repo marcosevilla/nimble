@@ -493,11 +493,17 @@ function InboxNoteRow({
           open()
         }
       }}
+      // The row paints its tint from `--row-tint` so the action overlay's
+      // fade can end on exactly the same colour (selected beats the focus
+      // tint, hover beats both, as before).
       className={cn(
-        'group relative flex h-9 items-center min-w-0 transition-colors hover:bg-hover cursor-default',
-        'focus-visible:-outline-offset-2',
-        focused && 'bg-accent/10',
-        isSelected && 'bg-accent-blue/10',
+        'group relative flex h-9 items-center min-w-0 transition-colors bg-(--row-tint) cursor-default',
+        'focus-visible:-outline-offset-2 hover:[--row-tint:var(--hover)]',
+        isSelected
+          ? '[--row-tint:color-mix(in_oklab,var(--accent-blue)_10%,transparent)]'
+          : focused
+            ? '[--row-tint:color-mix(in_oklab,var(--accent)_10%,transparent)]'
+            : '[--row-tint:transparent]',
       )}
     >
       <div className="absolute right-full top-0 flex h-9 items-center gap-1 pr-2">
@@ -517,14 +523,20 @@ function InboxNoteRow({
         )}
 
         {/* Actions — revealed on hover AND on keyboard focus anywhere in the
-            row (P1-2); each carries its single-key hint. Out of the layout
-            until then (not just transparent), so in the 640px page column
-            the note text gets the row's full width (C1). Kept mounted while
-            the picker is open — the popover anchors to its trigger. */}
+            row (P1-2); each carries its single-key hint. They overlay the
+            row's right end (decision 7): out of flow, so the title never
+            reflows, over a fade from transparent to the row's own tint on
+            the page background. `bottom-px` keeps the hairline. Invisible
+            (not display:none) at rest so it stays out of the tab order,
+            and kept up while the picker is open — the popover anchors to
+            its trigger. */}
         <div
+          data-row-actions
           className={cn(
-            'hidden shrink-0 items-center gap-1 group-hover:flex group-focus-within:flex',
-            pickerOpen && 'flex',
+            'invisible absolute right-0 top-0 bottom-px flex items-center gap-1 pl-8 opacity-0 transition-opacity',
+            'bg-[linear-gradient(to_right,transparent,var(--row-tint)_2rem),linear-gradient(to_right,transparent,var(--background)_2rem)]',
+            'group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100',
+            pickerOpen && 'visible opacity-100',
           )}
           onClick={(e) => e.stopPropagation()}
         >
@@ -550,12 +562,13 @@ function InboxNoteRow({
               {pickerOpen && <MoveToDocPicker capture={capture} onMoved={onMoved} onFailed={onMoveFailed} />}
             </PopoverContent>
           </Popover>
-          <button type="button" onClick={onConvert} className={ROW_ACTION}>
+          {/* tabIndex: WebKit's default Tab skips plain buttons. */}
+          <button type="button" tabIndex={0} onClick={onConvert} className={ROW_ACTION}>
             <ArrowRight className="size-3" />
             Convert to task
             <RowKbd>T</RowKbd>
           </button>
-          <button type="button" onClick={onDismiss} className={ROW_ACTION} aria-label="Dismiss note">
+          <button type="button" tabIndex={0} onClick={onDismiss} className={ROW_ACTION} aria-label="Dismiss note">
             <X className="size-3" />
             Dismiss
             <RowKbd>D</RowKbd>
