@@ -403,14 +403,16 @@ pub fn run() {
                 });
             }
 
-            // --- Background sync: 5-minute interval, min 60s apart ---
+            // --- Background sync: integrations every 5 minutes, Turso every minute ---
             // First tick fires immediately (tokio::time::interval semantics),
             // covering an on-launch sync without a separate code path.
             //
-            // Both integrations run here. Turso is the device-to-device sync, so
-            // leaving it out (as this loop did until 2026-08-15) meant local
-            // changes reached the cloud only when someone pressed the button on
-            // the Settings page, and remote changes never arrived at all.
+            // Turso is the device-to-device sync, so leaving it out (as this loop
+            // did until 2026-08-15) meant local changes reached the cloud only
+            // when someone pressed the button on the Settings page, and remote
+            // changes never arrived at all. It gets its own 60s loop (2026-09-24)
+            // so phone captures from /api/capture land while the app sits in the
+            // background — a pull is one watermark query, cheap to run often.
             if !isolated_test {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -419,7 +421,18 @@ pub fn run() {
                     loop {
                         interval.tick().await; // first tick fires immediately → covers on-launch sync
                         crate::sync_runner::run_if_due_and_emit(&handle, 60).await;
-                        crate::sync_runner::run_turso_sync_if_due(&handle, 60).await;
+                    }
+                });
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    loop {
+                        interval.tick().await;
+                        // 45s, not 60: the last-sync stamp is written at the start
+                        // of each run and compared in whole seconds, so a 60s gate
+                        // on a 60s tick would skip every other tick.
+                        crate::sync_runner::run_turso_sync_if_due(&handle, 45).await;
                     }
                 });
             }
