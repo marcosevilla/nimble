@@ -21,6 +21,7 @@ import { InlineTitle } from './InlineTitle'
 import { TiptapEditor } from '@/components/docs/TiptapEditor'
 import { Textarea } from '@/components/ui/textarea'
 import { MetadataChips, type ChipValues } from '@/components/tasks/MetadataChips'
+import { taskPatchToUpdate } from '@/lib/taskPatch'
 import { TaskItem, type TaskItemData } from '@/components/tasks/TaskItem'
 import { labelColor } from '@/lib/labelColors'
 import { DetailBreadcrumbs } from './DetailBreadcrumbs'
@@ -192,65 +193,13 @@ export function TaskDetailPage() {
 
   // Unified chip patch handler — same dp.tasks.update() call every other
   // field on this page already uses, just routed through MetadataChips'
-  // single onChange(patch) contract instead of one handler per field.
+  // single onChange(patch) contract instead of one handler per field. The
+  // patch → update mapping lives in lib/taskPatch.ts, shared with the task
+  // row's clickable marks.
   const handleChipChange = useCallback(async (patch: Partial<ChipValues>) => {
     if (!task) return
-    const updates: Parameters<typeof dp.tasks.update>[0] = { id: task.id }
-    let touched = false
-
-    if (patch.priority !== undefined) {
-      updates.priority = patch.priority
-      touched = true
-    }
-    if (patch.due !== undefined) {
-      // DueDatePopover always emits the full DueValue (every field, even
-      // ones untouched by this interaction) — deriving clear flags from
-      // "value is null" instead of "value CHANGED" meant e.g. setting
-      // Duration on a task with no due time sent clearDueTime: true, which
-      // the Rust backend applies AFTER setting duration_minutes and nulls
-      // both. Gate each set/clear on the incoming value actually differing
-      // from the task's current value (mirrors the retired TaskEditor's
-      // `dueTimeChanged && !dueTime && !!task.due_time` pattern), and only
-      // clear a field the task actually has — this also stops the 3-4
-      // no-op clear UPDATEs (activity-log + sync churn) on every due patch.
-      const due = patch.due
-      let dueTouched = false
-      if (due.dueDate !== (task.due_date ?? null)) {
-        updates.dueDate = due.dueDate ?? undefined
-        updates.clearDueDate = due.dueDate === null && !!task.due_date
-        dueTouched = true
-      }
-      if (due.dueTime !== (task.due_time ?? null)) {
-        updates.dueTime = due.dueTime ?? undefined
-        updates.clearDueTime = due.dueTime === null && !!task.due_time
-        dueTouched = true
-      }
-      if (due.durationMinutes !== (task.duration_minutes ?? null)) {
-        updates.durationMinutes = due.durationMinutes ?? undefined
-        updates.clearDuration = due.durationMinutes === null && task.duration_minutes != null
-        dueTouched = true
-      }
-      if (due.recurrenceRule !== (task.recurrence_rule ?? null)) {
-        updates.recurrenceRule = due.recurrenceRule ?? undefined
-        updates.clearRecurrence = due.recurrenceRule === null && !!task.recurrence_rule
-        dueTouched = true
-      }
-      if (dueTouched) touched = true
-    }
-    if (patch.labelIds !== undefined) {
-      updates.labelIds = patch.labelIds
-      touched = true
-    }
-    if (patch.sectionId !== undefined) {
-      updates.sectionId = patch.sectionId ?? undefined
-      updates.clearSection = patch.sectionId === null
-      touched = true
-    }
-    if (patch.linkedDocId !== undefined) {
-      updates.linkedDocId = patch.linkedDocId
-      touched = true
-    }
-    if (!touched) return
+    const updates = taskPatchToUpdate(task, patch)
+    if (!updates) return
 
     try {
       await dp.tasks.update(updates)

@@ -105,25 +105,8 @@ const SURFACES: Record<Surface['key'], Surface> = {
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-test.beforeEach(async ({ app: _app, page, theme }) => {
+test.beforeEach(async ({ app: _app, page }) => {
   await page.clock.setFixedTime(MOCK_NOW)
-  // Two mock fidelity patches, registered after the mock (the `app` fixture
-  // adds it first):
-  //  1. Real Tauri IPC returns freshly deserialized JSON on every call, but
-  //     tools/mock-tauri.js hands back its own mutated-in-place task objects,
-  //     so memoized consumers never see an update (e.g. the detail page's
-  //     priority chip stays "Urgent" after picking High). Clone like IPC.
-  //  2. The mock's settings say theme 'light', which useTheme reads on mount
-  //     and which overrides the fixture's localStorage — so `theme: 'dark'`
-  //     would silently render light. Answer the theme setting from the option.
-  await page.addInitScript((mode) => {
-    const w = window as any
-    const orig = w.__TAURI_INTERNALS__.invoke
-    w.__TAURI_INTERNALS__.invoke = (cmd: string, args?: any, opts?: unknown) => {
-      if (cmd === 'get_setting' && args?.key === 'theme') return Promise.resolve(mode)
-      return Promise.resolve(orig(cmd, args, opts)).then((r: unknown) => (r == null ? r : JSON.parse(JSON.stringify(r))))
-    }
-  }, theme)
 })
 
 /** Give the Inbox's only task row (task-14: priority 1, no due, no labels) marks. */

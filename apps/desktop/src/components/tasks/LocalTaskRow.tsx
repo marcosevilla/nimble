@@ -178,6 +178,7 @@ export function LocalTaskRow({
         dragHandleProps={dragHandleProps}
         showGrip={showGrip}
         actions={<TaskRowActions task={task} focusShortcut={focusShortcut} />}
+        markTask={task}
       />
 
       {showSubInput && onAddSubtask && (

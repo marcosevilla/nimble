@@ -1,12 +1,13 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { StatusDropdown } from './StatusDropdown'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { focusSpaceAction } from '@/stores/focusStore'
 import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { PriorityBars } from '@/components/shared/PriorityBars'
+import { PriorityMark, DueMark, LabelMarks, ProjectMark, type RowMarkTask } from './RowMarks'
+import { dueBadgeLabel } from '@/lib/dueLabel'
 import type { TaskStatus } from '@nimble/types'
-import { format, parseISO, isToday, isTomorrow } from 'date-fns'
 import { CornerDownRight, ListTree, CheckCircle2, GripVertical } from 'lucide-react'
 
 // ── Due Date Badge ──
@@ -15,13 +16,8 @@ import { CornerDownRight, ListTree, CheckCircle2, GripVertical } from 'lucide-re
    Today lifts to foreground. --destructive is reserved for destructive
    actions (see lib/task-view.ts "Still open" bucket). */
 function DueDateBadge({ date }: { date: string }) {
-  const parsed = parseISO(date)
-  const today = isToday(parsed)
-
-  let label: string
-  if (today) label = 'Today'
-  else if (isTomorrow(parsed)) label = 'Tomorrow'
-  else label = format(parsed, 'MMM d')
+  const label = dueBadgeLabel(date)
+  const today = label === 'Today'
 
   /* Template literal (not cn) to dodge the tailwind-merge + custom-color
      gotcha that drops text-<size> when combined with text-foreground /
@@ -141,9 +137,16 @@ interface TaskItemProps {
   /** Trailing row actions (focus-queue icon + overflow menu) rendered after
    * the metadata. Interactive children must stop click propagation. */
   actions?: ReactNode
+  /** The task the row's marks edit. Given, the priority bars, due badge,
+   * label chips and project name become buttons that open the detail
+   * page's pickers (RowMarks.tsx); omitted, they stay plain marks (the
+   * detail page's subtask rows). */
+  markTask?: RowMarkTask
 }
 
-export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, className, dragHandleProps, showGrip = true, selectable = true, actions }: TaskItemProps) {
+export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, className, dragHandleProps, showGrip = true, selectable = true, actions, markTask }: TaskItemProps) {
+  const rowId = navId ?? task.id
+  const titleId = useId()
   const isSelected = useSelectionStore((s) => s.selectedIds.has(task.id))
   const isCompleting = useSelectionStore((s) => s.completingTaskIds.has(task.id))
 
@@ -151,17 +154,24 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
   const visibleLabels = task.labels?.slice(0, 2) ?? []
   const overflowCount = (task.labels?.length ?? 0) - visibleLabels.length
 
+  /* The row is a focusable, named group, not role="button": a button's
+     children are presentational, so the status menu, the grip, the
+     checkbox and the mark buttons nested in it were invalid
+     (axe nested-interactive). A group may hold controls. Enter/Space still
+     open the task (below) and j/k/x/s/f come from useRowNavigation. */
   return (
     <div
-      role="button"
+      role="group"
+      aria-labelledby={titleId}
       tabIndex={0}
-      data-nav-row={navId ?? task.id}
+      data-nav-row={rowId}
       onClick={onOpen}
       onFocus={(e) => { if (e.target === e.currentTarget) onFocusRow?.() }}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget || !onOpen) return
-        // Enter and Space open, like any role="button" (review I2). Space
-        // pauses a running focus session instead (Dashboard).
+        // Enter and Space open, as they did when the row was a button
+        // (review I2). Space pauses a running focus session instead
+        // (Dashboard).
         if (e.key === 'Enter' || (e.key === ' ' && !focusSpaceAction())) {
           e.preventDefault()
           onOpen()
@@ -217,14 +227,19 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
           <div className="w-4 shrink-0" />
         )}
 
-        {/* Priority */}
-        <PriorityBars priority={task.priority} />
+        {/* Priority — Normal has no bars, so no mark (just the spacer) */}
+        {markTask && task.priority >= 2 ? (
+          <PriorityMark task={markTask} rowId={rowId} />
+        ) : (
+          <PriorityBars priority={task.priority} />
+        )}
 
         {/* Subtask indicator */}
         {task.isSubtask && <SubtaskBadge />}
 
         {/* Task name — the whole row handles click/open, so this is plain text */}
         <span
+          id={titleId}
           className={cn(
             'flex-1 min-w-0 truncate text-body',
             completed && 'text-muted-foreground line-through',
@@ -238,13 +253,21 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
           {task.subtaskStats && task.subtaskStats.total > 0 && (
             <SubtaskSummary done={task.subtaskStats.done} total={task.subtaskStats.total} />
           )}
-          {visibleLabels.map((label, i) => (
-            <LabelChipPill key={`${label.name}-${i}`} name={label.name} color={label.color} />
-          ))}
-          {overflowCount > 0 && <LabelChipPill name={`+${overflowCount}`} />}
+          {markTask ? (
+            <LabelMarks task={markTask} rowId={rowId} visible={visibleLabels} overflow={Math.max(0, overflowCount)} />
+          ) : (
+            <>
+              {visibleLabels.map((label, i) => (
+                <LabelChipPill key={`${label.name}-${i}`} name={label.name} color={label.color} />
+              ))}
+              {overflowCount > 0 && <LabelChipPill name={`+${overflowCount}`} />}
+            </>
+          )}
           {/* Project badge — All Tasks mixes projects, so the row says which
               one it belongs to (tasks audit P2-1). Swatch is project data. */}
-          {task.projectName && (
+          {task.projectName && markTask ? (
+            <ProjectMark task={markTask} rowId={rowId} name={task.projectName} color={task.projectColor} />
+          ) : task.projectName && (
             <span className="flex shrink-0 items-center gap-1 text-meta text-muted-foreground">
               {task.projectColor && (
                 <span className="size-1.5 rounded-full" style={{ backgroundColor: task.projectColor }} />
@@ -252,7 +275,11 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
               {task.projectName}
             </span>
           )}
-          {task.dueDate && <DueDateBadge date={task.dueDate} />}
+          {task.dueDate && markTask ? (
+            <DueMark task={markTask} rowId={rowId} date={task.dueDate} />
+          ) : (
+            task.dueDate && <DueDateBadge date={task.dueDate} />
+          )}
           {actions}
         </div>
       </div>
