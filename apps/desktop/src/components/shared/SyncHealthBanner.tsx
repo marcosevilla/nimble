@@ -27,7 +27,8 @@ let sessionDismissed: SyncHealth | null = null
 
 /** Live width of the shell's right column — the rail, its collapsed strip,
  *  Settings' empty slot or the detail sidebar, whichever is mounted
- *  (`[data-right-rail]`). Re-found when any of those swap. */
+ *  (`[data-right-rail]`). Re-found when any of those swap; the observer's
+ *  first callback (delivered on observe) supplies the initial width. */
 function useRightColumnWidth() {
   const [width, setWidth] = useState<number | null>(null)
   const page = useAppStore((s) => s.currentPage)
@@ -35,13 +36,8 @@ function useRightColumnWidth() {
   const collapsed = useLayoutStore((s) => s.rightCollapsed)
   useLayoutEffect(() => {
     const el = Array.from(document.querySelectorAll<HTMLElement>('[data-right-rail]')).pop()
-    if (!el) {
-      setWidth(null)
-      return
-    }
-    const measure = () => setWidth(el.getBoundingClientRect().width)
-    measure()
-    const ro = new ResizeObserver(measure)
+    if (!el) return
+    const ro = new ResizeObserver(() => setWidth(el.getBoundingClientRect().width))
     ro.observe(el)
     return () => ro.disconnect()
   }, [page, detail, collapsed])
