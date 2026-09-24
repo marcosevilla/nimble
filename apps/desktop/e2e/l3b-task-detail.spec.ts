@@ -500,7 +500,9 @@ test('B2 "Add to focus queue" in the menu enqueues the task exactly like the old
   await expect(item, 'menu item "Add to focus queue"').toBeVisible()
   await item.click()
   await expect.poll(() => focusCalls(page)).toEqual([
-    { kind: 'enqueue', task_ids: [TIMED.id], source: { kind: 'project', project_id: 'proj-taskapp' }, explicit_still_open: false },
+    // task-04 is due on the pinned "today", so the source is Today — the old
+    // header button sends the same (checked on a frozen 3815def build).
+    { kind: 'enqueue', task_ids: [TIMED.id], source: { kind: 'today' }, explicit_still_open: false },
   ])
 })
 
