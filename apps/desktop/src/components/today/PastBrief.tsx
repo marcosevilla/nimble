@@ -117,7 +117,7 @@ export function PastBrief({ date, today }: { date: string; today: string }) {
         today={date}
         live={false}
       />
-      <PrioritiesBox priorities={snapshot?.priorities ?? null} readOnly />
+      <PrioritiesBox priorities={snapshot?.priorities ?? null} />
       <DueTodaySnapshot tasks={snapshot?.due_today ?? []} />
       <StillOpenBox
         tasks={stillOpen?.oldest ?? []}

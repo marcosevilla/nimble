@@ -107,3 +107,9 @@ test('⇧H is the habits shortcut, bare and unrepeated (goals N-P1-1)', () => {
   assert.equal(isHabitsShortcut({ key: 'H', repeat: true }), false)
   assert.ok(SHORTCUTS.some((s) => s.keys === '⇧H'), 'registry lists ⇧H')
 })
+
+test('Today rows use plain lowercase keys, matching todayKey (which rejects Shift)', () => {
+  const today = SHORTCUTS.filter((s) => s.section === 'Today').map((s) => s.keys)
+  assert.ok(today.includes('b'), 'b toggles the brief')
+  assert.ok(!today.includes('B'), 'B would read as Shift+B')
+})

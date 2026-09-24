@@ -13,11 +13,14 @@ export function BriefStrip({
   priorities,
   onExpand,
   loading = false,
+  offline = false,
 }: {
   events: CalendarEvent[]
   priorities: Priority[] | null | undefined
   onExpand: () => void
   loading?: boolean
+  /** The calendar couldn't load and nothing is cached. */
+  offline?: boolean
 }) {
   const next = nextEvent(events, nowHHMM())
   const top = (priorities ?? []).slice(0, 3)
@@ -27,6 +30,8 @@ export function BriefStrip({
       <span className="min-w-0 shrink truncate text-body">
         {loading ? (
           <Skeleton className="inline-block h-4 w-40 align-middle" />
+        ) : offline ? (
+          <Meta>Calendar offline.</Meta>
         ) : next ? (
           <>
             <Meta className="tabular-nums">Next: {hhmm(next.start_time)}</Meta> {next.summary}

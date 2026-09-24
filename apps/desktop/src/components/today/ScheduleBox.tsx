@@ -9,23 +9,28 @@ const MAX_ROWS = 5
 
 /** Today's events in a time gutter, a one-line tomorrow peek and the
  *  largest free block. `live` counts the free block from now; a snapshot
- *  (`live={false}`) reads the whole working window of its own day. */
+ *  (`live={false}`) reads the whole working window of its own day. A load
+ *  `error` with nothing to show reads "Calendar offline." — an unknown
+ *  schedule is never presented as a wide-open day. */
 export function ScheduleBox({
   events,
   loading,
   tomorrow,
   today,
   live,
+  error = null,
 }: {
   events: CalendarEvent[]
   loading: boolean
   tomorrow: CalendarEvent[]
   today: string
   live: boolean
+  error?: string | null
 }) {
+  const offline = !loading && !!error && events.length === 0
   // "From now" only while the wall clock is still on this box's day.
   const from = live && localIsoDate() === today ? nowHHMM() : undefined
-  const block = loading ? null : largestFreeBlock(events, { from })
+  const block = loading || offline ? null : largestFreeBlock(events, { from })
   const peek = tomorrow[0]
 
   return (
@@ -45,6 +50,8 @@ export function ScheduleBox({
             <Skeleton key={i} className="h-6" />
           ))}
         </div>
+      ) : offline ? (
+        <Meta as="p">Calendar offline.</Meta>
       ) : events.length === 0 ? (
         <Meta as="p">No events. Wide open.</Meta>
       ) : (

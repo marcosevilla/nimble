@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarCheck, ChevronDown } from 'lucide-react'
-import type { CalendarEvent, LocalTask, Priority } from '@nimble/types'
+import type { CalendarEvent, LocalTask } from '@nimble/types'
 import { ReminderCatchUp } from '@/components/today/ReminderCatchUp'
 import { ScheduleBox } from '@/components/today/ScheduleBox'
-import { PrioritiesBox, PrioritiesSkeleton } from '@/components/today/PrioritiesBox'
+import { PrioritiesBox } from '@/components/today/PrioritiesBox'
 import { StillOpenBox } from '@/components/today/StillOpenBox'
 import { VaultBox } from '@/components/today/VaultBox'
 import { BriefStrip } from '@/components/today/BriefStrip'
-import { BriefBox } from '@/components/today/BriefBox'
 import { PastBrief } from '@/components/today/PastBrief'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { LocalTaskRow } from '@/components/tasks/LocalTaskRow'
@@ -21,6 +20,7 @@ import { useObsidian } from '@/hooks/useObsidian'
 import { useCalendar } from '@/hooks/useCalendar'
 import { useLocalToday } from '@/hooks/useLocalToday'
 import { useGreeting } from '@/hooks/useGreeting'
+import { useDailyPriorities } from '@/hooks/useDailyPriorities'
 import { useDataProvider } from '@/services/provider-context'
 import { pickBriefDate, resolveBriefDate, shiftIsoDate } from '@/lib/briefDate'
 import { todayKey } from '@/lib/keyGuard'
@@ -77,7 +77,7 @@ export function TodayPage() {
     return () => { live = false }
   }, [dp, today])
 
-  const { events, loadedDate: calLoadedFor, goToToday } = useCalendar()
+  const { events, loadedDate: calLoadedFor, error: calError, goToToday } = useCalendar()
   // Calendar follows the new day (`goToToday` is a stable useCallback).
   useEffect(() => { goToToday() }, [today, goToToday])
   const [tomorrow, setTomorrow] = useState<CalendarEvent[]>([])
@@ -100,17 +100,17 @@ export function TodayPage() {
   const calReady = calLoadedFor === today
   const tasksReady = tasksLoadedFor === today
   const ready = briefReady({ today, calendarLoadedFor: calLoadedFor, tasksLoadedFor })
+  // Offline with nothing cached for today: the schedule is unknown, not empty.
+  const calendarOffline = calReady && !!calError && events.length === 0
 
-  const [cached, setCached] = useState<{ date: string; priorities: Priority[] | null } | null>(null)
-  useEffect(() => {
-    let live = true
-    dp.dailyState.get().then((s) => { if (live) setCached({ date: today, priorities: s.priorities }) })
-      .catch(() => { if (live) setCached({ date: today, priorities: null }) })
-    return () => { live = false }
-  }, [dp, today]) // decision 6: re-read on a new day
-  const priorities = cached?.date === today ? cached.priorities : undefined // undefined = loading
-  // A fresh set replaces the cached one, so the compact strip shows it too.
-  const handleGenerated = useCallback((p: Priority[]) => setCached({ date: today, priorities: p }), [today])
+  // Display-only project lookup (`allProjects`, so a task in an archived
+  // project keeps its badge and its name in the priorities prompt).
+  const { allProjects } = useProjects()
+
+  // Cached set + at most one auto generation per date, whether the brief is
+  // expanded or compact (the strip shows the same priorities).
+  const daily = useDailyPriorities({ today, ready, events, calendarUnavailable: calendarOffline, tasks, projects: allProjects })
+  const priorities = daily.priorities // undefined = loading
 
   // Snapshot once the day's live data has landed (Review Focus 1 and 2).
   // `ready` stays true for the rest of the day: a calendar revalidation
@@ -145,9 +145,7 @@ export function TodayPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [toggleCompact, selected, today, select])
 
-  // Due today rows: display-only project lookup (`allProjects`, so a task in
-  // an archived project keeps its badge) and the subtask map for row stats.
-  const { allProjects } = useProjects()
+  // Due today rows: project badges and the subtask map for row stats.
   const projectMap = useMemo(() => {
     const map: Record<string, { name: string; color: string }> = {}
     for (const p of allProjects) map[p.id] = { name: p.name, color: p.color }
@@ -213,21 +211,19 @@ export function TodayPage() {
       ) : (
         <>
           {compact ? (
-            <BriefStrip events={events} priorities={priorities} onExpand={toggleCompact} loading={!calReady} />
+            <BriefStrip events={events} priorities={priorities} onExpand={toggleCompact} loading={!calReady} offline={calendarOffline} />
           ) : (
             <>
-              <ScheduleBox events={events} loading={!calReady} tomorrow={tomorrow} today={today} live />
-              {/* Never mounted before the cache read, so it can't auto-generate
-                  over a set that is already stored; with nothing stored, it also
-                  waits until today's calendar and tasks have loaded, and
-                  generates from exactly those. */}
-              {priorities === undefined || (priorities === null && !ready) ? (
-                <BriefBox title="Top priorities">
-                  <PrioritiesSkeleton />
-                </BriefBox>
-              ) : (
-                <PrioritiesBox key={today} priorities={priorities} events={events} tasks={tasks} onGenerated={handleGenerated} />
-              )}
+              <ScheduleBox events={events} loading={!calReady} error={calError} tomorrow={tomorrow} today={today} live />
+              {/* Skeleton until the cache read lands and, with nothing stored,
+                  until the day's data is ready and the one auto attempt runs. */}
+              <PrioritiesBox
+                priorities={priorities ?? null}
+                loading={priorities === undefined || (priorities === null && !ready) || daily.generating}
+                error={daily.error}
+                noKey={daily.noKey}
+                onRegenerate={daily.regenerate}
+              />
             </>
           )}
 

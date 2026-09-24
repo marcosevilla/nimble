@@ -144,7 +144,7 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Goals', keys: '⇧H', label: 'Open / close habits in the right column' },
 
   // ── Today: brief (TodayPage.tsx → lib/keyGuard.ts todayKey) ──
-  { section: 'Today', keys: 'B', label: 'Expand / compact the brief' },
+  { section: 'Today', keys: 'b', label: 'Expand / compact the brief' },
   { section: 'Today', keys: '[', label: "Previous day's brief" },
   { section: 'Today', keys: ']', label: "Next day's brief" },
 ]

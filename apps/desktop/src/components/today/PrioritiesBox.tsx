@@ -1,16 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useLocalToday } from '@/hooks/useLocalToday'
-import { useAppStore } from '@/stores/appStore'
-import { useProjects } from '@/hooks/useLocalTasks'
-import { useDataProvider } from '@/services/provider-context'
-import type { CalendarEvent, LocalTask, Priority } from '@nimble/types'
+import type { Priority } from '@nimble/types'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { IconButton } from '@/components/shared/IconButton'
 import { Meta } from '@/components/shared/typography'
 import { cn } from '@/lib/utils'
-import { shouldAutoGenerate } from '@/lib/todayBrief'
 import { RefreshCw } from 'lucide-react'
 import { BriefBox } from './BriefBox'
 
@@ -21,32 +15,6 @@ const SOURCE_DOT: Record<string, string | null> = {
   Todoist: 'bg-destructive',
   Obsidian: 'bg-ai',
   General: null,
-}
-
-function buildCalendarSummary(events: { summary: string; start_time: string; end_time: string; all_day: boolean }[]): string {
-  if (events.length === 0) return 'No meetings or events today.'
-  return events
-    .map((e) => e.all_day ? `All day: ${e.summary}` : `${e.start_time}–${e.end_time}: ${e.summary}`)
-    .join('\n')
-}
-
-function buildTasksSummary(
-  tasks: { content: string; project_id: string; priority: number; completed: boolean }[],
-  projectNames: Record<string, string>,
-): string {
-  const open = tasks.filter((t) => !t.completed)
-  if (open.length === 0) return 'No tasks due today.'
-  return open
-    .map((t) => {
-      const pri = t.priority >= 3 ? ' [HIGH]' : ''
-      const proj = projectNames[t.project_id] ? ` (${projectNames[t.project_id]})` : ''
-      return `- ${t.content}${proj}${pri}`
-    })
-    .join('\n')
-}
-
-function buildObsidianSummary(obsidianToday: string | null): string {
-  return obsidianToday || 'No Obsidian tasks today.'
 }
 
 function PriorityCard({ priority, index }: { priority: Priority; index: number }) {
@@ -76,11 +44,6 @@ function PriorityCard({ priority, index }: { priority: Priority; index: number }
   )
 }
 
-// The day's auto-generation outcome, kept across mounts: navigating away
-// and back must not re-call for a keyless or failed day, and a new date
-// starts fresh (Review Focus 3).
-let autoTried: { date: string; noKey: boolean } | null = null
-
 /** Priority rows while loading or generating — the same shape as the cards. */
 export function PrioritiesSkeleton() {
   return (
@@ -98,77 +61,31 @@ export function PrioritiesSkeleton() {
   )
 }
 
-/** Top priorities. Live, it auto-generates at most once per day when the
- *  day has no cached set (TodayPage keys it by date and mounts it only once
- *  the day's data has loaded); without a key it shows a calm line and never
- *  retries on its own. It generates from exactly the `events` and `tasks`
- *  TodayPage shows, so a new day can't use yesterday's schedule.
- *  `readOnly` (snapshots) renders the given set and never generates. */
+/** Top priorities, as rendered. Generation lives in `useDailyPriorities`
+ *  (TodayPage), so it runs whether the brief is expanded or compact; this
+ *  box only shows the result. Snapshots pass `priorities` alone, which reads
+ *  the stored set with no regenerate control. */
 export function PrioritiesBox({
-  priorities: initial,
-  events = [],
-  tasks = [],
-  onGenerated,
-  readOnly = false,
+  priorities,
+  loading = false,
+  error = null,
+  noKey = false,
+  onRegenerate,
 }: {
   priorities: Priority[] | null
-  /** Today's events and tasks, the generation input. Unused when `readOnly`. */
-  events?: CalendarEvent[]
-  tasks?: LocalTask[]
-  onGenerated?: (priorities: Priority[]) => void
-  readOnly?: boolean
+  loading?: boolean
+  error?: string | null
+  noKey?: boolean
+  /** Live only. Always offered when idle, so a key added in Settings can be
+   *  used the same day. */
+  onRegenerate?: () => void
 }) {
-  const dp = useDataProvider()
-  const obsidianToday = useAppStore((s) => s.obsidianToday)
-  const today = useLocalToday() // local date, like the Due today list (C2)
-  // Display-only lookup (resolving a task's own project name), not a
-  // picker — `allProjects` so a task still in an archived project doesn't
-  // lose its name here.
-  const { allProjects } = useProjects()
-  const projectNames = useMemo(() => {
-    const map: Record<string, string> = {}
-    for (const p of allProjects) map[p.id] = p.name
-    return map
-  }, [allProjects])
-
-  const [generated, setPriorities] = useState<Priority[] | null>(initial)
-  const priorities = readOnly ? initial : generated
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [tried, setTried] = useState(() => autoTried?.date === today)
-  const [noKey, setNoKey] = useState(() => autoTried?.date === today && autoTried.noKey)
-
-  const generate = useCallback(async () => {
-    setTried(true); setLoading(true); setError(null); setNoKey(false)
-    autoTried = { date: today, noKey: false }
-    try {
-      const result = await dp.dailyState.generatePriorities(
-        buildCalendarSummary(events), buildTasksSummary(tasks, projectNames), buildObsidianSummary(obsidianToday))
-      setPriorities(result); onGenerated?.(result)
-    } catch (e) {
-      if (String(e).includes('not configured')) { setNoKey(true); autoTried = { date: today, noKey: true } }
-      else setError('Couldn’t reach the AI just now.')
-    } finally { setLoading(false) }
-  }, [dp, today, events, tasks, projectNames, obsidianToday, onGenerated])
-
-  // `autoTried` is re-checked here, not only via `tried` state: an effect
-  // that runs twice before re-rendering (StrictMode's mount check) would
-  // otherwise see a stale `tried` and call twice.
-  useEffect(() => {
-    const triedToday = tried || autoTried?.date === today
-    if (!readOnly && shouldAutoGenerate({ cached: priorities !== null, tried: triedToday, noKey })) void generate()
-  }, [readOnly, today, priorities, tried, noKey, generate])
-
-  // Always reachable while live, so a key added in Settings can be used
-  // today without waiting for tomorrow's auto-generation.
-  const canRegenerate = !readOnly && !loading && !error
-
   return (
     <BriefBox
       title="Top priorities"
       action={
-        canRegenerate ? (
-          <IconButton size="sm" onClick={() => void generate()} aria-label="Regenerate priorities" title="Regenerate">
+        onRegenerate && !loading && !error ? (
+          <IconButton size="sm" onClick={onRegenerate} aria-label="Regenerate priorities" title="Regenerate">
             <RefreshCw className="size-3" />
           </IconButton>
         ) : undefined
@@ -176,10 +93,10 @@ export function PrioritiesBox({
     >
       {loading ? (
         <PrioritiesSkeleton />
-      ) : error && !readOnly ? (
+      ) : error && onRegenerate ? (
         <div className="space-y-2">
           <Meta as="p">{error}</Meta>
-          <Button variant="outline" size="sm" onClick={() => void generate()}>
+          <Button variant="outline" size="sm" onClick={onRegenerate}>
             Try again
           </Button>
         </div>

@@ -77,6 +77,31 @@ export function briefReady(s: { today: string; calendarLoadedFor: string | null;
   return s.calendarLoadedFor === s.today && s.tasksLoadedFor === s.today
 }
 
+/** The last auto-generation outcome for a date, kept across mounts. */
+export type PrioritiesOutcome = { date: string; noKey: boolean; error: string | null }
+
+/** What `today` should show given the kept outcome: the same day keeps its
+ *  attempt, error and no-key state (no re-call, "Try again" survives a
+ *  remount); any other day starts fresh. */
+export function outcomeFor(memo: PrioritiesOutcome | null, today: string): { tried: boolean; noKey: boolean; error: string | null } {
+  return memo?.date === today
+    ? { tried: true, noKey: memo.noKey, error: memo.error }
+    : { tried: false, noKey: false, error: null }
+}
+
+/** The schedule as the priorities prompt sees it. `unavailable` (calendar
+ *  offline with nothing cached) must not read as a free day. */
+export function buildCalendarSummary(
+  events: { summary: string; start_time: string; end_time: string; all_day: boolean }[],
+  opts: { unavailable?: boolean } = {},
+): string {
+  if (opts.unavailable) return 'Calendar unavailable right now — today’s schedule is unknown.'
+  if (events.length === 0) return 'No meetings or events today.'
+  return events
+    .map((e) => e.all_day ? `All day: ${e.summary}` : `${e.start_time}–${e.end_time}: ${e.summary}`)
+    .join('\n')
+}
+
 /** Priorities auto-generate once per day: never over a cached set, never
  *  twice after a try, never without a key (Review Focus 3). */
 export function shouldAutoGenerate(s: { cached: boolean; tried: boolean; noKey: boolean }): boolean {
