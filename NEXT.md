@@ -2,6 +2,15 @@
 
 Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + chunk 2 capture vocabulary/NL dates `649ca72` merged, installed with Lane B's install; 393 frontend tests). Updated 2026-09-23 eve (Lane B: Rust batch `bb6ac53` + brief phase 1 `e24daa4` merged; **installed at `649ca72`** = both lanes incl. capture-prefixes; DB migrated v22→v23, 1,335 tasks kept, today's brief snapshot written, `turso_schema_v23_upgraded` set). Before that 2026-09-23 (agentation-1 merged + installed at `0ad4bd5`). Before that 2026-09-22 (Focus Queue: all 12 plan tasks implemented, Task 12 verification recorded; awaiting final whole-branch review + Marco's 30-min human checklist; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
 
+## Loop 2 polish + new icon (2026-09-24)
+
+- [x] **Activity → Settings sub-page** (`389e7de`): nav page `session` removed; `g s`, `?page=session` and persisted nav orders redirect to Settings → Activity (`lib/navTargets.ts`). Right-rail Activity tab unchanged.
+- [x] **One 960px column** for every page, header and detail view (`--container-page: 60rem`, `wide` variant retired); 720px reading measure for Docs prose, task descriptions and Settings forms; Settings keeps the rail's space so every title starts at the same x (264 rail open / 363 closed at 1440). Screenshots `docs/audit-findings/screenshots/loop2-widths/`.
+- [x] **Minimal focus queue** (`918c752`): header `+` (quick add, From/Add all, Still open collapsed) and `⋯` (pop out, show/hide queue, mute, last synced); task `⋯` sits left of play; no footer rows; timer 36px rail/pop-out, 48px full view. Screenshots `docs/audit-findings/screenshots/loop2-focus-simplify/`.
+- [x] **New brand mark: C3 "Stamp"** (`e20a2e3`) — Figma `7CZR91ENBhMRrRDkKJSemR` node `8:436` (explorations on pages Directions / Ink × Signal / C variations). App icon set regenerated; `favicon.svg` (was Vite default) + `source.svg` = flat vector; tray template is now the dot n + now dot.
+- [ ] Real-app checks (harness-only so far): focus `+`/`⋯` keyboard flow in the installed app, pop-out compact height + dark mode, Settings drag region, Dock/tray icon at real size (C3 is faint at 32px — agent flagged; consider a bolder small-size variant if it reads poorly).
+- [ ] Minors deferred: task ⋯ menu opens downward over Up next; pop-out dark screenshots stale; Geist 403 in worktree harness only.
+
 ## Calendar feed timezone fix (2026-09-23)
 
 - [x] **Bug:** calendar events showed 7h late (e.g. Covered CA 10:00 PDT displayed as 17:00). Root cause: `parsers/ical.rs` stripped the `Z` from UTC `DTSTART`s (1,405 of Google's feed lines) and treated them as local; `TZID` zones other than local were also read as local, and events were bucketed by their UTC date. Fixed to convert UTC/`TZID` times into the local zone before date-matching and formatting; floating and unknown (Windows) TZIDs stay as written. Tests: `nimble-core/tests/ical_timezones.rs`; verified against the live feed.
