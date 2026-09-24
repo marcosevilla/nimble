@@ -33,7 +33,7 @@ test('section and page ids are unique; labels are sentence case', () => {
   for (const p of SETTINGS_PAGES) assertSentenceCase(p.label)
 })
 
-test('five pages in the decided order, each section on the decided page', () => {
+test('six pages in the decided order (Activity last), each section on the decided page', () => {
   assert.deepEqual(
     SETTINGS_PAGES.map((p) => [p.id, p.label]),
     [
@@ -42,6 +42,7 @@ test('five pages in the decided order, each section on the decided page', () => 
       ['tasks', 'Tasks & capture'],
       ['connections', 'Connections'],
       ['data', 'Data'],
+      ['activity', 'Activity'],
     ],
   )
   const byPage = Object.fromEntries(SETTINGS_PAGES.map((p) => [p.id, sectionsOnPage(SETTINGS_SECTIONS, p.id).map((s) => s.id)]))
@@ -51,6 +52,7 @@ test('five pages in the decided order, each section on the decided page', () => 
     tasks: ['capture-routes', 'labels', 'reminders'],
     connections: ['integrations', 'obsidian', 'todoist-sync', 'calendars', 'google-calendar'],
     data: ['sync', 'backups', 'maintenance'],
+    activity: ['activity'],
   })
   assert.equal(DEFAULT_SETTINGS_PAGE, 'general')
   assert.equal(SETTINGS_SECTIONS.find((s) => s.id === 'integrations').label, 'API keys')
@@ -87,7 +89,7 @@ test('visibleSections drops capability-gated sections and keeps order', () => {
 
 test('visiblePages hides a page with no renderable section (web build, empty brief slot)', () => {
   const web = visibleSections(NONE).filter((s) => s.id !== 'today-brief')
-  assert.deepEqual(visiblePages(web).map((p) => p.id), ['general', 'tasks', 'connections', 'data'])
+  assert.deepEqual(visiblePages(web).map((p) => p.id), ['general', 'tasks', 'connections', 'data', 'activity'])
   assert.deepEqual(visiblePages(visibleSections(ALL)).map((p) => p.id), SETTINGS_PAGES.map((p) => p.id))
   assert.deepEqual(visiblePages([]), [])
 })
@@ -103,6 +105,7 @@ test('settingsTarget maps a section to its page; unknown ids open the default pa
   assert.deepEqual(settingsTarget('todoist-sync'), { page: 'connections', section: 'todoist-sync' })
   assert.deepEqual(settingsTarget('demo'), { page: 'general', section: 'demo' })
   assert.deepEqual(settingsTarget('today-brief'), { page: 'brief', section: 'today-brief' })
+  assert.deepEqual(settingsTarget('activity'), { page: 'activity', section: 'activity' })
   assert.deepEqual(settingsTarget('no-such-section'), { page: 'general', section: null })
 })
 

@@ -50,6 +50,7 @@ import { DocsMigrationSection } from '@/components/settings/DocsMigrationSection
 import { TasksMigrationSection } from '@/components/settings/TasksMigrationSection'
 import { VaultSection } from '@/components/settings/VaultSection'
 import { LabelManager } from '@/components/settings/LabelManager'
+import { ActivityLog } from '@/components/activity/ActivityLog'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
 import {
   visibleSections,
@@ -1824,6 +1825,18 @@ export function SettingsPage() {
             </div>
           </div>
         </details>
+      </section>
+    ),
+
+    /* Formerly its own nav page (Activity, page id `session`); same
+       timeline + session-log tabs, framed by Settings now. `g s` lands here. */
+    activity: (
+      <section id="activity" className={SECTION_CLASS}>
+        <SectionHeader
+          title="Activity"
+          description="What happened in Nimble, and today's work-session log."
+        />
+        <ActivityLog />
       </section>
     ),
   }

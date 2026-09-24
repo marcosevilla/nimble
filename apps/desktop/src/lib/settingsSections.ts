@@ -19,7 +19,7 @@
 
 export type SettingsCapability = 'backup' | 'reminders' | 'googleCalendar'
 
-export type SettingsPageId = 'general' | 'brief' | 'tasks' | 'connections' | 'data'
+export type SettingsPageId = 'general' | 'brief' | 'tasks' | 'connections' | 'data' | 'activity'
 
 export interface SettingsPage {
   id: SettingsPageId
@@ -32,6 +32,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: 'tasks', label: 'Tasks & capture' },
   { id: 'connections', label: 'Connections' },
   { id: 'data', label: 'Data' },
+  // Formerly its own nav page (id `session`); `g s` still lands here.
+  { id: 'activity', label: 'Activity' },
 ]
 
 export const DEFAULT_SETTINGS_PAGE: SettingsPageId = 'general'
@@ -60,6 +62,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'sync', label: 'Sync', page: 'data' },
   { id: 'backups', label: 'Backups', page: 'data', requires: 'backup', standalone: true },
   { id: 'maintenance', label: 'Maintenance', page: 'data' },
+  { id: 'activity', label: 'Activity', page: 'activity' },
 ]
 
 /** Sections the current provider can actually render, in page order. */

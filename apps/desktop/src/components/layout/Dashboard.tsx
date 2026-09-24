@@ -7,6 +7,7 @@ import { listen } from '@tauri-apps/api/event'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useAppStore } from '@/stores/appStore'
+import { navigateTo } from '@/stores/settingsNavStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { NavSidebar } from './NavSidebar'
 import { RightSidebar } from './RightSidebar'
@@ -21,7 +22,6 @@ import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { TodayPage } from '@/components/pages/TodayPage'
 import { TasksPage } from '@/components/pages/TasksPage'
 import { InboxPage } from '@/components/pages/InboxPage'
-import { SessionPage } from '@/components/pages/SessionPage'
 import { SettingsPage } from '@/components/pages/SettingsPage'
 import { DocsPage } from '@/components/pages/DocsPage'
 import { GoalsPage } from '@/components/pages/GoalsPage'
@@ -55,8 +55,6 @@ function PageContent({ page }: { page: string }) {
       return <DocsPage />
     case 'goals':
       return <GoalsPage />
-    case 'session':
-      return <SessionPage />
     case 'settings':
       return <SettingsPage />
     default:
@@ -227,16 +225,16 @@ export function Dashboard() {
         const num = parseInt(e.key, 10)
         if (num >= 1 && num <= pages.length) {
           e.preventDefault()
-          setCurrentPage(pages[num - 1] as typeof currentPage)
+          navigateTo(pages[num - 1])
           return
         }
       }
 
-      // Cmd+1-6 for navigation (works even in inputs)
+      // Cmd+1–5 for navigation (works even in inputs)
       if (meta && e.key >= '1' && e.key <= String(pages.length)) {
         e.preventDefault()
         const idx = parseInt(e.key, 10) - 1
-        if (idx < pages.length) setCurrentPage(pages[idx] as typeof currentPage)
+        if (idx < pages.length) navigateTo(pages[idx])
         return
       }
     }
@@ -246,6 +244,7 @@ export function Dashboard() {
   }, [setCurrentPage, detailTarget, closeDetail])
 
   // G-prefix navigation (§1.5, shell P1-5): `g` then t/k/i/d/g/s/, within
+  // (`g s` opens Settings → Activity)
   // 600ms. Registered in the capture phase so the second key never reaches
   // the page-level handlers (`k` = previous task, `s` = snooze, `t` =
   // calendar today). Number keys and ⌘1–6 are untouched — this is additive.
@@ -265,11 +264,11 @@ export function Dashboard() {
       if (pending !== null) {
         pendingGRef.current = null
         if (Date.now() - pending <= G_PREFIX_TIMEOUT_MS) {
-          const page = G_PREFIX_PAGES[e.key]
-          if (page) {
+          const target = G_PREFIX_PAGES[e.key]
+          if (target) {
             e.preventDefault()
             e.stopPropagation()
-            setCurrentPage(page)
+            navigateTo(target)
             return
           }
         }
@@ -282,7 +281,7 @@ export function Dashboard() {
     }
     window.addEventListener('keydown', handleChord, true)
     return () => window.removeEventListener('keydown', handleChord, true)
-  }, [setCurrentPage])
+  }, [])
 
   const hideSidebar = pageHidesRightRail(currentPage)
   const contentMaxW = hideSidebar ? 'max-w-3xl' : 'max-w-2xl'
