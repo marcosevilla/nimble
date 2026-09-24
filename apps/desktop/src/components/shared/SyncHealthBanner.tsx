@@ -106,7 +106,8 @@ export function SyncHealthBanner() {
           )}
         </div>
       </div>
-      <IconButton onClick={dismiss} aria-label="Dismiss" title="Dismiss">
+      {/* tabIndex: WebKit leaves a bare <button> out of the Tab order */}
+      <IconButton onClick={dismiss} aria-label="Dismiss" title="Dismiss" tabIndex={0}>
         <X className="size-3.5" />
       </IconButton>
     </div>

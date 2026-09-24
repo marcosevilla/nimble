@@ -29,7 +29,11 @@ function tokenTransition(reduce: boolean) {
   const ms = (parseFloat(raw) || 0) * (raw.endsWith('ms') ? 1 : 1000)
   const bezier = root.getPropertyValue('--ease-entrance').match(/-?[\d.]+/g)?.map(Number)
   return {
-    duration: reduce ? 0 : ms / 1000,
+    // Reduced motion is instant. A literal 0 would finish inside the key or
+    // click handler itself, before the frame that shows the press; 1ms
+    // lands on motion's next frame like any frame-synced update — still no
+    // in-between frame.
+    duration: reduce || ms === 0 ? 0.001 : ms / 1000,
     ease: bezier?.length === 4 ? (bezier as [number, number, number, number]) : ('easeOut' as const),
   }
 }
