@@ -147,8 +147,9 @@ interface MockOpts {
   reminders?: Record<string, number>
   /** Google Calendar reports connected (enables the phone checkbox). */
   googleConnected?: boolean
-  /** A writable, stateful focus engine; `queued` task ids start in the queue. */
-  focus?: { queued?: string[] }
+  /** A writable, stateful focus engine; `queued` task ids start in the queue;
+   * `liveTiming: false` blocks Focus now (queueing stays writable). */
+  focus?: { queued?: string[]; liveTiming?: boolean }
 }
 
 /**
@@ -196,7 +197,7 @@ async function installMocks(page: Page, opts: MockOpts = {}) {
         return Promise.resolve({ connected: true, clientSecretConfigured: true, calendarLabel: 'Nimble', timezone: 'America/Los_Angeles', errorCode: null })
       if (o.focus) {
         if (cmd === 'focus_capabilities')
-          return Promise.resolve({ queue_read: true, queue_write: true, history_read: true, live_timing: true, companion: false, import: false, reason: null })
+          return Promise.resolve({ queue_read: true, queue_write: true, history_read: true, live_timing: o.focus.liveTiming ?? true, companion: false, import: false, reason: null })
         if (cmd === 'focus_snapshot') return Promise.resolve(snap())
         if (cmd === 'focus_execute') {
           const a = args.command.action
@@ -524,6 +525,36 @@ test('B2 "Focus now" in the menu enqueues then starts, like the old header butto
   await item.click()
   await expect.poll(async () => (await focusCalls(page)).map((a) => a.kind)).toEqual(['enqueue', 'start'])
   expect((await focusCalls(page))[1]).toEqual({ kind: 'start', occurrence_id: `occ-${TIMED.id}` })
+})
+
+// Moved from tests/focusTaskEntry.test.mjs's SSR "detail:" tests when the
+// header Focus group (TaskFocusControlsView) was deleted: the menu section
+// must keep the same order, blocked-reason and completed-task behaviour.
+test('B2 blocked Focus now (no live timing) stays listed, disabled with its reason, after an enabled Add', async ({ app, page }) => {
+  await openDetail(app, page, TIMED, { focus: { liveTiming: false } })
+  const menu = await openActionsMenu(page)
+  const add = menu.getByRole('menuitem', { name: /add to focus queue/i }).first()
+  const now = menu.getByRole('menuitem', { name: /focus now/i }).first()
+  await expect(add).toBeVisible()
+  await expect(now).toBeVisible()
+  const [a, n] = [await rect(add), await rect(now)]
+  expect(a.top, 'Add to focus queue comes before Focus now').toBeLessThan(n.top)
+  const state = (l: Locator) => l.evaluate((el) => ({
+    disabled: el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('data-disabled'),
+    text: (el.textContent ?? '').trim(),
+  }))
+  expect((await state(add)).disabled, 'Add stays enabled').toBe(false)
+  const ns = await state(now)
+  expect(ns.disabled, 'Focus now disabled').toBe(true)
+  expect(ns.text.replace(/^Focus now/, '').trim().length, `Focus now carries its reason: "${ns.text}"`).toBeGreaterThan(0)
+})
+
+test('B2 a completed task\'s menu has no focus items (the rest stay)', async ({ app, page }) => {
+  await openDetail(app, page, { id: 'task-11', title: /Reply to Fillmore photo pass email/ }, { focus: {} })
+  const menu = await openActionsMenu(page)
+  await expect(menu.getByRole('menuitem', { name: 'Duplicate task' })).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: /focus queue|focus now/i })).toHaveCount(0)
+  await expect(menu).not.toContainText('In focus queue')
 })
 
 test('B2 guard: the Task actions trigger stays a tab stop with a focus ring (passes on main)', async ({ app, page }) => {

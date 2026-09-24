@@ -88,7 +88,8 @@ const taskOps: FocusTaskOps = {
 }
 const noop = () => {}
 
-export function renderFocusCard(opts: { missingTask?: boolean; live?: boolean; running?: boolean; resumable?: boolean; overtimeMs?: number; countUpMs?: number; plain?: boolean; timerSize?: 'sm' | 'display' } = {}): string {
+export function renderFocusCard(opts: { missingTask?: boolean; live?: boolean; running?: boolean; resumable?: boolean; overtimeMs?: number; countUpMs?: number; plain?: boolean; timerSize?: 'sm' | 'display'; priority?: number } = {}): string {
+  const card = opts.plain ? { ...tasks[0], description: null } : tasks[0]
   const snap = opts.countUpMs != null
     ? snapshot({ config: countUp, totalMs: opts.countUpMs })
     : snapshot({ totalMs: opts.overtimeMs != null ? 25 * MIN + opts.overtimeMs : undefined,
@@ -98,7 +99,7 @@ export function renderFocusCard(opts: { missingTask?: boolean; live?: boolean; r
       snapshot={snap}
       capabilities={caps({ live_timing: opts.live ?? true })}
       entry={snap.queue[0]}
-      task={opts.missingTask ? null : opts.plain ? { ...tasks[0], description: null } : tasks[0]}
+      task={opts.missingTask ? null : { ...card, priority: opts.priority ?? card.priority }}
       subtasks={opts.missingTask ? [] : [tasks[1]]}
       placeLabel={opts.plain ? undefined : 'Deep work / Writing'}
       today={TODAY}

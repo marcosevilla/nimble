@@ -187,31 +187,10 @@ test('row markup never nests a button inside a button', () => {
   }
 })
 
-test('detail: unqueued shows Add to focus queue primary and Focus now secondary', () => {
-  const html = rendered.renderDetail({ queued: false })
-  assert.ok(html.indexOf('Add to focus queue') >= 0)
-  assert.ok(html.indexOf('Add to focus queue') < html.indexOf('Focus now'))
-  assert.equal(nestedButton(html), false)
-})
-
-test('detail: queued shows In focus queue with Remove, Focus now stays', () => {
-  const html = rendered.renderDetail({ queued: 'upcoming' })
-  assert.match(html, /In focus queue/)
-  assert.match(html, /Remove from focus queue/)
-  assert.match(html, /Focus now/)
-  assert.doesNotMatch(html, />Add to focus queue</)
-})
-
-test('detail: a completed task renders no Focus control', () => {
-  assert.equal(rendered.renderDetail({ queued: 'upcoming', completed: true }), '')
-})
-
-test('detail: blocked Focus now is visible, disabled and explains why', () => {
-  const html = rendered.renderDetail({ queued: false, focusNowBlocked: 'Timing starts once the focus companion is ready.' })
-  const btn = html.match(/<button\b[^>]*>(?:(?!<\/button>).)*Focus now(?:(?!<\/button>).)*<\/button>/s)?.[0] ?? ''
-  assert.match(btn, /disabled/)
-  assert.match(html, /Timing starts once the focus companion is ready\./)
-})
+// The task detail's focus items (Add/Remove, Focus now, disabled reasons, none
+// for a completed task) sit in its Task actions menu since Agentation pass 3
+// — a portal SSR can't render — so e2e/l3b-task-detail.spec.ts (B2) covers
+// them; the states themselves are the focusTaskControls tests above.
 
 test('bulk action bar renders no button inside a button', () => {
   assert.equal(nestedButton(rendered.renderBulkBar()), false)

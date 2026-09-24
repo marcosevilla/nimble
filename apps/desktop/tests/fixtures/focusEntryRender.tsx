@@ -1,12 +1,12 @@
 // Bundled by tests/focusTaskEntry.test.mjs (Vite SSR). Renders the real task
-// row (with its focus actions), the task detail Focus control and the bulk
-// action bar against a seeded focus cache.
+// row (with its focus actions) and the bulk action bar against a seeded focus
+// cache. The task detail's focus items live in its actions menu, which only
+// renders when open (a portal), so e2e/l3b-task-detail.spec.ts covers them.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { TaskItem } from '../../src/components/tasks/TaskItem'
-import { TaskRowActions, TaskFocusControlsView } from '../../src/components/focus/FocusTaskEntry'
+import { TaskRowActions } from '../../src/components/focus/FocusTaskEntry'
 import { BulkActionBar } from '../../src/components/shared/BulkActionBar'
 import { DataProviderRoot } from '../../src/services/provider-context'
-import { focusTaskControls, queuedEntryFor } from '../../src/lib/focusTaskEntry'
 import { useFocusCache } from '../../src/stores/focusStore'
 import { useSelectionStore } from '../../src/stores/selectionStore'
 import type { DataProvider } from '../../src/services/data-provider'
@@ -60,14 +60,6 @@ export function renderRow(opts: { queued: Queued; readOnly?: boolean; pending?: 
       actions={<TaskRowActions task={rowTask(opts.completed)} focusShortcut />}
     />,
   ))
-}
-
-export function renderDetail(opts: { queued: Queued; focusNowBlocked?: string; completed?: boolean }): string {
-  const controls = focusTaskControls({
-    entry: queuedEntryFor(snapshot(opts.queued), 'row'), capabilities: caps(), pending: false,
-    focusNowBlocked: opts.focusNowBlocked ?? null, completed: opts.completed ?? false,
-  })
-  return renderToStaticMarkup(<TaskFocusControlsView controls={controls} onToggle={noop} onFocusNow={noop} />)
 }
 
 export function renderBulkBar(): string {
