@@ -1449,6 +1449,8 @@
       // convertWithDate follows this with an update_local_task keyed on the
       // returned id, which otherwise falls through findTask's TASKS[0] fallback.
       TASKS.push(t)
+      // Mirrors Rust's mark_capture_converted (nimble-core convert flow).
+      if (cap) cap.converted_to_task_id = t.id
       return t
     },
     delete_capture: function () { return null },
@@ -1475,9 +1477,11 @@
       var route = CAPTURE_ROUTES.find(function (r) { return r.prefix === (args && args.prefix) }) || CAPTURE_ROUTES[0]
       if (route.target_type === 'task') {
         // Rust creates a real task and returns its id (capture_routes.rs), so a
-        // follow-up update_local_task lands on it instead of TASKS[0].
-        var task = commands.create_local_task({ content: args.content })
-        return { routed_to: task.id, target_type: 'task', created_id: task.id, label: route.label }
+        // follow-up update_local_task lands on it instead of TASKS[0]. Named
+        // `created`, not `task` — the latter shadows the file-level `task()`
+        // record-builder helper used throughout this file.
+        var created = commands.create_local_task({ content: args.content })
+        return { routed_to: created.id, target_type: 'task', created_id: created.id, label: route.label }
       }
       return {
         routed_to: route.doc_id || 'doc-ideas',

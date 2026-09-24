@@ -47,6 +47,35 @@ type InboxItem =
 // Row ids for keyboard navigation — unique across the two kinds.
 const rowId = (item: InboxItem) => `${item.kind}:${item.data.id}`
 
+// Fix round 1: converting note A then note B inside A's undo window used to
+// register two independent `keydown` listeners, so one ⌘Z ran BOTH keeps —
+// both tasks lost their dates. A single module-level slot always points at
+// the latest dated convert; a single listener (installed once, since the
+// toast — and any future convert — outlives InboxPage's own lifetime) fires
+// only that one. Each toast's own "Keep as text" button still calls its own
+// `keep`, unaffected by which entry currently holds the slot.
+let latestKeep: { run: () => void } | null = null
+let undoListenerInstalled = false
+function installUndoListener() {
+  if (undoListenerInstalled) return
+  undoListenerInstalled = true
+  window.addEventListener('keydown', (e) => {
+    if (
+      e.key !== 'z' ||
+      !(e.metaKey || e.ctrlKey) ||
+      e.shiftKey ||
+      e.altKey ||
+      e.repeat ||
+      e.defaultPrevented ||
+      isTextEntry(e.target as Element | null)
+    ) {
+      return
+    }
+    e.preventDefault()
+    latestKeep?.run()
+  })
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
   if (!el) return false
@@ -257,9 +286,17 @@ export function InboxPage() {
         taskToast(`Converted to task: "${capture.content}"`, task.id)
         return
       }
-      // "Keep as text": click the action, or ⌘Z while the toast shows.
+      // "Keep as text": click this toast's own action, or ⌘Z while it's the
+      // MOST RECENT dated convert still showing (see `latestKeep` above) —
+      // converting a second note reassigns the slot, so an earlier toast's
+      // ⌘Z no longer fires; its own button still works regardless.
+      installUndoListener()
+      // `entry`'s identity (not its contents) is the slot key — `.run` is
+      // filled in below once `keep` exists, but the object itself is created
+      // first so `cleanup` can compare `latestKeep === entry` from the start.
+      const entry: { run: () => void } = { run: () => {} }
       let done = false
-      const cleanup = () => window.removeEventListener('keydown', onUndoKey)
+      const cleanup = () => { if (latestKeep === entry) latestKeep = null }
       const keep = async () => {
         if (done) return
         done = true
@@ -273,13 +310,8 @@ export function InboxPage() {
           toast.error(`Couldn't restore the text: ${e}`)
         }
       }
-      const onUndoKey = (e: KeyboardEvent) => {
-        if (e.key === 'z' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !isTextEntry(e.target as Element | null)) {
-          e.preventDefault()
-          void keep()
-        }
-      }
-      window.addEventListener('keydown', onUndoKey)
+      entry.run = () => void keep()
+      latestKeep = entry
       const toastId = toast.success(`Converted · due ${date.label}`, {
         action: { label: 'Keep as text', onClick: () => void keep() },
         onDismiss: cleanup,
