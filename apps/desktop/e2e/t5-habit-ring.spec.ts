@@ -74,14 +74,8 @@ async function openHabits(app: App, page: Page, pageId = 'today') {
     }
     w.__calls = []
     const orig = w.__TAURI_INTERNALS__.invoke
-    // Harness gap: the mock's SETTINGS.theme='light' overrides the fixture's
-    // `theme` option once settings load; answer with the seeded theme instead.
-    const seededTheme = localStorage.getItem('theme')
     w.__TAURI_INTERNALS__.invoke = (cmd, args, opts) => {
       w.__calls.push({ cmd, args: args as Call['args'], at: performance.now() })
-      if (cmd === 'get_setting' && (args as { key?: string } | undefined)?.key === 'theme' && seededTheme) {
-        return Promise.resolve(seededTheme)
-      }
       return orig(cmd, args, opts)
     }
   })
