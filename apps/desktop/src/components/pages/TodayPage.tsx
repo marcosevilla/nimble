@@ -8,11 +8,13 @@ import { StillOpenBox } from '@/components/today/StillOpenBox'
 import { VaultBox } from '@/components/today/VaultBox'
 import { BriefStrip } from '@/components/today/BriefStrip'
 import { BriefBox } from '@/components/today/BriefBox'
+import { PastBrief } from '@/components/today/PastBrief'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { LocalTaskRow } from '@/components/tasks/LocalTaskRow'
 import { PageFrame } from '@/components/shared/PageFrame'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { IconButton } from '@/components/shared/IconButton'
+import { DateStrip } from '@/components/shared/DateStrip'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { useObsidian } from '@/hooks/useObsidian'
@@ -20,7 +22,7 @@ import { useCalendar } from '@/hooks/useCalendar'
 import { useLocalToday } from '@/hooks/useLocalToday'
 import { useGreeting } from '@/hooks/useGreeting'
 import { useDataProvider } from '@/services/provider-context'
-import { shiftIsoDate } from '@/lib/briefDate'
+import { pickBriefDate, resolveBriefDate, shiftIsoDate } from '@/lib/briefDate'
 import { todayKey } from '@/lib/keyGuard'
 import { briefReady, loadTodayCompact, saveTodayCompact, splitDueTasks } from '@/lib/todayBrief'
 import { cn } from '@/lib/utils'
@@ -61,6 +63,19 @@ export function TodayPage() {
   const greeting = useGreeting()
   const [compact, setCompact] = useState(loadTodayCompact)
   const toggleCompact = useCallback(() => setCompact((c) => { saveTodayCompact(!c); return !c }), [])
+
+  // Past dates (Task 8): `picked` is `null` while following today, so the
+  // rollover at midnight moves the card in the same render — no stale date.
+  const [picked, setPicked] = useState<string | null>(null)
+  const selected = resolveBriefDate(picked, today)
+  const select = useCallback((d: string) => setPicked(pickBriefDate(d, today)), [today])
+  const [briefDates, setBriefDates] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    let live = true
+    Promise.all([dp.brief.listDates().catch(() => []), dp.dailyState.listBriefDates().catch(() => [])])
+      .then(([a, b]) => { if (live) setBriefDates(new Set([...a, ...b])) })
+    return () => { live = false }
+  }, [dp, today])
 
   const { events, loadedDate: calLoadedFor, goToToday } = useCalendar()
   // Calendar follows the new day (`goToToday` is a stable useCallback).
@@ -104,7 +119,9 @@ export function TodayPage() {
   useEffect(() => {
     if (!ready || snappedFor.current === today) return
     snappedFor.current = today
-    dp.brief.ensureSnapshot(today).catch(() => {})
+    dp.brief.ensureSnapshot(today).then((brief) => {
+      if (brief) setBriefDates((prev) => new Set(prev).add(today))
+    }).catch(() => {})
   }, [dp, today, ready])
 
   useEffect(() => {
@@ -119,10 +136,14 @@ export function TodayPage() {
         shiftKey: e.shiftKey,
       })
       if (action === 'toggle') { e.preventDefault(); toggleCompact() }
+      else if (action === 'prev') { e.preventDefault(); select(shiftIsoDate(selected, -1)) }
+      // `]` only pages forward while browsing the past — it never crosses today,
+      // matching DateStrip's own next chevron (`disabled={selected >= today}`).
+      else if (action === 'next' && selected < today) { e.preventDefault(); select(shiftIsoDate(selected, 1)) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [toggleCompact])
+  }, [toggleCompact, selected, today, select])
 
   // Due today rows: display-only project lookup (`allProjects`, so a task in
   // an archived project keeps its badge) and the subtask map for row stats.
@@ -169,75 +190,84 @@ export function TodayPage() {
       actions={
         <div className="flex items-center gap-3">
           {completed > 0 && <ProgressBar completed={completed} total={total} />}
-          <IconButton
-            aria-label={compact ? 'Expand the brief' : 'Compact the brief'}
-            aria-expanded={!compact}
-            onClick={toggleCompact}
-          >
-            <ChevronDown
-              className={cn('size-3.5 transition-transform duration-(--transition-fast)', !compact && 'rotate-180')}
-            />
-          </IconButton>
+          <DateStrip briefDates={briefDates} selected={selected} today={today} onSelect={select} />
+          {selected === today && (
+            <IconButton
+              aria-label={compact ? 'Expand the brief' : 'Compact the brief'}
+              aria-expanded={!compact}
+              onClick={toggleCompact}
+            >
+              <ChevronDown
+                className={cn('size-3.5 transition-transform duration-(--transition-fast)', !compact && 'rotate-180')}
+              />
+            </IconButton>
+          )}
         </div>
       }
       bodyClassName="space-y-4"
     >
       <ReminderCatchUp />
 
-      {compact ? (
-        <BriefStrip events={events} priorities={priorities} onExpand={toggleCompact} loading={!calReady} />
+      {selected !== today ? (
+        <PastBrief date={selected} today={today} />
       ) : (
         <>
-          <ScheduleBox events={events} loading={!calReady} tomorrow={tomorrow} today={today} live />
-          {/* Never mounted before the cache read, so it can't auto-generate
-              over a set that is already stored; with nothing stored, it also
-              waits until today's calendar and tasks have loaded, and
-              generates from exactly those. */}
-          {priorities === undefined || (priorities === null && !ready) ? (
-            <BriefBox title="Top priorities">
-              <PrioritiesSkeleton />
-            </BriefBox>
+          {compact ? (
+            <BriefStrip events={events} priorities={priorities} onExpand={toggleCompact} loading={!calReady} />
           ) : (
-            <PrioritiesBox key={today} priorities={priorities} events={events} tasks={tasks} onGenerated={handleGenerated} />
+            <>
+              <ScheduleBox events={events} loading={!calReady} tomorrow={tomorrow} today={today} live />
+              {/* Never mounted before the cache read, so it can't auto-generate
+                  over a set that is already stored; with nothing stored, it also
+                  waits until today's calendar and tasks have loaded, and
+                  generates from exactly those. */}
+              {priorities === undefined || (priorities === null && !ready) ? (
+                <BriefBox title="Top priorities">
+                  <PrioritiesSkeleton />
+                </BriefBox>
+              ) : (
+                <PrioritiesBox key={today} priorities={priorities} events={events} tasks={tasks} onGenerated={handleGenerated} />
+              )}
+            </>
           )}
+
+          <CollapsibleSection title="Due today" count={tasksReady ? dueTodayOpen : undefined} defaultOpen={true} className="-mt-3!">
+            {!tasksReady ? (
+              <div className="space-y-1.5 pt-1">
+                {[...Array(3)].map((_, i) => (
+                  <Skeleton key={i} className="h-8" />
+                ))}
+              </div>
+            ) : dueToday.length === 0 ? (
+              <EmptyState icon={CalendarCheck} kbd="Q" size="compact">Nothing due today. Add a task with</EmptyState>
+            ) : (
+              <div>
+                {dueToday.map((task) => {
+                  const subs = subtaskMap[task.id] ?? []
+                  const done = subs.filter((s) => s.completed || s.status === 'complete').length
+                  const stats = subs.length > 0 ? { done, total: subs.length } : undefined
+                  return (
+                    <div key={task.id}>
+                      <LocalTaskRow
+                        task={task}
+                        projectName={projectMap[task.project_id]?.name}
+                        projectColor={projectMap[task.project_id]?.color}
+                        subtaskStats={stats}
+                        onDelete={remove}
+                        onAddSubtask={handleAddSubtask}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </CollapsibleSection>
+
+          <StillOpenBox tasks={stillOpen.slice(0, 5)} total={stillOpen.length} today={today} loading={!tasksReady} />
+
+          <VaultBox date={today} />
         </>
       )}
-
-      <CollapsibleSection title="Due today" count={tasksReady ? dueTodayOpen : undefined} defaultOpen={true} className="-mt-3!">
-        {!tasksReady ? (
-          <div className="space-y-1.5 pt-1">
-            {[...Array(3)].map((_, i) => (
-              <Skeleton key={i} className="h-8" />
-            ))}
-          </div>
-        ) : dueToday.length === 0 ? (
-          <EmptyState icon={CalendarCheck} kbd="Q" size="compact">Nothing due today. Add a task with</EmptyState>
-        ) : (
-          <div>
-            {dueToday.map((task) => {
-              const subs = subtaskMap[task.id] ?? []
-              const done = subs.filter((s) => s.completed || s.status === 'complete').length
-              const stats = subs.length > 0 ? { done, total: subs.length } : undefined
-              return (
-                <div key={task.id}>
-                  <LocalTaskRow
-                    task={task}
-                    projectName={projectMap[task.project_id]?.name}
-                    projectColor={projectMap[task.project_id]?.color}
-                    subtaskStats={stats}
-                    onDelete={remove}
-                    onAddSubtask={handleAddSubtask}
-                  />
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </CollapsibleSection>
-
-      <StillOpenBox tasks={stillOpen.slice(0, 5)} total={stillOpen.length} today={today} loading={!tasksReady} />
-
-      <VaultBox date={today} />
     </PageFrame>
   )
 }

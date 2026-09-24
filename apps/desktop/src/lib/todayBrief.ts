@@ -83,6 +83,31 @@ export function shouldAutoGenerate(s: { cached: boolean; tried: boolean; noKey: 
   return !s.cached && !s.tried && !s.noKey
 }
 
+// ── Past briefs (Task 8) ──
+
+export type PastView = 'loading' | 'snapshot' | 'vault' | 'none'
+
+/** Which body `PastBrief` renders: a stored snapshot beats the vault
+ *  fallback, and either beats a calm "no brief" line (Review Focus 4).
+ *  `brief` is the result of `dp.brief.get(date)` — pass `null` when it
+ *  resolved with no usable snapshot (see `hasValidSnapshot`) so a
+ *  malformed row falls through to vault/none instead of rendering. */
+export function pastBriefView(brief: unknown | undefined, vault: string | null | undefined): PastView {
+  if (brief === undefined || (brief === null && vault === undefined)) return 'loading'
+  if (brief) return 'snapshot'
+  return vault ? 'vault' : 'none'
+}
+
+/** A stored `layout_json`/`snapshot_json` that failed to parse arrives from
+ *  Rust as JSON null (controller note, Task 2 minor), so `brief.snapshot`
+ *  can be `null` even though the TS type says it can't. Treat that brief as
+ *  if it had no snapshot at all, rather than crash rendering it. */
+export function hasValidSnapshot(brief: unknown): boolean {
+  if (!brief || typeof brief !== 'object' || !('snapshot' in brief)) return false
+  const snapshot = (brief as { snapshot: unknown }).snapshot
+  return !!snapshot && typeof snapshot === 'object'
+}
+
 // Compact brief: a per-device view preference, never reset by a new day (§0 Q3).
 const COMPACT_KEY = 'nimble.todayCompact'
 export function loadTodayCompact(): boolean {

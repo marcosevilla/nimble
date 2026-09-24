@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { hhmm, splitDueTasks, ageLabel, largestFreeBlock, formatFreeBlock, nextEvent, greetingFor, shouldAutoGenerate, nowHHMM, briefReady } from '../src/lib/todayBrief.ts'
+import { hhmm, splitDueTasks, ageLabel, largestFreeBlock, formatFreeBlock, nextEvent, greetingFor, shouldAutoGenerate, nowHHMM, briefReady, pastBriefView, hasValidSnapshot } from '../src/lib/todayBrief.ts'
 
 test('hhmm reads both the real "HH:MM" and the mock ISO shape', () => {
   assert.equal(hhmm('10:05'), '10:05')
@@ -76,4 +76,21 @@ test('briefReady: only once the calendar and the task list have loaded this date
   assert.equal(briefReady({ today, calendarLoadedFor: '2026-09-23', tasksLoadedFor: today }), false)
   // First open: nothing loaded yet.
   assert.equal(briefReady({ today, calendarLoadedFor: null, tasksLoadedFor: null }), false)
+})
+
+test('pastBriefView: snapshot beats vault; neither is a calm none (Review Focus 4)', () => {
+  assert.equal(pastBriefView(undefined, undefined), 'loading')
+  assert.equal(pastBriefView({ date: 'x' }, null), 'snapshot')
+  assert.equal(pastBriefView(null, undefined), 'loading')
+  assert.equal(pastBriefView(null, '# Brief'), 'vault')
+  assert.equal(pastBriefView(null, null), 'none')
+})
+
+test('hasValidSnapshot: a malformed stored snapshot falls through, it never crashes (controller note, Task 2 minor)', () => {
+  assert.equal(hasValidSnapshot(undefined), false)
+  assert.equal(hasValidSnapshot(null), false)
+  assert.equal(hasValidSnapshot({ date: 'x', snapshot: null }), false)
+  assert.equal(hasValidSnapshot({ date: 'x' }), false)
+  assert.equal(hasValidSnapshot({ date: 'x', snapshot: {} }), true)
+  assert.equal(hasValidSnapshot({ date: 'x', snapshot: { due_today: [] } }), true)
 })
