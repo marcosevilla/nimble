@@ -1251,7 +1251,17 @@
       }
       return Object.assign({}, l)
     },
-    delete_label: function () { return null },
+    delete_label: function (args) {
+      // Mirrors Rust's delete_label: detach from every task, then drop it.
+      var id = args && args.id
+      TASKS.forEach(function (t) {
+        if (t.labels && t.labels.indexOf(id) !== -1) t.labels = t.labels.filter(function (l) { return l !== id })
+      })
+      for (var i = LABELS.length - 1; i >= 0; i--) {
+        if (LABELS[i].id === id) LABELS.splice(i, 1)
+      }
+      return null
+    },
     set_task_labels: function (args) {
       var t = findTask(args && args.taskId) || TASKS[0]
       t.labels = (args && args.labelIds) || []
@@ -1475,7 +1485,13 @@
       }
     },
     update_capture_route: function () { return null },
-    delete_capture_route: function () { return null },
+    delete_capture_route: function (args) {
+      var id = args && args.id
+      for (var i = CAPTURE_ROUTES.length - 1; i >= 0; i--) {
+        if (CAPTURE_ROUTES[i].id === id) CAPTURE_ROUTES.splice(i, 1)
+      }
+      return null
+    },
     route_capture: function (args) {
       var route = CAPTURE_ROUTES.find(function (r) { return r.prefix === (args && args.prefix) }) || CAPTURE_ROUTES[0]
       if (route.target_type === 'task') {
@@ -1530,7 +1546,15 @@
         updated_at: iso(TODAY, '10:10:00'),
       })
     },
-    delete_document: function () { return null },
+    delete_document: function (args) {
+      // Mirrors Rust's delete_document: its doc notes go with it.
+      var id = args && args.id
+      for (var i = DOCUMENTS.length - 1; i >= 0; i--) {
+        if (DOCUMENTS[i].id === id) DOCUMENTS.splice(i, 1)
+      }
+      delete DOC_NOTES[id]
+      return null
+    },
     search_documents: function (args) {
       var q = ((args && args.query) || '').toLowerCase()
       return DOCUMENTS.filter(function (d) {
