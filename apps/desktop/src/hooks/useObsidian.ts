@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '@/stores/appStore'
 import { useDataProvider } from '@/services/provider-context'
 import type { ParsedTodayMd } from '@nimble/types'
-import { friendlyError } from '@/lib/errors'
+import { friendlyError, isMissingTodayNote } from '@/lib/errors'
 import { toast } from 'sonner'
 
 export function useObsidian() {
@@ -23,6 +23,12 @@ export function useObsidian() {
       ].join('\n')
       setObsidianToday(summary)
     } catch (e) {
+      // No vault-root today.md: show no daily note, not a vault-path toast.
+      if (isMissingTodayNote(e)) {
+        setTodayData(null)
+        setObsidianToday(null)
+        return
+      }
       const msg = friendlyError(e)
       setError(msg)
       toast.error(msg)
