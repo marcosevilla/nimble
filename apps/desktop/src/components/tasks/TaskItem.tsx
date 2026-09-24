@@ -5,7 +5,10 @@ import { useSelectionStore } from '@/stores/selectionStore'
 import { focusSpaceAction } from '@/stores/focusStore'
 import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { PriorityBars } from '@/components/shared/PriorityBars'
-import { PriorityMark, DueMark, LabelMarks, ProjectMark, type RowMarkTask } from './RowMarks'
+import { PriorityMark, DueMark, LabelMarks, ProjectMark, RowEndPicker, type RowMarkTask } from './RowMarks'
+import { rowPickerKind, type RowPickerKind } from '@/lib/rowPickerKeys'
+import { decideRowKey } from '@/lib/rowNav'
+import { useRowPickerStore } from '@/stores/rowPickerStore'
 import { dueBadgeLabel } from '@/lib/dueLabel'
 import type { TaskStatus } from '@nimble/types'
 import { CornerDownRight, ListTree, CheckCircle2, GripVertical } from 'lucide-react'
@@ -153,6 +156,14 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
   const completed = task.completed || task.status === 'complete'
   const visibleLabels = task.labels?.slice(0, 2) ?? []
   const overflowCount = (task.labels?.length ?? 0) - visibleLabels.length
+  /** Which marks the row shows: a row key opens its picker on the mark,
+   * or on the row's right end when there is none (T2). */
+  const hasMark: Record<RowPickerKind, boolean> = {
+    priority: task.priority >= 2,
+    due: !!task.dueDate,
+    label: visibleLabels.length > 0,
+    project: !!task.projectName,
+  }
 
   /* The row is a focusable, named group, not role="button": a button's
      children are presentational, so the status menu, the grip, the
@@ -168,6 +179,18 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
       onClick={onOpen}
       onFocus={(e) => { if (e.target === e.currentTarget) onFocusRow?.() }}
       onKeyDown={(e) => {
+        // p · ⇧D · l · m open this row's pickers (T2) — from the row or a
+        // control in it, never from a field, an open popup (React bubbles
+        // portal keys through here) or while another row picker is open.
+        const pickerKind = markTask ? rowPickerKind(e) : null
+        if (pickerKind) {
+          const decision = decideRowKey(e.target, e.key)
+          if (decision.handle && decision.rowId === rowId && !useRowPickerStore.getState().open) {
+            e.preventDefault()
+            useRowPickerStore.getState().openPicker(rowId, pickerKind, hasMark[pickerKind] ? 'mark' : 'row')
+          }
+          return
+        }
         if (e.target !== e.currentTarget || !onOpen) return
         // Enter and Space open, as they did when the row was a button
         // (review I2). Space pauses a running focus session instead
@@ -283,6 +306,8 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
           {actions}
         </div>
       </div>
+
+      {markTask && <RowEndPicker task={markTask} rowId={rowId} />}
     </div>
   )
 }

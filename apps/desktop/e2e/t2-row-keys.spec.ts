@@ -689,6 +689,38 @@ for (const theme of ['light', 'dark'] as const) {
   })
 }
 
+// ── Focus ring vs the flush-right mark (QA on T1) ────────────────────────
+
+/** Right edge of the mark's own text glyphs (a Range over its text, so
+ * padding inside the mark doesn't count). */
+async function textRight(l: Locator) {
+  return l.evaluate((el) => {
+    const r = document.createRange()
+    r.selectNodeContents(el)
+    return r.getBoundingClientRect().right
+  })
+}
+
+for (const c of [
+  { row: 'task-05', kind: 'due' as const, text: 'Aug 3' },
+  { row: BARE.row, kind: 'project' as const, text: 'Life Admin' },
+]) {
+  test(`ring: a focused row's inset ring doesn't overlap the flush-right ${c.kind} text "${c.text}" (light)`, async ({ app, page }) => {
+    await openSurface(app, page, SURFACES.tasks)
+    await focusByJ(page, c.row)
+    await expectFocusRing(page)
+    const row = rowOf(page, c.row)
+    const m = mark(row, c.kind)
+    await expect(m).toHaveText(c.text)
+    const ring = await row.evaluate((el) => parseFloat(getComputedStyle(el).outlineWidth))
+    expect(ring, 'the row draws a ring').toBeGreaterThan(0)
+    const rowRight = (await rectOf(row)).right
+    const right = await textRight(m)
+    expect(right, `"${c.text}" ends at ${right}, row ${rowRight}, ring ${ring}px`).toBeLessThanOrEqual(rowRight - ring - 1)
+    await expectNoClipping(row, { allowEllipsis: true })
+  })
+}
+
 // ── Sanity (must pass on the base) ───────────────────────────────────────
 
 test('sanity: j reaches task-05 on Tasks and the row shows a focus ring', async ({ app, page }) => {
