@@ -28,6 +28,7 @@ const customTwMerge = extendTailwindMerge({
             'title',
             'display',
             'timer',
+            'timer-sm',
           ],
         },
       ],
