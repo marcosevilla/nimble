@@ -5,7 +5,7 @@ Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + 
 ## Keychain prompt fix (2026-09-24)
 
 - [x] **Bug:** macOS asked for the login password for the Google Calendar Keychain items after every install. Root cause: the self-signed "Marco Task App Dev" cert has no team ID, so the Keychain partition list pins "Always Allow" to each build's cdhash (12 accumulated). Fix `61e7775`: Google refresh token + client secret now live in `app_data_dir/credentials/*.json` (dir 0700, files 0600, atomic write), never in SQLite/backups; legacy Keychain items migrate on first read and are deleted. Installed 2026-09-24; verified both files hold 1 entry and 0 `com.marcosevilla.nimble` Keychain items remain. Trade-off accepted: any process running as Marco can read the files. A Developer ID (team ID) would allow moving back to Keychain.
-- [ ] Watch: `google_calendar_state.error_code = google_event_conflict`, last sync 2026-09-23 14:21 UTC — predates this fix; check the next tick clears it.
+- [ ] **Deferred with the C2 phone test (Marco, 2026-09-24):** `google_calendar_state.error_code = google_event_conflict` (409), last sync 2026-09-23 14:21 UTC. Only Google-published task is "Phone test" (`8e8e2785…`); its link is stuck `pending_upsert`, `google_calendar_conflicts` is empty. Predates the credential fix. Trace the 409 when the phone test resumes — same path must work for it. Regular calendar (iCal feed) unaffected.
 - [ ] Flaky test: `backup_git_cancellation_terminates_helpers` fails intermittently even when run alone (timing-sensitive PID check).
 
 ## Vault-path toast on Today (2026-09-24)
