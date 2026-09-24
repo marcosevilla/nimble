@@ -19,10 +19,11 @@ let sessionDismissed: SyncHealth | null = null
 /**
  * Persistent bottom-right notice for a Todoist sync that has gone quiet or
  * started failing — the R1 gap where a 401 sat silent for three weeks.
- * Renders nothing while sync is off or healthy; no-guilt phrasing. It
- * floats over the bottom-right of the page column (Agentation pass 3, A4):
- * the page never shifts when it appears, and it stays clear of the right
- * rail and the `?` help button. One notice per problem; Dismiss hides it
+ * Renders nothing while sync is off or healthy; no-guilt phrasing. A
+ * floating notice (Agentation pass 3, A4) so the page never shifts: it sits
+ * just above the `?` help button, inside the right rail's footprint (w-64
+ * fits the 288px rail) where it covers the rail's quiet bottom rather than
+ * task rows. One notice per problem; Dismiss hides it
  * until a different problem shows up or the app relaunches. Polls status
  * every 60s plus on window focus so a fix elsewhere (re-auth in Settings)
  * clears it promptly.
@@ -82,7 +83,7 @@ export function SyncHealthBanner() {
     <div
       role="status"
       aria-live="polite"
-      className="panel-in absolute right-4 bottom-4 z-20 flex w-80 max-w-[calc(100%-2rem)] items-start gap-2.5 rounded-lg border border-border bg-popover py-3 pr-2 pl-3 text-popover-foreground shadow-popover"
+      className="panel-in fixed right-4 bottom-16 z-20 flex w-64 items-start gap-2.5 rounded-lg border border-border bg-popover py-3 pr-2 pl-3 text-popover-foreground shadow-popover"
     >
       <Icon
         icon={isError ? OctagonAlert : TriangleAlert}
