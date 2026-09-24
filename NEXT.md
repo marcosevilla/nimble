@@ -2,6 +2,13 @@
 
 Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + chunk 2 capture vocabulary/NL dates `649ca72` merged, installed with Lane B's install; 393 frontend tests). Updated 2026-09-23 eve (Lane B: Rust batch `bb6ac53` + brief phase 1 `e24daa4` merged; **installed at `649ca72`** = both lanes incl. capture-prefixes; DB migrated v22→v23, 1,335 tasks kept, today's brief snapshot written, `turso_schema_v23_upgraded` set). Before that 2026-09-23 (agentation-1 merged + installed at `0ad4bd5`). Before that 2026-09-22 (Focus Queue: all 12 plan tasks implemented, Task 12 verification recorded; awaiting final whole-branch review + Marco's 30-min human checklist; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
 
+## iPhone quick capture (2026-09-24)
+
+- [x] **`/api/capture` live in production** (`fe976ca`, on main, not pushed; Vercel prod deployed by hand). Bearer `CAPTURE_TOKEN` (Vercel env, Production + Preview), exempt from the cookie gate; writes capture + sync_log to Turso like the web `createCapture`; `source = 'iphone'`, `created_at` in `CAPTURE_TZ` (default America/Los_Angeles). Verified: 401 without token, `/api/turso` still gated, capture reached the Mac Inbox on the next Turso pull.
+- [ ] Marco: build the "Nimble Capture" Shortcut, assign to the Action button, delete the two "safe to delete" test captures.
+- [ ] Lag: the Mac pulls Turso every 5 min (`lib.rs` 300 s loop) or on window focus. If captures need to land faster while Nimble is in the background, shorten the Turso tick.
+- [ ] Not mirrored (same gap as web): `item_captured` activity_log entry for phone captures.
+
 ## Keychain prompt fix (2026-09-24)
 
 - [x] **Bug:** macOS asked for the login password for the Google Calendar Keychain items after every install. Root cause: the self-signed "Marco Task App Dev" cert has no team ID, so the Keychain partition list pins "Always Allow" to each build's cdhash (12 accumulated). Fix `61e7775`: Google refresh token + client secret now live in `app_data_dir/credentials/*.json` (dir 0700, files 0600, atomic write), never in SQLite/backups; legacy Keychain items migrate on first read and are deleted. Installed 2026-09-24; verified both files hold 1 entry and 0 `com.marcosevilla.nimble` Keychain items remain. Trade-off accepted: any process running as Marco can read the files. A Developer ID (team ID) would allow moving back to Keychain.
