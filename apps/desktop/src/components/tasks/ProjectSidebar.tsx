@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useState, useCallback, useMemo, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { Plus, List, Pencil, Trash2, Check, X, ChevronRight } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -9,6 +9,7 @@ import { PROJECT_COLORS } from '@/lib/projectColors'
 import { pickRovingKey } from '@/lib/docsTree'
 import { buildProjectTree, visibleProjectKeys } from '@/lib/projectTree'
 import { handleTreeKeyDown } from '@/components/shared/treeKeys'
+import { Collapse } from '@/components/shared/Collapse'
 
 // A parent past this many children opens collapsed by default (e.g. 🏡
 // Personal (12)) — big lists like that read as noise on first paint;
@@ -99,22 +100,18 @@ export function ProjectSidebar({
   // tree doesn't read as noise on first paint. `projects` loads async
   // (starts empty, refetches after mount), so this can't be a plain
   // `useState` lazy initializer — it runs once more per newly-discovered
-  // big parent instead, tracked in a ref so a user's manual expand isn't
-  // re-collapsed the next time `projects` changes.
-  const autoCollapsedRef = useRef<Set<string>>(new Set())
-  useEffect(() => {
-    const newlyBig = Object.entries(childrenByParent)
-      .filter(([, children]) => children.length > AUTO_COLLAPSE_THRESHOLD)
-      .map(([id]) => id)
-      .filter((id) => !autoCollapsedRef.current.has(id))
-    if (newlyBig.length === 0) return
-    for (const id of newlyBig) autoCollapsedRef.current.add(id)
-    setCollapsedParents((prev) => {
-      const next = new Set(prev)
-      for (const id of newlyBig) next.add(id)
-      return next
-    })
-  }, [childrenByParent])
+  // big parent instead, tracked so a user's manual expand isn't
+  // re-collapsed the next time `projects` changes. Adjusted during render
+  // (not in an effect) so the first painted frame is already collapsed —
+  // an effect would now play the collapse animation on load.
+  const [autoCollapsed, setAutoCollapsed] = useState<Set<string>>(new Set())
+  const newlyBig = Object.entries(childrenByParent)
+    .filter(([id, children]) => children.length > AUTO_COLLAPSE_THRESHOLD && !autoCollapsed.has(id))
+    .map(([id]) => id)
+  if (newlyBig.length > 0) {
+    setAutoCollapsed(new Set([...autoCollapsed, ...newlyBig]))
+    setCollapsedParents(new Set([...collapsedParents, ...newlyBig]))
+  }
 
   // Count non-completed tasks per project
   const taskCountByProject: Record<string, number> = {}
@@ -180,7 +177,7 @@ export function ProjectSidebar({
       <div
         key={project.id}
         className={cn(
-          'group flex h-9 w-full items-center gap-2 rounded-md pr-1.5 transition-colors',
+          'group flex h-6.5 w-full items-center gap-2 rounded-md pr-1.5 transition-colors duration-(--transition-fast)',
           isSelected ? 'bg-muted' : 'hover:bg-muted/50',
         )}
       >
@@ -200,7 +197,7 @@ export function ProjectSidebar({
           aria-level={indent ? 2 : 1}
           onClick={() => onSelectProject(project.id)}
           className={cn(
-            'flex h-9 min-w-0 flex-1 items-center rounded-md text-left text-foreground',
+            'flex h-full min-w-0 flex-1 items-center rounded-md text-left text-foreground',
             indent ? 'pl-8' : 'pl-2',
             isSelected ? 'text-meta-strong' : 'text-meta',
           )}
@@ -243,10 +240,10 @@ export function ProjectSidebar({
             title={collapsed ? 'Expand (→)' : 'Collapse (←)'}
             aria-label={collapsed ? `Expand ${project.name}` : `Collapse ${project.name}`}
           >
-            <ChevronRight className={cn('size-3 transition-transform', !collapsed && 'rotate-90')} />
+            <ChevronRight className={cn('size-3 transition-transform duration-(--transition-fast) ease-(--ease-entrance)', !collapsed && 'rotate-90')} />
           </button>
         ) : (
-          <span className="w-3 shrink-0 text-center text-meta text-muted-foreground">{count}</span>
+          <span className="min-w-3 shrink-0 text-center text-meta tabular-nums text-muted-foreground">{count}</span>
         )}
       </div>
     )
@@ -288,7 +285,7 @@ export function ProjectSidebar({
           aria-level={1}
           onClick={() => onSelectProject(null)}
           className={cn(
-            'flex h-9 w-full items-center gap-2 rounded-md pl-2 pr-1.5 text-left transition-colors',
+            'flex h-6.5 w-full items-center gap-2 rounded-md pl-2 pr-1.5 text-left transition-colors duration-(--transition-fast)',
             selectedProjectId === null ? 'bg-muted' : 'hover:bg-muted/50',
           )}
         >
@@ -301,17 +298,26 @@ export function ProjectSidebar({
           >
             All tasks
           </span>
-          <span className="w-3 shrink-0 text-center text-meta text-muted-foreground">{totalActive}</span>
+          {/* min-w, not w-3: "15" is 14px and overflowed the fixed 12px slot */}
+          <span className="min-w-3 shrink-0 text-center text-meta tabular-nums text-muted-foreground">{totalActive}</span>
         </button>
 
         {/* Projects — root projects first, each followed by its (one-level)
-            children indented pl-8 when not collapsed. */}
+            children indented pl-8, in a list that animates open and closed.
+            The list takes no outer margin (mb-0 beats space-y's zero-
+            specificity rule); its pb-0.5 is the gap after the last child, so
+            the gap animates with the height instead of jumping at the end. */}
         {rootProjects.flatMap((project) => {
           const children = childrenByParent[project.id] ?? []
           const isCollapsed = collapsedParents.has(project.id)
+          const key = `project:${project.id}`
           const rows = [renderProjectRow(project, { hasChildren: children.length > 0, collapsed: isCollapsed })]
-          if (children.length > 0 && !isCollapsed) {
-            rows.push(...children.map((child) => renderProjectRow(child, { indent: true, parentKey: `project:${project.id}` })))
+          if (children.length > 0) {
+            rows.push(
+              <Collapse key={`${project.id}:children`} open={!isCollapsed} role="group" data-tree-children={key} className="mb-0" innerClassName="space-y-0.5 pb-0.5">
+                {children.map((child) => renderProjectRow(child, { indent: true, parentKey: key }))}
+              </Collapse>,
+            )
           }
           return rows
         })}

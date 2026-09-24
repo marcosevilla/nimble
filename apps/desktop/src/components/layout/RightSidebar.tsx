@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react'
 import { CalendarPanel } from '@/components/calendar/CalendarPanel'
 import { RIGHT_TABS, rightRailWidth, useLayoutStore, type RightTab } from '@/stores/layoutStore'
 import { IconButton } from '@/components/shared/IconButton'
@@ -22,8 +22,45 @@ const TAB_META: Record<RightTab, { label: string; icon: LucideIcon }> = {
   focus: { label: 'Focus queue', icon: Timer },
 }
 
-/** Scrolling body shared by the non-calendar tabs. */
-const PANEL_CLASS = 'flex-1 min-h-0 overflow-y-auto p-4 pt-3 [scrollbar-gutter:stable]'
+/** Scrolling body shared by the non-calendar tabs. `tab-panel-in` fades
+ *  the panel in each time it's shown (Agentation pass 3, A5). */
+const PANEL_CLASS = 'tab-panel-in flex-1 min-h-0 overflow-y-auto p-4 pt-3 [scrollbar-gutter:stable]'
+
+/* The active tab's pill, drawn once behind the tabs and slid between them
+   (Agentation pass 3, A5) instead of each tab painting its own. Measured
+   after layout — the active tab widens to show its label in the same
+   commit — so it slides straight to the new box. Rendered only once
+   measured, so first paint doesn't slide in from 0. */
+function TabIndicator({ listRef, measureKey }: { listRef: React.RefObject<HTMLDivElement | null>; measureKey: string }) {
+  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    const measure = () => {
+      const tab = list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+      if (!tab) return
+      const next = { left: tab.offsetLeft, top: tab.offsetTop, width: tab.offsetWidth, height: tab.offsetHeight }
+      setBox((prev) => (prev && Object.entries(next).every(([k, v]) => prev[k as keyof typeof next] === v) ? prev : next))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(list)
+    return () => ro.disconnect()
+  }, [listRef, measureKey])
+  if (!box) return null
+  return (
+    <span
+      data-tab-indicator
+      aria-hidden="true"
+      className="pointer-events-none absolute top-0 left-0 rounded-md border border-transparent bg-background shadow-sm transition-[transform,width] duration-(--transition-base) ease-(--ease-entrance) dark:border-input dark:bg-input/30"
+      style={{ transform: `translate(${box.left}px, ${box.top}px)`, width: box.width, height: box.height }}
+    />
+  )
+}
+
+/** Tabs drop their own active fill; TabIndicator draws it. */
+const TRIGGER_CLASS =
+  'flex-none px-2 text-meta data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent'
 
 export function RightSidebar() {
   const collapsed = useLayoutStore((s) => s.rightCollapsed)
@@ -45,6 +82,7 @@ export function RightSidebar() {
   const loadHabits = useGoalsStore((s) => s.loadHabits)
   useEffect(() => { loadHabits() }, [loadHabits])
   const habitCount = habitProgress(habits)
+  const tabListRef = useRef<HTMLDivElement>(null)
 
   const [dragging, setDragging] = useState(false)
   const startX = useRef(0)
@@ -132,13 +170,14 @@ export function RightSidebar() {
             {/* Tabs, then the collapse button on the right. The active tab
                 shows its label; the others are icons with a tooltip. */}
             <div className="flex items-center gap-2 px-3 pt-2">
-              <TabsList aria-label="Sidebar views">
+              <TabsList ref={tabListRef} aria-label="Sidebar views" className="relative">
+                <TabIndicator listRef={tabListRef} measureKey={`${tab}:${habitCount.done}/${habitCount.total}`} />
                 {RIGHT_TABS.map((id) => (
                   <TabsTrigger
                     key={id}
                     value={id}
                     title={TAB_META[id].label}
-                    className="flex-none px-2 text-meta"
+                    className={TRIGGER_CLASS}
                   >
                     <Icon icon={TAB_META[id].icon} />
                     <span className={cn(id === tab ? 'inline' : 'sr-only')}>{TAB_META[id].label}</span>
@@ -164,18 +203,21 @@ export function RightSidebar() {
             {/* tabIndex={-1}: Base UI's TabsPanel defaults to tabIndex={open
                 ? 0 : -1} (the Tab stop when open), but CalendarPanel owns
                 its own tabIndex={0} root and ←/→/t handling — the panel
-                wrapper itself must stay out of the Tab order. */}
-            <TabsContent value="calendar" tabIndex={-1} className="flex flex-1 min-h-0 flex-col p-4 pt-3">
-              <CalendarPanel />
+                wrapper itself must stay out of the Tab order.
+                keepMounted keeps every panel element (hidden while
+                inactive) so each tab's aria-controls always resolves; the
+                content itself still mounts only while its tab is active. */}
+            <TabsContent value="calendar" keepMounted tabIndex={-1} className="tab-panel-in flex flex-1 min-h-0 flex-col p-4 pt-3">
+              {tab === 'calendar' && <CalendarPanel />}
             </TabsContent>
-            <TabsContent value="habits" className={PANEL_CLASS}>
-              <HabitsSection />
+            <TabsContent value="habits" keepMounted className={PANEL_CLASS}>
+              {tab === 'habits' && <HabitsSection />}
             </TabsContent>
-            <TabsContent value="activity" className={PANEL_CLASS}>
-              <ActivityPanel />
+            <TabsContent value="activity" keepMounted className={PANEL_CLASS}>
+              {tab === 'activity' && <ActivityPanel />}
             </TabsContent>
-            <TabsContent value="focus" className={PANEL_CLASS}>
-              <FocusRailPanel />
+            <TabsContent value="focus" keepMounted className={PANEL_CLASS}>
+              {tab === 'focus' && <FocusRailPanel />}
             </TabsContent>
           </Tabs>
         </>

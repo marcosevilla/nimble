@@ -9,10 +9,12 @@ import { Button } from '@/components/ui/button'
 import { DocsSearch } from './DocsSearch'
 import { visibleTreeKeys, pickRovingKey } from '@/lib/docsTree'
 import { handleTreeKeyDown } from '@/components/shared/treeKeys'
+import { Collapse } from '@/components/shared/Collapse'
 import { useDeferredDeletes } from '@/hooks/useDeferredDeletes'
 import type { Document, VaultNoteSummary } from '@nimble/types'
 
-const ROW = 'flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-foreground transition-colors duration-(--transition-fast)'
+// 26px rows + space-y-0.5 → a 28px pitch (Agentation pass 3, A2)
+const ROW = 'flex h-6.5 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-foreground transition-colors duration-(--transition-fast)'
 const ROW_WRAP = 'group relative flex items-center rounded-md transition-colors duration-(--transition-fast)'
 const ACTION = 'relative flex size-6 shrink-0 items-center justify-center rounded-md transition-[opacity,color,background-color] duration-(--transition-fast) before:absolute before:-inset-1 hover:bg-hover'
 const REVEAL = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100'
@@ -204,7 +206,7 @@ export function FolderTree() {
 
   const renderConfirm = (target: ConfirmTarget, indent?: boolean) => (
     <div
-      className={cn('flex h-8 items-center gap-1 px-1.5', indent && 'ml-4')}
+      className={cn('flex h-6.5 items-center gap-1 px-1.5', indent && 'ml-4')}
       role="alertdialog"
       aria-label={`Delete ${target.name}?`}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelConfirm() } }}
@@ -293,7 +295,7 @@ export function FolderTree() {
                     aria-expanded={open}
                     className={cn(ROW, 'text-meta')}
                   >
-                    <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform duration-(--transition-fast)', open && 'rotate-90')} />
+                    <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform duration-(--transition-fast) ease-(--ease-entrance)', open && 'rotate-90')} />
                     {open ? <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" /> : <Folder className="size-3.5 shrink-0 text-muted-foreground" />}
                     <span className="min-w-0 flex-1 truncate">{folder.name}</span>
                   </button>
@@ -320,11 +322,9 @@ export function FolderTree() {
                 </div>
               )}
 
-              {open && (
-                <div className="ml-4 space-y-0.5" role="group">
-                  {(docsByFolder[folder.id] || []).map((doc) => renderDocRow(doc, key))}
-                </div>
-              )}
+              <Collapse open={open} role="group" data-tree-children={key} className="ml-4" innerClassName="space-y-0.5">
+                {(docsByFolder[folder.id] || []).map((doc) => renderDocRow(doc, key))}
+              </Collapse>
             </div>
           )
         })}
@@ -357,7 +357,7 @@ export function FolderTree() {
                 aria-expanded={vaultExpanded}
                 className={cn(ROW, 'text-label text-muted-foreground')}
               >
-                <ChevronRight className={cn('size-3 shrink-0 transition-transform duration-(--transition-fast)', vaultExpanded && 'rotate-90')} />
+                <ChevronRight className={cn('size-3 shrink-0 transition-transform duration-(--transition-fast) ease-(--ease-entrance)', vaultExpanded && 'rotate-90')} />
                 <Vault className="size-3.5 shrink-0" />
                 <span className="min-w-0 flex-1 truncate text-left">Vault</span>
                 <span className="tabular-nums">{vaultNotes.length}</span>
@@ -375,19 +375,17 @@ export function FolderTree() {
               )}
             </div>
 
-            {vaultExpanded && (
-              <div className="ml-4 space-y-0.5" role="group">
-                <VaultBranch
-                  node={vaultTree}
-                  parentKey="vault"
-                  expanded={expandedVaultFolders}
-                  onToggle={toggleVaultFolder}
-                  selectedPath={selectedVaultPath}
-                  onSelect={selectVaultNote}
-                  tabIndexFor={tabIndexFor}
-                />
-              </div>
-            )}
+            <Collapse open={vaultExpanded} role="group" data-tree-children="vault" className="ml-4" innerClassName="space-y-0.5">
+              <VaultBranch
+                node={vaultTree}
+                parentKey="vault"
+                expanded={expandedVaultFolders}
+                onToggle={toggleVaultFolder}
+                selectedPath={selectedVaultPath}
+                onSelect={selectVaultNote}
+                tabIndexFor={tabIndexFor}
+              />
+            </Collapse>
           </div>
         )}
 
@@ -396,7 +394,7 @@ export function FolderTree() {
           onClick={() => handleCreateDoc(selectedFolderId ?? undefined)}
           title="New document (N)"
           data-opens-docs
-          className="flex h-8 w-full items-center gap-1.5 rounded-md px-1.5 text-meta text-muted-foreground hover:text-foreground hover:bg-hover transition-colors duration-(--transition-fast)"
+          className="flex h-6.5 w-full items-center gap-1.5 rounded-md px-1.5 text-meta text-muted-foreground hover:text-foreground hover:bg-hover transition-colors duration-(--transition-fast)"
         >
           <Plus className="size-3" />
           New document
@@ -424,7 +422,7 @@ export function FolderTree() {
           <button
             type="button"
             onClick={() => setNewFolderInput(true)}
-            className="flex h-8 w-full items-center gap-1.5 rounded-md px-1.5 text-meta text-muted-foreground hover:text-foreground hover:bg-hover transition-colors duration-(--transition-fast)"
+            className="flex h-6.5 w-full items-center gap-1.5 rounded-md px-1.5 text-meta text-muted-foreground hover:text-foreground hover:bg-hover transition-colors duration-(--transition-fast)"
           >
             <Plus className="size-3" />
             New folder
@@ -476,24 +474,22 @@ function VaultBranch({
                 aria-expanded={isOpen}
                 className={cn(ROW, 'text-meta')}
               >
-                <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform duration-(--transition-fast)', isOpen && 'rotate-90')} />
+                <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform duration-(--transition-fast) ease-(--ease-entrance)', isOpen && 'rotate-90')} />
                 {isOpen ? <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" /> : <Folder className="size-3.5 shrink-0 text-muted-foreground" />}
                 <span className="min-w-0 flex-1 truncate text-left">{child.name}</span>
               </button>
             </div>
-            {isOpen && (
-              <div className="ml-4 space-y-0.5" role="group">
-                <VaultBranch
-                  node={child}
-                  parentKey={key}
-                  expanded={expanded}
-                  onToggle={onToggle}
-                  selectedPath={selectedPath}
-                  onSelect={onSelect}
-                  tabIndexFor={tabIndexFor}
-                />
-              </div>
-            )}
+            <Collapse open={isOpen} role="group" data-tree-children={key} className="ml-4" innerClassName="space-y-0.5">
+              <VaultBranch
+                node={child}
+                parentKey={key}
+                expanded={expanded}
+                onToggle={onToggle}
+                selectedPath={selectedPath}
+                onSelect={onSelect}
+                tabIndexFor={tabIndexFor}
+              />
+            </Collapse>
           </div>
         )
       })}

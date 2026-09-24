@@ -292,12 +292,8 @@ export function Dashboard() {
       {/* Left: Nav sidebar */}
       <NavSidebar />
 
-      {/* Center: Main content area */}
-      <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
-        {/* Sync health: mounted once for every page, renders nothing while
-            Todoist sync is off or healthy (Task 5). */}
-        <SyncHealthBanner />
-
+      {/* Center: Main content area. `relative` anchors the sync notice. */}
+      <div className="relative flex flex-1 flex-col min-w-0 overflow-hidden">
         {/* Focus banner: coexists with shell navigation while anything is queued */}
         {focusQueued && !focusExpanded && <FocusBanner />}
 
@@ -344,6 +340,13 @@ export function Dashboard() {
             </main>
           )}
         </div>
+
+        {/* Sync health: mounted once for every page, renders nothing while
+            Todoist sync is off or healthy (Task 5). A notice floating at
+            the column's bottom-right, not a top banner, so the page never
+            shifts; after the page in DOM order, so Tab reaches it after
+            the page content (Agentation pass 3, A4). */}
+        <SyncHealthBanner />
       </div>
 
       {/* Right: Sidebar — detail view replaces Schedule/Habits when in sidebar mode */}

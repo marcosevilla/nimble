@@ -15,7 +15,8 @@ export function handleTreeKeyDown(
   onRowKey?: (key: string, row: HTMLElement) => boolean,
 ) {
   const container = e.currentTarget
-  const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-tree-row]'))
+  // Rows inside a closing child list (inert while it animates out) are skipped.
+  const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-tree-row]')).filter((r) => !r.closest('[inert]'))
   const active = document.activeElement as HTMLElement | null
   const idx = active ? rows.indexOf(active) : -1
   if (idx === -1) return
