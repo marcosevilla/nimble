@@ -726,6 +726,44 @@ for (const c of [
   })
 }
 
+/** Left edge of the mark's own text glyphs. */
+async function textLeft(l: Locator) {
+  return l.evaluate((el) => {
+    const r = document.createRange()
+    r.selectNodeContents(el)
+    return r.getBoundingClientRect().left
+  })
+}
+
+for (const vp of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }]) {
+  test.describe(`${vp.width}px`, () => {
+    test.use({ viewport: vp })
+    test(`ring: adjacent right-side marks keep a visible gap, and nothing scrolls sideways (${vp.width}px)`, async ({ app, page }) => {
+      await openSurface(app, page, SURFACES.tasks)
+      await focusByJ(page, 'task-05')
+      const row = rowOf(page, 'task-05')
+      const project = mark(row, 'project')
+      const due = mark(row, 'due')
+      await expect(project).toHaveText('Nimble')
+      await expect(due).toHaveText('Aug 3')
+      const gap = (await textLeft(due)) - (await textRight(project))
+      expect(gap, `"Nimble" → "Aug 3" text gap ${gap}px`).toBeGreaterThanOrEqual(6)
+      // T1's horizontal-scroll fix still holds: no scroll container (page or
+      // list) is wider than its box.
+      const wide = await page.evaluate(() =>
+        [document.scrollingElement!, ...Array.from(document.querySelectorAll<HTMLElement>('body *'))]
+          .filter((el) => {
+            const ox = getComputedStyle(el).overflowX
+            const scrolls = el === document.scrollingElement || ox === 'auto' || ox === 'scroll'
+            return scrolls && el.scrollWidth > el.clientWidth + 1
+          })
+          .map((el) => `${el.tagName}.${(el as HTMLElement).className} ${el.scrollWidth}>${el.clientWidth}`),
+      )
+      expect(wide, 'horizontal scroll').toEqual([])
+    })
+  })
+}
+
 // ── Sanity (must pass on the base) ───────────────────────────────────────
 
 test('sanity: j reaches task-05 on Tasks and the row shows a focus ring', async ({ app, page }) => {

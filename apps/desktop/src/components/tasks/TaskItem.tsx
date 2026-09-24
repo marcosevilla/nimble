@@ -271,8 +271,10 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
           {task.content}
         </span>
 
-        {/* Right side metadata — flush right */}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        {/* Right side metadata. `pr-1` insets the cluster by the focus
+            ring's footprint (2px inset offset + 2px width), so the focused
+            row's ring never covers the last mark's text (T2 it2). */}
+        <div className="ml-auto flex shrink-0 items-center gap-2 pr-1">
           {task.subtaskStats && task.subtaskStats.total > 0 && (
             <SubtaskSummary done={task.subtaskStats.done} total={task.subtaskStats.total} />
           )}

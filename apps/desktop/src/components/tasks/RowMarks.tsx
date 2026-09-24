@@ -48,16 +48,10 @@ export type RowMarkTask = Pick<
 const MARK =
   "relative shrink-0 cursor-pointer transition-colors after:absolute after:inset-x-0 after:-inset-y-1 after:content-['']"
 
-/** Text marks (due, project) sit flush with the row's right end, so they
- * can't grow a padded hover box; they lift to foreground and underline.
- *
- * The last one in the cluster (T2 QA): the focused row's inset ring covers
- * the row's last 2px, so the flush text keeps a 4px inset (`pr-1`) inside
- * its box, and `-ml-1` hands the 4px back on the left so the box's right
- * edge, its margin-box width and every sibling stay exactly where they
- * were (nothing pokes past the row's end). */
+/** Text marks (due, project) end the row's right cluster, so they can't
+ * grow a padded hover box; they lift to foreground and underline. */
 const TEXT_MARK =
-  'flex h-6 items-center decoration-muted-foreground/60 underline-offset-4 hover:text-foreground hover:underline last:-ml-1 last:pr-1'
+  'flex h-6 items-center decoration-muted-foreground/60 underline-offset-4 hover:text-foreground hover:underline'
 
 const stop = (e: MouseEvent) => e.stopPropagation()
 
