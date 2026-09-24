@@ -32,7 +32,9 @@ import type { LocalTask } from '@nimble/types'
    - The mark's box never moves the row: marks that need a bigger target
      than their glyph grow it with negative margin (the StatusDropdown
      trick) or an ::after hit extender, so the row stays 36px and every
-     text sits where it did. */
+     text sits where it did. Nothing may poke past the row's right end:
+     the list wrapper clips there, and a focused or hovered control that
+     overflows it scrolls the whole list sideways. */
 
 /** Row-mark subset of a task; LocalTaskRow passes the full LocalTask. */
 export type RowMarkTask = Pick<
@@ -40,8 +42,15 @@ export type RowMarkTask = Pick<
   'id' | 'priority' | 'due_date' | 'due_time' | 'duration_minutes' | 'recurrence_rule' | 'labels' | 'project_id'
 >
 
-/** Shared mark chrome: pointer, hover tint on the mark's own box. */
-const MARK = 'relative shrink-0 cursor-pointer rounded-md transition-colors hover:bg-hover hover:text-foreground'
+/** Shared mark chrome: pointer, and an ::after that grows the target to
+ * at least 32px tall (square, so rounded corners don't cut the hit area). */
+const MARK =
+  "relative shrink-0 cursor-pointer transition-colors after:absolute after:inset-x-0 after:-inset-y-1 after:content-['']"
+
+/** Text marks (due, project) sit flush with the row's right end, so they
+ * can't grow a padded hover box; they lift to foreground and underline. */
+const TEXT_MARK =
+  'flex h-6 items-center decoration-muted-foreground/60 underline-offset-4 hover:text-foreground hover:underline'
 
 const stop = (e: MouseEvent) => e.stopPropagation()
 
@@ -101,7 +110,7 @@ export function PriorityMark({ task, rowId }: MarkProps) {
       triggerProps={{
         ref: triggerRef,
         'aria-label': rowMarkName({ kind: 'priority', priority: task.priority }),
-        className: cn(MARK, '-mx-1.5 -my-2 flex size-6 items-center justify-center'),
+        className: cn(MARK, '-mx-1.5 -my-2 flex size-6 items-center justify-center rounded-md hover:bg-hover'),
         onClick: stop,
       }}
       contentProps={{ finalFocus, onClick: stop }}
@@ -114,8 +123,7 @@ export function PriorityMark({ task, rowId }: MarkProps) {
 // ── Due ──
 
 /** The due badge. Muted by default, Today lifts to foreground (no-guilt:
- * a past date is not an alarm). The text keeps its old box; the button
- * around it pads 4px each side and takes it back with negative margin. */
+ * a past date is not an alarm). The button is the old badge's box. */
 export function DueMark({ task, rowId, date }: MarkProps & { date: string }) {
   const { open, onOpenChange } = useRowPicker(rowId, 'due')
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -145,16 +153,12 @@ export function DueMark({ task, rowId, date }: MarkProps & { date: string }) {
       triggerProps={{
         ref: triggerRef,
         'aria-label': rowMarkName({ kind: 'due', label }),
-        className: cn(
-          MARK,
-          '-mx-1 flex h-6 items-center px-1 text-meta tabular-nums',
-          today ? 'text-foreground' : 'text-muted-foreground',
-        ),
+        className: cn(MARK, TEXT_MARK, 'text-meta tabular-nums', today ? 'text-foreground' : 'text-muted-foreground'),
         onClick: stop,
       }}
       contentProps={{ align: 'end', finalFocus, onClick: stop }}
     >
-      <span>{label}</span>
+      {label}
     </DueDatePopover>
   )
 }
@@ -205,10 +209,10 @@ export function LabelMarks({
             },
             'aria-label': chip.ariaLabel,
             // The old pill's exact box (h-5, px-2) — only the ::after hit
-            // extender reaches past it, to 28px tall.
+            // extender reaches past it.
             className: cn(
               MARK,
-              "flex h-5 items-center gap-[5px] rounded-full bg-secondary px-2 text-meta text-muted-foreground after:absolute after:inset-x-0 after:-inset-y-1 after:content-['']",
+              'flex h-5 items-center gap-[5px] rounded-full bg-secondary px-2 text-meta text-muted-foreground hover:bg-hover hover:text-foreground',
             ),
             onClick: stop,
           }}
@@ -225,8 +229,7 @@ export function LabelMarks({
 // ── Project ──
 
 /** Project swatch + name. The menu's items are the active projects, loaded
- * only while it is open (every row mounts this mark). Same trigger box
- * trick as the due badge. */
+ * only while it is open (every row mounts this mark). */
 export function ProjectMark({
   task,
   rowId,
@@ -248,13 +251,11 @@ export function ProjectMark({
       <DropdownMenuTrigger
         ref={triggerRef}
         aria-label={rowMarkName({ kind: 'project', name })}
-        className={cn(MARK, '-mx-1 flex h-6 items-center px-1 text-muted-foreground')}
+        className={cn(MARK, TEXT_MARK, 'gap-1 text-meta text-muted-foreground')}
         onClick={stop}
       >
-        <span className="flex items-center gap-1 text-meta">
-          {color && <span className="size-1.5 rounded-full" style={{ backgroundColor: color }} />}
-          {name}
-        </span>
+        {color && <span className="size-1.5 rounded-full" style={{ backgroundColor: color }} />}
+        {name}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" finalFocus={finalFocus} onClick={stop}>
         <ProjectMenuItems onSelect={move} />
