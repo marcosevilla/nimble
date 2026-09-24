@@ -9,6 +9,7 @@ Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + 
 - [x] Marco built the "Nimble Capture" Shortcut; first real capture landed. Body field uses **Clipboard** (Provided Input wasn't offered).
 - [ ] Marco: delete the test captures from the Inbox ("safe to delete" ×3 + "This is a nimble test").
 - [ ] Not mirrored (same gap as web): `item_captured` activity_log entry for phone captures.
+- Note: `CAPTURE_TOKEN` exists only in Vercel (Sensitive, unreadable) and in the phone Shortcut's Authorization header. Lose the Shortcut → mint a new token (`vercel env rm/add CAPTURE_TOKEN`, redeploy prod) and paste it into the Shortcut. iOS 26 Shortcuts: Ask for Input's output isn't offered as "Provided Input" in the JSON body picker — the Shortcut copies input to Clipboard first and sends **Clipboard**.
 
 ## Keychain prompt fix (2026-09-24)
 
