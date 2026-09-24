@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Caption } from '@/components/shared/typography'
@@ -24,7 +24,8 @@ const PHASE_CLASS: Record<TimerPhase, string> = {
 interface FocusTimeboxPickerProps {
   config: FocusConfig
   presentation: TimerPresentation
-  caption: string | null
+  /** The line under the timer (budget caption joined with the task's meta). */
+  caption: ReactNode
   /** Configure needs queue writes; the timer still displays when blocked. */
   disabledReason: string | null
   onConfigure: (config: FocusConfig) => void
@@ -63,7 +64,7 @@ export function FocusTimeboxPicker({ config, presentation, caption, disabledReas
           disabled={disabledReason != null}
           data-phase={presentation.phase}
           className={cn(
-            'rounded-md text-timer transition-opacity duration-(--transition-fast) hover:opacity-70 focus-ring disabled:hover:opacity-100 motion-reduce:transition-none',
+            'rounded-md text-timer-sm transition-opacity duration-(--transition-fast) hover:opacity-70 focus-ring disabled:hover:opacity-100 motion-reduce:transition-none',
             PHASE_CLASS[presentation.phase],
           )}
         >
@@ -127,7 +128,11 @@ export function FocusTimeboxPicker({ config, presentation, caption, disabledReas
           </Button>
         </PopoverContent>
       </Popover>
-      {caption && <Caption as="div" className="mt-0.5">{caption}</Caption>}
+      {caption && (
+        <Caption as="div" data-slot="focus-timer-caption" className="mt-0.5 flex min-w-0 items-center gap-1.5">
+          {caption}
+        </Caption>
+      )}
     </div>
   )
 }

@@ -5,9 +5,12 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { FocusTaskCard } from '../../src/components/focus/FocusTaskCard'
 import { FocusQueueTray } from '../../src/components/focus/FocusQueueTray'
 import { FocusLoadState } from '../../src/components/focus/FocusLoadState'
+import { FocusAddPanel } from '../../src/components/focus/FocusAddPopover'
 import { FocusRequestError } from '../../src/services/focus-events'
-import type { FocusTaskOps } from '../../src/lib/focusQueueIntents'
+import { queueBlockedReason, type FocusTaskOps } from '../../src/lib/focusQueueIntents'
+import { focusAddState } from '../../src/lib/focusSources'
 import type {
+  FocusSource,
   FocusCapabilities,
   FocusConfig,
   FocusEntry,
@@ -99,8 +102,6 @@ export function renderFocusCard(opts: { missingTask?: boolean; live?: boolean; r
       subtasks={opts.missingTask ? [] : [tasks[1]]}
       placeLabel={opts.plain ? undefined : 'Deep work / Writing'}
       today={TODAY}
-      compact={false}
-      onToggleCompact={noop}
       onAction={never}
       onCompleteSubtask={noop}
       onMenu={noop}
@@ -108,9 +109,11 @@ export function renderFocusCard(opts: { missingTask?: boolean; live?: boolean; r
   )
 }
 
-function tray(opts: { compact?: boolean; empty?: boolean; source?: 'project'; readOnly?: boolean; live?: boolean; error?: FocusRequestError } = {}): string {
+function tray(opts: { compact?: boolean; empty?: boolean; source?: 'project'; readOnly?: boolean; live?: boolean; error?: FocusRequestError; untitled?: boolean } = {}): string {
   return renderToStaticMarkup(
     <FocusQueueTray
+      title={opts.untitled ? undefined : <h2>Focus</h2>}
+      headerActions={opts.untitled ? undefined : <button type="button" aria-label="Expand" />}
       snapshot={snapshot({ empty: opts.empty })}
       capabilities={opts.readOnly ? caps({ queue_write: false, live_timing: false, reason: 'Replica is read-only' }) : caps({ live_timing: opts.live ?? true })}
       tasks={tasks}
@@ -127,8 +130,33 @@ function tray(opts: { compact?: boolean; empty?: boolean; source?: 'project'; re
   )
 }
 
+/** The companion's card-only mode: no title (the native titlebar names it). */
 export function renderCompactFocus(): string {
-  return tray({ compact: true, live: false })
+  return tray({ compact: true, live: false, untitled: true })
+}
+
+/** The `+` popover body, fed by the same `focusAddState` the tray uses. */
+export function renderAddPanel(opts: { source?: 'project' | 'local'; readOnly?: boolean } = {}): string {
+  const source: FocusSource = opts.source === 'project' ? { kind: 'project', project_id: 'p1' } : opts.source === 'local' ? { kind: 'local' } : { kind: 'today' }
+  const state = focusAddState(tasks, source, TODAY, snapshot(), sections)
+  const blocked = queueBlockedReason(opts.readOnly ? caps({ queue_write: false, reason: 'Replica is read-only' }) : caps())
+  return renderToStaticMarkup(
+    <FocusAddPanel
+      source={source}
+      projects={projects}
+      onSourceChange={noop}
+      newCount={state.newCount}
+      sourceCount={state.sourceCount}
+      onQueueThese={noop}
+      stillOpen={state.stillOpen}
+      today={TODAY}
+      onAddStillOpen={noop}
+      blockedReason={blocked}
+      onQuickAdd={never}
+      draft=""
+      onDraftChange={noop}
+    />,
+  )
 }
 
 export function renderQueueTray(opts: { compact?: boolean; empty?: boolean; source?: 'project'; readOnly?: boolean; error?: 'storage' | 'conflict' } = {}): string {

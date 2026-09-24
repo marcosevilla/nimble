@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type Ref } from 'react'
-import { Check, ChevronDown, ChevronUp, ClipboardCopy, MoreHorizontal, Pause, Play } from 'lucide-react'
+import { Check, MoreHorizontal, Pause, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -8,18 +8,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { IconButton } from '@/components/shared/IconButton'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { Caption, Label, Meta } from '@/components/shared/typography'
 import { FocusTimeboxPicker } from '@/components/focus/FocusTimeboxPicker'
 import { cn } from '@/lib/utils'
 import {
+  cardCaption,
   cardTiming,
   controlBlockedReason,
   descriptionOverflows,
-  dueLabel,
-  isLocalOnly,
-  NIMBLE_ONLY,
   queueBlockedReason,
   taskMenuItems,
   timerControl,
@@ -68,6 +65,13 @@ export function CompletionButton({
     </button>
   )
 }
+
+/**
+ * Quiet task actions: the ⋯ shows on keyboard focus and while its menu is
+ * open; pair it with the parent's `group-hover:opacity-100` variant.
+ */
+export const TASK_MENU_REVEAL =
+  'opacity-0 transition-opacity duration-(--transition-fast) focus-within:opacity-100 has-[[data-popup-open]]:opacity-100 motion-reduce:transition-none'
 
 /** One "More actions" menu for the card and each row. Clicks never reach the row. */
 export function FocusTaskMenu({
@@ -228,9 +232,6 @@ export interface FocusTaskCardProps {
   /** Where the task lives ("Project" or "Project / Section"), shown above the title. */
   placeLabel?: string | null
   today: string
-  /** Card-only (companion/compact) presentation: the queue is hidden. */
-  compact: boolean
-  onToggleCompact: () => void
   onAction: (action: FocusAction) => Promise<unknown>
   onCompleteSubtask: (task: LocalTask) => void
   onMenu: (id: TaskMenuId, task: LocalTask, entry: FocusEntry) => void
@@ -243,9 +244,12 @@ export interface FocusTaskCardProps {
 }
 
 /**
- * Focus Queue's familiar card in Nimble tokens: completion + multiline title
- * + actions, metadata, inline subtasks, then the timer bottom-left and the
- * circular Start/Pause bottom-right. Rendering it never starts timing.
+ * The focused task, quiet around a hero title: a small muted place label,
+ * completion + title (full width — task actions live in one ⋯ revealed on
+ * hover/focus at the top-right), inline subtasks, then the timer with one
+ * caption line (budget · priority · due) and the circular Start/Pause.
+ * Surface controls (add, queue toggle, sounds) live in the surface header.
+ * Rendering it never starts timing.
  */
 export function FocusTaskCard({
   snapshot,
@@ -255,8 +259,6 @@ export function FocusTaskCard({
   subtasks,
   placeLabel,
   today,
-  compact,
-  onToggleCompact,
   onAction,
   onCompleteSubtask,
   onMenu,
@@ -268,31 +270,16 @@ export function FocusTaskCard({
 }: FocusTaskCardProps) {
   const reasonId = useId()
   const displayExtra = useFocusDisplayExtra(snapshot, entry, capabilities?.live_timing === true)
-  const toggle = (
-    <IconButton
-      size="lg"
-      aria-label={compact ? 'Show queue' : 'Hide queue'}
-      aria-expanded={!compact}
-      onClick={onToggleCompact}
-      className="focus-ring"
-    >
-      {compact ? <ChevronDown className="size-3.5" aria-hidden /> : <ChevronUp className="size-3.5" aria-hidden />}
-    </IconButton>
-  )
-
   const writeBlocked = queueBlockedReason(capabilities)
 
   if (entry && !task) {
     // The queued task left native storage (deleted/moved elsewhere). Keep an
     // escape: remove or skip the orphan entry; its recorded time is kept.
     return (
-      <section aria-label="Focused task" className="border-b border-border px-4 pt-4 pb-3">
-        <div className="flex items-start gap-2.5">
-          <h2 ref={headingRef} tabIndex={-1} className="min-w-0 flex-1 text-title text-muted-foreground outline-none">
-            Task no longer available
-          </h2>
-          {toggle}
-        </div>
+      <section aria-label="Focused task" className="px-4 pt-1 pb-4">
+        <h2 ref={headingRef} tabIndex={-1} className="text-title text-muted-foreground outline-none">
+          Task no longer available
+        </h2>
         <Meta as="p" className="mt-1">It may have been deleted elsewhere. Its recorded time is kept.</Meta>
         <div className="mt-3 flex items-center gap-1.5">
           <Button
@@ -314,10 +301,9 @@ export function FocusTaskCard({
 
   if (!entry || !task) {
     return (
-      <section aria-label="Focused task" className="relative flex min-h-32 flex-col items-center justify-center gap-1 border-b border-border px-8 py-6 text-center">
-        <div className="absolute top-2 right-3">{toggle}</div>
+      <section aria-label="Focused task" className="flex min-h-28 flex-col items-center justify-center gap-1 px-8 pt-2 pb-6 text-center">
         <p className="text-body-strong text-foreground">Queue is clear</p>
-        <Meta>{compact ? 'Show the queue to add what’s next.' : 'Pick a source below and queue what you want to work on.'}</Meta>
+        <Meta>Use + to add what’s next.</Meta>
       </section>
     )
   }
@@ -326,14 +312,19 @@ export function FocusTaskCard({
   const blocked = controlBlockedReason(control, capabilities)
   const timing = cardTiming(snapshot, entry, displayExtra)
   const running = control.label === 'Pause' || control.label === 'End break'
-  const due = dueLabel(task, today)
-  const meta = [isLocalOnly(task) ? NIMBLE_ONLY : null, due].filter(Boolean).join(' · ')
+  const caption = cardCaption(timing.caption, task, today)
+  const showBars = task.priority >= 2
   const description = task.description?.trim() ?? ''
 
   return (
-    <section aria-label="Focused task" className="border-b border-border px-4 pt-4 pb-3">
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5">
+    <section aria-label="Focused task" className="group/card relative px-4 pt-1 pb-4">
+      {placeLabel && (
+        <Label as="p" data-slot="focus-place" className="block truncate pr-8">
+          {placeLabel}
+        </Label>
+      )}
+      <div className={cn('flex items-start gap-2.5', placeLabel && 'mt-1')}>
+        <div className="flex h-[calc(var(--text-title--line-height)*1em)] items-center text-title">
           <CompletionButton
             title={task.content}
             size="lg"
@@ -343,40 +334,30 @@ export function FocusTaskCard({
           />
         </div>
         <div className="min-w-0 flex-1">
-          {placeLabel && (
-            <Label as="p" data-slot="focus-place" className="block truncate">
-              {placeLabel}
-            </Label>
+          {renaming && onRename && onRenameCancel ? (
+            <InlineRename task={task} className="text-title" onCommit={(c) => onRename(task, c)} onCancel={onRenameCancel} />
+          ) : (
+            <h2 ref={headingRef} tabIndex={-1} className="text-title break-words text-foreground outline-none">
+              {/* Without a place label the ⋯ sits on the title's first line: keep that corner clear. */}
+              {!placeLabel && <span aria-hidden className="float-right h-5 w-6" />}
+              {task.content}
+            </h2>
           )}
-          <div className="flex items-start gap-1.5">
-            {renaming && onRename && onRenameCancel ? (
-              <InlineRename task={task} className="text-title" onCommit={(c) => onRename(task, c)} onCancel={onRenameCancel} />
-            ) : (
-              <h2 ref={headingRef} tabIndex={-1} className="min-w-0 flex-1 text-title break-words text-foreground outline-none">
-                {task.content}
-              </h2>
-            )}
-            <div className="flex shrink-0 items-center gap-0.5">
-              <IconButton
-                size="lg"
-                aria-label={`Copy assistant context for ${task.content}`}
-                title="Copy assistant context"
-                onClick={() => onMenu('copy_context', task, entry)}
-                className="focus-ring"
-              >
-                <ClipboardCopy className="size-3.5" aria-hidden />
-              </IconButton>
-              <FocusTaskMenu task={task} place="card" onSelect={(id) => onMenu(id, task, entry)} />
-              {toggle}
-            </div>
-          </div>
           {description && <FocusTaskDescription key={task.id} text={description} />}
-          <div className="mt-1 flex min-w-0 items-center gap-1.5">
-            <PriorityBars priority={task.priority} />
-            {meta && <Meta className="truncate">{meta}</Meta>}
-          </div>
         </div>
       </div>
+      {/* Task actions sit top-right, out of the title's way until hover or
+          keyboard focus; in the DOM they follow the title, so Tab order
+          reads completion → title → actions. An explicit tabIndex keeps the
+          trigger a Tab stop in WKWebView, which skips plain buttons unless
+          macOS keyboard navigation is on (it now holds Copy context). */}
+      <FocusTaskMenu
+        task={task}
+        place="card"
+        tabIndex={0}
+        onSelect={(id) => onMenu(id, task, entry)}
+        className={cn('absolute top-0.5 right-3 group-hover/card:opacity-100', TASK_MENU_REVEAL)}
+      />
 
       {subtasks.length > 0 && (
         <ul aria-label="Subtasks" className="mt-2.5 ml-7.5 flex flex-col gap-1.5">
@@ -389,11 +370,20 @@ export function FocusTaskCard({
         </ul>
       )}
 
-      <div className="mt-3 flex items-end justify-between gap-3">
+      <div className="mt-4 flex items-end justify-between gap-3">
         <FocusTimeboxPicker
           config={timing.config}
           presentation={timing.presentation}
-          caption={timing.caption}
+          caption={
+            caption.timing || caption.meta || showBars ? (
+              <>
+                {caption.timing && <span className="shrink-0">{caption.timing}</span>}
+                {caption.timing && (showBars || caption.meta) && <span aria-hidden>·</span>}
+                {showBars && <PriorityBars priority={task.priority} />}
+                {caption.meta && <span className="min-w-0 truncate">{caption.meta}</span>}
+              </>
+            ) : null
+          }
           disabledReason={writeBlocked}
           onConfigure={(config) => void onAction({ kind: 'configure', occurrence_id: entry.occurrence_id, config })}
         />
@@ -404,7 +394,7 @@ export function FocusTaskCard({
           disabled={blocked != null || busy}
           variant={running ? 'secondary' : 'default'}
           onClick={() => void onAction(control.action)}
-          className="size-11 shrink-0 rounded-full p-0"
+          className="mb-0.5 size-10 shrink-0 rounded-full p-0"
         >
           {running ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
         </Button>

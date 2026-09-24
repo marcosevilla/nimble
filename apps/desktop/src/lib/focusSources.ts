@@ -130,3 +130,39 @@ export function queueTheseAction(
   if (task_ids.length === 0) return null
   return { kind: 'enqueue', task_ids, source: copySource(source), explicit_still_open: opts.stillOpen === true }
 }
+
+export interface FocusAddState {
+  /** "Add all" intent for the current source, or null when nothing is new. */
+  queueThese: Extract<FocusAction, { kind: 'enqueue' }> | null
+  /** Source tasks not already queued (the "Add all N" count). */
+  newCount: number
+  /** Everything the source offers, queued or not. */
+  sourceCount: number
+  /** Earlier open work offered by the Today source, minus what's queued. */
+  stillOpen: LocalTask[]
+}
+
+/**
+ * What the `+` add panel offers for one source. Project sources order by
+ * that project's sections; still-open work is offered only from Today.
+ */
+export function focusAddState(
+  tasks: LocalTask[],
+  source: FocusSource,
+  today: string,
+  snapshot: FocusSnapshot,
+  sections: readonly Section[],
+): FocusAddState {
+  const sourceSections = source.kind === 'project' ? sections.filter((s) => s.project_id === source.project_id) : []
+  const queueThese = queueTheseAction(tasks, source, today, snapshot, { sections: sourceSections })
+  const sourceCount = candidateIds(tasks, source, today, sourceSections).ids.length
+  const queued = new Set(snapshot.queue.map((e) => e.task_id))
+  const byId = new Map(tasks.map((t) => [t.id, t]))
+  const stillOpen =
+    source.kind === 'today'
+      ? candidateIds(tasks, source, today)
+          .still_open_ids.filter((id) => !queued.has(id))
+          .flatMap((id) => byId.get(id) ?? [])
+      : []
+  return { queueThese, newCount: queueThese?.task_ids.length ?? 0, sourceCount, stillOpen }
+}

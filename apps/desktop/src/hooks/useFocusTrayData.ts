@@ -26,7 +26,7 @@ export interface FocusTrayOptions {
 
 export interface FocusTrayData {
   tasks: LocalTask[]
-  /** Active-only — FocusSourcePicker's project list; archived projects
+  /** Active-only — the focus + panel's source list; archived projects
    * shouldn't be offered as a source to pull candidates from. */
   projects: Project[]
   /** Every project, archived included — for display lookups (task/source

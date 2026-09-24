@@ -13,8 +13,9 @@ import {
   pomodoroConfig, parseCustomMinutes, planQuickAdd, runQuickAdd, taskMenuItems, failureControl,
   focusTaskOps, duplicateInput, dueLabel, localFailureMessage, visibleFailure, menuFocusAction, undoDeleteAction, stillOpenAction,
   addToQueueLabel, sourceLabel, queueRowKeyIntent, queueRowClickIntent, queueTabStop, reenqueueAction, restoreEntryAction,
-  taskPlaceLabel, descriptionOverflows,
+  taskPlaceLabel, descriptionOverflows, focusPanelMenuItems,
 } from '../src/lib/focusQueueIntents.ts'
+import { focusAddState } from '../src/lib/focusSources.ts'
 
 let output, rendered
 before(async () => {
@@ -241,11 +242,100 @@ test('task ops pass the displayed due date on completion and duplicate as fresh 
 const labelsIn = (html, labels) => labels.map((l) => html.indexOf(l))
 const ascending = (xs) => xs.every((x, i) => x >= 0 && (i === 0 || x > xs[i - 1]))
 
-test('expanded tray keeps Focus Queue hierarchy: card, Up next, Add, completed, still open, footer', () => {
+test('expanded tray hierarchy: header (title, +, surface icons, ⋯), card, Up next, completed; no footer rows', () => {
   const html = rendered.renderQueueTray()
-  const order = labelsIn(html, ['Example task', 'Focus timer', 'Up next', 'Second task', 'Third task',
-    'Add task', 'Shipped notes', 'Still open', 'Add tasks from'])
+  const order = labelsIn(html, ['>Focus</h2>', 'aria-label="Add to queue"', 'aria-label="Expand"', 'aria-label="Focus options"',
+    'Example task', 'Focus timer', 'Up next', 'Second task', 'Third task', 'Shipped notes'])
   assert.ok(ascending(order), `order ${order}`)
+  for (const gone of ['Still open', 'Add tasks from', '>Add task<', 'From: ', 'Mute focus sounds']) {
+    assert.ok(!html.includes(gone), `${gone} left the tray`)
+  }
+})
+
+test('one divider: between the card and what follows, none per row', () => {
+  const html = rendered.renderQueueTray()
+  assert.equal((html.match(/border-t border-border/g) ?? []).length, 1)
+  assert.doesNotMatch(html, /border-b border-border/)
+  // Nothing follows the card: no divider at all.
+  const empty = rendered.renderQueueTray({ compact: true })
+  assert.doesNotMatch(empty, /border-t border-border/)
+})
+
+test('an untitled surface (companion) shows the place label in the header row, once', () => {
+  const html = rendered.renderCompactFocus()
+  const header = html.match(/<header\b[\s\S]*?<\/header>/)?.[0] ?? ''
+  assert.match(header, /data-slot="focus-place"[^>]*>Deep work \/ Writing</)
+  assert.equal(html.split('Deep work / Writing').length - 1, 1)
+  const titled = rendered.renderQueueTray()
+  assert.doesNotMatch(titled.match(/<header\b[\s\S]*?<\/header>/)?.[0] ?? '', /focus-place/)
+  assert.match(titled, /data-slot="focus-place"/)
+})
+
+test('surface ⋯: extras first, queue toggle, mute checkbox, sync note; disabled extras keep their reason', () => {
+  const popOut = () => {}
+  const items = focusPanelMenuItems({
+    extras: [{ id: 'pop_out', label: 'Pop out', onSelect: popOut, disabledReason: 'Companion not ready' }],
+    compact: false, soundMuted: true, canMute: true, syncNote: 'Last synced 9:41 AM',
+  })
+  assert.deepEqual(items.map((i) => i.kind), ['extra', 'toggle_queue', 'mute', 'sync_note'])
+  assert.deepEqual(items[0], { kind: 'extra', key: 'extra:pop_out', label: 'Pop out', detail: 'Companion not ready', disabled: true, onSelect: popOut })
+  assert.equal(items[1].label, 'Hide queue')
+  assert.equal(items[2].checked, true)
+  assert.equal(items[3].disabled, true)
+  const plain = focusPanelMenuItems({ compact: true, soundMuted: false, canMute: false, syncNote: null })
+  assert.deepEqual(plain.map((i) => [i.kind, i.label]), [['toggle_queue', 'Show queue']])
+  const enabled = focusPanelMenuItems({ extras: [{ id: 'pop_out', label: 'Pop out', onSelect: popOut }], compact: false, soundMuted: false, canMute: true, syncNote: null })
+  assert.equal(enabled[0].disabled, false)
+  assert.equal(enabled.find((i) => i.kind === 'mute')?.checked, false)
+})
+
+test('+ panel: quick add field, source picker with Add all, still-open list with per-task add', () => {
+  const html = rendered.renderAddPanel()
+  assert.match(html, /<textarea\b[^>]*aria-label="Add task to Today"[^>]*placeholder="Add task to Today"/)
+  assert.match(html, /aria-label="Add tasks from: Today"/)
+  assert.match(html, />From: Today</)
+  assert.match(html, /<button\b[^>]*title="Adds to the end of the queue"[^>]*>Add 1<\/button>/)
+  assert.match(html, /aria-label="Still open"/)
+  assert.match(html, />Still open · 1</)
+  assert.match(html, /aria-label="Add Earlier thing to queue"/)
+  assert.match(html, />Queue all</)
+  assert.doesNotMatch(html, /disabled=""/)
+  assert.doesNotMatch(html, /candidate|Queue these|overdue/i)
+})
+
+test('+ panel follows the source: project placeholder and count, no still-open outside Today', () => {
+  const project = rendered.renderAddPanel({ source: 'project' })
+  assert.match(project, /placeholder="Add task to Deep work"/)
+  assert.match(project, />From: Deep work</)
+  assert.doesNotMatch(project, /Still open/)
+  const local = rendered.renderAddPanel({ source: 'local' })
+  assert.match(local, /placeholder="Add a Nimble-only task"/)
+})
+
+test('+ panel read-only: every add control is disabled with the reason shown, nothing hidden', () => {
+  const html = rendered.renderAddPanel({ readOnly: true })
+  assert.match(html, /role="note"[^>]*>Replica is read-only</)
+  assert.match(html.match(/<textarea\b[^>]*>/)?.[0] ?? '', /disabled=""/)
+  assert.match(html.match(/<button\b[^>]*>Add 1<\/button>/)?.[0] ?? '', /disabled=""[^>]*title="Replica is read-only"|title="Replica is read-only"[^>]*disabled=""/)
+  assert.match(html.match(/<button\b[^>]*>Queue all<\/button>/)?.[0] ?? '', /disabled=""/)
+  assert.match(html.match(/<button\b[^>]*aria-label="Add Earlier thing to queue"[^>]*>/)?.[0] ?? '', /disabled=""/)
+  // The header + stays usable so the reason is one click away.
+  const tray = rendered.renderQueueTray({ readOnly: true })
+  assert.doesNotMatch(tray.match(/<button\b[^>]*aria-label="Add to queue"[^>]*>/)?.[0] ?? '', /disabled/)
+})
+
+test('add state per source matches what the tray hands the + panel', () => {
+  const t = (over) => task({ due_date: '2026-09-22', ...over })
+  const tasks = [t({ id: 'a' }), t({ id: 'b' }), t({ id: 'old', due_date: '2026-09-20' }), t({ id: 'p', project_id: 'p1', due_date: null })]
+  const snap = snapshot({ queue: [entry(1, { task_id: 'a' })] })
+  const today = focusAddState(tasks, { kind: 'today' }, '2026-09-22', snap, [])
+  assert.deepEqual(today.queueThese?.task_ids, ['b'])
+  assert.equal(today.newCount, 1)
+  assert.equal(today.sourceCount, 2)
+  assert.deepEqual(today.stillOpen.map((x) => x.id), ['old'])
+  const project = focusAddState(tasks, { kind: 'project', project_id: 'p1' }, '2026-09-22', snap, [])
+  assert.deepEqual(project.stillOpen, [])
+  assert.equal(project.newCount, 1)
 })
 
 test('Up next renders snapshot order regardless of the candidate source order', () => {
@@ -258,7 +348,7 @@ test('Up next renders snapshot order regardless of the candidate source order', 
 
 test('queue rows expose separate handle, completion, promote and menu stops', () => {
   const html = rendered.renderQueueTray()
-  const upNext = html.slice(html.indexOf('Up next'), html.indexOf('Add task'))
+  const upNext = html.slice(html.indexOf('Up next'), html.indexOf('aria-label="Completed"'))
   assert.equal((upNext.match(/aria-label="Drag to reorder Second task"/g) ?? []).length, 1)
   assert.match(upNext, /aria-label="Complete Second task"/)
   assert.match(upNext, /aria-label="Move Second task to top"/) // explicit mouse promote (paused)
@@ -363,17 +453,21 @@ test('completed tray shows struck title with spent time and Show/Hide/Clear', ()
   assert.match(tray, />Clear</)
 })
 
-test('footer names where tasks come from and says exactly what the add button adds', () => {
+test('quiet rows: Move to top, Focus now and ⋯ share one group with no width until hover, row focus or an open menu', () => {
   const html = rendered.renderQueueTray()
-  assert.match(html, /aria-label="Add tasks from: Today"/)
-  assert.match(html, />From: Today</)
-  assert.match(html, />Add 1 to queue</)
-  assert.doesNotMatch(html, /candidate|Queue these|overdue/i)
+  const row = html.slice(html.indexOf('data-focus-entry="e2"'))
+  const group = row.match(/<div\b[^>]*class="([^"]*)"[^>]*><button\b[^>]*aria-label="Move Second task to top"/)?.[1] ?? ''
+  for (const cls of ['w-0', 'opacity-0', 'group-hover:w-auto', 'group-focus-within:w-auto', 'has-[[data-popup-open]]:w-auto']) {
+    assert.ok(group.split(/\s+/).includes(cls), `${cls} in ${group}`)
+  }
+  const inGroup = row.slice(row.indexOf('Move Second task to top'), row.indexOf('</li>'))
+  assert.match(inGroup, /aria-label="Focus Second task now"/)
+  assert.match(inGroup, /aria-label="More actions for Second task"/)
 })
 
-test('add button copy: count, singular, all added, nothing to add', () => {
-  assert.equal(addToQueueLabel(3, 5), 'Add 3 to queue')
-  assert.equal(addToQueueLabel(1, 1), 'Add 1 to queue')
+test('add-all copy: count, singular, all added, nothing to add', () => {
+  assert.equal(addToQueueLabel(3, 5), 'Add all 3')
+  assert.equal(addToQueueLabel(1, 1), 'Add 1')
   assert.equal(addToQueueLabel(0, 4), 'All added')
   assert.equal(addToQueueLabel(0, 0), 'Nothing to add')
 })
@@ -389,7 +483,6 @@ test('read-only capability renders disabled controls with the reason, not hidden
   assert.ok(start, 'Start is rendered')
   assert.match(start, /disabled=""/)
   assert.match(html, /Replica is read-only/)
-  assert.match(html.match(/<button\b[^>]*>Add 1 to queue<\/button>/)?.[0] ?? '', /disabled=""/)
 })
 
 test('uncertain failure stays visible with Try again, beside any completion acknowledgement', () => {
@@ -401,11 +494,14 @@ test('uncertain failure stays visible with Try again, beside any completion ackn
   assert.doesNotMatch(certain, />Try again</)
 })
 
-test('empty queue keeps a positive empty card and Show queue in card-only mode', () => {
-  const html = rendered.renderQueueTray({ empty: true, compact: true })
-  assert.match(html, /Queue is clear/)
-  assert.match(html, /Show queue/)
-  assert.doesNotMatch(html, /Add task/)
+test('empty queue keeps a positive empty card pointing at + (card-only mode too), no guilt', () => {
+  for (const html of [rendered.renderQueueTray({ empty: true }), rendered.renderQueueTray({ empty: true, compact: true })]) {
+    assert.match(html, /Queue is clear/)
+    assert.match(html, /Use \+ to add what’s next\./)
+    assert.match(html, /aria-label="Add to queue"/)
+    assert.match(html, /aria-label="Focus options"/)
+    assert.doesNotMatch(html, /overdue|behind|missed/i)
+  }
 })
 
 test('a focus surface without a snapshot shows a loading skeleton or the error, never a blank area or Start', () => {
