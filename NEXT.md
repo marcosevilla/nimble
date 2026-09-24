@@ -22,6 +22,18 @@ Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + 
 - [x] **Bug:** "File not found — check your vault path in Settings" toasted on every Today load though Obsidian is connected. Root cause: `useObsidian` still reads the legacy vault-root `today.md` (gone from the vault); `read_today_md` rejects "today.md: not found" and `friendlyError` maps any "not found" to the vault-path copy. Fix `e332dff`: a missing `today.md` = no daily note (no toast, header count from tasks only); other errors still toast. Test `tests/errors.test.mjs`; frozen-build browser check (main toasts, fix doesn't). Merged + installed 2026-09-24 at `b758284` (bundle `index-B6-Wn9T_` = dist; rollback `Nimble Rollbacks/20260924-122656-today-md-toast/`).
 - [ ] Follow-ups: `friendlyError` maps every "not found" (e.g. a 404 iCal feed) to the vault-path message; the `today.md` read itself is legacy — remove it (and `TodayPanel`/`HabitsPanel` if unused) when Today's brief no longer needs it; web `obsidian.readTodayMd` is `ni()` and may toast "Something went wrong" on web Today.
 
+## Agentation pass 3 + subtasks + focus reopen (2026-09-24) — built + verified, awaiting Marco's merge approval
+
+Plan `docs/superpowers/plans/2026-09-24-agentation-3.md` (branch `loop3/plan`). Ledger `.superpowers/sdd/2026-09-24-agentation-3/ledger.md`. Screenshots `~/Developer/second-brain/outputs/qa/{l3a-shell,l3b-task-detail,l3c-subtasks}/{before,after}/`.
+- [ ] Merge (Marco approves) in order: `loop3/a-shell` (0a0b3bc) · `loop3/b-task-detail` (c1f85e9) · `loop3/c-subtasks` (2e9ddc4, stacked on B) · `loop3/d-focus-reopen` (355c91b). Combined on main `74683c4`: 358/358 e2e ×2, 459 unit, 608 Rust, both builds, eslint 58 (main 59).
+- [ ] Marco decides: (1) task-detail back control goes up one level (parent task, else project) — nested projects need one click per level; keep or add a jump-to-project? (2) icon-snapped sidebar: the Nimble mark pushes nav icons down ~26px — keep or hide the mark when snapped?
+- [ ] Real-app checks after install: focus reopen (complete from Focus → reopen from the list the same day → back at top of Up next, no timer, not in the completed tray); sync notice in the rail (open/collapsed/200px) + Dismiss; tree/tab motion with macOS Reduce Motion on/off; subtask drag/multi-select/bulk Todo + "Reopen N subtasks too?".
+- Known: toast stack lifts above the sync notice (wider toasts still reach into the page column); `completed_at` cascade window 0..+2 s after the parent; `x` only completes (no reopen path).
+
+## Instinct sync 2026-09-24 16:22
+
+- Asked (via Instinct, per Marco's pipeline instruction): lane C grip — A (row content +16px, full 24px grip) or B (keep 16px). Instinct relayed 16:22:56; Marco chose **A** (said so in the Claude Code session too). Claude Code implemented it in lane C it3. Nothing else waiting on Marco from this exchange.
+
 ## Loop 2 polish + new icon (2026-09-24)
 
 - [x] **Activity → Settings sub-page** (`389e7de`): nav page `session` removed; `g s`, `?page=session` and persisted nav orders redirect to Settings → Activity (`lib/navTargets.ts`). Right-rail Activity tab unchanged.
