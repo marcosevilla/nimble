@@ -153,6 +153,12 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Capture', keys: '/i /q /t', label: 'Send to one of your capture routes (Settings → Tasks & capture)' },
   { section: 'Capture', keys: '⌫', label: 'Right after a detected date: keep the words as text' },
   { section: 'Capture', keys: '⌘Z', label: 'After converting a note with a date: keep the words as text' },
+  // ── Tasks: focused-row pickers (TaskItem.tsx → lib/rowPickerKeys.ts; loop 2 chunk 3, T2) ──
+  // On Inbox, `m` on a note row keeps "Move to a doc"; task rows get these.
+  { section: 'Tasks', keys: 'p', label: 'Set priority of focused task' },
+  { section: 'Tasks', keys: '⇧D', label: 'Set due date of focused task' },
+  { section: 'Tasks', keys: 'l', label: 'Edit labels of focused task' },
+  { section: 'Tasks', keys: 'm', label: 'Move focused task to a project' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [

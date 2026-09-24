@@ -4,10 +4,10 @@ import { cn } from '@/lib/utils'
 import { useDataProvider } from '@/services/provider-context'
 import { emitTasksChanged, useProjectOptions } from '@/hooks/useLocalTasks'
 import { taskToast } from '@/lib/taskToast'
-import { rowMarkName } from '@/lib/rowMarks'
+import { rowMarkName, type RowMarkKind } from '@/lib/rowMarks'
 import { dueBadgeLabel } from '@/lib/dueLabel'
 import { taskPatchToUpdate, type TaskPatch } from '@/lib/taskPatch'
-import { useRowPicker } from '@/stores/rowPickerStore'
+import { useRowPicker, useRowPickerStore } from '@/stores/rowPickerStore'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { Skeleton } from '@/components/ui/skeleton'
 import { PriorityMenu, LabelsPopover, EntityMenuItems } from '@/components/tasks/MetadataChips'
@@ -48,8 +48,8 @@ export type RowMarkTask = Pick<
 const MARK =
   "relative shrink-0 cursor-pointer transition-colors after:absolute after:inset-x-0 after:-inset-y-1 after:content-['']"
 
-/** Text marks (due, project) sit flush with the row's right end, so they
- * can't grow a padded hover box; they lift to foreground and underline. */
+/** Text marks (due, project) end the row's right cluster, so they can't
+ * grow a padded hover box; they lift to foreground and underline. */
 const TEXT_MARK =
   'flex h-6 items-center decoration-muted-foreground/60 underline-offset-4 hover:text-foreground hover:underline'
 
@@ -201,7 +201,9 @@ export function LabelMarks({
           onChange={(labelIds) => void update({ labelIds })}
           open={open && Math.min(anchor, chips.length - 1) === i}
           onOpenChange={(next) => {
-            if (next) setAnchor(i)
+            // A click anchors on its chip; after a close the next open (a
+            // row key) starts from the first chip again.
+            setAnchor(next ? i : 0)
             onOpenChange(next)
           }}
           triggerProps={{
@@ -285,4 +287,108 @@ function ProjectMenuItems({ onSelect }: { onSelect: (id: string, name: string) =
       onSelect={(id) => onSelect(id, projects.find((p) => p.id === id)?.name ?? 'project')}
     />
   )
+}
+
+// ── Row end (T2) ──
+
+/** The anchor a right-end picker hangs from: a zero-width strip down the
+ * row's right edge. Absolute, so it takes no room in the row (the title
+ * never moves); full row height, so the popup sits just below the row, or
+ * just above it when flipped, never over the title. Out of the tab order
+ * and hidden from assistive tech: the popup, not this, is what's focused. */
+const ROW_END_ANCHOR = 'pointer-events-none absolute inset-y-0 right-0 w-0'
+
+/** A row key (p · ⇧D · l · m) on a row that shows no mark of that kind
+ * opens the same picker at the row's right end instead. Mounted from the
+ * first such open and kept (closed) after, so the popup's exit animation
+ * and its focus return to the row run like a mark's. */
+export function RowEndPicker({ task, rowId }: MarkProps) {
+  const openKind = useRowPickerStore((s) => (s.open?.rowId === rowId && s.open.anchor === 'row' ? s.open.kind : null))
+  const [kind, setKind] = useState<RowMarkKind | null>(openKind)
+  if (openKind && openKind !== kind) setKind(openKind)
+  if (!kind) return null
+  return <RowEndPickerFor key={kind} task={task} rowId={rowId} kind={kind} />
+}
+
+function RowEndPickerFor({ task, rowId, kind }: MarkProps & { kind: RowMarkKind }) {
+  const { open, onOpenChange } = useRowPicker(rowId, kind, 'row')
+  const triggerRef = useRef<HTMLElement | null>(null)
+  const finalFocus = useRowFocus(rowId, triggerRef)
+  const update = useTaskMarkUpdate(task)
+
+  const triggerProps = {
+    ref: (el: HTMLElement | null) => {
+      triggerRef.current = el
+    },
+    tabIndex: -1,
+    'aria-hidden': true,
+    className: ROW_END_ANCHOR,
+    onClick: stop,
+  }
+  const contentProps = { align: 'end' as const, finalFocus, onClick: stop }
+
+  switch (kind) {
+    case 'priority':
+      return (
+        <PriorityMenu
+          open={open}
+          onOpenChange={onOpenChange}
+          onChange={(priority) => void update({ priority })}
+          triggerProps={triggerProps}
+          contentProps={contentProps}
+        >
+          {null}
+        </PriorityMenu>
+      )
+    case 'due': {
+      const value: DueValue = {
+        dueDate: task.due_date ?? null,
+        dueTime: task.due_time ?? null,
+        durationMinutes: task.duration_minutes ?? null,
+        recurrenceRule: task.recurrence_rule ?? null,
+      }
+      return (
+        <DueDatePopover
+          value={value}
+          onChange={(next) => {
+            if (next.dueDate !== value.dueDate) onOpenChange(false)
+            void update({ due: next })
+          }}
+          open={open}
+          onOpenChange={onOpenChange}
+          triggerProps={triggerProps}
+          contentProps={contentProps}
+        >
+          {null}
+        </DueDatePopover>
+      )
+    }
+    case 'label':
+      return (
+        <LabelsPopover
+          value={task.labels}
+          onChange={(labelIds) => void update({ labelIds })}
+          open={open}
+          onOpenChange={onOpenChange}
+          triggerProps={triggerProps}
+          contentProps={contentProps}
+        >
+          {null}
+        </LabelsPopover>
+      )
+    case 'project':
+      return (
+        <DropdownMenu open={open} onOpenChange={onOpenChange}>
+          <DropdownMenuTrigger {...triggerProps} />
+          <DropdownMenuContent {...contentProps}>
+            <ProjectMenuItems
+              onSelect={async (projectId, projectName) => {
+                if (projectId === task.project_id) return
+                if (await update({ projectId })) taskToast(`Moved to ${projectName}`, task.id)
+              }}
+            />
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )
+  }
 }

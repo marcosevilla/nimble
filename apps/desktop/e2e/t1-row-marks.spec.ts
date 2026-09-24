@@ -70,7 +70,7 @@ const SURFACES: Record<Surface['key'], Surface> = {
     row: 'task-05',
     title: 'Ship v1.5: quick-capture polish',
     marks: { priority: 'urgent', due: AUG3, label: 'quick-win', project: 'nimble' },
-    rightTexts: { 'quick-win': 96.97, Nimble: 39.89, 'Aug 3': 0 },
+    rightTexts: { 'quick-win': 100.97, Nimble: 43.89, 'Aug 3': 4 }, // cluster inset by the focus ring's footprint, T2 it2
     newPriority: 'High',
   },
   project: {
@@ -79,7 +79,7 @@ const SURFACES: Record<Surface['key'], Surface> = {
     row: 'task-05',
     title: 'Ship v1.5: quick-capture polish',
     marks: { priority: 'urgent', due: AUG3, label: 'quick-win', project: 'nimble' },
-    rightTexts: { 'quick-win': 96.97, Nimble: 39.89, 'Aug 3': 0 },
+    rightTexts: { 'quick-win': 100.97, Nimble: 43.89, 'Aug 3': 4 }, // cluster inset by the focus ring's footprint, T2 it2
     newPriority: 'High',
   },
   today: {
@@ -88,7 +88,7 @@ const SURFACES: Record<Surface['key'], Surface> = {
     row: 'task-04',
     title: 'Fix capture strip focus bug on second monitor',
     marks: { priority: 'high', due: 'today', label: 'bug', project: 'nimble' },
-    rightTexts: { bug: 192.25, 'deep-work': 97.3, Nimble: 40.22, Today: 0 },
+    rightTexts: { bug: 196.25, 'deep-work': 101.3, Nimble: 44.22, Today: 4 }, // cluster inset by the focus ring's footprint, T2 it2
     newPriority: 'Medium',
   },
   // Inbox rows don't show a project; task-14 is seeded with marks (see seedInbox).
@@ -98,7 +98,7 @@ const SURFACES: Record<Surface['key'], Surface> = {
     row: 'task:task-14',
     title: 'Research pedalboard flight case options',
     marks: { priority: 'high', due: AUG3, label: 'quick-win' },
-    rightTexts: { 'quick-win': 39.89, 'Aug 3': 0 },
+    rightTexts: { 'quick-win': 43.89, 'Aug 3': 4 }, // cluster inset by the focus ring's footprint, T2 it2
     newPriority: 'Urgent',
   },
 }
