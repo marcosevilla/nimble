@@ -1760,10 +1760,18 @@ pub async fn apply_remote_rows_with_focus(
     let mut applied_rows: Vec<&Planned> = Vec::new();
     let mut deleted: Vec<LocalTask> = Vec::new();
     let mut changed_ids: Vec<String> = Vec::new();
+    // Completion state of each task before this chunk first touched it, so a
+    // pull that un-completes a task is reported as a reopen (focus restore).
+    let mut was_complete: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     let result: crate::Result<()> = async {
         for plan in &planned {
             let row = plan.row;
             let conn = write.conn();
+            if row.table_name == "local_tasks" && row.operation != "DELETE" && !was_complete.contains_key(&row.row_id) {
+                let prior: Option<(i64, String)> = sqlx::query_as("SELECT completed,status FROM local_tasks WHERE id = ?")
+                    .bind(&row.row_id).fetch_optional(&mut *conn).await?;
+                was_complete.insert(row.row_id.clone(), prior.is_some_and(|(done, status)| done != 0 || status == "complete"));
+            }
             sqlx::query("SAVEPOINT pulled_row").execute(&mut *conn).await?;
             let outcome: crate::Result<Vec<LocalTask>> = async {
                 let mut removed = Vec::new();
@@ -1828,6 +1836,12 @@ pub async fn apply_remote_rows_with_focus(
         }
     }
     effects.changed.retain(|t| !deleted_seen.contains(&t.id));
+    effects.reopened = effects
+        .changed
+        .iter()
+        .filter(|t| !(t.completed || t.status == "complete") && was_complete.get(&t.id).copied().unwrap_or(false))
+        .map(|t| t.id.clone())
+        .collect();
     write.commit(&effects).await?;
 
     for plan in &applied_rows {

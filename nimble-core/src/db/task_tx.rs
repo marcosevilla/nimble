@@ -34,6 +34,12 @@ pub struct TaskEffects {
     /// an open focus occurrence's expected due identity; a remote pull that
     /// moves a due never does (focus Complete then refuses as stale).
     pub rescheduled: Vec<String>,
+    /// Task IDs this write moved from complete to not complete (a genuine
+    /// reopen). Filled by every writer that knows the pre-write state: local
+    /// `set_status_tx` and the Todoist/Turso applies. Focus restores a
+    /// same-day completed occurrence only for these; "open task + completed
+    /// latest occurrence" alone is also what a completed repeat looks like.
+    pub reopened: Vec<String>,
 }
 
 fn validate_reminder(
@@ -530,6 +536,9 @@ pub async fn set_status_tx(
     } else {
         sqlx::query("UPDATE local_tasks SET status=?,completed=0,completed_at=NULL,updated_at=datetime('now','localtime') WHERE id=?")
             .bind(status).bind(id).execute(&mut *conn).await?;
+        if before.completed || before.status == "complete" {
+            effects.reopened.push(id.to_string());
+        }
     }
     let task = fetch(conn, id).await?;
     if policy != MutationPolicy::Remote {

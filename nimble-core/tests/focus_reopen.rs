@@ -35,10 +35,10 @@
 //!   completed occurrence cannot be queued". The lane D plan (newer, Marco's
 //!   decision) supersedes that: same occurrence, reopened — which is also the
 //!   only way totals stay attached without copying ledger rows.
-//! * Open questions left to the builder (report the choice): an occurrence
-//!   the user already cleared from the tray (`archived=1`) and then reopens —
-//!   restore it (and un-archive?) or not; `selected_occurrence_id` when the
-//!   restore lands in an empty queue (d1 edge test leaves it unasserted).
+//! * Open questions, resolved 2026-09-24 (controller, Marco-approved): a
+//!   tray-cleared occurrence (`archived=1`) restores and is un-archived; a
+//!   restore into an empty queue becomes the selected (paused, sessionless)
+//!   card; a still-unsent time comment is withdrawn on restore (d10).
 //! * Paths covered here: `FocusService::execute_native_task(SetStatus)` (the
 //!   desktop UI + `dt` with the app running, via `focus_service::execute_task`),
 //!   `db::tasks::update_task_status` (headless/`dt` with the app closed),
@@ -344,9 +344,9 @@ async fn d1_same_day_reopen_via_headless_status_restores_to_top_of_up_next() {
 }
 
 /// d1 edge: A was the only card, so the queue is empty after completion. The
-/// restored entry is the whole queue; still no session. (Whether it becomes
-/// `selected_occurrence_id` is the builder's call — Enqueue selects the first
-/// entry, and a paused selected card is not a running timer. Report it.)
+/// restored entry is the whole queue and the selected card (like Enqueue
+/// selecting its first entry); still no session — a selected card is not a
+/// running timer.
 #[tokio::test]
 async fn d1_reopen_into_an_empty_queue_restores_without_starting() {
     let h = Harness::new().await;
@@ -362,6 +362,11 @@ async fn d1_reopen_into_an_empty_queue_restores_without_starting() {
     let snap = h.snapshot().await;
     assert_eq!(order(&snap), vec![a.clone()], "restored into the empty queue");
     assert_eq!(snap.queue[0].occurrence_id, occ);
+    assert_eq!(
+        snap.selected_occurrence_id.as_deref(),
+        Some(occ.as_str()),
+        "decided 2026-09-24: the lone restored card becomes the selected (paused) card"
+    );
     assert!(
         snap.session.as_ref().is_none_or(|s| s.status != FocusStatus::Running),
         "never running after restore"
@@ -746,23 +751,14 @@ async fn d9_incoming_todoist_reopen_restores() {
 
 // ── d10: queued Todoist time comment ───────────────────────────────────────
 
-/// Guard (expected to PASS on main). Asserts only: nothing errors and there is
-/// never more than one time-comment intent per occurrence.
-///
-/// Current behaviour (main): Focus Complete enqueues one `time_comment` row in
-/// `focus_delivery` (state `pending`) in the completion transaction; a reopen
-/// leaves it as is; `enqueue_completion_tx` is `ON CONFLICT(occurrence_id,
-/// purpose) DO NOTHING`, so a re-completion of the SAME (restored) occurrence
-/// never enqueues a second one — and never updates the time either.
-///
-/// TODO(builder, decide + report): after a restore, should a still-`pending`
-/// (unsent) time comment for this occurrence be cancelled (e.g. archived with a
-/// reason, or deleted) so Todoist isn't told "⏱ Nm spent" about a task that is
-/// open again — and then re-enqueued with the new total on the next
-/// completion? A comment already `sending`/`acknowledged`/`uncertain` cannot
-/// be un-sent; leave those. Whatever you choose, tighten this test to it.
+/// Decided 2026-09-24 (controller, Marco-approved behaviour): a restore
+/// withdraws a still-unsent time comment (`pending`, or a definite
+/// `retryable-error` failure) for the restored occurrence, so Todoist is never
+/// told "⏱ Nm spent" about a task that is open again; the next completion of
+/// the same occurrence queues a fresh one carrying the updated total. There is
+/// never more than one intent per occurrence.
 #[tokio::test]
-async fn d10_queued_time_comment_is_never_duplicated_across_reopen() {
+async fn d10_restore_withdraws_unsent_time_comment_and_recompletion_requeues_it() {
     let h = Harness::new().await;
     nimble_core::db::settings::set_setting(&h.pool, delivery::ENABLED_SETTING, "1").await.unwrap();
     let a = h.task("A").await;
@@ -786,20 +782,39 @@ async fn d10_queued_time_comment_is_never_duplicated_across_reopen() {
             .unwrap()
         }
     };
+    let recorded_ms = |payload: &str| -> u64 {
+        serde_json::from_str::<serde_json::Value>(payload).unwrap()["recorded_ms"].as_u64().unwrap()
+    };
     let after_complete = comments(&h, occ_a.clone()).await;
     assert_eq!(after_complete.len(), 1, "precondition: Focus Complete queued one time comment");
     assert_eq!(after_complete[0].0, "pending", "precondition");
+    assert_eq!(recorded_ms(&after_complete[0].1), 90_000, "precondition");
 
     set_status_native(&h, &a, "todo").await;
-    let after_reopen = comments(&h, occ_a.clone()).await;
-    assert!(after_reopen.len() <= 1, "reopen never duplicates the comment: {after_reopen:?}");
-    eprintln!("d10 after reopen: {after_reopen:?}");
+    assert!(
+        comments(&h, occ_a.clone()).await.is_empty(),
+        "restore withdraws the unsent time comment"
+    );
 
-    // Complete again from the task list (closes the restored occurrence when
-    // restore is implemented; a no-op for focus on main), then reopen again.
+    // Work more on the restored card, then complete it from the task list:
+    // a fresh comment carries the new total.
+    let snap = h.snapshot().await;
+    let selected = snap.selected_occurrence_id.clone().unwrap();
+    h.send(FocusAction::Promote { occurrence_id: occ_a.clone() }).await.unwrap();
+    assert_ne!(selected, occ_a, "precondition: A was restored behind the card");
+    work_running(&h, &occ_a, 60_000).await;
     set_status_native(&h, &a, "complete").await;
     let after_recomplete = comments(&h, occ_a.clone()).await;
-    assert!(after_recomplete.len() <= 1, "re-completion never duplicates: {after_recomplete:?}");
+    assert_eq!(after_recomplete.len(), 1, "re-completion queues exactly one comment: {after_recomplete:?}");
+    assert_eq!(after_recomplete[0].0, "pending");
+    assert_eq!(recorded_ms(&after_recomplete[0].1), 150_000, "the fresh comment has the updated total");
+
+    // A definite send failure is still unsent: a reopen withdraws it too.
+    sqlx::query("UPDATE focus_delivery SET state='retryable-error',attempts=1 WHERE occurrence_id=?")
+        .bind(&occ_a)
+        .execute(&h.pool)
+        .await
+        .unwrap();
     set_status_native(&h, &a, "todo").await;
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM focus_delivery WHERE native_task_id=? AND purpose=?",
@@ -809,6 +824,61 @@ async fn d10_queued_time_comment_is_never_duplicated_across_reopen() {
     .fetch_one(&h.pool)
     .await
     .unwrap();
-    assert!(total <= 1, "at most one time-comment intent for this task's occurrence, got {total}");
-    eprintln!("d10 after recomplete+reopen: {:?}", comments(&h, occ_a).await);
+    assert_eq!(total, 0, "no time-comment intent survives a reopen before it was sent");
+}
+
+/// A comment that may already have reached Todoist can't be un-sent: a
+/// restore leaves it exactly as it is (and the occurrence still restores).
+#[tokio::test]
+async fn d10_restore_keeps_a_time_comment_that_may_have_been_sent() {
+    for state in ["sending", "acknowledged", "uncertain", "needs-review"] {
+        let h = Harness::new().await;
+        nimble_core::db::settings::set_setting(&h.pool, delivery::ENABLED_SETTING, "1").await.unwrap();
+        let a = h.task("A").await;
+        let b = h.task("B").await;
+        map_todoist(&h, &a, "RA").await;
+        enqueue(&h, &[&a, &b]).await;
+        let occ_a = occurrence_of(&h.snapshot().await, &a);
+        work_running(&h, &occ_a, 90_000).await;
+        complete_in_focus(&h, &occ_a).await;
+        sqlx::query("UPDATE focus_delivery SET state=? WHERE occurrence_id=?")
+            .bind(state)
+            .bind(&occ_a)
+            .execute(&h.pool)
+            .await
+            .unwrap();
+
+        set_status_native(&h, &a, "todo").await;
+
+        let kept: Vec<String> = sqlx::query_scalar(
+            "SELECT state FROM focus_delivery WHERE occurrence_id=? AND purpose=?",
+        )
+        .bind(&occ_a)
+        .bind(delivery::TIME_COMMENT)
+        .fetch_all(&h.pool)
+        .await
+        .unwrap();
+        assert_eq!(kept, vec![state.to_string()], "a {state} comment is left alone");
+        assert_eq!(occurrence_of(&h.snapshot().await, &a), occ_a, "restore still happens ({state})");
+    }
+}
+
+// ── tray-cleared occurrence (controller decision 3) ────────────────────────
+
+/// Decided 2026-09-24: an occurrence the user already cleared from today's
+/// tray (`archived=1`) still restores on a same-day reopen, and the archive
+/// flag is cleared so history stays consistent.
+#[tokio::test]
+async fn cleared_from_tray_then_reopened_same_day_restores_and_unarchives() {
+    let h = Harness::new().await;
+    let (a, b, c, occ_a) = abc_with_a_focus_completed(&h).await;
+    h.send(FocusAction::ArchiveHistory { occurrence_ids: vec![occ_a.clone()] }).await.unwrap();
+    assert!(history_row(&h, &occ_a).await.archived, "precondition: cleared from the tray");
+
+    set_status_native(&h, &a, "todo").await;
+
+    let snap = h.snapshot().await;
+    assert_eq!(order(&snap), [b, a.clone(), c]);
+    assert_eq!(occurrence_of(&snap, &a), occ_a);
+    assert!(!history_row(&h, &occ_a).await.archived, "restore clears the archive flag");
 }
