@@ -226,13 +226,11 @@ export async function getDailyState(): Promise<DailyState> {
 }
 
 export async function generatePriorities(
-  energyLevel: string,
   calendarSummary: string,
   tasksSummary: string,
   obsidianSummary: string,
 ): Promise<Priority[]> {
   return invoke<Priority[]>('generate_priorities', {
-    energyLevel,
     calendarSummary,
     tasksSummary,
     obsidianSummary,

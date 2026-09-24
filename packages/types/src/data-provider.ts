@@ -311,7 +311,6 @@ export interface DataProvider {
   dailyState: {
     get(): Promise<DailyState>
     generatePriorities(
-      energyLevel: string,
       calendarSummary: string,
       tasksSummary: string,
       obsidianSummary: string,
