@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { DocsSearch } from './DocsSearch'
 import { visibleTreeKeys, pickRovingKey } from '@/lib/docsTree'
 import { handleTreeKeyDown } from '@/components/shared/treeKeys'
+import { useDeferredDeletes } from '@/hooks/useDeferredDeletes'
 import type { Document, VaultNoteSummary } from '@nimble/types'
 
 const ROW = 'flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-foreground transition-colors duration-(--transition-fast)'
@@ -21,7 +22,7 @@ type ConfirmTarget = { kind: 'doc' | 'folder'; id: string; name: string }
 export function FolderTree() {
   const dp = useDataProvider()
   const folders = useDocsStore((s) => s.folders)
-  const documents = useDocsStore((s) => s.documents)
+  const allDocuments = useDocsStore((s) => s.documents)
   const selectedDocId = useDocsStore((s) => s.selectedDocId)
   const selectedFolderId = useDocsStore((s) => s.selectedFolderId)
   const selectDoc = useDocsStore((s) => s.selectDoc)
@@ -58,6 +59,12 @@ export function FolderTree() {
   // Last row that held focus — the roving tab stop follows the arrow keys.
   const [focusKey, setFocusKey] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+
+  // Doc delete is a deferred commit (T4): after the inline confirm the row
+  // hides at once, the real delete runs when the Undo toast closes (or when
+  // the tree unmounts). Folder delete stays immediate.
+  const { hidden: hiddenDocs, defer } = useDeferredDeletes()
+  const documents = allDocuments.filter((d) => !hiddenDocs.has(d.id))
 
   // Load on mount
   useEffect(() => {
@@ -112,15 +119,20 @@ export function FolderTree() {
     }
   }, [createDocument])
 
-  const handleDeleteDoc = useCallback(async (id: string) => {
-    try {
-      await dp.docs.deleteDocument(id)
-      if (selectedDocId === id) selectDoc(null)
-      refresh()
-    } catch (e) {
-      toast.error(`Couldn't delete — ${e}`)
-    }
-  }, [selectedDocId, selectDoc, refresh, dp])
+  const handleDeleteDoc = useCallback((id: string, name: string) => {
+    // An open doc closes with its row, and reopens if the delete is undone.
+    const wasOpen = selectedDocId === id
+    if (wasOpen) selectDoc(null)
+    defer(id, `Doc "${name}" deleted`, async () => {
+      try {
+        await dp.docs.deleteDocument(id)
+        if (useDocsStore.getState().selectedDocId === id) selectDoc(null)
+        await refresh()
+      } catch (e) {
+        toast.error(`Couldn't delete — ${e}`)
+      }
+    }, { onUndo: () => { if (wasOpen) selectDoc(id) } })
+  }, [selectedDocId, selectDoc, refresh, dp, defer])
 
   const handleDeleteFolder = useCallback(async (id: string) => {
     try {
@@ -133,7 +145,7 @@ export function FolderTree() {
 
   const runConfirmedDelete = useCallback(() => {
     if (!confirmDelete) return
-    if (confirmDelete.kind === 'doc') handleDeleteDoc(confirmDelete.id)
+    if (confirmDelete.kind === 'doc') handleDeleteDoc(confirmDelete.id, confirmDelete.name)
     else handleDeleteFolder(confirmDelete.id)
     setConfirmDelete(null)
   }, [confirmDelete, handleDeleteDoc, handleDeleteFolder])
