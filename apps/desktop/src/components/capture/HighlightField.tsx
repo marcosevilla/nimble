@@ -10,7 +10,7 @@ export interface HighlightRange {
    under the matched characters. Copied from the live field, so any font
    setting or class change carries over. */
 const MIRRORED = [
-  'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontFeatureSettings', 'fontVariationSettings',
+  'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontFeatureSettings', 'fontVariationSettings', 'fontVariantNumeric',
   'letterSpacing', 'wordSpacing', 'lineHeight', 'textTransform', 'textIndent', 'tabSize',
   'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
   'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'boxSizing',
@@ -99,14 +99,19 @@ export function HighlightField(props: HighlightFieldProps) {
 
   const start = highlight ? Math.max(0, Math.min(highlight.start, value.length)) : 0
   const end = highlight ? Math.max(start, Math.min(highlight.end, value.length)) : 0
-  const fieldClassName = cn('relative w-full bg-transparent', className)
+  const fieldClassName = cn('relative block w-full bg-transparent', className)
 
   const mirror = hasHighlight ? (
     <div
       ref={mirrorEl}
       aria-hidden
       className="pointer-events-none absolute inset-0 overflow-hidden text-transparent"
-      style={{ ...metrics, whiteSpace: multiline ? 'pre-wrap' : 'pre', overflowWrap: multiline ? 'break-word' : 'normal' }}
+      style={{
+        ...metrics,
+        whiteSpace: multiline ? 'pre-wrap' : 'pre',
+        overflowWrap: multiline ? 'break-word' : 'normal',
+        ...(multiline ? { scrollbarGutter: 'stable' } : null),
+      }}
     >
       {value.slice(0, start)}
       <mark className="rounded-[3px] bg-primary/15 text-transparent">{value.slice(start, end)}</mark>
@@ -125,6 +130,7 @@ export function HighlightField(props: HighlightFieldProps) {
         ref={setRefs}
         value={value}
         className={fieldClassName}
+        style={{ ...rest.style, scrollbarGutter: 'stable' }}
         onScroll={(e) => {
           sync()
           rest.onScroll?.(e)
