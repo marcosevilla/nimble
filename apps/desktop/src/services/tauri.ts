@@ -24,6 +24,7 @@ export type {
   QuickCapture,
   Priority,
   DailyState,
+  Brief,
   Project,
   TaskStatus,
   LocalTask,
@@ -76,6 +77,7 @@ import type {
   QuickCapture,
   Priority,
   DailyState,
+  Brief,
   Project,
   TaskStatus,
   LocalTask,
@@ -226,17 +228,29 @@ export async function getDailyState(): Promise<DailyState> {
 }
 
 export async function generatePriorities(
-  energyLevel: string,
   calendarSummary: string,
   tasksSummary: string,
   obsidianSummary: string,
 ): Promise<Priority[]> {
   return invoke<Priority[]>('generate_priorities', {
-    energyLevel,
     calendarSummary,
     tasksSummary,
     obsidianSummary,
   })
+}
+
+// ── Morning Brief ──
+
+export async function getBrief(date: string): Promise<Brief | null> {
+  return invoke<Brief | null>('brief_get', { date })
+}
+
+export async function listBriefSnapshots(): Promise<string[]> {
+  return invoke<string[]>('brief_list_dates')
+}
+
+export async function ensureBriefSnapshot(date: string): Promise<Brief | null> {
+  return invoke<Brief | null>('brief_ensure_snapshot', { date })
 }
 
 // ── Projects ──

@@ -60,7 +60,7 @@ test('Inbox section lists capture and row keys', () => {
 })
 
 test('Inbox is appended after General (then B3b sections), existing order untouched', () => {
-  assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox', 'Docs', 'Goals', 'Session'])
+  assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox', 'Docs', 'Goals', 'Session', 'Today'])
 })
 
 test('Space is not a Tasks row key — it stays Focus pause/resume (review I2)', () => {
@@ -106,4 +106,10 @@ test('⇧H is the habits shortcut, bare and unrepeated (goals N-P1-1)', () => {
   assert.equal(isHabitsShortcut({ key: 'H', altKey: true }), false)
   assert.equal(isHabitsShortcut({ key: 'H', repeat: true }), false)
   assert.ok(SHORTCUTS.some((s) => s.keys === '⇧H'), 'registry lists ⇧H')
+})
+
+test('Today rows use plain lowercase keys, matching todayKey (which rejects Shift)', () => {
+  const today = SHORTCUTS.filter((s) => s.section === 'Today').map((s) => s.keys)
+  assert.ok(today.includes('b'), 'b toggles the brief')
+  assert.ok(!today.includes('B'), 'B would read as Shift+B')
 })

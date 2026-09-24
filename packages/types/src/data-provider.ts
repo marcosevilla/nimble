@@ -22,6 +22,7 @@ import type {
   QuickCapture,
   Priority,
   DailyState,
+  Brief,
   Project,
   Label,
   Section,
@@ -311,7 +312,6 @@ export interface DataProvider {
   dailyState: {
     get(): Promise<DailyState>
     generatePriorities(
-      energyLevel: string,
       calendarSummary: string,
       tasksSummary: string,
       obsidianSummary: string,
@@ -324,6 +324,16 @@ export interface DataProvider {
       tasksOpen: string,
       tasksDeferred: string,
     ): Promise<SaveResult>
+  }
+
+  brief: {
+    /** The stored brief for `date`, or null. */
+    get(date: string): Promise<Brief | null>
+    /** Dates that have a stored brief, newest first. */
+    listDates(): Promise<string[]>
+    /** Today's snapshot, written on first call (desktop). Past/future dates are
+     *  read-only; the web never writes and resolves null. */
+    ensureSnapshot(date: string): Promise<Brief | null>
   }
 
   goals: {

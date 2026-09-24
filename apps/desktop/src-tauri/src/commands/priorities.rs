@@ -14,7 +14,6 @@ pub async fn get_daily_state(app: AppHandle) -> Result<DailyStateResponse, Strin
 #[tauri::command]
 pub async fn generate_priorities(
     app: AppHandle,
-    energy_level: String,
     calendar_summary: String,
     tasks_summary: String,
     obsidian_summary: String,
@@ -29,7 +28,6 @@ pub async fn generate_priorities(
 
     let priorities = nimble_core::api::anthropic::generate_priorities(
         &api_key,
-        &energy_level,
         &calendar_summary,
         &tasks_summary,
         &obsidian_summary,
@@ -37,8 +35,8 @@ pub async fn generate_priorities(
     .await
     .map_err(|e| e.to_string())?;
 
-    // Cache in daily_state
-    nimble_core::db::daily_state::save_priorities(pool.inner(), &energy_level, &priorities)
+    // Cache in daily_state (and patch today's brief snapshot)
+    nimble_core::db::daily_state::save_priorities(pool.inner(), &priorities)
         .await
         .map_err(|e| e.to_string())?;
 

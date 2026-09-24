@@ -340,6 +340,29 @@ const FOCUS_REPLICA_DDL: &str = "CREATE TABLE IF NOT EXISTS focus_replica (
     payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), as_of TEXT NOT NULL
 )";
 
+/// Remote DDL for the v23 `briefs` table. Mirrors `migrations.rs` version 23
+/// exactly, minus the `CHECK(status IN (...))` constraint — remote tables
+/// stay permissive, same as every other synced table here. Single
+/// definition shared by the fresh-init path and the `ensure_remote_v23_schema`
+/// upgrade gate so the two can never drift apart.
+const REMOTE_BRIEFS_DDL: &str = "CREATE TABLE IF NOT EXISTS briefs (
+    date TEXT PRIMARY KEY,
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'nimble',
+    layout_json TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    snapshot_schema INTEGER NOT NULL,
+    energy_level TEXT,
+    model TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    error_code TEXT,
+    notes TEXT,
+    generated_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)";
+
 /// Create all synced tables on the remote Turso database.
 /// Only runs once — checks for `turso_initialized` setting.
 pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
@@ -373,6 +396,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
                 other?;
                 ensure_remote_v21_schema(pool, turso_url, turso_token).await?;
                 ensure_remote_v22_schema(pool, turso_url, turso_token).await?;
+                ensure_remote_v23_schema(pool, turso_url, turso_token).await?;
                 return Ok(());
             },
         }
@@ -496,6 +520,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             focus_started_at TEXT,
             focus_paused_at TEXT
         )",
+        REMOTE_BRIEFS_DDL,
         // activity_log
         "CREATE TABLE IF NOT EXISTS activity_log (
             id TEXT PRIMARY KEY,
@@ -602,6 +627,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     .execute(pool)
     .await?;
     ensure_remote_v21_schema(pool, turso_url, turso_token).await?;
+    ensure_remote_v23_schema(pool, turso_url, turso_token).await?;
 
     Ok(())
 }
@@ -820,6 +846,21 @@ async fn ensure_remote_v22_schema(pool: &SqlitePool, turso_url: &str, turso_toke
     Ok(())
 }
 
+async fn ensure_remote_v23_schema(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='turso_schema_v23_upgraded'")
+        .fetch_optional(pool).await?;
+    if done.is_some() { return Ok(()); }
+    let requests = [
+        turso_execute(REMOTE_BRIEFS_DDL, vec![]),
+        serde_json::json!({"type":"close"}),
+    ];
+    let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
+    check_pipeline_statement_errors(&body, "Turso v23 schema upgrade", true)?;
+    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v23_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
+        .execute(pool).await?;
+    Ok(())
+}
+
 // ── Push ──
 
 /// Conflict target (primary-key columns) per synced table, for building the
@@ -827,7 +868,7 @@ async fn ensure_remote_v22_schema(pool: &SqlitePool, turso_url: &str, turso_toke
 fn conflict_target(table_name: &str) -> &'static str {
     match table_name {
         "task_labels" => "task_id, label_id",
-        "daily_state" => "date",
+        "daily_state" | "briefs" => "date",
         _ => "id",
     }
 }
@@ -1246,6 +1287,9 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     }
     if let Err(e) = ensure_remote_v22_schema(pool, turso_url, turso_token).await {
         log::warn!("Turso v22 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
+    if let Err(e) = ensure_remote_v23_schema(pool, turso_url, turso_token).await {
+        log::warn!("Turso v23 schema gate failed, pushing anyway (gate retries next push): {e}");
     }
 
     // Fetch all unsynced entries
@@ -1932,6 +1976,7 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
         "task_labels",
         "sections",
         "focus_replica",
+        "briefs",
     ];
 
     if ALLOWED.contains(&name) {
@@ -3124,6 +3169,24 @@ mod v19_sync_tests {
             "SELECT COUNT(*) FROM sync_log WHERE table_name = 'task_labels' AND row_id = ?",
         ).bind(&tl_row_id).fetch_one(&pool).await.unwrap();
         assert_eq!(tl_count, 1);
+    }
+
+    #[test]
+    fn briefs_sync_by_date() {
+        assert!(super::sanitize_table_name("briefs").is_ok());
+        let sql = super::build_snapshot_upsert_sql("briefs", &["date", "snapshot_json"]);
+        assert!(sql.contains("ON CONFLICT(date) DO UPDATE SET snapshot_json = excluded.snapshot_json"), "got {sql}");
+    }
+
+    #[tokio::test]
+    async fn a_pulled_brief_lands_and_reads_back() {
+        let pool = test_pool().await;
+        let snap = serde_json::json!({"date":"2026-09-22","version":1,"status":"ready","source":"nimble",
+            "layout_json":"[\"schedule\"]","snapshot_json":"{\"priorities\":null}","snapshot_schema":1,
+            "generated_at":"2026-09-22 07:00:00","updated_at":"2026-09-22 07:00:00"}).to_string();
+        super::apply_remote_change(&pool, "briefs", "2026-09-22", "INSERT", Some(&snap)).await.unwrap();
+        let b = crate::db::briefs::get_brief(&pool, "2026-09-22").await.unwrap().unwrap();
+        assert_eq!(b.layout, serde_json::json!(["schedule"]));
     }
 }
 

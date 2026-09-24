@@ -27,7 +27,7 @@ async fn v22_adds_archived_at() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(v, 22);
+    assert_eq!(v, 23);
     let p = nimble_core::db::projects::get_projects(&pool).await.unwrap();
     assert!(p.iter().find(|p| p.id == "inbox").unwrap().archived_at.is_none());
 }

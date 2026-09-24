@@ -24,6 +24,7 @@ export type ShortcutSection =
   | 'Docs'
   | 'Goals'
   | 'Session'
+  | 'Today'
 
 export interface Shortcut {
   section: ShortcutSection
@@ -141,6 +142,11 @@ export const SHORTCUTS: Shortcut[] = [
 
   // ── Goals: habits in the right column (Dashboard.tsx ⇧H → lib/rightRail.ts toggleHabits) ──
   { section: 'Goals', keys: '⇧H', label: 'Open / close habits in the right column' },
+
+  // ── Today: brief (TodayPage.tsx → lib/keyGuard.ts todayKey) ──
+  { section: 'Today', keys: 'b', label: 'Expand / compact the brief' },
+  { section: 'Today', keys: '[', label: "Previous day's brief" },
+  { section: 'Today', keys: ']', label: "Next day's brief" },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [
@@ -155,6 +161,7 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
   'Docs',
   'Goals',
   'Session',
+  'Today',
 ]
 
 export function shortcutsBySection(): { title: ShortcutSection; rows: Shortcut[] }[] {

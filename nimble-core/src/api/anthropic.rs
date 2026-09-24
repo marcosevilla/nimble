@@ -85,21 +85,13 @@ Return ONLY a JSON array of strings. No other text. Example: ["Step one", "Step 
     Ok(subtasks)
 }
 
-/// Generate top 3 priorities using Claude API
-pub async fn generate_priorities(
-    api_key: &str,
-    energy_level: &str,
-    calendar_summary: &str,
-    tasks_summary: &str,
-    obsidian_summary: &str,
-) -> crate::Result<Vec<Priority>> {
-    let prompt = format!(
+/// Build the priorities prompt. Load is inferred from the calendar, not a
+/// user-provided energy level.
+pub fn priorities_prompt(calendar_summary: &str, tasks_summary: &str, obsidian_summary: &str) -> String {
+    format!(
         r#"You are a personal daily coach for someone with ADHD. Based on today's data, pick the TOP 3 priorities they should focus on. Be warm but direct.
 
-Energy level: {energy_level}
-- High energy → recommend creative or hard thinking work
-- Medium energy → recommend meetings, reviews, collaborative work
-- Low energy → recommend mechanical tasks, admin, easy wins
+Infer how much today can hold from the calendar: a packed calendar means lighter, smaller priorities; an open day can take deeper, harder work.
 
 TODAY'S CALENDAR:
 {calendar_summary}
@@ -116,7 +108,17 @@ Return EXACTLY 3 priorities as a JSON array. Each item must have:
 - "reasoning": one sentence explaining why this is a priority right now (be specific, not generic)
 
 Respond with ONLY the JSON array, no other text."#
-    );
+    )
+}
+
+/// Generate top 3 priorities using Claude API
+pub async fn generate_priorities(
+    api_key: &str,
+    calendar_summary: &str,
+    tasks_summary: &str,
+    obsidian_summary: &str,
+) -> crate::Result<Vec<Priority>> {
+    let prompt = priorities_prompt(calendar_summary, tasks_summary, obsidian_summary);
 
     let client = reqwest::Client::new();
     let resp = client
@@ -159,4 +161,15 @@ Respond with ONLY the JSON array, no other text."#
         serde_json::from_str(clean).map_err(|e| crate::Error::Parse(format!("Failed to parse priorities JSON: {}. Raw: {}", e, clean)))?;
 
     Ok(priorities)
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    #[test]
+    fn priorities_prompt_infers_load_from_the_calendar_not_energy() {
+        let p = super::priorities_prompt("10:00–11:00: Call", "- Ship", "none");
+        assert!(!p.to_lowercase().contains("energy"), "{p}");
+        assert!(p.contains("packed calendar"));
+        assert!(p.contains("10:00–11:00: Call") && p.contains("- Ship"));
+    }
 }

@@ -53,9 +53,10 @@ pub(crate) const TABLES: &[TablePolicy] = &[
 /// V19 remains byte-for-byte compatible. V20 adds only reviewed user intent
 /// to portable data; device-local calendar and delivery state is excluded.
 /// V22 adds `projects.archived_at` (reviewed, included).
+/// V23 adds the reviewed, included `briefs` table (per-day brief snapshots).
 pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
     if version == 19 { return Some(TABLES.to_vec()); }
-    if version != 20 && version != 21 && version != 22 { return None; }
+    if version != 20 && version != 21 && version != 22 && version != 23 { return None; }
     let mut tables = TABLES.to_vec();
     for policy in &mut tables {
         match policy.name {
@@ -93,12 +94,15 @@ pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
             table!("focus_replica"; ["id","writer_device_id","owner_epoch","revision","queue_revision","payload_json","as_of"]; []),
         ]);
     }
-    if version == 22 {
+    if version >= 22 {
         for policy in &mut tables {
             if policy.name == "projects" {
                 *policy = table!("projects"; ["id","name","color","position","created_at","goal_id","milestone_id","external_id","external_source","remote_updated_at","synced_snapshot","parent_id","archived_at"]; ["id","name","color","position","created_at","goal_id","milestone_id","external_id","external_source","parent_id","archived_at"]);
             }
         }
+    }
+    if version >= 23 {
+        tables.push(table!("briefs"; ["date","version","status","source","layout_json","snapshot_json","snapshot_schema","energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at"]; ["date","version","status","source","layout_json","snapshot_json","snapshot_schema","energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at"]; ["date"]));
     }
     tables.sort_by_key(|policy| policy.name);
     Some(tables)

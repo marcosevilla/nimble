@@ -22,19 +22,27 @@ export function useCalendar() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedDate, setSelectedDate] = useState(todayString())
+  // The date whose load has settled (events shown, or the load gave up), so
+  // callers can tell "loaded this day" from "not loading yet" — just after a
+  // date change `loading` is still false from the previous day.
+  const [loadedDate, setLoadedDate] = useState<string | null>(null)
   const setCalendarEvents = useAppStore((s) => s.setCalendarEvents)
 
   const isToday = selectedDate === todayString()
 
   // Latest requested date, so a slow revalidation can't overwrite a newer day.
   const latestDate = useRef(selectedDate)
+  // The date the shown `events` belong to.
+  const shownDate = useRef<string | null>(null)
 
   const loadEventsForDate = useCallback(async (date: string, forceRefresh = false) => {
     latestDate.current = date
     const show = (data: CalendarEvent[]) => {
       if (latestDate.current !== date) return
       setEvents(data)
+      shownDate.current = date
       setLoading(false)
+      setLoadedDate(date)
       // If this is today, also update the app store
       if (date === todayString()) {
         setCalendarEvents(data)
@@ -47,9 +55,20 @@ export function useCalendar() {
     } catch (e) {
       // Inline "Calendar offline. / Retry" in the panel is the one channel;
       // a toast here fired on every day change (shell P2-6, §3.2).
-      if (latestDate.current === date) setError(friendlyError(e))
+      if (latestDate.current === date) {
+        setError(friendlyError(e))
+        // Nothing for this day could be shown: don't leave the previous
+        // day's events standing under the new date.
+        if (shownDate.current !== date) {
+          setEvents([])
+          shownDate.current = date
+        }
+      }
     } finally {
-      if (latestDate.current === date) setLoading(false)
+      if (latestDate.current === date) {
+        setLoading(false)
+        setLoadedDate(date)
+      }
     }
   }, [dp, setCalendarEvents])
 
@@ -83,6 +102,7 @@ export function useCalendar() {
     error,
     loading,
     selectedDate,
+    loadedDate,
     isToday,
     setDate,
     goToToday,

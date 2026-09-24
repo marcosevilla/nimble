@@ -337,6 +337,21 @@ pub struct Priority {
     pub reasoning: String,
 }
 
+// ── Briefs ──
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Brief {
+    pub date: String,
+    pub version: i64,
+    pub status: String,
+    pub source: String,
+    pub layout: serde_json::Value,     // ["schedule","priorities","due_today","still_open","vault"]
+    pub snapshot: serde_json::Value,   // BriefSnapshotV1
+    pub snapshot_schema: i64,          // 1
+    pub generated_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DailyStateResponse {
     pub date: String,
