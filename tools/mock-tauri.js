@@ -781,6 +781,90 @@
     }
   } catch (e) { /* noop */ }
 
+  // ── Briefs (morning brief phase 1) ───────────────────────────────────────
+  // Field names/shape mirror nimble-core's Brief + BriefSnapshotV1
+  // (nimble-core/src/db/briefs.rs). Keyed by date, newest-first is computed
+  // by brief_list_dates, not by insertion order here.
+
+  var BRIEFS = {
+    '2026-07-31': {
+      date: '2026-07-31',
+      version: 1,
+      status: 'ready',
+      source: 'nimble',
+      layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault'],
+      snapshot: {
+        schedule: {
+          events: [
+            {
+              id: 'evt-past-01',
+              summary: 'Portfolio review with Jordan',
+              description: null,
+              location: null,
+              start_time: iso('2026-07-31', '10:00:00'),
+              end_time: iso('2026-07-31', '11:00:00'),
+              all_day: false,
+              meeting_url: null,
+              date: '2026-07-31',
+              feed_label: 'Personal',
+              feed_color: '#5e6ad2',
+            },
+            {
+              id: 'evt-past-02',
+              summary: 'Dentist appointment',
+              description: null,
+              location: 'SoMa Dental',
+              start_time: iso('2026-07-31', '15:30:00'),
+              end_time: iso('2026-07-31', '16:15:00'),
+              all_day: false,
+              meeting_url: null,
+              date: '2026-07-31',
+              feed_label: 'Personal',
+              feed_color: '#5e6ad2',
+            },
+          ],
+          tomorrow: [],
+        },
+        priorities: [
+          {
+            title: 'Send the Canary case study draft to Jordan for feedback',
+            source: 'Portfolio · task',
+            reasoning: 'Review is booked for 10am — send it the night before so there is time to read.',
+          },
+          {
+            title: 'Confirm the Turnstile photo pass',
+            source: 'Calendar · this week',
+            reasoning: 'Door list closes Friday; a quick email now avoids a scramble later.',
+          },
+          {
+            title: 'Pay the storage unit invoice',
+            source: 'Life Admin · due today',
+            reasoning: 'Autopay lapsed last month — a manual payment keeps the account current.',
+          },
+        ],
+        due_today: [
+          { id: 'task-past-01', content: 'Pay the storage unit invoice', due_date: '2026-07-31', priority: 3, project_id: 'proj-life' },
+          { id: 'task-past-02', content: 'Send case study draft to Jordan', due_date: '2026-07-31', priority: 4, project_id: 'proj-portfolio' },
+        ],
+        still_open: {
+          total: 4,
+          oldest: [
+            { id: 'task-past-03', content: 'Renew passport', due_date: '2026-07-10', priority: 2, project_id: 'proj-life' },
+            { id: 'task-past-04', content: 'Back up old hard drive', due_date: '2026-07-18', priority: 1, project_id: 'proj-taskapp' },
+            { id: 'task-past-05', content: 'Reply to venue about Nov booking', due_date: '2026-07-25', priority: 2, project_id: 'proj-photo' },
+          ],
+        },
+      },
+      snapshot_schema: 1,
+      generated_at: '2026-07-31 07:05:00',
+      updated_at: '2026-07-31 07:05:00',
+    },
+  }
+
+  function briefTaskRef(t) {
+    return { id: t.id, content: t.content, due_date: t.due_date, priority: t.priority, project_id: t.project_id }
+  }
+
   // ── Obsidian today.md ────────────────────────────────────────────────────
 
   var TODAY_MD = {
@@ -1080,6 +1164,42 @@
     // Daily state / AI priorities
     get_daily_state: function () { return DAILY_STATE },
     generate_priorities: function () { return DAILY_STATE.priorities },
+
+    // Morning brief (phase 1)
+    brief_get: function (args) { return BRIEFS[args && args.date] || null },
+    brief_list_dates: function () {
+      return Object.keys(BRIEFS).sort().reverse()
+    },
+    brief_ensure_snapshot: function (args) {
+      var date = args && args.date
+      if (date !== TODAY) return BRIEFS[date] || null
+      if (BRIEFS[date]) return BRIEFS[date]
+
+      var topLevelOpen = TASKS.filter(function (t) { return !t.parent_id && !t.completed })
+      var dueToday = topLevelOpen.filter(function (t) { return t.due_date === TODAY }).map(briefTaskRef)
+      var stillOpen = topLevelOpen
+        .filter(function (t) { return t.due_date && t.due_date < TODAY })
+        .sort(function (a, b) { return a.due_date < b.due_date ? -1 : a.due_date > b.due_date ? 1 : 0 })
+
+      var brief = {
+        date: date,
+        version: 1,
+        status: 'ready',
+        source: 'nimble',
+        layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault'],
+        snapshot: {
+          schedule: { events: CALENDAR_EVENTS.slice(), tomorrow: [] },
+          priorities: DAILY_STATE.priorities,
+          due_today: dueToday,
+          still_open: { total: stillOpen.length, oldest: stillOpen.slice(0, 5).map(briefTaskRef) },
+        },
+        snapshot_schema: 1,
+        generated_at: iso(TODAY, '07:00:00').replace('T', ' '),
+        updated_at: iso(TODAY, '07:00:00').replace('T', ' '),
+      }
+      BRIEFS[date] = brief
+      return brief
+    },
     break_down_task: function () {
       return [
         'Pick the three strongest frames from the set',

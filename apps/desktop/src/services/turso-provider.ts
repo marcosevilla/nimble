@@ -44,6 +44,7 @@ import { listLabels } from '@/services/turso/labels'
 import { listSections } from '@/services/turso/sections'
 import { readFocusHistory, readFocusSnapshot } from '@/services/turso/focus'
 import { focusUnsupported } from '@/services/focus-events'
+import { getBrief, listBriefDates } from '@/services/turso/briefs'
 
 const WEB_FOCUS_REASON =
   'The web shows the settled focus queue and history. Start, reorder, timing and import happen in the desktop app.'
@@ -266,6 +267,13 @@ export function createTursoProvider(): DataProvider {
       readDailyBrief: ni('dailyState.readDailyBrief'),
       listBriefDates: ni('dailyState.listBriefDates'),
       saveProgress: ni('dailyState.saveProgress'),
+    },
+
+    // Read-only on the web: snapshots are written by the Mac at first open.
+    brief: {
+      get: getBrief,
+      listDates: listBriefDates,
+      ensureSnapshot: () => Promise.resolve(null),
     },
 
     // Out of v1 (§5).

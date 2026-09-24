@@ -166,6 +166,12 @@ export function createTauriProvider(): DataProvider {
       saveProgress: tauri.saveProgress,
     },
 
+    brief: {
+      get: tauri.getBrief,
+      listDates: tauri.listBriefSnapshots,
+      ensureSnapshot: tauri.ensureBriefSnapshot,
+    },
+
     goals: {
       list: tauri.getGoals,
       get: tauri.getGoal,

@@ -2,6 +2,7 @@ pub mod reminders;
 pub mod google_calendar;
 pub mod activity;
 pub mod ai;
+pub mod brief;
 pub mod calendar;
 pub mod capture_routes;
 pub mod captures;

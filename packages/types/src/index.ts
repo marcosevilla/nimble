@@ -78,6 +78,35 @@ export interface DailyState {
   review_complete: boolean
 }
 
+// ── Briefs ──
+
+export interface BriefTaskRef {
+  id: string
+  content: string
+  due_date: string | null
+  priority: number
+  project_id: string
+}
+
+export interface BriefSnapshotV1 {
+  schedule: { events: CalendarEvent[]; tomorrow: CalendarEvent[] }
+  priorities: Priority[] | null
+  due_today: BriefTaskRef[]
+  still_open: { total: number; oldest: BriefTaskRef[] }
+}
+
+export interface Brief {
+  date: string
+  version: number
+  status: 'ready' | 'partial' | 'fallback' | 'failed'
+  source: 'nimble' | 'legacy_vault'
+  layout: string[]
+  snapshot: BriefSnapshotV1
+  snapshot_schema: number
+  generated_at: string
+  updated_at: string
+}
+
 // ── Projects ──
 
 export interface Project {
