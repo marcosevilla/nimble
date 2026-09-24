@@ -62,6 +62,24 @@
     "link-name": 1,
     "nested-interactive": 1
   },
+  "task-detail": {
+    "aria-required-children": 1,
+    "button-name": 8,
+    "color-contrast": 1,
+    "label": 2,
+    "link-name": 1,
+    "nested-interactive": 3,
+    "scrollable-region-focusable": 1
+  },
+  "task-detail:dark": {
+    "aria-required-children": 1,
+    "button-name": 8,
+    "color-contrast": 1,
+    "label": 2,
+    "link-name": 1,
+    "nested-interactive": 3,
+    "scrollable-region-focusable": 1
+  },
   "tasks": {
     "aria-required-children": 1,
     "button-name": 8,
