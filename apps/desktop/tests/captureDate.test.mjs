@@ -88,6 +88,54 @@ test('isKeepAsTextKey: Backspace with the caret right after the date span', () =
   assert.equal(isKeepAsTextKey({ ...base, selectionStart: spanEnd - 1, selectionEnd: spanEnd - 1 }), false)
   assert.equal(isKeepAsTextKey({ ...base, metaKey: true }), false)
   assert.equal(isKeepAsTextKey({ ...base, altKey: true }), false)
+  assert.equal(isKeepAsTextKey({ ...base, ctrlKey: true }), false)
   assert.equal(isKeepAsTextKey({ ...base, key: 'Delete' }), false)
   assert.equal(isKeepAsTextKey({ ...base, selectionStart: null, selectionEnd: null }), false)
+})
+
+// --- Fix round 1 (Opus review + controller rulings) ---
+
+test('day + bare hour rejects the whole match (ambiguous, no meridiem)', () => {
+  assert.equal(parseCaptureDate('dentist fri at 3', ref), null)
+  assert.equal(parseCaptureDate('dentist tomorrow at 10:30', ref), null)
+  assert.equal(parseCaptureDate('dentist fri at 15:00', ref).dueTime, '15:00')
+})
+
+test('recurrence anywhere in the text yields no date at all', () => {
+  for (const text of [
+    'water plants every friday',
+    'stretch each monday',
+    'every day at 9am meds',
+    'every 2 weeks on friday',
+    'call mom every other friday',
+    'hike friday every week',
+    'gym every mon and fri',
+    'standup weekdays at 9am',
+  ]) {
+    assert.equal(parseCaptureDate(text, ref), null, text)
+  }
+})
+
+test('a possessive right after the match is not a date reference', () => {
+  assert.equal(parseCaptureDate("read today's paper", ref), null)
+  assert.equal(parseCaptureDate('review friday’s notes', ref), null)
+  assert.equal(parseCaptureDate("look at tomorrow's plan", ref), null)
+})
+
+test('past dates are skipped', () => {
+  assert.equal(parseCaptureDate('called mom yesterday', ref), null)
+  assert.equal(parseCaptureDate('call at 9am', ref).dueDate, '2026-09-24')
+})
+
+test('the label carries the year when it differs from ref\'s year', () => {
+  const r = parseCaptureDate('renew passport jan 5', ref)
+  assert.equal(r.dueDate, '2027-01-05')
+  assert.equal(r.label, 'Tue, Jan 5, 2027')
+})
+
+test('weekday matching the same day as ref reads Today', () => {
+  const fri = new Date(2026, 8, 25, 10, 0) // Fri Sep 25 2026, 10:00 local
+  const r = parseCaptureDate('call mom friday', fri)
+  assert.equal(r.dueDate, '2026-09-25')
+  assert.equal(r.label, 'Today')
 })
