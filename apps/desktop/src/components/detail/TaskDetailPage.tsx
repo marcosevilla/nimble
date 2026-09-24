@@ -22,6 +22,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { MetadataChips, type ChipValues } from '@/components/tasks/MetadataChips'
 import { taskPatchToUpdate } from '@/lib/taskPatch'
 import { TaskItem, type TaskItemData } from '@/components/tasks/TaskItem'
+import { SortableRows, SortableRow } from '@/components/tasks/SortableTaskList'
+import { useSelectionStore } from '@/stores/selectionStore'
 import { labelColor } from '@/lib/labelColors'
 import { DetailBreadcrumbs } from './DetailBreadcrumbs'
 import { TaskActivityLog } from './TaskActivityLog'
@@ -56,6 +58,16 @@ export function TaskDetailPage() {
   // `projects` (active-only) feeds the "Move to project…" picker below —
   // archived projects shouldn't be a move target.
   const { projects } = useProjects()
+
+  // Subtask selection belongs to this page (C2): it starts empty — a list
+  // selection from just before doesn't carry in — and clears when the page
+  // goes (back to the list, drilling into another task), so it never bleeds
+  // into a list either. Page switches clear it too (Dashboard).
+  const targetId = target?.id
+  useEffect(() => {
+    useSelectionStore.getState().clear()
+    return () => useSelectionStore.getState().clear()
+  }, [targetId])
 
   const [breakingDown, setBreakingDown] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
@@ -349,6 +361,7 @@ export function TaskDetailPage() {
       .filter((l): l is Label => !!l)
       .map((l) => ({ name: l.name, color: labelColor(l.color) })),
   }))
+  const subtaskById = new Map(subtaskItems.map((item) => [item.id, item]))
 
   return (
     <>
@@ -497,18 +510,34 @@ export function TaskDetailPage() {
         <div className="flex flex-col">
           <p className="text-body-strong pb-1">Subtask</p>
 
+          {/* Same rows as the main lists (C1/C2): grip to reorder (pointer or
+              grip → Space → arrows → Space), persisted with
+              dp.tasks.reorder(subtask ids); a checkbox to select, with
+              shift-click ranges over the subtasks in display order, acted
+              on by the bulk action bar. */}
           {subtaskItems.length > 0 && (
-            <div className="space-y-0.5">
-              {subtaskItems.map((item) => (
-                <TaskItem
-                  key={item.id}
-                  task={item}
-                  onOpen={() => drillDown({ type: 'task', id: item.id })}
-                  showGrip={false}
-                  selectable={false}
-                />
-              ))}
-            </div>
+            <SortableRows ids={subtaskItems.map((item) => item.id)} onReordered={emitTasksChanged}>
+              {(order) => (
+                <div className="space-y-0.5">
+                  {order.map((id) => {
+                    const item = subtaskById.get(id)
+                    if (!item) return null
+                    return (
+                      <SortableRow key={id} id={id}>
+                        {(dragHandleProps) => (
+                          <TaskItem
+                            task={item}
+                            onOpen={() => drillDown({ type: 'task', id })}
+                            allIds={order}
+                            dragHandleProps={dragHandleProps}
+                          />
+                        )}
+                      </SortableRow>
+                    )
+                  })}
+                </div>
+              )}
+            </SortableRows>
           )}
 
           {/* AI breakdown loading state */}

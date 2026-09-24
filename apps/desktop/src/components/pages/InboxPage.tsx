@@ -506,11 +506,13 @@ function InboxNoteRow({
             : '[--row-tint:transparent]',
       )}
     >
-      <div className="absolute right-full top-0 flex h-9 items-center gap-1 pr-2">
+      {/* Same cluster slot and content inset as a task row (TaskItem), so
+          notes and tasks share one column (Marco 2026-09-24 option A). */}
+      <div className="absolute right-[calc(100%-1.375rem)] top-0 flex h-9 items-center gap-1">
         <SelectionCheckbox id={capture.id} type="capture" />
       </div>
 
-      <div className="flex flex-1 h-9 items-center gap-3 min-w-0 ml-4 border-b border-secondary">
+      <div className="flex flex-1 h-9 items-center gap-3 min-w-0 ml-8 border-b border-secondary">
         <PenLine className="size-4 shrink-0 text-muted-foreground" />
 
         <span className="flex-1 min-w-0 truncate text-body">{capture.content}</span>

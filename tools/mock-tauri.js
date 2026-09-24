@@ -15,6 +15,16 @@
     return date + 'T' + (time || '09:00:00')
   }
 
+  // The page clock as Rust stamps it: datetime('now','localtime') →
+  // local "YYYY-MM-DD HH:MM:SS". Playwright's page.clock drives `new Date()`,
+  // so specs can tell a cascade apart from an earlier completion.
+  function nowStamp() {
+    var d = new Date()
+    var p = function (n) { return String(n).padStart(2, '0') }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+      ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
+  }
+
   // Deterministic pseudo-random 0..1 from a string seed (for habit history)
   function hash01(str) {
     var h = 2166136261
@@ -1088,6 +1098,30 @@
     return TASKS.find(function (t) { return t.id === id }) || null
   }
 
+  function setTaskStatus(t, status) {
+    var at = nowStamp()
+    if (status === 'complete') {
+      if (t.completed && t.status === 'complete') return
+      t.status = status
+      t.completed = true
+      t.completed_at = at
+      t.updated_at = at
+      if (t.recurrence_rule && t.due_date) return
+      TASKS.forEach(function (c) {
+        if (c.parent_id !== t.id || c.completed) return
+        c.status = 'complete'
+        c.completed = true
+        c.completed_at = at
+        c.updated_at = at
+      })
+      return
+    }
+    t.status = status
+    t.completed = false
+    t.completed_at = null
+    t.updated_at = at
+  }
+
   var backupScenario = new URLSearchParams(window.location.search).get('backup') || 'local'
   var backupMock = {
     running: backupScenario === 'working', disabled_reason: null,
@@ -1376,34 +1410,25 @@
       t.updated_at = iso(TODAY, '10:00:00')
       return Object.assign({}, t)
     },
+    // Mirrors Rust set_status_tx (nimble-core/src/db/task_tx.rs): completing
+    // stamps the task, then cascades to every child still open with the SAME
+    // completed_at/updated_at; any other status touches only the task itself
+    // (completed_at → null), never its children. Recurring parents reschedule
+    // in Rust and don't cascade — the mock doesn't model the reschedule, but
+    // it doesn't cascade them either.
     update_task_status: function (args) {
       var t = findTask(args && args.id)
-      if (t && args && args.status) {
-        t.status = args.status
-        t.completed = args.status === 'complete'
-        t.completed_at = t.completed ? iso(TODAY, '10:05:00') : null
-        t.updated_at = iso(TODAY, '10:05:00')
-      }
+      if (t && args && args.status) setTaskStatus(t, args.status)
       return null
     },
     complete_local_task: function (args) {
       var t = findTask(args && args.id)
-      if (t) {
-        t.completed = true
-        t.status = 'complete'
-        t.completed_at = iso(TODAY, '10:05:00')
-        t.updated_at = iso(TODAY, '10:05:00')
-      }
+      if (t) setTaskStatus(t, 'complete')
       return null
     },
     uncomplete_local_task: function (args) {
       var t = findTask(args && args.id)
-      if (t) {
-        t.completed = false
-        t.status = 'todo'
-        t.completed_at = null
-        t.updated_at = iso(TODAY, '10:05:00')
-      }
+      if (t) setTaskStatus(t, 'todo')
       return null
     },
     delete_local_task: function (args) {

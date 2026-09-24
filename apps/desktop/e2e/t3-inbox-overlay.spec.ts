@@ -288,7 +288,9 @@ for (const theme of ['light', 'dark'] as Theme[]) {
         const r = await box(row)
         const first = await box(action(row, 0))
         const midY = r.y + r.height / 2
-        const rowBg = await pixel(page, r.x + 8, midY)
+        // Marco 2026-09-24 option A: row content +16px for 24px grip (was r.x + 8,
+        // now under the selected checkbox).
+        const rowBg = await pixel(page, r.x + 24, midY)
         const fadeEnd = await pixel(page, first.x + 2, midY)
         for (let c = 0; c < 3; c++) {
           expect(Math.abs(fadeEnd[c] - rowBg[c]), `fade end ${fadeEnd} vs row bg ${rowBg} (channel ${c})`).toBeLessThanOrEqual(6)

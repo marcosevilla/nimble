@@ -7,7 +7,7 @@ import { SelectionCheckbox } from '@/components/shared/SelectionCheckbox'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { PriorityMark, DueMark, LabelMarks, ProjectMark, RowEndPicker, type RowMarkTask } from './RowMarks'
 import { rowPickerKind, type RowPickerKind } from '@/lib/rowPickerKeys'
-import { decideRowKey } from '@/lib/rowNav'
+import { decideRowKey, hasOpenOverlay } from '@/lib/rowNav'
 import { useRowPickerStore } from '@/stores/rowPickerStore'
 import { dueBadgeLabel } from '@/lib/dueLabel'
 import type { TaskStatus } from '@nimble/types'
@@ -130,12 +130,8 @@ interface TaskItemProps {
    * drag reordering is disabled and a dead grip icon would be misleading.
    * Defaults to true so other call sites are unaffected. */
   showGrip?: boolean
-  /** Hides the SelectionCheckbox entirely — used by TaskDetailPage's subtask
-   * rows, which have no action bar mountable in body-mode detail (BulkActionBar
-   * is gated to the tasks list page, SelectionActionBar lives on list pages
-   * that are unmounted here), so a hover-revealed checkbox there would be a
-   * dead end only escapable via Escape. Defaults to true so list-page call
-   * sites keep selecting. */
+  /** Hides the SelectionCheckbox entirely, for a surface with no bulk action
+   * bar to act on the selection. Defaults to true. */
   selectable?: boolean
   /** Trailing row actions (focus-queue icon + overflow menu) rendered after
    * the metadata. Interactive children must stop click propagation. */
@@ -182,11 +178,12 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
       onKeyDown={(e) => {
         // p · ⇧D · l · m open this row's pickers (T2) — from the row or a
         // control in it, never from a field, an open popup (React bubbles
-        // portal keys through here) or while another row picker is open.
+        // portal keys through here), while any popup is showing (even before
+        // it takes focus) or while another row picker is open.
         const pickerKind = markTask ? rowPickerKind(e) : null
         if (pickerKind) {
           const decision = decideRowKey(e.target, e.key)
-          if (decision.handle && decision.rowId === rowId && !useRowPickerStore.getState().open) {
+          if (decision.handle && decision.rowId === rowId && !useRowPickerStore.getState().open && !hasOpenOverlay()) {
             e.preventDefault()
             useRowPickerStore.getState().openPicker(rowId, pickerKind, hasMark[pickerKind] ? 'mark' : 'row')
           }
@@ -212,23 +209,28 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
         className,
       )}
     >
-      {/* Hover cluster — grip then checkbox, absolutely positioned to hang
-          OUTSIDE the list column to the left (Marco QA round 3, item 1).
-          They no longer occupy in-flow slots, so the status icon below stays
-          flush with the section/page title's `pl-4` left edge whether or
-          not the cluster is revealed. `right-full` pins the cluster's right
-          edge to this row's own left edge (before the content's `ml-4`), so
-          it never nudges the border or the status icon. */}
+      {/* Hover cluster — grip then checkbox, absolutely positioned so it
+          never occupies an in-flow slot: the status icon's x is the same
+          whether or not the cluster is revealed (Marco QA round 3, item 1).
+          It lives in the strip left of the status icon — the column's 24px
+          gutter plus the row's 32px content inset (Marco 2026-09-24 option A:
+          +16px so the grip is a full 24×24 target). Hit areas abut, never
+          overlap: grip [-22, +2), checkbox (24px ::after) [+2, +26), status
+          trigger from +26 (its glyph at +32). It used to hang wholly outside
+          the row (`right-full`), which at 1440 put the grip past the list's
+          `overflow-x-hidden` scroller edge: clipped and unclickable
+          (Agentation pass 3, C4). */}
       {(showGrip || selectable) && (
-        <div className="absolute right-full top-0 flex h-9 items-center gap-1 pr-2">
+        <div className="absolute right-[calc(100%-1.375rem)] top-0 flex h-9 items-center gap-1">
           {/* dnd-kit's attributes make the grip a focusable button — so it
               reveals on focus-within too, never an invisible tab stop, and
-              the 12px glyph gets a 24px target (P1-2, P3-3). */}
+              shows at once (no fade) when it holds keyboard focus itself.
+              The ring is inset: the grip sits at the scroller's edge. */}
           {showGrip && (
             <button
               type="button"
               aria-label="Drag to reorder"
-              className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+              className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:transition-none focus-visible:-outline-offset-2"
               onClick={(e) => e.stopPropagation()}
               {...dragHandleProps}
             >
@@ -240,10 +242,10 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
       )}
 
       {/* Content — offset via margin (not padding) so the border below
-          starts exactly at the status icon's left edge (matching the
-          section/page title's `pl-4` inset) instead of under the gutter or
-          the overhanging hover cluster. */}
-      <div className="flex flex-1 h-9 items-center gap-3 min-w-0 ml-4 border-b border-secondary">
+          starts exactly at the status icon's left edge instead of under the
+          gutter or the hover cluster. 32px: room for the cluster's 24px
+          targets (Marco 2026-09-24 option A). */}
+      <div className="flex flex-1 h-9 items-center gap-3 min-w-0 ml-8 border-b border-secondary">
         {/* Status (before priority per updated row anatomy) */}
         {task.source === 'local' && task.status ? (
           <StatusDropdown taskId={task.id} status={task.status} dueDate={task.dueDate} />

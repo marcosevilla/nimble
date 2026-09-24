@@ -71,6 +71,13 @@ export const OVERLAY_SELECTOR =
 /** A roving tree (the nav's Docs and project trees) owns every key typed
  * in it: its arrows move tree focus, its letters are not row actions
  * (re-score docs N-P1-1). */
+/** True while any popover, menu, listbox or dialog is showing anywhere —
+ * not only when focus is already inside it. Base UI moves focus into a popup
+ * a frame after it opens, and a key typed in that gap reached the row. */
+export function hasOpenOverlay(doc: Document = document): boolean {
+  return Array.from(doc.querySelectorAll(OVERLAY_SELECTOR)).some((el) => el.getClientRects().length > 0)
+}
+
 export const TREE_SELECTOR = '[role="tree"]'
 
 export interface RowKeyDecision {

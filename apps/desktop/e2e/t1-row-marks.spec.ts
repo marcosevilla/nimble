@@ -470,7 +470,8 @@ for (const s of Object.values(SURFACES)) {
     const row = rowOf(page, s.row)
     const g = await rowGeometry(row, s)
     expect(g.height).toBe(36)
-    expect(g.titleLeft).toBeCloseTo(68, 0)
+    // Marco 2026-09-24 option A: row content +16px for 24px grip (was 68).
+    expect(g.titleLeft).toBeCloseTo(84, 0)
     for (const [t, want] of Object.entries(s.rightTexts)) expect(g.right[t], `${t} offset from row end`).toBeCloseTo(want, 0)
     await expectNoClipping(row, { allowEllipsis: true })
   })
