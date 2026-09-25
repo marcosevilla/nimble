@@ -190,6 +190,9 @@ pub struct CompositionRecord {
     pub bump_version: bool,
     /// Regenerate: freshly gathered `(layout_json, snapshot_json)`.
     pub regathered: Option<(serde_json::Value, serde_json::Value)>,
+    /// The snapshot is `partial` (a module failed to gather): an AI success
+    /// keeps that flag instead of flipping the row to `ready`.
+    pub partial: bool,
     /// Local "YYYY-MM-DD HH:MM:SS".
     pub now: String,
 }
@@ -209,7 +212,7 @@ pub async fn record_composition(pool: &SqlitePool, rec: &CompositionRecord) -> c
         b.snapshot = serde_json::json!({});
     }
     b.snapshot["compose"] = rec.compose.clone();
-    b.status = rec.status.clone();
+    b.status = if rec.status == "ready" && rec.partial { "partial".into() } else { rec.status.clone() };
     b.model = rec.model.clone();
     b.input_tokens = rec.input_tokens;
     b.output_tokens = rec.output_tokens;
@@ -230,9 +233,22 @@ pub async fn record_composition(pool: &SqlitePool, rec: &CompositionRecord) -> c
     .execute(&mut *tx).await?;
     let cols = serde_json::json!(["version","status","layout_json","snapshot_json","model","input_tokens","output_tokens","error_code","composed_at","compose_attempts","updated_at"]).to_string();
     sync::append_sync_log_tx(&mut tx, "briefs", &b.date, "UPDATE", Some(&cols), Some(&sync_snapshot(&b))).await?;
-    crate::db::brief_items::replace_unacted_tx(&mut tx, &rec.date, &rec.items, &rec.now).await?;
+    crate::db::brief_items::replace_unacted_tx(&mut tx, &rec.date, &rec.items, &rec.now, &rec.now).await?;
     tx.commit().await?;
     Ok(b)
+}
+
+/// Count an automatic attempt before its network call, so a crash, quit or
+/// failed write mid-call still uses one of the day's 3 attempts. Returns the
+/// new count. Device bookkeeping: the next composition write syncs it.
+pub async fn begin_attempt(pool: &SqlitePool, date: &str) -> crate::Result<i64> {
+    let n: Option<i64> = sqlx::query_scalar(
+        "UPDATE briefs SET compose_attempts = compose_attempts + 1 WHERE date = ? RETURNING compose_attempts",
+    )
+    .bind(date)
+    .fetch_optional(pool)
+    .await?;
+    n.ok_or_else(|| crate::Error::Other("brief_missing".into()))
 }
 
 /// A retry that failed again while rule-based picks are already on screen:

@@ -33,7 +33,7 @@ pub fn dedupe_key(kind: &str, task_id: &str) -> String {
     format!("{kind}:{task_id}")
 }
 
-const ITEM_COLS: &str = "bi.id, bi.date, bi.module_id, bi.kind, bi.title, bi.body, bi.task_id, bi.origin, bi.dedupe_key, bi.action_kind, bi.action_state, bi.produced_ref, bi.position, bi.created_at, bi.updated_at, t.status AS t_status, t.completed AS t_completed, t.due_date AS t_due_date, t.content AS t_content, t.description AS t_description, t.project_id AS t_project_id";
+const ITEM_COLS: &str = "bi.id, bi.date, bi.module_id, bi.kind, bi.title, bi.body, bi.task_id, bi.origin, bi.dedupe_key, bi.action_kind, bi.action_state, bi.produced_ref, bi.position, bi.created_at, bi.updated_at, bi.composed_at, t.status AS t_status, t.completed AS t_completed, t.due_date AS t_due_date, t.content AS t_content, t.description AS t_description, t.project_id AS t_project_id";
 const ORDER: &str = "ORDER BY CASE bi.kind WHEN 'priority' THEN 0 WHEN 'quick_help' THEN 1 WHEN 'quick_self' THEN 2 ELSE 3 END, bi.position, bi.id";
 
 #[derive(sqlx::FromRow)]
@@ -53,6 +53,7 @@ struct ItemRow {
     position: i64,
     created_at: String,
     updated_at: String,
+    composed_at: Option<String>,
     t_status: Option<String>,
     t_completed: Option<bool>,
     t_due_date: Option<String>,
@@ -77,7 +78,7 @@ fn to_item(r: ItemRow) -> BriefItem {
         id: r.id, date: r.date, module_id: r.module_id, kind: r.kind, title: r.title, body: r.body,
         task_id: r.task_id, origin: r.origin, dedupe_key: r.dedupe_key, action_kind: r.action_kind,
         action_state: r.action_state, produced_ref: r.produced_ref, position: r.position,
-        created_at: r.created_at, updated_at: r.updated_at, task,
+        created_at: r.created_at, updated_at: r.updated_at, composed_at: r.composed_at, task,
     }
 }
 
@@ -88,14 +89,20 @@ fn sync_snapshot(i: &BriefItem) -> String {
         "body": i.body, "task_id": i.task_id, "origin": i.origin, "dedupe_key": i.dedupe_key,
         "action_kind": i.action_kind, "action_state": i.action_state, "produced_ref": i.produced_ref,
         "position": i.position, "created_at": i.created_at, "updated_at": i.updated_at,
+        "composed_at": i.composed_at,
     })
     .to_string()
 }
 
 /// Items for a date, each joined with its task's live state, in display order.
+/// Only the brief's current composition (matching `composed_at` stamp) plus
+/// anything already acted on: rows another Mac composed for the same day
+/// arrive by sync but never merge into this one's picks.
 pub async fn list_items(pool: &SqlitePool, date: &str) -> crate::Result<Vec<BriefItem>> {
     let rows: Vec<ItemRow> = sqlx::query_as(&format!(
-        "SELECT {ITEM_COLS} FROM brief_items bi LEFT JOIN local_tasks t ON t.id = bi.task_id WHERE bi.date = ? {ORDER}"
+        "SELECT {ITEM_COLS} FROM brief_items bi LEFT JOIN local_tasks t ON t.id = bi.task_id
+         LEFT JOIN briefs b ON b.date = bi.date
+         WHERE bi.date = ? AND (bi.action_state != 'none' OR bi.composed_at IS b.composed_at) {ORDER}"
     ))
     .bind(date)
     .fetch_all(pool)
@@ -148,29 +155,46 @@ pub async fn set_item_state(
     Ok(item)
 }
 
-/// Inside the composition transaction: drop the date's un-acted rows, insert
-/// the new ones. A new row whose id already exists (an acted-on row for the
-/// same task and kind) is ignored, so acted-on rows keep their state.
+/// Inside the composition transaction. Un-acted rows that aren't picked again
+/// are deleted; a re-picked un-acted row is UPDATEd in place (never DELETE +
+/// INSERT of the same id in one transaction: a peer that orders the two log
+/// entries the other way round would end up deleting it); acted-on rows keep
+/// their state. Every written row carries `stamp` (the brief's `composed_at`).
 pub(crate) async fn replace_unacted_tx(
     conn: &mut SqliteConnection,
     date: &str,
     items: &[NewBriefItem],
     now: &str,
+    stamp: &str,
 ) -> crate::Result<()> {
-    let stale: Vec<String> = sqlx::query_scalar("SELECT id FROM brief_items WHERE date = ? AND action_state = 'none'")
-        .bind(date)
-        .fetch_all(&mut *conn)
-        .await?;
-    for id in &stale {
-        sqlx::query("DELETE FROM brief_items WHERE id = ?").bind(id).execute(&mut *conn).await?;
-        sync::append_sync_log_tx(&mut *conn, "brief_items", id, "DELETE", None, None).await?;
-    }
     for it in items {
         if !KINDS.contains(&it.kind.as_str()) || !ORIGINS.contains(&it.origin.as_str()) {
             return Err(crate::Error::Other(format!("invalid brief item {}/{}", it.kind, it.origin)));
         }
+    }
+    let picked: HashSet<String> = items.iter().map(|it| item_id(date, &it.kind, &it.task_id)).collect();
+    let stale: Vec<String> = sqlx::query_scalar("SELECT id FROM brief_items WHERE date = ? AND action_state = 'none'")
+        .bind(date)
+        .fetch_all(&mut *conn)
+        .await?;
+    for id in stale.iter().filter(|id| !picked.contains(*id)) {
+        sqlx::query("DELETE FROM brief_items WHERE id = ?").bind(id).execute(&mut *conn).await?;
+        sync::append_sync_log_tx(&mut *conn, "brief_items", id, "DELETE", None, None).await?;
+    }
+    for it in items {
+        let id = item_id(date, &it.kind, &it.task_id);
+        let existing: Option<(String, String)> =
+            sqlx::query_as("SELECT action_state, created_at FROM brief_items WHERE id = ?")
+                .bind(&id)
+                .fetch_optional(&mut *conn)
+                .await?;
+        let (op, created_at) = match existing {
+            Some((state, _)) if state != "none" => continue, // acted on: kept as it is
+            Some((_, created_at)) => ("UPDATE", created_at),
+            None => ("INSERT", now.to_string()),
+        };
         let row = BriefItem {
-            id: item_id(date, &it.kind, &it.task_id),
+            id: id.clone(),
             date: date.into(),
             module_id: it.module_id.clone(),
             kind: it.kind.clone(),
@@ -183,21 +207,34 @@ pub(crate) async fn replace_unacted_tx(
             action_state: "none".into(),
             produced_ref: None,
             position: it.position,
-            created_at: now.into(),
+            created_at,
             updated_at: now.into(),
+            composed_at: Some(stamp.into()),
             task: None,
         };
-        let inserted = sqlx::query(
-            "INSERT OR IGNORE INTO brief_items (id, date, module_id, kind, title, body, task_id, origin, dedupe_key, action_kind, action_state, produced_ref, position, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'none', NULL, ?, ?, ?)",
-        )
-        .bind(&row.id).bind(&row.date).bind(&row.module_id).bind(&row.kind).bind(&row.title).bind(&row.body)
-        .bind(&row.task_id).bind(&row.origin).bind(&row.dedupe_key).bind(row.position).bind(now).bind(now)
-        .execute(&mut *conn)
-        .await?
-        .rows_affected();
-        if inserted == 1 {
-            sync::append_sync_log_tx(&mut *conn, "brief_items", &row.id, "INSERT", None, Some(&sync_snapshot(&row))).await?;
+        if op == "UPDATE" {
+            sqlx::query(
+                "UPDATE brief_items SET module_id = ?, title = ?, body = ?, origin = ?, position = ?, updated_at = ?, composed_at = ? WHERE id = ?",
+            )
+            .bind(&row.module_id).bind(&row.title).bind(&row.body).bind(&row.origin).bind(row.position)
+            .bind(now).bind(stamp).bind(&row.id)
+            .execute(&mut *conn)
+            .await?;
+            let cols = serde_json::json!(["module_id", "title", "body", "origin", "position", "updated_at", "composed_at"]).to_string();
+            sync::append_sync_log_tx(&mut *conn, "brief_items", &row.id, "UPDATE", Some(&cols), Some(&sync_snapshot(&row))).await?;
+        } else {
+            let inserted = sqlx::query(
+                "INSERT OR IGNORE INTO brief_items (id, date, module_id, kind, title, body, task_id, origin, dedupe_key, action_kind, action_state, produced_ref, position, created_at, updated_at, composed_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'none', NULL, ?, ?, ?, ?)",
+            )
+            .bind(&row.id).bind(&row.date).bind(&row.module_id).bind(&row.kind).bind(&row.title).bind(&row.body)
+            .bind(&row.task_id).bind(&row.origin).bind(&row.dedupe_key).bind(row.position).bind(now).bind(now).bind(stamp)
+            .execute(&mut *conn)
+            .await?
+            .rows_affected();
+            if inserted == 1 {
+                sync::append_sync_log_tx(&mut *conn, "brief_items", &row.id, "INSERT", None, Some(&sync_snapshot(&row))).await?;
+            }
         }
     }
     Ok(())
@@ -234,7 +271,7 @@ mod tests {
             date: D.into(), status: "ready".into(), model: Some("claude-opus-5-5".into()),
             input_tokens: Some(9000), output_tokens: Some(600), error_code: None,
             compose: serde_json::json!({"summary": "A calm day.", "origin": "ai", "wins": []}),
-            items, attempts, bump_version: bump, regathered: None, now: NOW.into(),
+            items, attempts, bump_version: bump, regathered: None, partial: false, now: NOW.into(),
         }
     }
 
@@ -331,5 +368,41 @@ mod tests {
         assert!(briefs::record_composition(&pool, &record(vec![bad], false, 1)).await.is_err());
         let b = briefs::get_brief(&pool, D).await.unwrap().unwrap();
         assert!(b.composed_at.is_none(), "the row patch rolled back with the items");
+    }
+
+    #[tokio::test]
+    async fn a_re_picked_item_is_updated_in_place_never_deleted() {
+        let pool = test_pool().await;
+        let (a, b) = (task(&pool, "A").await, task(&pool, "B").await);
+        briefs::ensure_snapshot(&pool, D, D).await.unwrap();
+        briefs::record_composition(&pool, &record(vec![item("priority", &a, 0), item("priority", &b, 1)], false, 1)).await.unwrap();
+        let mut again = record(vec![item("priority", &a, 1)], true, 2);
+        again.now = "2026-09-25 12:00:00".into();
+        briefs::record_composition(&pool, &again).await.unwrap();
+        let id = item_id(D, "priority", &a);
+        let ops: Vec<String> = sqlx::query_scalar("SELECT operation FROM sync_log WHERE table_name='brief_items' AND row_id = ? ORDER BY rowid")
+            .bind(&id).fetch_all(&pool).await.unwrap();
+        assert_eq!(ops, ["INSERT", "UPDATE"], "no DELETE for a re-picked id");
+        let rows = list_items(&pool, D).await.unwrap();
+        assert_eq!(rows.iter().map(|i| i.task_id.clone().unwrap()).collect::<Vec<_>>(), [a.clone()], "b was not re-picked");
+        assert_eq!((rows[0].position, rows[0].composed_at.as_deref()), (1, Some("2026-09-25 12:00:00")));
+    }
+
+    #[tokio::test]
+    async fn another_macs_picks_for_the_same_day_never_merge_into_this_list() {
+        let pool = test_pool().await;
+        let (a, b) = (task(&pool, "A").await, task(&pool, "B").await);
+        briefs::ensure_snapshot(&pool, D, D).await.unwrap();
+        briefs::record_composition(&pool, &record(vec![item("priority", &a, 0)], false, 1)).await.unwrap();
+        // Rows another Mac composed at another time arrive by sync.
+        for (kind, state) in [("priority", "none"), ("quick_help", "produced")] {
+            sqlx::query("INSERT INTO brief_items (id, date, module_id, kind, title, task_id, origin, dedupe_key, action_state, position, created_at, updated_at, composed_at)
+                         VALUES (?, ?, 'priorities', ?, 'B', ?, 'ai', ?, ?, 0, 'n', 'n', '2026-09-25 06:31:00')")
+                .bind(item_id(D, kind, &b)).bind(D).bind(kind).bind(&b).bind(dedupe_key(kind, &b)).bind(state)
+                .execute(&pool).await.unwrap();
+        }
+        let rows: Vec<(String, String)> = list_items(&pool, D).await.unwrap().into_iter().map(|i| (i.kind, i.task_id.unwrap())).collect();
+        assert_eq!(rows, [("priority".to_string(), a.clone()), ("quick_help".to_string(), b.clone())],
+            "this composition's rows, plus what was acted on anywhere");
     }
 }

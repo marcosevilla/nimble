@@ -727,7 +727,8 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             produced_ref TEXT,
             position INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            composed_at TEXT
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_brief_items_dedupe ON brief_items(date, dedupe_key);
         CREATE INDEX IF NOT EXISTS idx_brief_items_date ON brief_items(date);
@@ -970,7 +971,7 @@ mod v26_tests {
         let cols: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('brief_items') ORDER BY cid")
             .fetch_all(&pool).await.unwrap();
         assert_eq!(cols, ["id","date","module_id","kind","title","body","task_id","origin","dedupe_key",
-            "action_kind","action_state","produced_ref","position","created_at","updated_at"]);
+            "action_kind","action_state","produced_ref","position","created_at","updated_at","composed_at"]);
         let briefs: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('briefs') ORDER BY cid")
             .fetch_all(&pool).await.unwrap();
         assert!(briefs.ends_with(&["composed_at".to_string(), "compose_attempts".to_string()]), "{briefs:?}");

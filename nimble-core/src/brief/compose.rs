@@ -20,12 +20,17 @@ use crate::types::Brief;
 
 pub const MAX_AUTO_ATTEMPTS: i64 = 3;
 
-/// Due until an AI composition landed (`composed_at` set with `status='ready'`)
-/// or today's attempts ran out. The phase-1 shell is written with
+/// Due until an AI composition landed (`composed_at` set and not the
+/// rule-based `fallback`; an AI success on a `partial` snapshot keeps
+/// `partial`) or today's attempts ran out. The phase-1 shell is written with
 /// `status='ready'` but no `composed_at`, so it is still due.
 pub fn compose_due(brief: &Brief) -> bool {
-    let composed_by_ai = brief.composed_at.is_some() && brief.status == "ready";
-    !composed_by_ai && brief.compose_attempts < MAX_AUTO_ATTEMPTS
+    !has_ai_picks(brief) && brief.compose_attempts < MAX_AUTO_ATTEMPTS
+}
+
+/// The day's rows came from the AI (not the rule-based fallback).
+pub fn has_ai_picks(brief: &Brief) -> bool {
+    brief.composed_at.is_some() && brief.status != "fallback"
 }
 
 pub fn parse_brief_time(value: Option<&str>) -> chrono::NaiveTime {
@@ -135,14 +140,17 @@ pub struct ComposeRun<'a> {
     pub now: chrono::NaiveDateTime,
     /// Regenerate: run even when not due, and bump `version`.
     pub force: bool,
-    /// Regenerate: freshly gathered `(layout_json, snapshot_json)`.
-    pub regathered: Option<(Value, Value)>,
+    /// Regenerate: freshly gathered `(layout_json, snapshot_json, partial)`.
+    pub regathered: Option<(Value, Value, bool)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComposeOutcome {
     NotDue,
     Composed { status: String, error_code: Option<String> },
+    /// Regenerate failed while AI picks were on screen: nothing was written
+    /// (no fallback replacement, no version bump).
+    Kept { error_code: String },
 }
 
 pub async fn compose<L: LlmClient>(pool: &SqlitePool, llm: Option<&L>, run: ComposeRun<'_>) -> crate::Result<ComposeOutcome> {
@@ -154,7 +162,14 @@ pub async fn compose<L: LlmClient>(pool: &SqlitePool, llm: Option<&L>, run: Comp
     let kept: HashSet<String> = crate::db::brief_items::acted_task_ids(pool, run.date).await?;
     let set = candidates::load_candidates(pool, run.date, &settings.labels).await?;
     let day = load_day_context(pool, run.date, run.now).await;
-    let attempts = brief.compose_attempts + 1;
+    // An automatic attempt is counted before the call, so a crash or a failed
+    // write can't retry forever. Regenerate is the user's and never counts.
+    let attempts = if run.force { brief.compose_attempts } else { briefs::begin_attempt(pool, run.date).await? };
+    let partial = match &run.regathered {
+        Some((_, _, partial)) => *partial,
+        None => brief.status == "partial",
+    };
+    let regathered = run.regathered.map(|(layout, snapshot, _)| (layout, snapshot));
     let now = run.now.format("%Y-%m-%d %H:%M:%S").to_string();
 
     let result = match llm {
@@ -177,7 +192,8 @@ pub async fn compose<L: LlmClient>(pool: &SqlitePool, llm: Option<&L>, run: Comp
                 items: items_from(&comp, "ai"),
                 attempts,
                 bump_version: run.force,
-                regathered: run.regathered,
+                regathered,
+                partial,
                 now,
             })
             .await?;
@@ -186,6 +202,10 @@ pub async fn compose<L: LlmClient>(pool: &SqlitePool, llm: Option<&L>, run: Comp
         Err(error) => {
             let attempts = if error.retryable() { attempts } else { attempts.max(MAX_AUTO_ATTEMPTS) };
             let code = error.code().to_string();
+            if run.force && has_ai_picks(&brief) {
+                // Regenerate failed: the AI picks on screen stay as they are.
+                return Ok(ComposeOutcome::Kept { error_code: code });
+            }
             if !run.force && brief.composed_at.is_some() && brief.status == "fallback" {
                 briefs::record_failed_retry(pool, run.date, attempts, &code, &now).await?;
             } else {
@@ -202,7 +222,8 @@ pub async fn compose<L: LlmClient>(pool: &SqlitePool, llm: Option<&L>, run: Comp
                     items: items_from(&comp, "rule"),
                     attempts,
                     bump_version: run.force,
-                    regathered: run.regathered,
+                    regathered,
+                    partial,
                     now,
                 })
                 .await?;
@@ -214,11 +235,11 @@ pub async fn compose<L: LlmClient>(pool: &SqlitePool, llm: Option<&L>, run: Comp
 
 /// The same gather `db::briefs::ensure_snapshot` runs for a new day:
 /// `(layout_json = enabled entries, snapshot_json = payloads by module id)`.
-pub async fn regather(pool: &SqlitePool, date: &str) -> crate::Result<(Value, Value)> {
+pub async fn regather(pool: &SqlitePool, date: &str) -> crate::Result<(Value, Value, bool)> {
     let layout = crate::brief::settings::load_layout(pool).await?;
-    let (snapshot, _partial) = crate::brief::gather_snapshot(&crate::brief::BriefCtx { pool, date }, &layout).await;
+    let (snapshot, partial) = crate::brief::gather_snapshot(&crate::brief::BriefCtx { pool, date }, &layout).await;
     let used: Vec<crate::brief::LayoutEntry> = layout.into_iter().filter(|e| e.enabled).collect();
-    Ok((json!(used), snapshot))
+    Ok((json!(used), snapshot, partial))
 }
 
 /// ⋯ → Regenerate: gather the modules again, recompose, `version + 1`, keep
@@ -464,5 +485,52 @@ mod tests {
             ("priority".to_string(), d.due.clone(), "ai".to_string()),
             ("quick_help".to_string(), d.help.clone(), "ai".to_string()),
         ], "the hidden second priority is neither written nor used up");
+    }
+
+    /// A call that never answers: the run is abandoned mid-flight (app quit,
+    /// crash, a write that never happens).
+    struct Hanging;
+    impl LlmClient for Hanging {
+        async fn structured(&self, _req: &crate::api::llm::LlmRequest) -> Result<crate::api::llm::LlmResponse, LlmError> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn an_abandoned_call_still_uses_an_attempt_and_three_is_the_cap() {
+        let d = day().await;
+        for n in 1..=3 {
+            let abandoned = tokio::time::timeout(std::time::Duration::from_millis(50), compose(&d.pool, Some(&Hanging), run(false))).await;
+            assert!(abandoned.is_err(), "the call was still in flight");
+            assert_eq!(brief(&d.pool).await.compose_attempts, n, "counted before the call");
+        }
+        assert!(!compose_due(&brief(&d.pool).await));
+        let untouched = FakeLlm::json(json!({}));
+        assert_eq!(compose(&d.pool, Some(&untouched), run(false)).await.unwrap(), ComposeOutcome::NotDue);
+        assert_eq!(untouched.calls(), 0, "no fourth call today");
+    }
+
+    #[tokio::test]
+    async fn a_failed_regenerate_keeps_the_ai_picks_as_they_are() {
+        let d = day().await;
+        let a = alias(&d.pool, &d.due).await;
+        compose(&d.pool, Some(&FakeLlm::json(json!({"summary": "Calm.", "priorities": [{"task_id": a, "reason": "r"}], "quick_help": [], "quick_self": [], "wins": []}))), run(false)).await.unwrap();
+        let before = (brief(&d.pool).await, crate::db::brief_items::list_items(&d.pool, D).await.unwrap());
+        let out = regenerate(&d.pool, Some(&FakeLlm::failing(LlmError::Server(503))), D, at(12, 0)).await.unwrap();
+        assert_eq!(out, ComposeOutcome::Kept { error_code: "server_error".into() });
+        let after = brief(&d.pool).await;
+        assert_eq!((after.version, after.status.as_str(), after.snapshot.clone()), (before.0.version, "ready", before.0.snapshot.clone()));
+        assert_eq!(crate::db::brief_items::list_items(&d.pool, D).await.unwrap(), before.1, "no fallback replacement");
+    }
+
+    #[tokio::test]
+    async fn an_ai_success_on_a_partial_snapshot_keeps_partial_and_is_done() {
+        let d = day().await;
+        sqlx::query("UPDATE briefs SET status = 'partial' WHERE date = ?").bind(D).execute(&d.pool).await.unwrap();
+        let a = alias(&d.pool, &d.due).await;
+        compose(&d.pool, Some(&FakeLlm::json(json!({"summary": "", "priorities": [{"task_id": a, "reason": "r"}], "quick_help": [], "quick_self": [], "wins": []}))), run(false)).await.unwrap();
+        let b = brief(&d.pool).await;
+        assert_eq!(b.status, "partial", "the gather failure stays visible");
+        assert!(has_ai_picks(&b) && !compose_due(&b));
     }
 }

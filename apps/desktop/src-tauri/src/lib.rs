@@ -353,7 +353,6 @@ pub fn run() {
 
                 // Store pool in app state
                 app_handle.manage(crate::backup_runner::BackupRuntime::new(app_dir.clone(), db_path.clone(), demo_mode, isolated_test));
-                app_handle.manage(crate::brief_runner::BriefRuntime::new(demo_mode, isolated_test));
                 // One process-wide focus engine, writable only while this
                 // process holds the profile owner lock. Initialization errors
                 // (e.g. a restored profile's wrong_owner) never block startup;
@@ -364,6 +363,7 @@ pub fn run() {
                     app_handle.manage(ProfileOwnerGuard(lock));
                 }
                 app_handle.manage(crate::focus_service::FocusRuntime::start(pool.clone(), owns_profile).await);
+                app_handle.manage(crate::brief_runner::BriefRuntime::new(demo_mode, isolated_test, owns_profile));
                 app_handle.manage(pool);
                 if !demo_mode {
                     match nimble_core::agent_protocol::AgentProfile::from_database(&db_path, isolated_test)

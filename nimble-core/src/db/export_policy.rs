@@ -126,7 +126,7 @@ pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
                 *policy = table!("briefs"; ["date","version","status","source","layout_json","snapshot_json","snapshot_schema","energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at","composed_at","compose_attempts"]; ["date","version","status","source","layout_json","snapshot_json","snapshot_schema","energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at","composed_at","compose_attempts"]; ["date"]);
             }
         }
-        tables.push(table!("brief_items"; ["id","date","module_id","kind","title","body","task_id","origin","dedupe_key","action_kind","action_state","produced_ref","position","created_at","updated_at"]; ["id","date","module_id","kind","title","body","task_id","origin","dedupe_key","action_kind","action_state","produced_ref","position","created_at","updated_at"]));
+        tables.push(table!("brief_items"; ["id","date","module_id","kind","title","body","task_id","origin","dedupe_key","action_kind","action_state","produced_ref","position","created_at","updated_at","composed_at"]; ["id","date","module_id","kind","title","body","task_id","origin","dedupe_key","action_kind","action_state","produced_ref","position","created_at","updated_at","composed_at"]));
     }
     tables.sort_by_key(|policy| policy.name);
     Some(tables)

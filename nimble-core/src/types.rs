@@ -444,6 +444,11 @@ pub struct BriefItem {
     pub position: i64,
     pub created_at: String,
     pub updated_at: String,
+    /// The `briefs.composed_at` of the composition that wrote it: a list
+    /// shows only the brief's current composition plus acted-on rows, so two
+    /// Macs composing the same day never merge their picks.
+    #[serde(default)]
+    pub composed_at: Option<String>,
     #[serde(default)]
     pub task: Option<BriefItemTask>,
 }

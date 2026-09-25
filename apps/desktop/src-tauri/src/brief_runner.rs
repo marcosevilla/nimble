@@ -1,11 +1,12 @@
 //! Morning-brief composition triggers (addendum §5): the existing 5-minute
 //! loop once the local clock passes `brief.time`, and the first Today open of
 //! the day (any time). Every run holds one job lock, so a first-open call made
-//! while the scheduled run is in flight waits, then finds it done. Demo mode
-//! and isolated test profiles never schedule and never call the AI; a first
-//! open there still writes the rule-based brief.
+//! while the scheduled run is in flight waits, then finds it done. Demo mode,
+//! isolated test profiles and a process that doesn't own the profile never
+//! schedule and never call the AI; a first open there still writes the
+//! rule-based brief. A restored profile stays inert until it is activated.
 
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use nimble_core::api::llm::AnthropicLlm;
 use nimble_core::brief::compose::{self, ComposeOutcome, ComposeRun};
 use nimble_core::types::Brief;
@@ -19,8 +20,10 @@ pub struct BriefRuntime {
 }
 
 impl BriefRuntime {
-    pub fn new(demo: bool, isolated_test: bool) -> Self {
-        let off = demo || isolated_test;
+    /// `owns_profile`: this process holds the profile owner lock. Only the
+    /// owner schedules and spends API calls; another process gets rule-based.
+    pub fn new(demo: bool, isolated_test: bool, owns_profile: bool) -> Self {
+        let off = demo || isolated_test || !owns_profile;
         Self { ai_allowed: !off, scheduled: !off, job: tokio::sync::Mutex::new(()) }
     }
 }
@@ -49,30 +52,56 @@ pub enum Mode {
 }
 
 /// Ensure today's shell, then compose it (if due) or regenerate it. Only
-/// today is ever composed; any other date is read back unchanged.
+/// today is ever composed; any other date is read back unchanged. Returns the
+/// row and whether a composition was written. A Regenerate that fails while
+/// AI picks are on screen writes nothing and errors (`regenerate_failed: …`).
+pub async fn run_on(
+    pool: &SqlitePool,
+    runtime: &BriefRuntime,
+    date: &str,
+    today: &str,
+    now: NaiveDateTime,
+    mode: Mode,
+) -> nimble_core::Result<(Option<Brief>, bool)> {
+    // A restored profile stays inert until activated, like backups and sync.
+    nimble_core::db::recovery::require_activation_clear(pool).await?;
+    let _job = runtime.job.lock().await;
+    if date != today {
+        return Ok((nimble_core::db::briefs::get_brief(pool, date).await?, false));
+    }
+    nimble_core::db::briefs::ensure_snapshot(pool, date, today).await?;
+    let llm = llm_for(pool, runtime).await;
+    let outcome = match mode {
+        Mode::IfDue => compose::compose(pool, llm.as_ref(), ComposeRun { date, now, force: false, regathered: None }).await?,
+        Mode::Regenerate => compose::regenerate(pool, llm.as_ref(), date, now).await?,
+    };
+    let composed = match &outcome {
+        ComposeOutcome::Composed { status, error_code } => {
+            match error_code {
+                Some(code) => log::warn!("Brief composed without AI ({code}); showing rule-based picks"),
+                None => log::info!("Brief composed ({status})"),
+            }
+            true
+        }
+        ComposeOutcome::Kept { error_code } => {
+            log::warn!("Regenerate failed ({error_code}); the brief on screen is kept");
+            return Err(nimble_core::Error::Other(format!("regenerate_failed: {error_code}")));
+        }
+        ComposeOutcome::NotDue => false,
+    };
+    Ok((nimble_core::db::briefs::get_brief(pool, date).await?, composed))
+}
+
 pub async fn run(app: &AppHandle, date: &str, mode: Mode) -> nimble_core::Result<Option<Brief>> {
     let runtime = app.state::<BriefRuntime>();
     let pool = app.state::<SqlitePool>();
-    let _job = runtime.job.lock().await;
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    if date != today {
-        return nimble_core::db::briefs::get_brief(pool.inner(), date).await;
-    }
-    nimble_core::db::briefs::ensure_snapshot(pool.inner(), date, &today).await?;
-    let llm = llm_for(pool.inner(), &runtime).await;
     let now = chrono::Local::now().naive_local();
-    let outcome = match mode {
-        Mode::IfDue => compose::compose(pool.inner(), llm.as_ref(), ComposeRun { date, now, force: false, regathered: None }).await?,
-        Mode::Regenerate => compose::regenerate(pool.inner(), llm.as_ref(), date, now).await?,
-    };
-    if let ComposeOutcome::Composed { status, error_code } = &outcome {
-        match error_code {
-            Some(code) => log::warn!("Brief composed without AI ({code}); showing rule-based picks"),
-            None => log::info!("Brief composed ({status})"),
-        }
+    let (brief, composed) = run_on(pool.inner(), &runtime, date, &today, now, mode).await?;
+    if composed {
         crate::data_events::broadcast(app, crate::data_events::BRIEF, vec![date.to_string()]);
     }
-    nimble_core::db::briefs::get_brief(pool.inner(), date).await
+    Ok(brief)
 }
 
 /// One scheduler tick (5-minute loop; the first tick fires at launch).
@@ -130,12 +159,44 @@ mod tests {
     }
 
     #[test]
-    fn demo_and_isolated_profiles_never_call_the_ai_or_schedule() {
-        for (demo, isolated) in [(true, false), (false, true), (true, true)] {
-            let r = BriefRuntime::new(demo, isolated);
-            assert!(!r.ai_allowed && !r.scheduled);
+    fn demo_isolated_and_non_owner_profiles_never_call_the_ai_or_schedule() {
+        for (demo, isolated, owner) in [(true, false, true), (false, true, true), (true, true, true), (false, false, false)] {
+            let r = BriefRuntime::new(demo, isolated, owner);
+            assert!(!r.ai_allowed && !r.scheduled, "{demo} {isolated} {owner}");
         }
-        let live = BriefRuntime::new(false, false);
+        let live = BriefRuntime::new(false, false, true);
         assert!(live.ai_allowed && live.scheduled);
+    }
+
+    async fn pool() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        nimble_core::db::migrations::run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    fn noon() -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(2026, 9, 25).unwrap().and_hms_opt(12, 0, 0).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_restored_profile_composes_nothing_until_activated() {
+        let pool = pool().await;
+        nimble_core::db::settings::set_setting(&pool, "restored_activation_required", "1").await.unwrap();
+        let live = BriefRuntime::new(false, false, true);
+        for mode in [Mode::IfDue, Mode::Regenerate] {
+            assert!(run_on(&pool, &live, "2026-09-25", "2026-09-25", noon(), mode).await.is_err());
+        }
+        assert!(nimble_core::db::briefs::get_brief(&pool, "2026-09-25").await.unwrap().is_none(), "not even the shell");
+    }
+
+    #[tokio::test]
+    async fn a_non_owner_gets_the_rule_based_brief_without_an_api_call() {
+        let pool = pool().await;
+        nimble_core::db::settings::set_setting(&pool, "anthropic_api_key", "sk-would-be-used").await.unwrap();
+        let second = BriefRuntime::new(false, false, false);
+        let (brief, composed) = run_on(&pool, &second, "2026-09-25", "2026-09-25", noon(), Mode::IfDue).await.unwrap();
+        let brief = brief.unwrap();
+        assert!(composed);
+        assert_eq!((brief.status.as_str(), brief.model.as_deref()), ("fallback", None), "no client was built");
     }
 }
