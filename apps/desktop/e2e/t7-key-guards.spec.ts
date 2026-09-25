@@ -418,6 +418,45 @@ test.describe('3 focus ⋯ menu', () => {
   })
 })
 
+// ── 4. the calendar is its own key region ──────────────────────────────
+
+test.describe('4 calendar key region', () => {
+  const activeRow = (page: Page) => page.evaluate(() => document.activeElement?.getAttribute('data-nav-row') ?? null)
+  const detailId = (page: Page) =>
+    page.evaluate(() => {
+      const s = (window as unknown as { __stores: { useAppStore: { getState(): { currentPage: string } }; useDetailStore: { getState(): { pageDetails?: Record<string, { target?: { id: string } } | undefined> } } } }).__stores
+      return s.useDetailStore.getState().pageDetails?.[s.useAppStore.getState().currentPage]?.target?.id ?? null
+    })
+  // The focusable calendar panel (the div holding the day chevrons).
+  const calendar = (page: Page) => page.getByRole('button', { name: 'Previous day' }).locator('xpath=ancestor::div[@tabindex="0"][1]')
+
+  for (const pageId of ['tasks', 'inbox'] as const) {
+    test(`${pageId}: j, k, x and Enter typed in the calendar leave the row list alone`, async ({ app, page }) => {
+      await app.open(pageId)
+      await page.keyboard.press('j')
+      await expect.poll(() => activeRow(page)).not.toBeNull()
+      const rowsBefore = await page.locator('[data-nav-row]').count()
+      await calendar(page).focus()
+      await expect(calendar(page)).toBeFocused()
+      await pressAll(page, ['j', 'j', 'k', 'x', 'Enter'])
+      await expect(calendar(page), 'focus stays in the calendar').toBeFocused()
+      expect(await detailId(page), 'Enter opens no task').toBeNull()
+      expect(await page.locator('[data-nav-row]').count(), 'x completes/dismisses nothing').toBe(rowsBefore)
+    })
+  }
+
+  test('the calendar still takes → and t while focused', async ({ app, page }) => {
+    await app.open('tasks')
+    await calendar(page).focus()
+    const label = () => calendar(page).getByTitle('Jump to today').textContent()
+    const before = await label()
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(label).not.toBe(before)
+    await page.keyboard.press('t')
+    await expect.poll(label).toBe(before)
+  })
+})
+
 // ── Screenshots (before/after evidence; never fail) ──────────────────────
 
 const SHOT_DIR = process.env.SHOT_DIR
