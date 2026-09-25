@@ -53,6 +53,7 @@ import { LabelManager } from '@/components/settings/LabelManager'
 import { TodayBriefSettings } from '@/components/settings/TodayBriefSettings'
 import { BriefLocationSettings } from '@/components/settings/BriefLocationSettings'
 import { BriefBoxesSettings } from '@/components/settings/BriefBoxesSettings'
+import { MomentumSettings } from '@/components/settings/MomentumSettings'
 import { useBriefSettingsStore } from '@/stores/briefSettingsStore'
 import { ActivityLog } from '@/components/activity/ActivityLog'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
@@ -1292,9 +1293,10 @@ export function SettingsPage() {
   const remindersSupported = dp.reminders.supported
   const googleSupported = dp.googleCalendar.supported
   const briefSupported = dp.briefSettings.supported
+  const momentumSupported = dp.momentum.supported
   const sections = useMemo(
-    () => visibleSections({ backup: backupSupported, reminders: remindersSupported, googleCalendar: googleSupported, briefSettings: briefSupported }),
-    [backupSupported, remindersSupported, googleSupported, briefSupported],
+    () => visibleSections({ backup: backupSupported, reminders: remindersSupported, googleCalendar: googleSupported, briefSettings: briefSupported, momentum: momentumSupported }),
+    [backupSupported, remindersSupported, googleSupported, briefSupported, momentumSupported],
   )
 
   // Load current values on mount
@@ -1677,6 +1679,7 @@ export function SettingsPage() {
     'today-brief': <TodayBriefSettings />,
     'today-location': <BriefLocationSettings />,
     'today-boxes': <BriefBoxesSettings />,
+    momentum: <MomentumSettings />,
 
     /* One-time migrations and developer verbs, collapsed and last
        (settings P2-1). Each keeps its old id so deep links still land. */

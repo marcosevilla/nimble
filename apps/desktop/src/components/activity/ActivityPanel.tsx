@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ActivityHeatmap } from '@/components/activity/ActivityHeatmap'
+import { StatTiles } from '@/components/activity/StatTiles'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SectionTitle } from '@/components/shared/typography'
@@ -128,6 +129,7 @@ export function ActivityPanel() {
           ))}
         </ToggleGroup>
       </div>
+      <StatTiles />
       {habitDays && taskDays ? (
         <ActivityHeatmap values={values} describe={describe} label={label} />
       ) : (
