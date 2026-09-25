@@ -2,6 +2,54 @@
 
 Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + chunk 2 capture vocabulary/NL dates `649ca72` merged, installed with Lane B's install; 393 frontend tests). Updated 2026-09-23 eve (Lane B: Rust batch `bb6ac53` + brief phase 1 `e24daa4` merged; **installed at `649ca72`** = both lanes incl. capture-prefixes; DB migrated v22→v23, 1,335 tasks kept, today's brief snapshot written, `turso_schema_v23_upgraded` set). Before that 2026-09-23 (agentation-1 merged + installed at `0ad4bd5`). Before that 2026-09-22 (Focus Queue: all 12 plan tasks implemented, Task 12 verification recorded; awaiting final whole-branch review + Marco's 30-min human checklist; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
 
+## QA checklist — real app (consolidated 2026-09-25; newest first)
+
+One place for every pending hands-on check. Tick here; the per-feature sections below keep the detail.
+
+**Omnibar (installed 2026-09-25)** — ✅ label pill (`photography` → Tab) · ✅ fast-Enter date (`dentist tomorrow 3pm`)
+- [ ] Delete the "dentist" test task
+- [ ] Esc, then ⌘F right away → the same bar reopens (not the old search window)
+- [ ] ⌘K and ⌘F open the same bar, never two
+- [ ] Type `completed` → Tab → status pill; only completed tasks show
+- [ ] Type `go on a 4K run` → Create rows: Task · Note · Doc · Goal · Project · Label; Enter creates a task
+- [ ] A matching open task + Enter opens it; `note: …` + Enter saves a note
+- [ ] Label pill + project pill active → Create task gets both
+
+**Momentum (installed 2026-09-25)**
+- [ ] Today momentum box: today/week vs goals 10/30, Sat/Sun treated as days off
+- [ ] Settings → Goals & momentum section; Activity tiles
+- [ ] Setup: all 7 days off → Back → Continue (known bug: selection silently dropped)
+
+**Brief phase 3 (installed 2026-09-25)**
+- [ ] Today: composed priorities + one-line summary; Regenerate works
+- [ ] Quick wins rows, buttons on a 3rd line
+- [ ] Break it down → "N subtasks added" → Undo removes them; Copy for Claude copies
+- [ ] Possible bug: label picker (`l`) on a Today row near the bottom — does it detach when the page scrolls?
+
+**C4 labels (installed 2026-09-25)**
+- [ ] `l` on a task row → grouped picker, EFFORT as radios
+- [ ] `from-instinct` / `nimble` gone from row chips
+- [ ] Settings → Labels: drag, Pick one, Archived section
+
+**Brief phase 2 (installed 2026-09-25)**
+- [ ] Setup appears once on Today (↵ ×6 or Esc "Finish later")
+- [ ] Set San Francisco → weather chip high/low + popover; `b` moves the chip into the strip
+- [ ] Settings → Boxes reorder / toggle Notes; no vault-path toasts
+
+**Loop 3 polish (2026-09-24)**
+- [ ] Filled chips always show a dimmed ✕; Space on a focused button activates it; rail calendar while sync notice shows
+
+**Agentation 3 + subtasks (2026-09-24)**
+- [ ] Focus reopen (complete from Focus → reopen same day → top of Up next, no timer)
+- [ ] Sync notice in the rail (open / collapsed / 200px) + Dismiss; motion with Reduce Motion on/off
+- [ ] Subtask drag / multi-select / bulk Todo + "Reopen N subtasks too?"
+
+**Loop 2 + icon (2026-09-24)**
+- [ ] Focus `+` / `⋯` keyboard flow; pop-out compact height + dark mode; Settings drag region
+- [ ] Dock/tray icon at real size (C3 mark may be faint at 32px)
+
+**Older, still open** (details further down): brief phase 1 checks (§ Morning brief, 7 items) · 1b calendar/tree keyboard checks · chunk 2/3 checks (⌘Z after convert, strip `/t`, row mark pickers, Undo deletes) · Activity log names + "Focused for Nm" · **C2 phone test** (§ Next execution order) · live recurrence exit test (EDD biweekly ×2).
+
 ## Brief phase 2 + C4 + phases 3–4 (2026-09-25) — brief phase 2 (`411084a`, v24) + C4 (`f7c0dcb`, v25) merged + installed
 
 **2026-09-25 pm: phase 3 (v26) + momentum (v27) + Omnibar installed + pushed; web deployed to Vercel prod (`dpl_4mE57qYqzq5B6zrQFaQhHDcPY7xa`, gate checks pass: `/` 200 login form, bare 401, `/api/turso` + `/api/capture` our 401, login 401 in 0.36 s, `λ middleware`). Worktrees + merged branches pruned (ledger archived in `.superpowers/sdd/2026-09-25-c4-brief/`).** Earlier pause pointer: `/Users/marcosevilla/Developer/marco-task-app/.nimble-wt/plan/.superpowers/sdd/2026-09-25-c4-brief/RESUME.md`** (phase 3 at `a712b71` WIP in `.nimble-wt/brief`: tasks 7–8 done, 9 half, 10 left; momentum `e1c2ca5` in `.nimble-wt/momentum`, reviewed, merges after phase 3 — v26 before v27).
@@ -272,7 +320,7 @@ Queued for Marco (Rust or decisions):
 - [x] **C1: Safety net activation.** Implemented, tested, installed, merged into main, and first private online backup acknowledged.
 - [ ] **C2: Reminders activation.** Code implemented: desktop reminders, persistent catch-up, dedicated-calendar OAuth and two-way reconciliation, schema20 label-group storage. Tests/review pass. Installed and verified; Marco confirmed the live Mac reminder banner on 2026-09-21. Google setup/consent and first sync now verified; remaining: physical-phone alert/two-way test.
 - [ ] **C3: Agent access activation.** CLI, JSON commands, private app socket and workflow proposals implemented; native open-task refresh verified. `dt` is installed on PATH and backup RPC is verified. Remaining: approve/activate actual assistant routing, and verify live web propagation. Todoist remains the fallback, without duplicate writes after uncertain results.
-- [ ] **C4: Labels and search.** Restore ENERGY / TIME / TYPE / CREATIVE grouping; indexed task-title and description search including completed tasks.
+- [x] **C4: Labels and search.** Installed 2026-09-25 (v25): label groups (EFFORT/TYPE/STATE/ASSIST/SYSTEM) + indexed search incl. completed; search now lives in the Omnibar.
 - [ ] **C5: Import and cutover.** Preserve first-class task fields; import active tasks plus the last 12 months completed; archive full history; use Nimble for 2–4 weeks before deciding on cutover. Downgrade Todoist to free only when ready.
 
 ## Design track — Marco in Figma
