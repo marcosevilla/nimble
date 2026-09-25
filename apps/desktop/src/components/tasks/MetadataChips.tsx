@@ -97,6 +97,7 @@ function ClearButton({ onClear, label }: { onClear: () => void; label: string })
   return (
     <button
       type="button"
+      tabIndex={0}
       aria-label={label}
       onClick={(e) => {
         e.stopPropagation()

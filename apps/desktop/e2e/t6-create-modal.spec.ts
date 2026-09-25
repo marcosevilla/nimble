@@ -9,7 +9,12 @@
  *    fields (title, description) show a filled well (non-transparent
  *    background) and no box outline; every other stop shows the app ring.
  *    Tab order is title → description → Priority → Due → Labels → project
- *    chip → + → Cancel → Save (Due and Labels used to be skipped by WebKit).
+ *    chip → its ✕ → + → Cancel → Save (Due, Labels and ✕ used to be skipped
+ *    by WebKit). A chip's ring is the chip's own rounded box.
+ * 2b. Ghost fields widen into their well instead of shifting: their text box
+ *    lines up with the column (chip row) on both sides, and the task-detail
+ *    description wraps at the same width in display and edit.
+ * 2c. A long description scrolls inside a capped field; Save stays on screen.
  * 2. No indicator is clipped by an overflow ancestor, and focusing any field
  *    — by keyboard or by mouse — moves nothing (rects of title, description,
  *    chip row, footer and the card itself are identical).
@@ -126,7 +131,7 @@ for (const theme of ['light', 'dark'] as const) {
       order.push(start.name)
       expect(start.filled, `title well: ${start.bg}`).toBe(true)
       expect(start.outline, 'title has no box ring').toBe(false)
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 9; i++) {
         await page.keyboard.press('Tab')
         const ind = await indicator(page)
         order.push(ind.name)
@@ -138,7 +143,7 @@ for (const theme of ['light', 'dark'] as const) {
           await expectFocusRing(page)
         }
       }
-      expect(order).toEqual(['Task title', 'Description', 'Priority', 'Due', 'Labels', 'Inbox', 'Add field', 'Cancel', 'Save'])
+      expect(order).toEqual(['Task title', 'Description', 'Priority', 'Due', 'Labels', 'Inbox', 'Clear project', 'Add field', 'Cancel', 'Save'])
     })
 
     test(`the project chip's focus ring is the chip's own rounded box, and the chip hugs its text (${theme})`, async ({ app, page }) => {
@@ -178,6 +183,67 @@ for (const theme of ['light', 'dark'] as const) {
       expect(m.clear!.visible).toBe('1')
       expect(m.clear!.left).toBeGreaterThanOrEqual(2)
       expect(m.trailing).toBeLessThanOrEqual(26)
+    })
+
+    test(`ghost fields line up with the column on both sides (${theme})`, async ({ app, page }) => {
+      const dialog = await openModal(app, page)
+      const m = await dialog.evaluate((root) => {
+        const text = (el: Element) => {
+          const cs = getComputedStyle(el)
+          const r = el.getBoundingClientRect()
+          return { left: r.left + parseFloat(cs.paddingLeft), right: r.right - parseFloat(cs.paddingRight) }
+        }
+        const col = root.querySelector('[data-composer-chips]')!.getBoundingClientRect()
+        return {
+          col: { left: col.left, right: col.right },
+          title: text(root.querySelector('[aria-label="Task title"]')!),
+          description: text(root.querySelector('[aria-label="Description"]')!),
+        }
+      })
+      for (const f of [m.title, m.description]) {
+        expect(Math.abs(f.left - m.col.left)).toBeLessThanOrEqual(1)
+        expect(Math.abs(f.right - m.col.right)).toBeLessThanOrEqual(1)
+      }
+    })
+
+    test(`task detail description wraps at the same width in display and edit (${theme})`, async ({ app, page }) => {
+      await app.open('tasks')
+      await page.evaluate(() =>
+        (window as unknown as { __stores: { useDetailStore: { getState(): { openTask(id: string, mode: string): void } } } }).__stores.useDetailStore
+          .getState()
+          .openTask('task-01', 'body'),
+      )
+      const main = page.locator('main').first()
+      const display = main.locator('.tiptap-editor').first()
+      await expect(display).toBeVisible()
+      const shown = await display.evaluate((el) => {
+        const r = el.getBoundingClientRect()
+        const cs = getComputedStyle(el)
+        return { left: r.left + parseFloat(cs.paddingLeft), width: r.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) }
+      })
+      await display.click()
+      const ta = main.locator('textarea').first()
+      await expect(ta).toBeFocused()
+      const edit = await ta.evaluate((el) => {
+        const r = el.getBoundingClientRect()
+        const cs = getComputedStyle(el)
+        return { left: r.left + parseFloat(cs.paddingLeft), width: el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) }
+      })
+      expect(Math.abs(edit.left - shown.left)).toBeLessThanOrEqual(1)
+      expect(Math.abs(edit.width - shown.width)).toBeLessThanOrEqual(1)
+    })
+
+    test(`a 40-line description scrolls inside the field and Save stays visible (${theme})`, async ({ app, page }) => {
+      const dialog = await openModal(app, page)
+      await page.keyboard.type('Long paste')
+      const lines = Array.from({ length: 40 }, (_, i) => `Line ${i + 1} of a long pasted note`).join('\n')
+      await description(dialog).fill(lines)
+      const save = dialog.getByRole('button', { name: 'Save' })
+      await expect(save).toBeInViewport({ ratio: 1 })
+      const box = (await save.boundingBox())!
+      expect(box.y + box.height).toBeLessThanOrEqual(900)
+      const scrolls = await description(dialog).evaluate((el) => el.scrollHeight > el.clientHeight + 1)
+      expect(scrolls).toBe(true)
     })
 
     test(`focus never moves the layout, by keyboard or mouse (${theme})`, async ({ app, page }) => {
@@ -255,8 +321,10 @@ for (const theme of ['light', 'dark'] as const) {
       expect(await calls(page, 'create_local_task')).toHaveLength(0)
       // A picker's Esc closes only the picker.
       await dialog.locator('button', { hasText: /^Due$/ }).click()
-      await expect(page.getByRole('dialog').filter({ hasNot: page.getByRole('textbox', { name: 'Task title' }) }).or(page.locator('[data-slot=popover-content]')).first()).toBeVisible()
+      const picker = page.locator('[data-slot=popover-content]').filter({ hasText: /Add time/ })
+      await expect(picker).toBeVisible()
       await page.keyboard.press('Escape')
+      await expect(picker).toBeHidden()
       await expect(dialog).toBeVisible()
       // Esc closes the modal and keeps the draft.
       await title(dialog).focus()
