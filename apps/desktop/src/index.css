@@ -98,6 +98,7 @@
     --color-success: var(--success);
     --color-success-fg: var(--success-fg);
     --color-success-hover: var(--success-hover);
+    --color-success-tint: var(--success-tint);
     /* Semantic roles — defined per theme in themes.css (warm light + dark). */
     --color-warning: var(--warning);
     --color-ai: var(--ai);
@@ -491,7 +492,7 @@
    a visible beat. */
 @keyframes task-complete-exit {
   0%   { opacity: 1; transform: translateX(0); background-color: transparent; }
-  20%  { background-color: oklch(0.85 0.1 145 / 20%); } /* brief green flash */
+  20%  { background-color: var(--success-tint); } /* brief green flash */
   50%  { opacity: 0.5; }
   100% { opacity: 0; transform: translateX(8px); }
 }
@@ -502,7 +503,7 @@
 /* Reduced-motion variant: opacity + tint only (used in the media block). */
 @keyframes task-complete-fade {
   0%   { opacity: 1; background-color: transparent; }
-  20%  { background-color: oklch(0.85 0.1 145 / 20%); }
+  20%  { background-color: var(--success-tint); }
   100% { opacity: 0; }
 }
 

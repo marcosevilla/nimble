@@ -43,6 +43,12 @@
   /* Success button hover darkens (success/90 lightened it to 4.06:1);
      --success-fg on it 6.09:1. */
   --success-hover: oklch(0.47 0.13 145);
+  /* Completion flash behind a row being completed (loop 3: was the
+     literal oklch(0.85 0.1 145 / 20%) in index.css). Derived from
+     --success, so every theme and mode gets its own tint — declared once
+     here on :root, it resolves against whichever --success wins on
+     <html>. Surface tint only, never text. */
+  --success-tint: oklch(from var(--success) l c h / 16%);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
