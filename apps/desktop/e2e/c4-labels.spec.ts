@@ -206,6 +206,9 @@ test('Label Manager: ⌥↑ moves a label into the group above, Pick one, archiv
   await expect(section.getByRole('textbox', { name: 'Group name Type' })).toBeVisible()
   expect(await calls(page, 'delete_label_group')).toEqual([])
 
+  // Let the dismissed Undo toast finish fading: axe reads a half-faded
+  // action button as low contrast.
+  await expect(page.locator('[data-sonner-toast]').filter({ has: page.getByRole('button', { name: 'Undo' }) })).toHaveCount(0)
   await expectNoNewAxeViolations(page, 'settings')
 })
 

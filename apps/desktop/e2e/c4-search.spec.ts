@@ -112,6 +112,7 @@ test('⌘K "/search " hands over to ⌘F; ⌘F stays shut while another overlay 
   await expect(bar).toBeVisible()
   await page.keyboard.press('Meta+f')
   await expect(search(page)).toHaveCount(0)
+  await expect(bar.getByRole('textbox')).toBeFocused() // ⌘K focuses its field a frame after opening
   await page.keyboard.type('/search ')
   await expect(bar).toHaveCount(0)
   await expect(input(page)).toBeFocused()
