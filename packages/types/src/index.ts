@@ -806,7 +806,8 @@ export interface WeatherCapability {
 // ── Momentum (spec 2026-09-23 §3.5, addendum 2026-09-25 §6; nimble-core/src/db/karma.rs) ──
 
 export type MomentumRange = '7d' | '30d' | 'all'
-export type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+/** Same keys as the brief settings' `Weekday` (goals.days_off). */
+export type WeekdayKey = Weekday
 
 export interface MomentumSettings {
   daily_goal: number

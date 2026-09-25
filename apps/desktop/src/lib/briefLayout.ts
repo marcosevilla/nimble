@@ -122,9 +122,10 @@ export function boxRowKey(
 export type PresetId = 'focused' | 'full' | 'minimal'
 
 /** Setup step 1 (base §3.4; UX checkpoint 4). Presets only toggle; the
- *  order stays the user's. Phase 3 appends 'quick_wins' to Focused. */
+ *  order stays the user's. Phase 3 appends 'quick_wins' to Focused; Momentum
+ *  (on by default, addendum A5) is in Focused too. */
 export const PRESETS: { id: PresetId; name: string; description: string; enabled: string[] | 'all' }[] = [
-  { id: 'focused', name: 'Focused', description: 'Your schedule, top priorities and what’s due today.', enabled: ['weather', 'schedule', 'priorities', 'due_today', 'vault'] },
+  { id: 'focused', name: 'Focused', description: 'Your schedule, top priorities and what’s due today.', enabled: ['weather', 'schedule', 'priorities', 'due_today', 'vault', 'momentum'] },
   { id: 'full', name: 'Full', description: 'Every box, including habits and notes.', enabled: 'all' },
   { id: 'minimal', name: 'Minimal', description: 'Your schedule and what’s due today. No AI.', enabled: ['weather', 'schedule', 'due_today', 'vault'] },
 ]
