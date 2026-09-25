@@ -27,3 +27,4 @@ pub mod backup;
 pub mod backup_storage;
 
 pub mod recovery;
+pub mod karma;
