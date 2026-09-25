@@ -881,6 +881,7 @@
         },
       },
       snapshot_schema: 1,
+      notes: null,
       generated_at: '2026-07-31 07:05:00',
       updated_at: '2026-07-31 07:05:00',
     },
@@ -888,6 +889,85 @@
 
   function briefTaskRef(t) {
     return { id: t.id, content: t.content, due_date: t.due_date, priority: t.priority, project_id: t.project_id }
+  }
+
+  // ── Brief settings (phase 2) ────────────────────────────────────────────
+  // Mirrors nimble-core brief::settings. ?setup=fresh = a profile that never
+  // ran the Today setup (no setup_completed_at, no location). Specs may seed
+  // window.__MOCK_BRIEF_SETTINGS__ ({ modules, time, location, … }); it is
+  // read on the first brief_settings_* call, after page init scripts ran.
+
+  function boolField(key, label) { return { type: 'bool', key: key, label: label, default: true } }
+  function choiceField(key, label, pairs, def) {
+    return { type: 'choice', key: key, label: label, options: pairs.map(function (p) { return { value: p[0], label: p[1] } }), default: def }
+  }
+  var BRIEF_MANIFESTS = [
+    { id: 'schedule', name: 'Schedule', kind: 'fixed', requires: ['calendar'], default_enabled: true,
+      config_schema: [boolField('tomorrow_peek', 'Tomorrow peek'), boolField('free_block', 'Free block')] },
+    { id: 'priorities', name: 'Top priorities', kind: 'ai', requires: ['ai'], default_enabled: true,
+      config_schema: [choiceField('count', 'How many', [[1, '1'], [2, '2'], [3, '3']], 3)] },
+    { id: 'due_today', name: 'Due today', kind: 'live', requires: [], default_enabled: true,
+      config_schema: [boolField('show_completed', 'Show completed')] },
+    { id: 'still_open', name: 'Still open', kind: 'fixed', requires: [], default_enabled: true,
+      config_schema: [choiceField('count', 'How many', [[3, '3'], [5, '5'], [10, '10']], 5)] },
+    { id: 'habits', name: 'Before you start', kind: 'live', requires: [], default_enabled: false, config_schema: [] },
+    { id: 'vault', name: 'From your vault', kind: 'fixed', requires: ['vault'], default_enabled: true, config_schema: [] },
+    { id: 'notes', name: 'Notes', kind: 'live', requires: [], default_enabled: false, config_schema: [] },
+  ]
+  function mergeModuleConfig(m, stored) {
+    var c = {}
+    m.config_schema.forEach(function (f) {
+      var v = stored ? stored[f.key] : undefined
+      if (f.type === 'bool') c[f.key] = typeof v === 'boolean' ? v : f.default
+      else if (f.type === 'choice') c[f.key] = f.options.some(function (o) { return o.value === v }) ? v : f.default
+      else c[f.key] = typeof v === 'string' && v.trim() ? v.trim() : f.default_name
+    })
+    return c
+  }
+  function resolveModules(stored) {
+    var out = []
+    ;(Array.isArray(stored) ? stored : []).forEach(function (e) {
+      var m = e && BRIEF_MANIFESTS.find(function (x) { return x.id === e.id })
+      if (!m || out.some(function (o) { return o.id === e.id })) return
+      out.push({ id: e.id, enabled: e.enabled !== false, config: mergeModuleConfig(m, e.config) })
+    })
+    BRIEF_MANIFESTS.forEach(function (m) {
+      if (!out.some(function (o) { return o.id === m.id })) out.push({ id: m.id, enabled: m.default_enabled, config: mergeModuleConfig(m, null) })
+    })
+    return out
+  }
+  var freshSetup = new URLSearchParams(window.location.search).get('setup') === 'fresh'
+  var briefState = {
+    time: '06:30',
+    location: freshSetup ? null : { name: 'San Francisco, California', lat: 37.7749, lon: -122.4194, tz: 'America/Los_Angeles' },
+    stored_modules: null,
+    model: 'claude-opus-5-5',
+    effort: 'low',
+    setup_completed_at: freshSetup ? null : '2026-07-01 07:00:00',
+    goals: { daily: 5, weekly: 25, days_off: ['sat', 'sun'] },
+  }
+  var briefSeeded = false
+  function seedBriefSettings() {
+    if (briefSeeded) return
+    briefSeeded = true
+    var seed = window.__MOCK_BRIEF_SETTINGS__
+    if (!seed) return
+    if (seed.modules) briefState.stored_modules = seed.modules
+    ;['time', 'location', 'model', 'effort', 'setup_completed_at', 'goals'].forEach(function (k) { if (k in seed) briefState[k] = seed[k] })
+  }
+  function briefSettingsView() {
+    seedBriefSettings()
+    return {
+      time: briefState.time,
+      location: briefState.location,
+      modules: resolveModules(briefState.stored_modules),
+      model: briefState.model,
+      effort: briefState.effort,
+      setup_completed_at: briefState.setup_completed_at,
+      goals: { daily: briefState.goals.daily, weekly: briefState.goals.weekly, days_off: briefState.goals.days_off.slice() },
+      sources: { calendar: !!SETTINGS.ical_feed_url, tasks: !!SETTINGS.todoist_api_token, vault: !!SETTINGS.obsidian_vault_path, ai: !!SETTINGS.anthropic_api_key },
+      manifests: BRIEF_MANIFESTS,
+    }
   }
 
   // ── Obsidian today.md ────────────────────────────────────────────────────
@@ -1235,7 +1315,7 @@
         version: 1,
         status: 'ready',
         source: 'nimble',
-        layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault'],
+        layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault'].map(function (id) { return { id: id, enabled: true, config: {} } }),
         snapshot: {
           schedule: { events: CALENDAR_EVENTS.slice(), tomorrow: [] },
           priorities: DAILY_STATE.priorities,
@@ -1243,11 +1323,30 @@
           still_open: { total: stillOpen.length, oldest: stillOpen.slice(0, 5).map(briefTaskRef) },
         },
         snapshot_schema: 1,
+        notes: null,
         generated_at: iso(TODAY, '07:00:00').replace('T', ' '),
         updated_at: iso(TODAY, '07:00:00').replace('T', ' '),
       }
       BRIEFS[date] = brief
       return brief
+    },
+    brief_settings_get: function () { return briefSettingsView() },
+    brief_settings_save: function (args) {
+      seedBriefSettings()
+      var p = (args && args.patch) || {}
+      if (p.time !== undefined) briefState.time = p.time
+      if (p.location !== undefined) briefState.location = p.location
+      if (p.modules !== undefined) briefState.stored_modules = p.modules
+      if (p.model !== undefined) briefState.model = p.model
+      if (p.effort !== undefined) briefState.effort = p.effort
+      if (p.goals) briefState.goals = Object.assign({}, briefState.goals, p.goals)
+      if (p.complete_setup) briefState.setup_completed_at = nowStamp()
+      return briefSettingsView()
+    },
+    brief_set_notes: function (args) {
+      var b = BRIEFS[args && args.date]
+      if (b) b.notes = args.notes && args.notes.trim() ? args.notes : null
+      return null
     },
     break_down_task: function () {
       return [

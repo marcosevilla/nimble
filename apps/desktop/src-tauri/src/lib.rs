@@ -655,6 +655,9 @@ pub fn run() {
             sync::sync_seed_existing,
             demo::demo_status,
             demo::demo_toggle,
+            brief::brief_settings_get,
+            brief::brief_settings_save,
+            brief::brief_set_notes,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

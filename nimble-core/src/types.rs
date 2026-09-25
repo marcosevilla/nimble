@@ -348,8 +348,19 @@ pub struct Brief {
     pub layout: serde_json::Value,     // ["schedule","priorities","due_today","still_open","vault"]
     pub snapshot: serde_json::Value,   // BriefSnapshotV1
     pub snapshot_schema: i64,          // 1
+    pub notes: Option<String>,
     pub generated_at: String,
     pub updated_at: String,
+}
+
+/// Where the brief's weather comes from (`brief.location`, addendum §2).
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct BriefLocation {
+    pub name: String,
+    pub lat: f64,
+    pub lon: f64,
+    /// IANA zone from the geocoder, e.g. "America/Los_Angeles".
+    pub tz: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -94,6 +94,9 @@ export function createTursoProvider(): DataProvider {
       configureRemote: ni('backup.configureRemote'),
       activateRestoredProfile: ni('backup.activateRestoredProfile'),
     },
+    // Settings live in the Mac's local KV store and are not synced, so the
+    // web has nothing to read; Today falls back to the synced row's layout.
+    briefSettings: { supported: false, get: ni('briefSettings.get'), save: ni('briefSettings.save') },
     settings: {
       // See note 2 in the file header — deliberately resolves.
       checkSetupComplete: () => Promise.resolve(true),
@@ -274,6 +277,7 @@ export function createTursoProvider(): DataProvider {
       get: getBrief,
       listDates: listBriefDates,
       ensureSnapshot: () => Promise.resolve(null),
+      setNotes: ni('brief.setNotes'),
     },
 
     // Out of v1 (§5).

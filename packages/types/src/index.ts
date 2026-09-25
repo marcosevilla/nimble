@@ -88,11 +88,23 @@ export interface BriefTaskRef {
   project_id: string
 }
 
+export interface BriefHabitRef {
+  id: string
+  name: string
+  icon: string
+  color: string
+  done: boolean
+}
+
+/** Frozen per-module payloads keyed by module id (snapshot_schema 1).
+ *  Every key is optional: a module that was off that morning is absent. */
 export interface BriefSnapshotV1 {
-  schedule: { events: CalendarEvent[]; tomorrow: CalendarEvent[] }
-  priorities: Priority[] | null
-  due_today: BriefTaskRef[]
-  still_open: { total: number; oldest: BriefTaskRef[] }
+  schedule?: { events: CalendarEvent[]; tomorrow: CalendarEvent[] }
+  priorities?: Priority[] | null
+  due_today?: BriefTaskRef[]
+  still_open?: { total: number; oldest: BriefTaskRef[] }
+  habits?: BriefHabitRef[] | null
+  [module: string]: unknown
 }
 
 export interface Brief {
@@ -100,11 +112,85 @@ export interface Brief {
   version: number
   status: 'ready' | 'partial' | 'fallback' | 'failed'
   source: 'nimble' | 'legacy_vault'
-  layout: string[]
+  /** Phase-1 rows hold module ids; phase-2+ rows the entries used that
+   *  morning. Always read it through `normalizeLayout` (lib/briefLayout). */
+  layout: string[] | BriefLayoutEntry[]
   snapshot: BriefSnapshotV1
   snapshot_schema: number
+  /** Today's scratchpad (the `notes` module). */
+  notes: string | null
   generated_at: string
   updated_at: string
+}
+
+// ── Brief settings (phase 2, addendum §1–§2) ──
+
+export type BriefModuleKind = 'fixed' | 'live' | 'ai'
+export type BriefIntegration = 'calendar' | 'tasks' | 'vault' | 'ai' | 'location'
+export type ConfigChoiceValue = string | number
+export type ConfigField =
+  | { type: 'bool'; key: string; label: string; default: boolean }
+  | { type: 'choice'; key: string; label: string; options: { value: ConfigChoiceValue; label: string }[]; default: ConfigChoiceValue }
+  | { type: 'label'; key: string; label: string; default_name: string }
+export interface ModuleManifest {
+  id: string
+  name: string
+  kind: BriefModuleKind
+  requires: BriefIntegration[]
+  default_enabled: boolean
+  config_schema: ConfigField[]
+}
+export interface BriefLayoutEntry {
+  id: string
+  enabled: boolean
+  config: Record<string, unknown>
+}
+export interface BriefLocation {
+  name: string
+  lat: number
+  lon: number
+  tz: string
+}
+export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+export interface BriefGoals {
+  daily: number
+  weekly: number
+  days_off: Weekday[]
+}
+export interface BriefSources {
+  calendar: boolean
+  tasks: boolean
+  vault: boolean
+  ai: boolean
+}
+export type BriefModel = 'claude-opus-5-5' | 'claude-sonnet-5'
+export type BriefEffort = 'low' | 'medium' | 'high'
+export interface BriefSettings {
+  time: string
+  location: BriefLocation | null
+  /** Resolved: every registered module, stored order first, config filled. */
+  modules: BriefLayoutEntry[]
+  model: BriefModel
+  effort: BriefEffort
+  setup_completed_at: string | null
+  goals: BriefGoals
+  sources: BriefSources
+  manifests: ModuleManifest[]
+}
+/** Omit a key to keep it; `location: null` clears. One save = one transaction. */
+export interface BriefSettingsPatch {
+  time?: string
+  location?: BriefLocation | null
+  modules?: BriefLayoutEntry[]
+  model?: BriefModel
+  effort?: BriefEffort
+  goals?: Partial<BriefGoals>
+  complete_setup?: boolean
+}
+export interface BriefSettingsCapability {
+  supported: boolean
+  get(): Promise<BriefSettings>
+  save(patch: BriefSettingsPatch): Promise<BriefSettings>
 }
 
 // ── Projects ──

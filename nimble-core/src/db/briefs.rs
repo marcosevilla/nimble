@@ -9,15 +9,16 @@ use crate::types::{Brief, Priority};
 
 const SNAPSHOT_SCHEMA: i64 = 1;
 
-type Row = (String, i64, String, String, String, String, i64, String, String);
-const COLS: &str = "date, version, status, source, layout_json, snapshot_json, snapshot_schema, generated_at, updated_at";
+type Row = (String, i64, String, String, String, String, i64, Option<String>, String, String);
+const COLS: &str = "date, version, status, source, layout_json, snapshot_json, snapshot_schema, notes, generated_at, updated_at";
+const NOTES_MAX: usize = 20_000;
 
 fn to_brief(r: Row) -> Brief {
     Brief {
         date: r.0, version: r.1, status: r.2, source: r.3,
         layout: serde_json::from_str(&r.4).unwrap_or(serde_json::Value::Null),
         snapshot: serde_json::from_str(&r.5).unwrap_or(serde_json::Value::Null),
-        snapshot_schema: r.6, generated_at: r.7, updated_at: r.8,
+        snapshot_schema: r.6, notes: r.7, generated_at: r.8, updated_at: r.9,
     }
 }
 
@@ -31,13 +32,30 @@ pub async fn list_brief_dates(pool: &SqlitePool) -> crate::Result<Vec<String>> {
     Ok(sqlx::query_scalar("SELECT date FROM briefs ORDER BY date DESC").fetch_all(pool).await?)
 }
 
-/// The row as sync sees it: DB column names, JSON columns as text.
+/// The row as sync sees it: DB column names, JSON columns as text. Every
+/// synced column is present — receivers upsert what they are sent.
 fn sync_snapshot(b: &Brief) -> String {
     serde_json::json!({
         "date": b.date, "version": b.version, "status": b.status, "source": b.source,
         "layout_json": b.layout.to_string(), "snapshot_json": b.snapshot.to_string(),
-        "snapshot_schema": b.snapshot_schema, "generated_at": b.generated_at, "updated_at": b.updated_at,
+        "snapshot_schema": b.snapshot_schema, "notes": b.notes,
+        "generated_at": b.generated_at, "updated_at": b.updated_at,
     }).to_string()
+}
+
+/// Today's scratchpad (the `notes` module). Past days are read-only; the
+/// first write of the day also writes the day's snapshot. Blank clears.
+pub async fn set_notes(pool: &SqlitePool, date: &str, today: &str, notes: &str) -> crate::Result<()> {
+    if date != today { return Err(crate::Error::Other("notes_read_only".into())); }
+    if notes.chars().count() > NOTES_MAX { return Err(crate::Error::Other("notes_too_long".into())); }
+    let Some(mut b) = ensure_snapshot(pool, date, today).await? else { return Err(crate::Error::Other("no_brief".into())) };
+    b.notes = if notes.trim().is_empty() { None } else { Some(notes.to_string()) };
+    b.updated_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    sqlx::query("UPDATE briefs SET notes = ?, updated_at = ? WHERE date = ?")
+        .bind(&b.notes).bind(&b.updated_at).bind(date).execute(pool).await?;
+    sync::append_sync_log(pool, "briefs", date, "UPDATE",
+        Some(&serde_json::json!(["notes", "updated_at"]).to_string()), Some(&sync_snapshot(&b))).await.ok();
+    Ok(())
 }
 
 /// Today's snapshot, written on first call from the enabled modules in
@@ -53,12 +71,12 @@ pub async fn ensure_snapshot(pool: &SqlitePool, date: &str, today: &str) -> crat
     let brief = Brief {
         date: date.into(), version: 1, status: if partial { "partial" } else { "ready" }.into(), source: "nimble".into(),
         layout: serde_json::json!(used), snapshot,
-        snapshot_schema: SNAPSHOT_SCHEMA, generated_at: now.clone(), updated_at: now,
+        snapshot_schema: SNAPSHOT_SCHEMA, notes: None, generated_at: now.clone(), updated_at: now,
     };
-    let inserted = sqlx::query(&format!("INSERT OR IGNORE INTO briefs ({COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"))
+    let inserted = sqlx::query(&format!("INSERT OR IGNORE INTO briefs ({COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"))
         .bind(&brief.date).bind(brief.version).bind(&brief.status).bind(&brief.source)
         .bind(brief.layout.to_string()).bind(brief.snapshot.to_string()).bind(brief.snapshot_schema)
-        .bind(&brief.generated_at).bind(&brief.updated_at)
+        .bind(&brief.notes).bind(&brief.generated_at).bind(&brief.updated_at)
         .execute(pool).await?.rows_affected();
     if inserted == 1 {
         sync::append_sync_log(pool, "briefs", date, "INSERT", None, Some(&sync_snapshot(&brief))).await.ok();
@@ -200,5 +218,26 @@ mod tests {
         assert_eq!(h.len(), 2, "inactive habits are left out");
         assert_eq!((h[0]["name"].as_str(), h[0]["done"].as_bool()), (Some("Stretch"), Some(true)));
         assert_eq!((h[1]["name"].as_str(), h[1]["done"].as_bool()), (Some("Read"), Some(false)));
+    }
+
+    #[tokio::test]
+    async fn notes_save_for_today_and_sync() {
+        let pool = test_pool().await;
+        super::set_notes(&pool, "2026-09-23", "2026-09-23", "Call the venue").await.unwrap();
+        let b = super::get_brief(&pool, "2026-09-23").await.unwrap().unwrap();
+        assert_eq!(b.notes.as_deref(), Some("Call the venue"), "the first write also creates the day's snapshot");
+        let snap: String = sqlx::query_scalar("SELECT snapshot FROM sync_log WHERE table_name='briefs' AND operation='UPDATE'")
+            .fetch_one(&pool).await.unwrap();
+        assert!(snap.contains("Call the venue"), "the sync snapshot carries notes (receivers would null an omitted column)");
+        super::set_notes(&pool, "2026-09-23", "2026-09-23", "   ").await.unwrap();
+        assert!(super::get_brief(&pool, "2026-09-23").await.unwrap().unwrap().notes.is_none(), "blank clears");
+    }
+
+    #[tokio::test]
+    async fn notes_are_read_only_on_other_days() {
+        let pool = test_pool().await;
+        super::ensure_snapshot(&pool, "2026-09-22", "2026-09-22").await.unwrap();
+        assert!(super::set_notes(&pool, "2026-09-22", "2026-09-23", "late").await.is_err());
+        assert!(super::set_notes(&pool, "2026-09-23", "2026-09-23", &"x".repeat(20_001)).await.is_err());
     }
 }

@@ -12,6 +12,7 @@ import type {
   FocusReply,
   FocusSnapshot,
 } from '@nimble/types'
+import type { BriefSettings, BriefSettingsPatch } from '@nimble/types'
 import { FocusRequestError } from './focus-events'
 
 // Re-export all types from the shared package so existing imports continue to work
@@ -251,6 +252,20 @@ export async function listBriefSnapshots(): Promise<string[]> {
 
 export async function ensureBriefSnapshot(date: string): Promise<Brief | null> {
   return invoke<Brief | null>('brief_ensure_snapshot', { date })
+}
+
+// ── Morning Brief settings (phase 2) ──
+
+export async function briefSettingsGet(): Promise<BriefSettings> {
+  return invoke<BriefSettings>('brief_settings_get')
+}
+
+export async function briefSettingsSave(patch: BriefSettingsPatch): Promise<BriefSettings> {
+  return invoke<BriefSettings>('brief_settings_save', { patch })
+}
+
+export async function briefSetNotes(date: string, notes: string): Promise<void> {
+  return invoke<void>('brief_set_notes', { date, notes })
 }
 
 // ── Projects ──

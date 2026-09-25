@@ -26,6 +26,7 @@ export function createTauriProvider(): DataProvider {
       configureRemote: tauri.backupConfigureRemote,
       activateRestoredProfile: tauri.backupActivateRestoredProfile,
     },
+    briefSettings: { supported: true, get: tauri.briefSettingsGet, save: tauri.briefSettingsSave },
     settings: {
       checkSetupComplete: tauri.checkSetupComplete,
       get: tauri.getSetting,
@@ -170,6 +171,7 @@ export function createTauriProvider(): DataProvider {
       get: tauri.getBrief,
       listDates: tauri.listBriefSnapshots,
       ensureSnapshot: tauri.ensureBriefSnapshot,
+      setNotes: tauri.briefSetNotes,
     },
 
     goals: {

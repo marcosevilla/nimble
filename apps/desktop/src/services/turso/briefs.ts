@@ -3,9 +3,9 @@
  * (`get_brief`, `list_brief_dates`); the web never writes briefs.
  */
 import type { Brief } from '@nimble/types'
-import { query, str, num, text, type Row } from './client'
+import { query, str, strOrNull, num, text, type Row } from './client'
 
-const COLS = 'date, version, status, source, layout_json, snapshot_json, snapshot_schema, generated_at, updated_at'
+const COLS = 'date, version, status, source, layout_json, snapshot_json, snapshot_schema, notes, generated_at, updated_at'
 
 function toBrief(row: Row): Brief {
   return {
@@ -16,6 +16,7 @@ function toBrief(row: Row): Brief {
     layout: JSON.parse(str(row, 'layout_json')),
     snapshot: JSON.parse(str(row, 'snapshot_json')),
     snapshot_schema: num(row, 'snapshot_schema'),
+    notes: strOrNull(row, 'notes'),
     generated_at: str(row, 'generated_at'),
     updated_at: str(row, 'updated_at'),
   }

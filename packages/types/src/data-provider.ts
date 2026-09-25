@@ -79,6 +79,7 @@ export interface DataProvider {
   googleCalendar: import('./index').GoogleCalendarCapability
   reminders: import('./index').ReminderCapability
   backup: import('./index').BackupCapability
+  briefSettings: import('./index').BriefSettingsCapability
   settings: {
     checkSetupComplete(): Promise<boolean>
     get(key: string): Promise<string | null>
@@ -334,6 +335,8 @@ export interface DataProvider {
     /** Today's snapshot, written on first call (desktop). Past/future dates are
      *  read-only; the web never writes and resolves null. */
     ensureSnapshot(date: string): Promise<Brief | null>
+    /** Today's scratchpad. Desktop only; past days are read-only. */
+    setNotes(date: string, notes: string): Promise<void>
   }
 
   goals: {
