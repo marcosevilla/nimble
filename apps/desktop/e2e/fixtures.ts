@@ -64,6 +64,8 @@ export async function findClipped(scope: Locator, opts: { allowEllipsis?: boolea
           if (!ownText) continue
           const cs = getComputedStyle(el)
           if (cs.display === 'none' || cs.visibility === 'hidden' || el.getClientRects().length === 0) continue
+          // Visually hidden (sr-only, base-ui Progress's VoiceOver "x"): never seen, never clipped.
+          if (el.clientWidth <= 1 && el.clientHeight <= 1) continue
           if (allowEllipsis && cs.textOverflow === 'ellipsis') continue
           // scrollWidth alone also counts invisible hit-area pseudo-elements;
           // confirm with the laid-out width of the element's own text.
