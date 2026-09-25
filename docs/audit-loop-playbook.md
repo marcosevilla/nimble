@@ -144,3 +144,11 @@ _(fill in after each loop)_
 - `apps/desktop/src/main.tsx` — `window.__stores` DEV-only export. Keep as long as audit loops are active. Re-evaluate when MockDataProvider lands and the bypass is no longer needed.
 
 **Final commit on main:** `c8fdf5d merge: audit-loop-1-today-composition — Gate-0 fixes (lanes D + F)` (14 commits ahead of origin/main).
+
+### Loop 3 — autonomous polish, 4 lanes (2026-09-24 night)
+
+**Outcome:** modal / rail / keys / errors lanes → `loop3/integration` → main `0694ede`, installed. 424 e2e, 474 unit, Rust green.
+
+**What worked:** controller pre-creates the worktrees (node_modules symlinked, `node_modules` in `.git/info/exclude`) and gives each lane its own frozen-build port (4611–4615); lanes self-critique from their own before/after shots; a separate `feature-dev:code-reviewer` per lane found real bugs every time the lane said "done" (ghost fields shifted not widened, WebKit IME `keyCode 229`, inline listbox counted as overlay, tooltip trigger `data-popup-open`, menu focus return stealing Space); the controller looking at 2–3 screenshots per lane caught what tests didn't (square focus ring on a chip, rows sliced under the notice).
+
+**What leaked:** passing `isolation: "worktree"` to Agent AND telling the agent to cd into a pre-made worktree → harness refused the cd; work landed on `worktree-agent-*` and had to be fast-forwarded. Use one or the other. Cross-lane interaction only surfaced on the integration run (keys' overlay guard × modal's `q`-after-Esc test → popups mid-exit now excluded) — always run the full suite on the merged branch before calling it done.
