@@ -198,5 +198,9 @@ mod tests {
         let brief = brief.unwrap();
         assert!(composed);
         assert_eq!((brief.status.as_str(), brief.model.as_deref()), ("fallback", None), "no client was built");
+        assert_eq!(brief.compose_attempts, 0, "the owner's AI attempts are untouched");
+        assert!(compose::compose_due(&brief), "the owner's tick still composes with AI");
+        let (_, again) = run_on(&pool, &second, "2026-09-25", "2026-09-25", noon(), Mode::IfDue).await.unwrap();
+        assert!(!again, "no client and a composition exists: nothing is rewritten");
     }
 }

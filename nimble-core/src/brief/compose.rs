@@ -158,13 +158,22 @@ pub async fn compose<L: LlmClient>(pool: &SqlitePool, llm: Option<&L>, run: Comp
     if !run.force && !compose_due(&brief) {
         return Ok(ComposeOutcome::NotDue);
     }
+    // No client (no key, or a process that doesn't own the profile): the
+    // rule-based brief is written once and the day's AI attempts stay
+    // untouched, so the owner's tick — or a key added later — still upgrades
+    // it. Once a composition exists, a clientless run has nothing better to
+    // write and never re-sorts rows under the user.
+    if !run.force && llm.is_none() && brief.composed_at.is_some() {
+        return Ok(ComposeOutcome::NotDue);
+    }
     let settings = load_settings(pool).await?;
     let kept: HashSet<String> = crate::db::brief_items::acted_task_ids(pool, run.date).await?;
     let set = candidates::load_candidates(pool, run.date, &settings.labels).await?;
     let day = load_day_context(pool, run.date, run.now).await;
     // An automatic attempt is counted before the call, so a crash or a failed
-    // write can't retry forever. Regenerate is the user's and never counts.
-    let attempts = if run.force { brief.compose_attempts } else { briefs::begin_attempt(pool, run.date).await? };
+    // write can't retry forever. Regenerate is the user's and never counts;
+    // neither does a run with no client (no call is made).
+    let attempts = if run.force || llm.is_none() { brief.compose_attempts } else { briefs::begin_attempt(pool, run.date).await? };
     let partial = match &run.regathered {
         Some((_, _, partial)) => *partial,
         None => brief.status == "partial",
@@ -200,7 +209,9 @@ pub async fn compose<L: LlmClient>(pool: &SqlitePool, llm: Option<&L>, run: Comp
             Ok(ComposeOutcome::Composed { status: "ready".into(), error_code: None })
         }
         Err(error) => {
-            let attempts = if error.retryable() { attempts } else { attempts.max(MAX_AUTO_ATTEMPTS) };
+            // A terminal answer (auth, bad request, refusal) ends today's
+            // retries; a missing client never does.
+            let attempts = if llm.is_none() || error.retryable() { attempts } else { attempts.max(MAX_AUTO_ATTEMPTS) };
             let code = error.code().to_string();
             if run.force && has_ai_picks(&brief) {
                 // Regenerate failed: the AI picks on screen stay as they are.
@@ -335,7 +346,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_key_writes_the_rule_based_brief_and_stops_retrying() {
+    async fn no_client_writes_the_rule_based_brief_without_using_attempts() {
         let d = day().await;
         // Two more urgent tasks, so the three priority slots don't swallow the labelled ones.
         for content in ["Renew passport", "Pay estimated taxes"] {
@@ -344,14 +355,39 @@ mod tests {
         let out = compose::<FakeLlm>(&d.pool, None, run(false)).await.unwrap();
         assert_eq!(out, ComposeOutcome::Composed { status: "fallback".into(), error_code: Some("no_key".into()) });
         let b = brief(&d.pool).await;
-        assert_eq!((b.status.as_str(), b.error_code.as_deref(), b.compose_attempts), ("fallback", Some("no_key"), MAX_AUTO_ATTEMPTS));
+        assert_eq!((b.status.as_str(), b.error_code.as_deref(), b.compose_attempts), ("fallback", Some("no_key"), 0));
         assert_eq!(b.model, None);
         assert_eq!(b.snapshot["compose"]["origin"], "rule");
-        assert!(!compose_due(&b), "no key: nothing to retry until Regenerate");
+        assert!(compose_due(&b), "no client: the day's AI attempts are untouched");
         let rows = kinds(&d.pool).await;
         assert_eq!(rows[0], ("priority".to_string(), d.due.clone(), "rule".to_string()));
         assert!(rows.contains(&("quick_help".to_string(), d.help.clone(), "rule".to_string())));
         assert!(rows.contains(&("quick_self".to_string(), d.errand.clone(), "rule".to_string())));
+    }
+
+    #[tokio::test]
+    async fn a_missing_client_never_rewrites_and_a_key_added_later_upgrades() {
+        let d = day().await;
+        // A second process (or a profile with no key) opens Today first.
+        compose::<FakeLlm>(&d.pool, None, run(false)).await.unwrap();
+        let first = (brief(&d.pool).await, crate::db::brief_items::list_items(&d.pool, D).await.unwrap());
+        let logged: i64 = sqlx::query_scalar("SELECT count(*) FROM sync_log").fetch_one(&d.pool).await.unwrap();
+        // The owner's tick with no client: nothing written, nothing counted.
+        let again = compose::<FakeLlm>(&d.pool, None, ComposeRun { date: D, now: at(9, 0), force: false, regathered: None }).await.unwrap();
+        assert_eq!(again, ComposeOutcome::NotDue);
+        assert_eq!(serde_json::to_value(brief(&d.pool).await).unwrap(), serde_json::to_value(&first.0).unwrap());
+        assert_eq!(crate::db::brief_items::list_items(&d.pool, D).await.unwrap(), first.1);
+        let after: i64 = sqlx::query_scalar("SELECT count(*) FROM sync_log").fetch_one(&d.pool).await.unwrap();
+        assert_eq!(after, logged);
+        // A Regenerate without a client doesn't cap the day either.
+        regenerate::<FakeLlm>(&d.pool, None, D, at(9, 30)).await.unwrap();
+        assert_eq!(brief(&d.pool).await.compose_attempts, 0);
+        // A key added mid-day: the next due run upgrades to AI picks.
+        let a = alias(&d.pool, &d.due).await;
+        let ok = FakeLlm::json(json!({"summary": "Calm.", "priorities": [{"task_id": a, "reason": "r"}], "quick_help": [], "quick_self": [], "wins": []}));
+        compose(&d.pool, Some(&ok), ComposeRun { date: D, now: at(10, 0), force: false, regathered: None }).await.unwrap();
+        let b = brief(&d.pool).await;
+        assert_eq!((b.status.as_str(), b.compose_attempts, ok.calls()), ("ready", 1, 1));
     }
 
     #[tokio::test]
