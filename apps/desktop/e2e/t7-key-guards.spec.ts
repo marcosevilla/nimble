@@ -20,9 +20,18 @@ import { test, expect, expectNoNewAxeViolations } from './fixtures'
 
 const MOCK_NOW = new Date('2026-08-01T10:00:00')
 
-test.beforeEach(async ({ app: _app, page }) => {
+// Depending on `app` installs the mock before the clock is pinned.
+test.beforeEach(async ({ app, page }) => {
+  void app
   await page.clock.setFixedTime(MOCK_NOW)
 })
+
+/** What these tests read from the page's window. */
+interface TestWindow {
+  __focusCalls: { kind: string }[]
+  __TAURI_INTERNALS__: { invoke(cmd: string, args: unknown, io: unknown): Promise<unknown> }
+  __stores: { useAppStore: { getState(): { currentPage: string } } }
+}
 
 // ── mocks ────────────────────────────────────────────────────────────────
 
@@ -34,7 +43,7 @@ interface FocusOpts {
 
 async function installFocus(page: Page, o: FocusOpts) {
   await page.addInitScript((opts: FocusOpts) => {
-    const w = window as any
+    const w = window as unknown as TestWindow
     w.__focusCalls = []
     const config = { mode: 'count_up', budget_ms: null, work_ms: 1500000, break_ms: 300000, rounds: 1 }
     const queue = opts.queued.map((id) => ({
@@ -52,12 +61,12 @@ async function installFocus(page: Page, o: FocusOpts) {
       totals: {}, as_of: new Date().toISOString(), checkpoint_at: null, recovery_reason: null, replica: false,
     })
     const orig = w.__TAURI_INTERNALS__.invoke
-    w.__TAURI_INTERNALS__.invoke = (cmd: string, args: any, io: any) => {
+    w.__TAURI_INTERNALS__.invoke = (cmd: string, args: unknown, io: unknown) => {
       if (cmd === 'focus_capabilities')
         return Promise.resolve({ queue_read: true, queue_write: true, history_read: true, live_timing: true, companion: false, import: false, reason: null })
       if (cmd === 'focus_snapshot') return Promise.resolve(snap())
       if (cmd === 'focus_execute') {
-        const a = args.command.action
+        const a = (args as { command: { action: { kind: string } } }).command.action
         w.__focusCalls.push(a)
         if (a.kind === 'pause' && session) session.status = 'paused'
         if (a.kind === 'resume' && session) session.status = 'running'
@@ -70,12 +79,12 @@ async function installFocus(page: Page, o: FocusOpts) {
 }
 
 async function focusCalls(page: Page): Promise<{ kind: string }[]> {
-  return page.evaluate(() => (window as any).__focusCalls ?? [])
+  return page.evaluate(() => (window as unknown as TestWindow).__focusCalls ?? [])
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-const currentPage = (page: Page) => page.evaluate(() => (window as any).__stores.useAppStore.getState().currentPage as string)
+const currentPage = (page: Page) => page.evaluate(() => (window as unknown as TestWindow).__stores.useAppStore.getState().currentPage)
 
 /** The right rail's selected tab ("Calendar", "Habits…", "Focus queue"). */
 async function railTab(page: Page) {
@@ -119,7 +128,7 @@ async function shellState(page: Page) {
   }
 }
 
-const SHELL_KEYS = ['Shift+H', 'Shift+F', 'q', '?', '2', '3', 'g', 't']
+const SHELL_KEYS = ['Shift+H', 'Shift+F', 'q', '?', '2', '3', 'g', 'i']
 
 async function pressAll(page: Page, keys: string[]) {
   for (const k of keys) {
@@ -152,6 +161,17 @@ test.describe('1 shell keys', () => {
     await focusSelect(page)
     await pressAll(page, SHELL_KEYS)
     expect(await shellState(page), 'no shell shortcut fired from the select').toEqual(before)
+  })
+
+  test('the g-chord (g i) stays out of a SELECT and an open menu', async ({ app, page }) => {
+    await app.open('tasks')
+    await focusSelect(page)
+    await pressAll(page, ['g', 'i'])
+    expect(await currentPage(page), 'g i from a select').toBe('tasks')
+    await page.locator('[data-nav-row="task-05"]').getByRole('button', { name: /^Status:/ }).click()
+    await expect(popups(page)).toHaveCount(1)
+    await pressAll(page, ['g', 'i'])
+    expect(await currentPage(page), 'g i inside a menu').toBe('tasks')
   })
 
   test('with a row menu open (focus inside it) shell keys do nothing', async ({ app, page }) => {
@@ -204,6 +224,39 @@ test.describe('1 shell keys', () => {
     await pressAll(page, ['q', '2', 'Shift+H'])
     expect(await shellState(page)).toEqual(before)
     await expect(confirm).toBeVisible()
+  })
+})
+
+// ── 1b. page single keys with the same guard (self-critique round) ────
+
+test.describe('1b page keys', () => {
+  const capture = (page: Page) => page.getByRole('textbox', { name: 'Capture a note' })
+
+  test('sanity: Inbox c focuses the capture field from the page', async ({ app, page }) => {
+    await app.open('inbox')
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.keyboard.press('c')
+    await expect(capture(page)).toBeFocused()
+  })
+
+  test('Inbox c with a note\'s Move to doc picker open leaves the picker alone', async ({ app, page }) => {
+    await app.open('inbox')
+    await page.locator('[data-nav-row^="note:"]').filter({ hasText: 'Ask Jordan about the design offsite date' }).focus()
+    await page.keyboard.press('m')
+    const picker = popups(page).filter({ hasText: 'Move to doc' })
+    await expect(picker).toHaveCount(1)
+    await page.keyboard.press('c')
+    await page.waitForTimeout(200)
+    await expect(capture(page), 'c does not jump to the capture field').not.toBeFocused()
+    await expect(picker, 'the picker stays open').toHaveCount(1)
+  })
+
+  test('Inbox c typed in a SELECT stays in the select', async ({ app, page }) => {
+    await app.open('inbox')
+    await focusSelect(page)
+    await page.keyboard.press('c')
+    await page.waitForTimeout(200)
+    await expect(page.locator('#t7-select')).toBeFocused()
   })
 })
 
