@@ -1,0 +1,128 @@
+//! Momentum ledger exit tests (addendum 2026-09-25 §6): a completion counts
+//! exactly once whichever path saw it; un-completing reverses it once.
+
+#[path = "common/focus.rs"]
+mod fixture;
+
+use fixture::Harness;
+use nimble_core::db::focus::engine::{NativeTaskAction, NativeTaskCommand};
+use nimble_core::db::karma::{self, KarmaEvent};
+use nimble_core::db::tasks::{create_local_task, update_task_status, update_task_status_at};
+use nimble_core::test_util::test_pool;
+use nimble_core::types::CreateTaskInput;
+use sqlx::SqlitePool;
+
+async fn events(pool: &SqlitePool) -> Vec<KarmaEvent> {
+    karma::list_events(pool).await.unwrap()
+}
+
+async fn task(pool: &SqlitePool, content: &str, priority: i64) -> String {
+    create_local_task(pool, CreateTaskInput { content: content.into(), priority: Some(priority), ..Default::default() })
+        .await.unwrap().id
+}
+
+async fn completed_at(pool: &SqlitePool, id: &str) -> Option<String> {
+    sqlx::query_scalar("SELECT completed_at FROM local_tasks WHERE id = ?").bind(id).fetch_one(pool).await.unwrap()
+}
+
+#[tokio::test]
+async fn complete_then_uncomplete_is_plus_one_then_minus_one_exactly_once() {
+    let pool = test_pool().await;
+    let id = task(&pool, "Send the draft", 1).await;
+    update_task_status(&pool, &id, "complete", None).await.unwrap();
+    let stamp = completed_at(&pool, &id).await.unwrap();
+    update_task_status(&pool, &id, "complete", None).await.unwrap(); // already complete: no-op
+    let e = events(&pool).await;
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert_eq!(e[0].id, format!("task:{id}:{stamp}"));
+    assert_eq!((e[0].kind.as_str(), e[0].points, e[0].date.as_str()), ("task", 1, &stamp[..10]));
+
+    update_task_status(&pool, &id, "todo", None).await.unwrap();
+    update_task_status(&pool, &id, "in_progress", None).await.unwrap(); // open -> open: nothing
+    let e = events(&pool).await;
+    assert_eq!(e.len(), 2, "{e:?}");
+    let rev = e.iter().find(|x| x.kind == "untask").unwrap();
+    assert_eq!((rev.id.clone(), rev.points), (format!("untask:{id}:{stamp}"), -1));
+    assert_eq!(rev.date, stamp[..10], "the reversal lands on the original day");
+    assert_eq!(e.iter().map(|x| x.points).sum::<i64>(), 0);
+}
+
+#[tokio::test]
+async fn high_and_urgent_earn_the_priority_bonus() {
+    let pool = test_pool().await;
+    for (p, want) in [(1, 1), (2, 1), (3, 2), (4, 2)] {
+        let id = task(&pool, &format!("p{p}"), p).await;
+        update_task_status(&pool, &id, "complete", None).await.unwrap();
+        let e = events(&pool).await.into_iter().find(|x| x.task_id.as_deref() == Some(id.as_str())).unwrap();
+        assert_eq!(e.points, want, "priority {p}");
+    }
+}
+
+#[tokio::test]
+async fn a_recurring_occurrence_counts_once_per_due_date() {
+    let pool = test_pool().await;
+    let id = create_local_task(&pool, CreateTaskInput {
+        content: "Stretch".into(), due_date: Some("2026-08-16".into()),
+        recurrence_rule: Some("every day".into()), priority: Some(3), ..Default::default()
+    }).await.unwrap().id;
+    let today = chrono::NaiveDate::from_ymd_opt(2026, 8, 16).unwrap();
+    update_task_status_at(&pool, &id, "complete", None, today).await.unwrap();
+    let e = events(&pool).await;
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert_eq!(e[0].id, format!("recur:{id}:2026-08-16"));
+    assert_eq!((e[0].kind.as_str(), e[0].points, e[0].date.as_str()), ("recur", 2, "2026-08-16"));
+    // The next occurrence is a new event; the same occurrence never repeats.
+    update_task_status_at(&pool, &id, "complete", None, today).await.unwrap();
+    let ids: Vec<String> = events(&pool).await.into_iter().map(|x| x.id).collect();
+    assert_eq!(ids.len(), 2, "{ids:?}");
+    assert!(ids.contains(&format!("recur:{id}:2026-08-17")), "{ids:?}");
+}
+
+#[tokio::test]
+async fn completing_a_parent_counts_each_child_it_closes() {
+    let pool = test_pool().await;
+    let parent = task(&pool, "Trip", 1).await;
+    for c in ["Book", "Pack"] {
+        create_local_task(&pool, CreateTaskInput { content: c.into(), parent_id: Some(parent.clone()), ..Default::default() })
+            .await.unwrap();
+    }
+    update_task_status(&pool, &parent, "complete", None).await.unwrap();
+    assert_eq!(events(&pool).await.iter().filter(|x| x.kind == "task").count(), 3);
+}
+
+#[tokio::test]
+async fn the_focus_service_status_path_counts_once() {
+    let h = Harness::new().await;
+    let id = h.task("Write the brief").await;
+    for _ in 0..2 {
+        h.service.execute_native_task(NativeTaskCommand {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            action: NativeTaskAction::SetStatus { id: id.clone(), status: "complete".into(), note: None, expected_due_date: None },
+        }).await.unwrap();
+    }
+    let e = events(&h.pool).await;
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert_eq!(e[0].kind, "task");
+}
+
+#[tokio::test]
+async fn reopening_a_completion_the_ledger_never_saw_writes_nothing() {
+    let pool = test_pool().await;
+    let id = task(&pool, "Old win", 1).await;
+    sqlx::query("UPDATE local_tasks SET status='complete', completed=1, completed_at='2026-01-05 09:00:00' WHERE id=?")
+        .bind(&id).execute(&pool).await.unwrap();
+    update_task_status(&pool, &id, "todo", None).await.unwrap();
+    assert!(events(&pool).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_broken_ledger_never_fails_the_completion() {
+    let pool = test_pool().await;
+    let id = task(&pool, "Still completes", 1).await;
+    sqlx::query("DROP TABLE karma_events").execute(&pool).await.unwrap();
+    update_task_status(&pool, &id, "complete", None).await.unwrap();
+    update_task_status(&pool, &id, "todo", None).await.unwrap();
+    update_task_status(&pool, &id, "complete", None).await.unwrap();
+    let status: String = sqlx::query_scalar("SELECT status FROM local_tasks WHERE id=?").bind(&id).fetch_one(&pool).await.unwrap();
+    assert_eq!(status, "complete");
+}
