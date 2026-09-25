@@ -1,13 +1,11 @@
 import { useDataVersion } from '@/hooks/useDataVersion'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { useDataProvider } from '@/services/provider-context'
 import { useProjects } from '@/hooks/useLocalTasks'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { taskToast } from '@/lib/taskToast'
-import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/shared/IconButton'
@@ -16,6 +14,16 @@ import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import type { LocalTask, Section, Label } from '@nimble/types'
 
 const EMPTY_DUE: ChipValues['due'] = { dueDate: null, dueTime: null, durationMinutes: null, recurrenceRule: null }
+
+const FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports?.('field-sizing', 'content')
+
+/** Grow a textarea to its content where `field-sizing: content` is missing
+ * (older WebKit). A no-op where the CSS does the job. */
+function autoGrow(el: HTMLTextAreaElement | null) {
+  if (!el || FIELD_SIZING) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
 
 /** `defaults.parentId` seeds a subtask create (Task Details' "Add subtask"
  * mount); everything else maps 1:1 onto Task 7's `ChipValues`. */
@@ -74,6 +82,7 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
   const [labels, setLabels] = useState<Label[]>([])
   const [saving, setSaving] = useState(false)
 
+  const titleRef = useRef<HTMLTextAreaElement>(null)
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -151,78 +160,91 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
   )
 
   // Plain Enter in the title just advances focus — it never submits or
-  // inserts a newline (the title is a single-line input). ⌘/Ctrl+Enter and
-  // Shift+Enter fall through to the card-level handler / native behavior.
-  const handleTitleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+  // inserts a newline (the title wraps visually but stays one line of
+  // text). ⌘/Ctrl+Enter falls through to the card-level handler.
+  const handleTitleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       descriptionRef.current?.focus()
     }
   }, [])
 
+  // Engines without `field-sizing: content` get the same auto-grow by hand.
+  useLayoutEffect(() => autoGrow(titleRef.current), [title])
+  useLayoutEffect(() => autoGrow(descriptionRef.current), [description])
+
   return (
     <div
+      data-composer-card
       onKeyDown={handleCardKeyDown}
-      className="rounded-xl border border-input bg-card px-5 py-4 shadow-[0px_2px_8px_0px_rgba(0,0,0,0.06)] flex flex-col gap-8"
+      className="surface-popover flex flex-col"
     >
-      <div className="flex flex-col gap-3">
-        {/* Header */}
+      <div className="flex flex-col px-6 pt-4 pb-6">
+        {/* Header — quiet chrome; the title field below is the hero. */}
         <div className="flex items-center justify-between">
-          <span className="text-body-strong">New task</span>
-          <IconButton size="md" onClick={handleClose} aria-label="Close">
-            <X className="size-[17px]" />
+          <span className="text-meta-strong text-muted-foreground">New task</span>
+          <IconButton size="md" onClick={handleClose} aria-label="Close" className="-mr-1">
+            <X className="size-4" />
           </IconButton>
         </div>
 
-        {/* Title */}
-        <Input
+        {/* Title — a one-row textarea so long titles wrap instead of
+            scrolling sideways; newlines are stripped (Enter moves on). */}
+        <Textarea
+          ref={titleRef}
+          variant="ghost"
+          rows={1}
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => setTitle(e.target.value.replace(/\r?\n/g, ' '))}
           onKeyDown={handleTitleKeyDown}
           placeholder="Task title"
+          aria-label="Task title"
           autoFocus
-          className={cn(
-            'h-auto border-none bg-transparent px-0 py-0 shadow-none',
-            'text-display placeholder:text-foreground/25',
-          )}
+          className="mt-4 text-display leading-[1.3]"
         />
 
-        {/* Description — raw markdown, auto-grows via field-sizing-content */}
+        {/* Description — raw markdown, auto-grows from three lines */}
         <Textarea
           ref={descriptionRef}
+          variant="ghost"
+          rows={1}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Description"
-          rows={1}
-          className={cn(
-            'min-h-0 resize-none border-none bg-transparent px-0 py-0 shadow-none',
-            'text-body placeholder:text-foreground/25',
-          )}
+          aria-label="Description"
+          className="mt-2 min-h-16 text-body"
         />
 
         {/* Metadata chips */}
-        <MetadataChips
-          values={chipValues}
-          onChange={(patch) => setChipValues((v) => ({ ...v, ...patch }))}
-          context="composer"
-          projects={projects}
-          sections={sections}
-          labels={labels}
-        />
+        <div data-composer-chips className="mt-6">
+          <MetadataChips
+            values={chipValues}
+            onChange={(patch) => setChipValues((v) => ({ ...v, ...patch }))}
+            context="composer"
+            projects={projects}
+            sections={sections}
+            labels={labels}
+          />
+        </div>
       </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" className="h-8 rounded-lg px-3.5 text-body" onClick={handleClose}>
-          Cancel
-        </Button>
-        <Button
-          className="h-8 rounded-lg px-4 bg-primary text-body text-primary-foreground disabled:opacity-50"
-          disabled={!canSave || saving}
-          onClick={handleSave}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
+      {/* Footer — its own strip, so the actions never crowd the chips. */}
+      <div data-composer-footer className="flex items-center justify-between gap-4 border-t border-border/60 px-6 py-4">
+        <span className="text-meta text-muted-foreground">
+          <kbd className="rounded-sm bg-muted px-1 py-0.5 font-sans text-label">⌘↵</kbd> to save
+        </span>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" className="h-8 rounded-lg px-3 text-body" onClick={handleClose}>
+            Cancel
+          </Button>
+          <Button
+            className="h-8 rounded-lg px-4"
+            disabled={!canSave || saving}
+            onClick={handleSave}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
       </div>
     </div>
   )
