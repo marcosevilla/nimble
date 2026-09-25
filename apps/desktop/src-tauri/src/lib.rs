@@ -4,6 +4,7 @@ mod google_oauth;
 mod google_credentials;
 mod google_calendar_runner;
 mod backup_runner;
+mod brief_runner;
 mod backup_git;
 mod backup_state;
 mod commands;
@@ -352,6 +353,7 @@ pub fn run() {
 
                 // Store pool in app state
                 app_handle.manage(crate::backup_runner::BackupRuntime::new(app_dir.clone(), db_path.clone(), demo_mode, isolated_test));
+                app_handle.manage(crate::brief_runner::BriefRuntime::new(demo_mode, isolated_test));
                 // One process-wide focus engine, writable only while this
                 // process holds the profile owner lock. Initialization errors
                 // (e.g. a restored profile's wrong_owner) never block startup;
@@ -453,6 +455,8 @@ pub fn run() {
                         if crate::backup_runner::run_if_due(&handle).await.is_err() {
                             log::warn!("Backup step did not finish; see Backups in Settings");
                         }
+                        // Morning brief: compose once the clock passes brief.time.
+                        crate::brief_runner::tick(&handle).await;
                     }
                 });
             }
@@ -555,6 +559,10 @@ pub fn run() {
             brief::brief_get,
             brief::brief_list_dates,
             brief::brief_ensure_snapshot,
+            brief::brief_items_list,
+            brief::brief_compose_if_due,
+            brief::brief_regenerate,
+            brief::brief_item_set_state,
             projects::get_projects,
             projects::create_project,
             projects::update_project,

@@ -20,6 +20,7 @@ pub const SECTIONS: &[Domain] = &[Domain::Sections];
 pub const TASKS_AND_SECTIONS: &[Domain] = &[Domain::Tasks, Domain::Sections];
 pub const PROJECTS: &[Domain] = &[Domain::Projects];
 pub const TASKS_AND_PROJECTS: &[Domain] = &[Domain::Tasks, Domain::Projects];
+pub const BRIEF: &[Domain] = &[Domain::Brief];
 
 pub fn payload(domains: &[Domain], ids: Vec<String>) -> DataChanged {
     DataChanged { version: VERSION, domains: domains.to_vec(), ids }
