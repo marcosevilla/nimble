@@ -4,6 +4,8 @@ Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + 
 
 ## Brief phase 2 + C4 + phases 3–4 (2026-09-25) — brief phase 2 (`411084a`, v24) + C4 (`f7c0dcb`, v25) merged + installed
 
+**PAUSED 2026-09-25 — resume from `/Users/marcosevilla/Developer/marco-task-app/.nimble-wt/plan/.superpowers/sdd/2026-09-25-c4-brief/RESUME.md`** (phase 3 at `a712b71` WIP in `.nimble-wt/brief`: tasks 7–8 done, 9 half, 10 left; momentum `e1c2ca5` in `.nimble-wt/momentum`, reviewed, merges after phase 3 — v26 before v27).
+
 Specs `docs/superpowers/specs/2026-09-25-c4-labels-search-design.md` + `2026-09-25-morning-brief-phases-2-4-addendum.md`; plans `docs/superpowers/plans/2026-09-25-{brief-phase-2,brief-phase-3,c4-labels-search,momentum}.md`; ledger `.nimble-wt/plan/.superpowers/sdd/2026-09-25-c4-brief/ledger.md`. Rollback `Nimble Rollbacks/20260925-053753-brief-phase-2/` (app + nimble.db v23 + dt). `dt` rebuilt (old: `~/.local/bin/dt.bak-fd854b6`).
 
 - [x] **Brief phase 2** (lane A, every task reviewed + opus whole-branch review): module registry (`nimble-core/src/brief/`, `components/today/briefModules.tsx`), Settings → Today & brief (Brief, Location & weather, Boxes), weather chip + popover (Open-Meteo, device-local `module_cache`, "as of"), 6-step Today setup with live preview, setup gate removed, notes in their own synced `brief_notes` table. Verified at branch: Rust suites, 500 node, both builds, B2 e2e 18/18 (full e2e 440 before the last fix round). Installed: bundle `index-C5r8oEFv`, DB v24, 1,364 tasks kept.
