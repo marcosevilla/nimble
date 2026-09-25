@@ -2025,7 +2025,15 @@ pub async fn apply_remote_rows_with_focus(
                 let recurring = task.recurrence_rule.as_deref().and_then(crate::recurrence::parse_rule).is_some();
                 if let (true, Some(before), Some(after)) = (recurring, prior_due.as_deref(), task.due_date.as_deref()) {
                     if after > before {
-                        crate::db::karma::on_recurred_tx(conn, &task.id, before, task.priority, &crate::db::karma::now_local()).await?;
+                        // Dated by the pulled row's own stamp (the web writes a
+                        // local `updated_at` with the roll-forward), not by
+                        // when this device happened to pull it.
+                        let at = if crate::db::karma::local_stamp(&task.updated_at).is_some() {
+                            task.updated_at.clone()
+                        } else {
+                            crate::db::karma::now_local()
+                        };
+                        crate::db::karma::on_recurred_tx(conn, &task.id, before, task.priority, &at).await?;
                     }
                 }
             }

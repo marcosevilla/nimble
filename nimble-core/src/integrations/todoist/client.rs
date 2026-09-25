@@ -37,6 +37,9 @@ pub struct TodoistItem {
     pub is_deleted: Option<bool>,
     #[serde(default)]
     pub updated_at: Option<String>,
+    /// When a checked item was completed (RFC 3339), if Todoist sent it.
+    #[serde(default)]
+    pub completed_at: Option<String>,
     #[serde(default)]
     pub due: Option<TodoistDue>,
     #[serde(default)]
@@ -152,6 +155,88 @@ pub async fn get_task_status(
 }
 
 pub const TODOIST_SYNC_URL: &str = "https://api.todoist.com/api/v1/sync";
+pub const TODOIST_ACTIVITIES_URL: &str = "https://api.todoist.com/api/v1/activities";
+
+/// One Todoist activity-log event (`GET /api/v1/activities`, the shape the
+/// official SDK reads: `results[]` + `next_cursor`).
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct ActivityEvent {
+    pub object_id: String,
+    pub event_type: String,
+    /// RFC 3339, UTC.
+    pub event_date: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ActivityPage {
+    #[serde(default)]
+    results: Vec<ActivityEvent>,
+    #[serde(default)]
+    next_cursor: Option<String>,
+}
+
+/// Todoist's activity log, as the momentum ledger needs it: item completions
+/// since a moment. Production is `HttpActivitySource`; tests use fakes.
+#[allow(async_fn_in_trait)]
+pub trait ActivitySource {
+    /// `item:completed` events at or after `since` (RFC 3339), optionally
+    /// narrowed to one item.
+    async fn completed_items_since(&self, since: &str, object_id: Option<&str>) -> crate::Result<Vec<ActivityEvent>>;
+}
+
+pub struct HttpActivitySource {
+    client: reqwest::Client,
+    url: reqwest::Url,
+    token: String,
+}
+
+impl HttpActivitySource {
+    /// Pages followed per call. A normal sync has at most a handful of
+    /// recurring completions; anything past this is simply not counted.
+    const MAX_PAGES: usize = 5;
+
+    pub fn todoist(token: String) -> crate::Result<Self> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| crate::Error::Api(format!("Todoist client: {e}")))?;
+        let url = reqwest::Url::parse(TODOIST_ACTIVITIES_URL)
+            .map_err(|e| crate::Error::Api(format!("todoist activities url: {e}")))?;
+        Ok(Self { client, url, token })
+    }
+}
+
+impl ActivitySource for HttpActivitySource {
+    async fn completed_items_since(&self, since: &str, object_id: Option<&str>) -> crate::Result<Vec<ActivityEvent>> {
+        let mut out = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..Self::MAX_PAGES {
+            // query_pairs_mut, never string concat: cursors carry `+ / =`.
+            let mut url = self.url.clone();
+            {
+                let mut q = url.query_pairs_mut();
+                q.append_pair("object_event_types", r#"["item:completed"]"#);
+                q.append_pair("date_from", since);
+                q.append_pair("limit", "100");
+                if let Some(id) = object_id { q.append_pair("object_id", id); }
+                if let Some(c) = &cursor { q.append_pair("cursor", c); }
+            }
+            let resp = self.client.get(url).bearer_auth(&self.token).send().await
+                .map_err(|e| crate::Error::Api(format!("todoist activities: {e}")))?;
+            if !resp.status().is_success() {
+                return Err(crate::Error::Api(format!("todoist activities HTTP {}", resp.status())));
+            }
+            let page: ActivityPage = resp.json().await
+                .map_err(|e| crate::Error::Api(format!("todoist activities parse: {e}")))?;
+            out.extend(page.results);
+            match page.next_cursor {
+                Some(c) if !c.is_empty() => cursor = Some(c),
+                _ => break,
+            }
+        }
+        Ok(out)
+    }
+}
 
 /// Outcome of one `/sync` command request, classified by what it proves about
 /// delivery. `NotSent` means the request never left (safe to retry);

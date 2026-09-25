@@ -197,10 +197,12 @@ async fn a_turso_recurring_roll_forward_counts_the_occurrence_and_a_reschedule_d
     }).await.unwrap().id;
     let mut row = row_json(&pool, &id).await;
     row["due_date"] = json!("2026-09-25");
+    row["updated_at"] = json!("2026-09-24 23:50:00"); // the web's local stamp for the completion
     apply_remote_rows_with_focus(&pool, None, &[remote("local_tasks", &id, "UPDATE", Some(r#"["due_date","due_time","status"]"#), row.to_string())]).await.unwrap();
     let e = events(&pool).await;
     assert_eq!(e.len(), 1, "{e:?}");
     assert_eq!(e[0].id, format!("recur:{id}:2026-09-24"));
+    assert_eq!((e[0].date.as_str(), e[0].created_at.as_str()), ("2026-09-24", "2026-09-24 23:50:00"), "dated when it happened, not when pulled");
     row["due_date"] = json!("2026-09-30");
     apply_remote_rows_with_focus(&pool, None, &[remote("local_tasks", &id, "UPDATE", Some(r#"["due_date"]"#), row.to_string())]).await.unwrap();
     assert_eq!(events(&pool).await.len(), 1);
