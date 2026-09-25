@@ -22,7 +22,7 @@
 //! Known limit: complete → reopen → complete inside one wall-clock second
 //! reuses the `completed_at` key, so the second completion isn't counted.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, Weekday};
 use serde::{Deserialize, Serialize};
@@ -546,6 +546,212 @@ pub async fn evaluate_at(pool: &SqlitePool, from: NaiveDate, today: NaiveDate) -
     }
     tx.commit().await?;
     Ok(report)
+}
+
+// ── Summary (the Momentum box + Activity tiles) and backfill ───────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TrendDay { pub date: String, pub done: i64, pub day_off: bool, pub paused: bool }
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Win { pub task_id: String, pub content: String, pub priority: i64, pub date: String }
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RangeStats {
+    /// First local date of the range; None for "all".
+    pub from: Option<String>,
+    pub completed: i64,
+    pub active_days: i64,
+    pub peak_hour: Option<i64>,
+    pub focused_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct KarmaParity { pub total: i64, pub level: String, pub next_level_at: Option<i64>, pub daily_streak: i64, pub weekly_streak: i64 }
+
+/// Everything the box and the tiles render. With karma off, `karma` is None
+/// and no field describes a past day's goal, so a missed goal can't leak
+/// into the next day's copy.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MomentumSummary {
+    pub today: String,
+    pub range: String,
+    pub settings: MomentumSettings,
+    pub is_day_off: bool,
+    pub today_done: i64,
+    pub week_done: i64,
+    pub week_start: String,
+    /// The last 7 local days, oldest first, ending today.
+    pub trend: Vec<TrendDay>,
+    /// Up to 3 of this week's completions, highest priority first.
+    pub wins: Vec<Win>,
+    pub stats: RangeStats,
+    pub karma: Option<KarmaParity>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+pub struct BackfillReport { pub tasks: u64, pub recurrences: u64, pub goal_days: u64, pub goal_weeks: u64 }
+
+/// A completion row whose reversal exists doesn't count (for wins/peak hour).
+const NOT_REVERSED: &str = "NOT EXISTS (SELECT 1 FROM karma_events u WHERE u.id = 'un' || e.id)";
+
+fn range_from(range: &str, today: NaiveDate) -> crate::Result<Option<NaiveDate>> {
+    match range {
+        "7d" => Ok(Some(today - Duration::days(6))),
+        "30d" => Ok(Some(today - Duration::days(29))),
+        "all" => Ok(None),
+        _ => Err(crate::Error::Other("range must be 7d, 30d or all".into())),
+    }
+}
+
+pub async fn momentum_summary(pool: &SqlitePool, range: &str) -> crate::Result<MomentumSummary> {
+    momentum_summary_at(pool, range, Local::now().date_naive()).await
+}
+
+/// Persist what the last `EVALUATE_DAYS` earned (fire-and-forget: a failure
+/// is logged and the read still answers), then read.
+pub async fn momentum_summary_at(pool: &SqlitePool, range: &str, today: NaiveDate) -> crate::Result<MomentumSummary> {
+    range_from(range, today)?;
+    if let Err(e) = evaluate_at(pool, today - Duration::days(EVALUATE_DAYS - 1), today).await {
+        log::warn!("karma: evaluation skipped: {e}");
+    }
+    read_summary_at(pool, range, today).await
+}
+
+/// The read-only half, also what the brief module snapshots.
+pub async fn read_summary_at(pool: &SqlitePool, range: &str, today: NaiveDate) -> crate::Result<MomentumSummary> {
+    let from = range_from(range, today)?;
+    let s = load_settings(pool).await?;
+    let paused = paused_days(pool, &s, today).await?;
+    let ws = week_start(today);
+    let trend_from = today - Duration::days(6);
+    let counts = done_by_day(pool, trend_from.min(ws), today).await?;
+    let n = |d: NaiveDate| counts.get(&d).copied().unwrap_or(0);
+    let trend: Vec<TrendDay> = (0..7).map(|i| {
+        let d = trend_from + Duration::days(i);
+        TrendDay { date: day(d), done: n(d), day_off: s.is_day_off(d), paused: paused.contains(&d) }
+    }).collect();
+    let week_done: i64 = (0..=(today - ws).num_days()).map(|i| n(ws + Duration::days(i))).sum();
+
+    let lo = from.map(day).unwrap_or_else(|| "0000-01-01".into());
+    let hi = day(today);
+    let completed: i64 = sqlx::query_scalar(&format!("SELECT {NET} FROM karma_events WHERE date >= ? AND date <= ?"))
+        .bind(&lo).bind(&hi).fetch_one(pool).await?;
+    let active_days: i64 = sqlx::query_scalar(&format!(
+        "SELECT COUNT(*) FROM (SELECT date FROM karma_events WHERE date >= ? AND date <= ? GROUP BY date HAVING {NET} > 0)"))
+        .bind(&lo).bind(&hi).fetch_one(pool).await?;
+    let peak_hour: Option<i64> = sqlx::query_scalar::<_, i64>(&format!(
+        "SELECT CAST(substr(e.created_at, 12, 2) AS INTEGER) AS h FROM karma_events e \
+         WHERE e.kind IN ('task','recur') AND e.date >= ? AND e.date <= ? AND {NOT_REVERSED} \
+         GROUP BY h ORDER BY COUNT(*) DESC, h ASC LIMIT 1"))
+        .bind(&lo).bind(&hi).fetch_optional(pool).await?;
+    let wins: Vec<(String, String, i64, String)> = sqlx::query_as(&format!(
+        "SELECT e.task_id, t.content, t.priority, MAX(e.date) FROM karma_events e JOIN local_tasks t ON t.id = e.task_id \
+         WHERE e.kind IN ('task','recur') AND e.date >= ? AND e.date <= ? AND {NOT_REVERSED} \
+         GROUP BY e.task_id ORDER BY t.priority DESC, MAX(e.created_at) DESC LIMIT 3"))
+        .bind(day(ws)).bind(&hi).fetch_all(pool).await?;
+    let focused_ms = focused_ms(pool, from, today).await?;
+    let karma = if s.karma_enabled { Some(parity(pool, &s, &paused, today).await?) } else { None };
+
+    Ok(MomentumSummary {
+        today: hi.clone(),
+        range: range.into(),
+        is_day_off: s.is_day_off(today),
+        today_done: n(today),
+        week_done,
+        week_start: day(ws),
+        trend,
+        wins: wins.into_iter().map(|(task_id, content, priority, date)| Win { task_id, content, priority, date }).collect(),
+        stats: RangeStats { from: from.map(day), completed, active_days, peak_hour, focused_ms },
+        karma,
+        settings: s,
+    })
+}
+
+/// `focus_sessions.work_ms`, by the session's LOCAL start date
+/// (`started_at` is UTC RFC 3339; `timezone_offset_minutes` is the device offset then).
+async fn focused_ms(pool: &SqlitePool, from: Option<NaiveDate>, to: NaiveDate) -> crate::Result<i64> {
+    let rows: Vec<(Option<String>, i64, i64)> = sqlx::query_as(
+        "SELECT started_at, timezone_offset_minutes, work_ms FROM focus_sessions WHERE work_ms > 0")
+        .fetch_all(pool).await?;
+    Ok(rows.into_iter().filter_map(|(started, offset, ms)| {
+        let utc = chrono::DateTime::parse_from_rfc3339(started.as_deref()?).ok()?.naive_utc();
+        let local = (utc + Duration::minutes(offset)).date();
+        (from.map_or(true, |f| local >= f) && local <= to).then_some(ms)
+    }).sum())
+}
+
+async fn kind_dates(pool: &SqlitePool, kind: &str) -> crate::Result<BTreeSet<NaiveDate>> {
+    Ok(sqlx::query_scalar::<_, String>("SELECT date FROM karma_events WHERE kind = ?")
+        .bind(kind).fetch_all(pool).await?
+        .iter().filter_map(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).collect())
+}
+
+async fn parity(pool: &SqlitePool, s: &MomentumSettings, paused: &BTreeSet<NaiveDate>, today: NaiveDate) -> crate::Result<KarmaParity> {
+    let total: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(points), 0) FROM karma_events").fetch_one(pool).await?;
+    let (level, next_level_at) = level_for(total);
+    let days = kind_dates(pool, "goal_day").await?;
+    let weeks: BTreeSet<NaiveDate> = kind_dates(pool, "goal_week").await?.into_iter().map(week_start).collect();
+    Ok(KarmaParity {
+        total, level: level.into(), next_level_at,
+        daily_streak: daily_streak(&days, s, paused, today),
+        weekly_streak: weekly_streak(&weeks, s, paused, today),
+    })
+}
+
+pub async fn backfill(pool: &SqlitePool) -> crate::Result<BackfillReport> {
+    backfill_at(pool, Local::now().date_naive()).await
+}
+
+/// Rebuild what history can tell: every task still marked complete (at its
+/// `completed_at`), every `task_recurred` activity row, then goal bonuses over
+/// the whole span with today's goals. Idempotent, so it's safe to rerun after C5.
+/// Deliberately not activity-log completions (re-score 1c found them unreliable).
+pub async fn backfill_at(pool: &SqlitePool, today: NaiveDate) -> crate::Result<BackfillReport> {
+    let mut r = BackfillReport::default();
+    let completed: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT id, priority, completed_at FROM local_tasks WHERE completed = 1 AND completed_at IS NOT NULL")
+        .fetch_all(pool).await?;
+    let priority: HashMap<String, i64> = sqlx::query_as::<_, (String, i64)>("SELECT id, priority FROM local_tasks")
+        .fetch_all(pool).await?.into_iter().collect();
+    let recurred: Vec<(Option<String>, Option<String>, String)> = sqlx::query_as(
+        "SELECT target_id, metadata, created_at FROM activity_log WHERE action_type = 'task_recurred'")
+        .fetch_all(pool).await?;
+    let mut tx = pool.begin().await?;
+    for (id, p, at) in &completed {
+        if let Some(e) = completion_event(id, *p, at) {
+            if record_tx(&mut tx, &e).await? { r.tasks += 1; }
+        }
+    }
+    for (target, meta, at) in &recurred {
+        let (Some(task_id), Some(meta)) = (target, meta) else { continue };
+        let Some(from) = serde_json::from_str::<serde_json::Value>(meta).ok()
+            .and_then(|m| m["from"].as_str().map(str::to_owned)) else { continue };
+        let p = priority.get(task_id).copied().unwrap_or(1);
+        if let Some(e) = recur_event(task_id, &from, p, at) {
+            if record_tx(&mut tx, &e).await? { r.recurrences += 1; }
+        }
+    }
+    tx.commit().await?;
+    let first: Option<String> = sqlx::query_scalar("SELECT MIN(date) FROM karma_events WHERE kind IN ('task','recur')")
+        .fetch_one(pool).await?;
+    if let Some(first) = first.and_then(|v| NaiveDate::parse_from_str(&v, "%Y-%m-%d").ok()) {
+        let e = evaluate_at(pool, first.min(today), today).await?;
+        r.goal_days = e.goal_days;
+        r.goal_weeks = e.goal_weeks;
+    }
+    Ok(r)
+}
+
+/// Launch hook: rebuild once, the first time the ledger is empty. Fire-and-forget.
+pub async fn backfill_if_empty(pool: &SqlitePool) {
+    let empty = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM karma_events")
+        .fetch_one(pool).await.map(|n| n == 0).unwrap_or(false);
+    if !empty { return; }
+    match backfill(pool).await {
+        Ok(r) => log::info!("karma backfill: {r:?}"),
+        Err(e) => log::warn!("karma backfill failed: {e}"),
+    }
 }
 
 #[cfg(test)]
