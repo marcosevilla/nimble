@@ -174,7 +174,6 @@ fn validate_location(l: &BriefLocation) -> crate::Result<()> {
     Ok(())
 }
 
-/// Known weekdays only, deduplicated, in week order.
 /// Known weekdays in week order. All seven off is refused (one rule with
 /// `karma::save_goals` and the forms: at least one day is a goal day).
 fn normalize_days(days: &[String]) -> crate::Result<Vec<String>> {
