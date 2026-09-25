@@ -41,7 +41,8 @@ function routeLines(task: LocalTask, caps: FocusCapabilities | null): string[] {
     const service = task.external_source ?? 'external'
     lines.push(
       `It is linked to ${service} task ${task.external_id}.`,
-      `Put results in subtasks or the description of that ${service} task; Nimble pulls them in on its next sync.`,
+      `Write results to Nimble with the \`dt\` CLI using Nimble task ID ${task.id}.`,
+      `Nimble syncs them to the ${service} task. Do not also write them to ${service}; that creates duplicates.`,
       'Task comments are not shown in Nimble.',
     )
   } else {

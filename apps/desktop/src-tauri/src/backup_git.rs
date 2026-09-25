@@ -17,6 +17,11 @@ use tokio::{
 };
 const FILES: [&str; 2] = ["export/data.json", "export/format.json"];
 const OUTPUT_LIMIT: usize = 1024 * 1024;
+/// macOS Finder metadata. Tolerated only as a regular file at the repository root or
+/// directly inside `export/`; it is never staged (publish adds explicit paths only).
+const FINDER_METADATA: &str = ".DS_Store";
+/// `git status --porcelain=v1` lines for untracked Finder metadata, the only ones ignored.
+const FINDER_STATUS: [&str; 2] = ["?? .DS_Store", "?? export/.DS_Store"];
 #[derive(Debug)]
 pub struct PublishResult {
     pub commit: String,
@@ -268,11 +273,16 @@ fn check_files(root: &Path) -> Result<()> {
         let path = entry.path();
         if name == ".git" {
             private_directory(&path)?;
+        } else if name == FINDER_METADATA {
+            plain_file(&path)?;
         } else if name == "export" {
             private_directory(&path)?;
             for file in fs::read_dir(&path).map_err(|_| error("backup_directory_failed"))? {
                 let file = file.map_err(|_| error("backup_directory_failed"))?;
-                if file.file_name() != "data.json" && file.file_name() != "format.json" {
+                if file.file_name() != "data.json"
+                    && file.file_name() != "format.json"
+                    && file.file_name() != FINDER_METADATA
+                {
                     return Err(error("unexpected_backup_files"));
                 }
                 plain_file(&file.path())?;
@@ -426,10 +436,11 @@ async fn inspect(tools: &Tools, root: &Path, name: &str, clean: bool) -> Result<
         }
     }
     if clean
-        && !tools
+        && tools
             .text(root, &["status", "--porcelain=v1", "--untracked-files=all"])
             .await?
-            .is_empty()
+            .lines()
+            .any(|line| !FINDER_STATUS.contains(&line))
     {
         return Err(error("backup_repository_dirty"));
     }
@@ -1052,6 +1063,76 @@ os.execv('/usr/bin/git', ['/usr/bin/git'] + args)
             !local_git(&fixture.bare, &["show", "main:export/data.json"])
                 .contains("SENTINEL_SECRET")
         );
+    }
+    #[tokio::test]
+    async fn backup_git_finder_metadata_is_ignored_and_never_published() {
+        let fixture = Fixture::new();
+        let remote = fixture.configure().await;
+        fixture.publish(&remote).await.unwrap();
+        // macOS Finder drops these whenever the folder is opened.
+        fs::write(fixture.root.join(".DS_Store"), "SENTINEL_SECRET").unwrap();
+        fs::write(fixture.root.join("export/.DS_Store"), "SENTINEL_SECRET").unwrap();
+        fs::write(fixture.exports.join("data.json"), "{\"tasks\":[1]}\n").unwrap();
+        let result = fixture.publish(&remote).await.unwrap();
+        assert_eq!(
+            local_git(&fixture.bare, &["rev-parse", "main"]),
+            result.commit
+        );
+        // An unchanged retry with the metadata still present stays clean.
+        assert_eq!(
+            fixture.publish(&remote).await.unwrap().commit,
+            result.commit
+        );
+        assert_eq!(
+            local_git(&fixture.bare, &["log", "--all", "--format=", "--name-only"])
+                .lines()
+                .filter(|line| !line.is_empty())
+                .any(|line| !FILES.contains(&line)),
+            false
+        );
+        assert_eq!(local_git(&fixture.root, &["ls-files"]), FILES.join("\n"));
+        // Re-adopting a folder that already holds Finder metadata also works.
+        assert_eq!(
+            fixture.configure().await.repository_id,
+            remote.repository_id
+        );
+        assert!(fixture.root.join(".DS_Store").exists());
+    }
+    #[tokio::test]
+    async fn backup_git_finder_metadata_must_be_a_plain_file() {
+        use std::os::unix::fs::symlink;
+        let fixture = Fixture::new();
+        let remote = fixture.configure().await;
+        fixture.publish(&remote).await.unwrap();
+        let target = fixture.directory.join("elsewhere");
+        fs::write(&target, "SENTINEL_SECRET").unwrap();
+        for location in [".DS_Store", "export/.DS_Store"] {
+            let path = fixture.root.join(location);
+            symlink(&target, &path).unwrap();
+            assert!(
+                fixture.publish(&remote).await.is_err(),
+                "{location} symlink"
+            );
+            fs::remove_file(&path).unwrap();
+            fs::create_dir(&path).unwrap();
+            assert!(
+                fixture.publish(&remote).await.is_err(),
+                "{location} directory"
+            );
+            fs::remove_dir(&path).unwrap();
+        }
+        // Only the exact Finder name is tolerated.
+        for other in [".DS_Store.bak", "export/._data.json", "export/.ds_store"] {
+            fs::write(fixture.root.join(other), "x").unwrap();
+            assert!(fixture
+                .publish(&remote)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("unexpected_backup_files"));
+            fs::remove_file(fixture.root.join(other)).unwrap();
+        }
+        fixture.publish(&remote).await.unwrap();
     }
     #[tokio::test]
     async fn backup_git_hidden_index_changes_are_refused() {

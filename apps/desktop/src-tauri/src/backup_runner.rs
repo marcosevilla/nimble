@@ -55,8 +55,8 @@ pub fn public_error_code(error: &Error) -> &'static str {
         "invalid_repository_name" => "invalid_repository_name",
         "backup_repository_dirty" | "backup_journal_conflict" => "backup_repository_dirty",
         "backup_branch_must_be_main" => "backup_branch_must_be_main",
+        "unexpected_backup_files" => "unexpected_backup_files",
         "unrelated_backup_repository"
-        | "unexpected_backup_files"
         | "unexpected_backup_remote"
         | "unexpected_backup_history" => "unrelated_backup_repository",
         "unexpected_backup_transport" | "git_url_rewrite_refused" => "unexpected_backup_transport",
@@ -505,6 +505,17 @@ mod tests {
     use chrono::{DateTime, NaiveDate};
     fn time(s: &str) -> DateTime<chrono::FixedOffset> {
         DateTime::parse_from_rfc3339(s).unwrap()
+    }
+    #[test]
+    fn unexpected_backup_files_has_its_own_public_code() {
+        assert_eq!(
+            public_error_code(&Error::Other("unexpected_backup_files".into())),
+            "unexpected_backup_files"
+        );
+        assert_eq!(
+            public_error_code(&Error::Other("unexpected_backup_history".into())),
+            "unrelated_backup_repository"
+        );
     }
     #[test]
     fn due_slot_catches_up_once_and_handles_clock_changes() {
