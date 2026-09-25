@@ -13,8 +13,8 @@ import {
 } from '../src/lib/settingsSections.ts'
 import { settingsFailure, settingsMessage } from '../src/lib/settingsMessage.ts'
 
-const ALL = { backup: true, reminders: true, googleCalendar: true }
-const NONE = { backup: false, reminders: false, googleCalendar: false }
+const ALL = { backup: true, reminders: true, googleCalendar: true, briefSettings: true }
+const NONE = { backup: false, reminders: false, googleCalendar: false, briefSettings: false }
 
 const ACRONYMS = ['API']
 function assertSentenceCase(label) {
@@ -48,7 +48,7 @@ test('six pages in the decided order (Activity last), each section on the decide
   const byPage = Object.fromEntries(SETTINGS_PAGES.map((p) => [p.id, sectionsOnPage(SETTINGS_SECTIONS, p.id).map((s) => s.id)]))
   assert.deepEqual(byPage, {
     general: ['appearance', 'demo', 'about'],
-    brief: ['today-brief'],
+    brief: ['today-brief', 'today-location'],
     tasks: ['capture-routes', 'labels', 'reminders'],
     connections: ['integrations', 'obsidian', 'todoist-sync', 'calendars', 'google-calendar'],
     data: ['sync', 'backups', 'maintenance'],
@@ -83,19 +83,20 @@ test('visibleSections drops capability-gated sections and keeps order', () => {
   const all = visibleSections(ALL).map((s) => s.id)
   assert.deepEqual(all, SETTINGS_SECTIONS.map((s) => s.id))
   const none = visibleSections(NONE).map((s) => s.id)
-  for (const gated of ['backups', 'reminders', 'google-calendar']) assert.ok(!none.includes(gated), gated)
-  assert.equal(none.length, all.length - 3)
+  const gated = SETTINGS_SECTIONS.filter((s) => s.requires).map((s) => s.id)
+  for (const id of gated) assert.ok(!none.includes(id), id)
+  assert.equal(none.length, all.length - gated.length)
 })
 
 test('visiblePages hides a page with no renderable section (web build, empty brief slot)', () => {
-  const web = visibleSections(NONE).filter((s) => s.id !== 'today-brief')
+  const web = visibleSections(NONE)
   assert.deepEqual(visiblePages(web).map((p) => p.id), ['general', 'tasks', 'connections', 'data', 'activity'])
   assert.deepEqual(visiblePages(visibleSections(ALL)).map((p) => p.id), SETTINGS_PAGES.map((p) => p.id))
   assert.deepEqual(visiblePages([]), [])
 })
 
 test('resolveSettingsPage keeps a visible page and falls back to the first visible one', () => {
-  const pages = visiblePages(visibleSections(ALL).filter((s) => s.id !== 'today-brief'))
+  const pages = visiblePages(visibleSections(ALL).filter((s) => s.page !== 'brief'))
   assert.equal(resolveSettingsPage('data', pages), 'data')
   assert.equal(resolveSettingsPage('brief', pages), 'general')
   assert.equal(resolveSettingsPage('general', []), null)
@@ -149,4 +150,12 @@ test('activeSectionId resolves to the last section once the scroller is at its e
   ]
   assert.equal(activeSectionId(boxes, 89), 'a')
   assert.equal(activeSectionId(boxes, 89, true), 'c')
+})
+
+test('Today & brief sections are desktop-only and named for the addendum', () => {
+  const brief = SETTINGS_SECTIONS.filter((s) => s.page === 'brief')
+  assert.deepEqual(brief.map((s) => [s.id, s.label]), [['today-brief', 'Brief'], ['today-location', 'Location & weather']])
+  for (const s of brief) assert.equal(s.requires, 'briefSettings', s.id)
+  assert.ok(!visiblePages(visibleSections(NONE)).some((p) => p.id === 'brief'), 'the web never shows the page')
+  assert.deepEqual(settingsTarget('today-location'), { page: 'brief', section: 'today-location' })
 })
