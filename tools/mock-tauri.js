@@ -1729,8 +1729,10 @@
         if (!isFinite(first)) return null
         var start = Math.max(0, first - 40)
         var slice = text.slice(start, first + 80)
-        tokens.forEach(function (t) {
-          slice = slice.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), function (m) { return '\u0002' + m + '\u0003' })
+        // Like FTS5 snippet() on a prefix query: the whole word is marked.
+        slice = slice.replace(/[\p{L}\p{N}]+/gu, function (w) {
+          var lw = w.toLowerCase()
+          return tokens.some(function (t) { return lw.indexOf(t) === 0 }) ? '\u0002' + w + '\u0003' : w
         })
         return (start > 0 ? '…' : '') + slice + (first + 80 < text.length ? '…' : '')
       }

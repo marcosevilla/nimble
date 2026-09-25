@@ -61,8 +61,8 @@ test('picker: group sections, Pick-one radios, archived and system hidden, arrow
   await add.focus()
   await page.keyboard.press('Enter')
 
-  const effort = page.getByRole('radiogroup', { name: 'Effort' })
-  const type = page.getByRole('group', { name: 'Type' })
+  const effort = page.getByRole('radiogroup', { name: 'Effort', exact: true })
+  const type = page.getByRole('group', { name: 'Type', exact: true })
   await expect(effort).toBeVisible()
   await expect(type).toBeVisible()
   await expect(effort.getByRole('radio', { name: 'deep-work' })).toHaveAttribute('aria-checked', 'true')

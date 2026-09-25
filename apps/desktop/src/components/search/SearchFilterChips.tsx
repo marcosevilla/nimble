@@ -52,7 +52,7 @@ export function SearchFilterChips({
         <DropdownMenuContent align="end" className="w-40">
           <DropdownMenuRadioGroup value={status} onValueChange={(v) => onChange({ ...filters, status: v as TaskSearchStatus })}>
             {STATUSES.map((s) => (
-              <DropdownMenuRadioItem key={s} value={s}>{STATUS_LABEL[s]}</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem key={s} value={s} closeOnClick>{STATUS_LABEL[s]}</DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
@@ -75,9 +75,9 @@ export function SearchFilterChips({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="max-h-72 w-52 overflow-y-auto">
           <DropdownMenuRadioGroup value={filters.project_id ?? ''} onValueChange={(v) => onChange({ ...filters, project_id: (v as string) || null })}>
-            <DropdownMenuRadioItem value="">Any project</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="" closeOnClick>Any project</DropdownMenuRadioItem>
             {projects.filter((p) => !p.archived_at).map((p) => (
-              <DropdownMenuRadioItem key={p.id} value={p.id}>{p.name}</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem key={p.id} value={p.id} closeOnClick>{p.name}</DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>

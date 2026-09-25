@@ -1,4 +1,3 @@
-import { useDataVersion } from '@/hooks/useDataVersion'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
 import { SectionedTaskList } from '@/components/tasks/SectionedTaskList'
@@ -16,9 +15,9 @@ import { ProjectDetailPage } from '@/components/tasks/ProjectDetailPage'
 import { TaskDetailPage } from '@/components/detail/TaskDetailPage'
 import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { useDetailStore } from '@/stores/detailStore'
-import { useDataProvider } from '@/services/provider-context'
 import { filterTasks, groupTasks, loadTaskView, saveTaskView, type GroupBy } from '@/lib/task-view'
 import type { LocalTask, Label, Project } from '@nimble/types'
+import { useLabelTaxonomy } from '@/hooks/useLabelTaxonomy'
 
 // Section/manual grouping don't have a coherent cross-project meaning here —
 // `sections` are scoped to a single project (see task-view.ts), so a merged
@@ -162,13 +161,13 @@ function AllTasksView({
 // ── Tasks Page ──
 
 export function TasksPage() {
-  const referenceVersion = useDataVersion('labels')
-  const dp = useDataProvider()
   const { allProjects, loading: projectsLoading } = useProjects()
   const { tasks, loading: tasksLoading, addTask, remove, refresh } = useLocalTasks()
   const selectedProjectId = useTasksNavStore((s) => s.selectedProjectId)
   const setSelectedProjectId = useTasksNavStore((s) => s.selectProject)
-  const [labels, setLabels] = useState<Label[]>([])
+  // Shared labels+groups cache: refreshes on task and label changes, so a
+  // label created or archived elsewhere reaches the filter without a remount.
+  const { labels } = useLabelTaxonomy()
 
   // Task details opened while on this page render in the content area below
   // (instead of Dashboard replacing this whole page), so the project
@@ -179,10 +178,6 @@ export function TasksPage() {
   const showingDetail = detailTarget?.type === 'task' && detailMode === 'body'
 
   const loading = projectsLoading || tasksLoading
-
-  useEffect(() => {
-    dp.labels.list().then(setLabels).catch(() => {})
-  }, [dp, referenceVersion])
 
   // Only surface labels that are actually applied to something — an empty
   // label taxonomy in the filter menu is just noise.
