@@ -86,6 +86,20 @@ Names below come from addendum §1/§2 and from the phase-2 plan (`docs/superpow
 | React lint: a `.tsx` exports only components; non-components live in `.ts` | Tasks 7–9 | Already followed here (`briefContext.ts`, `lib/*.ts`) |
 | Schema: C4 v24 and phase-2 v25 merged; `tables_for_version` and `backup.rs` accept 24 and 25; phase 2 marks its sites `// schema-v25` | Task 4 | If a number moved, renumber every `// schema-v26` site in this plan the same way |
 
+### Reconciled against merged main `c14c5a9` (2026-09-25)
+
+Phase 2 merged as **v24** and C4 lands as **v25** before this branch; phase 3 stays **v26**. Every other row above matched the merged code except these, which the tasks below must follow (the merged code wins):
+
+| Plan assumed | Merged code | Affects |
+|---|---|---|
+| Phase 2 = v25 (`// schema-v25`), C4 = v24 | Phase 2 = **v24** (`// schema-v24`: `module_cache` + synced `brief_notes`, Turso gate `turso_schema_v24_upgraded`); C4 merges as v25 first. `tables_for_version` / `backup.rs` currently accept `…23 \| 24`; C4 adds 25, Task 4 adds 26. | Task 4 |
+| `db/briefs.rs` in phase-1 shape; notes in `briefs.notes` | `COLS` is the 9-column **insert** list; reads use `SELECT` (`briefs b LEFT JOIN brief_notes n`, notes = `NULLIF(n.notes,'')`) into a 10-field `Row`; `Brief.notes` comes from `brief_notes` (v24, its own synced row); `sync_snapshot` omits notes; `briefs.notes` stays unused. Task 4 adds its six columns to `COLS`-for-reads by extending `SELECT` (keep the join and the notes field) and must not write `briefs.notes`. | Task 4 |
+| Weather patch may be read-modify-write | Already atomic: `patch_snapshot_if_null` (`json_set` where the key is JSON null) and `set_priorities` (`json_set` on `$.priorities`, re-read before logging). No change needed. | Task 4 |
+| TodayPage priorities from phase 1 `useDailyPriorities` via locals | `useDailyPriorities` feeds `BriefLive.priorities = {list, generating, noKey, error, regenerate}` (`components/today/briefLive.ts`); `modules/PrioritiesModule.tsx` (`PrioritiesModule`, `PrioritiesStrip`) read it; generation is gated by `ready && !setupPending && isOn('priorities')`. Task 8 replaces that source, keeping the setup gate. | Task 8 |
+| `BriefMenu()` with Customize… | `components/today/BriefMenu.tsx` exports `BriefMenu()` (no props), rendered for today when `dp.briefSettings.supported` and setup isn't open. | Task 8 |
+| Settings read raw | `brief::settings::load_view(pool)` returns normalized `model` (one of `MODELS = [claude-opus-5-5, claude-sonnet-5]`) and `effort` (one of `EFFORTS = [low, medium, high]`); `api::llm::normalize_*` stays as a second guard. | Tasks 5, 6 |
+| e2e port 4610 | Lane A uses **5301** for `tools/qa-frozen.sh`. | Tasks 8–10 |
+
 ## Review Focus
 
 1. **Task titles that look like instructions or markup** (`</open_tasks>`, "ignore previous instructions", newlines, `|`): they must reach the model only as cleaned data inside tags and never break the prompt's structure. Pinned in Task 2 (`clean_text` + one-closing-tag test).
