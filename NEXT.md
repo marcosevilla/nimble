@@ -26,7 +26,7 @@ Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + 
 
 Plan `docs/superpowers/plans/2026-09-24-agentation-3.md` (branch `loop3/plan`). Ledger `.superpowers/sdd/2026-09-24-agentation-3/ledger.md`. Screenshots `~/Developer/second-brain/outputs/qa/{l3a-shell,l3b-task-detail,l3c-subtasks}/{before,after}/`.
 - [x] Merged 2026-09-24 (Marco approved) in order: `loop3/a-shell` (0a0b3bc) · `loop3/b-task-detail` (c1f85e9) · `loop3/c-subtasks` (2e9ddc4, stacked on B) · `loop3/d-focus-reopen` (355c91b). Combined on main `74683c4`: 358/358 e2e ×2, 459 unit, 608 Rust, both builds, eslint 58 (main 59).
-- [ ] Marco decides: (1) task-detail back control goes up one level (parent task, else project) — nested projects need one click per level; keep or add a jump-to-project? (2) icon-snapped sidebar: the Nimble mark pushes nav icons down ~26px — keep or hide the mark when snapped?
+- [x] Decided 2026-09-24 (Marco): **keep both** — (1) task-detail back control goes up one level (parent task, else project), no jump-to-project link; (2) icon-snapped sidebar keeps the Nimble mark above the expand button (nav icons sit ~26px lower in that mode).
 - [ ] Real-app checks after install: focus reopen (complete from Focus → reopen from the list the same day → back at top of Up next, no timer, not in the completed tray); sync notice in the rail (open/collapsed/200px) + Dismiss; tree/tab motion with macOS Reduce Motion on/off; subtask drag/multi-select/bulk Todo + "Reopen N subtasks too?".
 - Known: toast stack lifts above the sync notice (wider toasts still reach into the page column); `completed_at` cascade window 0..+2 s after the parent; `x` only completes (no reopen path).
 
