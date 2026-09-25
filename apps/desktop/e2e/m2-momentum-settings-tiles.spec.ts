@@ -58,7 +58,11 @@ test('Goals & momentum: validate, save, pause from the keyboard, honest karma li
     .toEqual([{ daily: 4, weekly: 25, days_off: ['mon', 'sun'], karma_enabled: false }])
 
   const pause = s.getByRole('switch', { name: 'Pause momentum' })
-  await pause.focus()
+  // Reach it the way a keyboard user does (WebKit shows :focus-visible on a
+  // span[role=switch] only for keyboard focus, not a scripted .focus()).
+  await s.getByRole('button', { name: 'Save goals' }).focus()
+  await page.keyboard.press('Tab')
+  await expect(pause).toBeFocused()
   await expectFocusRing(page)
   await page.keyboard.press('Space')
   await expect.poll(async () => (await calls(page, 'momentum_set_paused')).map((c) => c.args?.paused)).toEqual([true])
