@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  FALLBACK_LAYOUT, normalizeLayout, configValue, setModuleConfig, setModuleEnabled, applySettingsPatch,
+  FALLBACK_LAYOUT, normalizeLayout, configValue, setModuleConfig, setModuleEnabled, applySettingsPatch, arrangeBrief,
 } from '../src/lib/briefLayout.ts'
 
 const e = (id, enabled = true, config = {}) => ({ id, enabled, config })
@@ -47,4 +47,17 @@ test('applySettingsPatch merges optimistically: goals shallow-merge, null locati
   assert.deepEqual(next.goals, { daily: 3, weekly: 25, days_off: ['sat', 'sun'] })
   assert.equal(base.time, '06:30', 'input untouched')
   assert.equal(applySettingsPatch(base, {}).location, base.location)
+})
+
+test('arrangeBrief: header modules in the header, strip modules collapse when compact', () => {
+  const info = (id) => ({ slot: id === 'weather' ? 'header' : undefined, strip: ['weather', 'schedule', 'priorities'].includes(id) })
+  const list = [e('weather'), e('schedule'), e('priorities'), e('due_today'), e('habits', false), e('vault')]
+  const open = arrangeBrief(list, info, false)
+  assert.deepEqual(open.header.map((x) => x.id), ['weather'])
+  assert.deepEqual(open.strip, [])
+  assert.deepEqual(open.body.map((x) => x.id), ['schedule', 'priorities', 'due_today', 'vault'])
+  const compact = arrangeBrief(list, info, true)
+  assert.deepEqual(compact.header, [], 'the chip moves into the strip (UX checkpoint 1)')
+  assert.deepEqual(compact.strip.map((x) => x.id), ['weather', 'schedule', 'priorities'])
+  assert.deepEqual(compact.body.map((x) => x.id), ['due_today', 'vault'])
 })

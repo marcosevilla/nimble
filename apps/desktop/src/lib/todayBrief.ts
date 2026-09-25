@@ -1,8 +1,6 @@
 // Pure helpers for the Today brief (spec 2026-09-23, phase 1). Plain TS so
 // node tests import it directly. Times are local "HH:MM".
 
-export const TODAY_LAYOUT = ['schedule', 'priorities', 'due_today', 'still_open', 'vault'] as const
-
 /** Real events carry "HH:MM"; the browser mock carries ISO datetimes. */
 export function hhmm(time: string): string {
   return time.includes('T') ? time.slice(11, 16) : time.slice(0, 5)

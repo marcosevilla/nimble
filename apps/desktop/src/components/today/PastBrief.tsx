@@ -5,15 +5,15 @@ import { BriefDisplay } from '@/components/shared/BriefDisplay'
 import { Meta } from '@/components/shared/typography'
 import { Skeleton } from '@/components/ui/skeleton'
 import { hasValidSnapshot, pastBriefView } from '@/lib/todayBrief'
+import { arrangeBrief, normalizeLayout } from '@/lib/briefLayout'
 import { BriefBox } from './BriefBox'
-import { ScheduleBox } from './ScheduleBox'
-import { PrioritiesBox, PrioritiesSkeleton } from './PrioritiesBox'
-import { StillOpenBox } from './StillOpenBox'
-import { VaultBox } from './VaultBox'
+import { PrioritiesSkeleton } from './PrioritiesBox'
+import { ModuleBox } from './ModuleBox'
+import { briefModuleInfo } from './briefModules'
 
-/** Skeletons shaped like the boxes below (spec §3.7), shown while a past
- *  date's stored brief and vault fallback are both in flight. */
-function PastBriefSkeleton() {
+/** Skeletons shaped like the brief's first boxes (spec §3.7), shown while a
+ *  past date's stored brief is in flight, or today's layout is loading. */
+export function BriefSkeleton() {
   return (
     <>
       <BriefBox title="Schedule">
@@ -27,26 +27,6 @@ function PastBriefSkeleton() {
         <PrioritiesSkeleton />
       </BriefBox>
     </>
-  )
-}
-
-/** Due today as read-only rows: the same row markup as `StillOpenBox`, but
- *  without the age tag — every row belongs to `date` itself. */
-function DueTodaySnapshot({ tasks }: { tasks: { id: string; content: string }[] }) {
-  return (
-    <BriefBox title="Due today" count={tasks.length}>
-      {tasks.length === 0 ? (
-        <Meta as="p">Nothing due that day.</Meta>
-      ) : (
-        <div className="-mx-2">
-          {tasks.map((task) => (
-            <div key={task.id} className="flex w-full min-w-0 items-center gap-3 rounded-md px-2 py-1.5 text-left">
-              <span className="min-w-0 flex-1 truncate text-body">{task.content}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </BriefBox>
   )
 }
 
@@ -90,7 +70,7 @@ export function PastBrief({ date, today }: { date: string; today: string }) {
   const current = loaded?.date === date ? loaded : null
   const view = pastBriefView(current?.brief, current?.vault)
 
-  if (view === 'loading') return <PastBriefSkeleton />
+  if (view === 'loading') return <BriefSkeleton />
 
   if (view === 'none') return <Meta as="p">No brief for this day.</Meta>
 
@@ -102,30 +82,24 @@ export function PastBrief({ date, today }: { date: string; today: string }) {
     )
   }
 
-  // `view === 'snapshot'`: hasValidSnapshot already confirmed `snapshot` is
-  // an object, but individual sub-fields still guard against a partial one.
-  const snapshot = current!.brief!.snapshot
-  const schedule = snapshot?.schedule
-  const stillOpen = snapshot?.still_open
-
+  // `view === 'snapshot'`: each module renders its own frozen payload, in
+  // the order and with the config recorded that morning. Phase-1 rows
+  // (layout = module ids) normalize to the same boxes as before.
+  const stored = current!.brief!
+  const snapshot = stored.snapshot as Record<string, unknown>
+  const { header, body } = arrangeBrief(normalizeLayout(stored.layout), briefModuleInfo, false)
   return (
     <>
-      <ScheduleBox
-        events={schedule?.events ?? []}
-        tomorrow={schedule?.tomorrow ?? []}
-        loading={false}
-        today={date}
-        live={false}
-      />
-      <PrioritiesBox priorities={snapshot?.priorities ?? null} />
-      <DueTodaySnapshot tasks={snapshot?.due_today ?? []} />
-      <StillOpenBox
-        tasks={stillOpen?.oldest ?? []}
-        total={stillOpen?.total ?? 0}
-        today={date}
-        readOnly
-      />
-      <VaultBox date={date} />
+      {header.length > 0 && (
+        <div className="flex items-center gap-2">
+          {header.map((e) => (
+            <ModuleBox key={e.id} id={e.id} mode="snapshot" date={date} config={e.config} payload={snapshot[e.id]} brief={stored} />
+          ))}
+        </div>
+      )}
+      {body.map((e) => (
+        <ModuleBox key={e.id} id={e.id} mode="snapshot" date={date} config={e.config} payload={snapshot[e.id]} brief={stored} />
+      ))}
     </>
   )
 }

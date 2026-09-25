@@ -56,3 +56,22 @@ export function applySettingsPatch(settings: BriefSettings, patch: BriefSettings
   if (patch.goals !== undefined) next.goals = { ...settings.goals, ...patch.goals }
   return next
 }
+
+/** Where each enabled module renders. Expanded: `slot: 'header'` modules
+ *  (the weather chip) go in the page header, the rest are boxes. Compact:
+ *  every module with a Strip collapses into the one-row strip, header ones
+ *  included (UX checkpoint 1); the rest stay boxes. */
+export function arrangeBrief(
+  entries: BriefLayoutEntry[],
+  info: (id: string) => { slot?: 'header'; strip: boolean },
+  compact: boolean,
+): { header: BriefLayoutEntry[]; strip: BriefLayoutEntry[]; body: BriefLayoutEntry[] } {
+  const on = entries.filter((x) => x.enabled)
+  const isHeader = (x: BriefLayoutEntry) => info(x.id).slot === 'header'
+  if (!compact) return { header: on.filter(isHeader), strip: [], body: on.filter((x) => !isHeader(x)) }
+  return {
+    header: on.filter((x) => isHeader(x) && !info(x.id).strip),
+    strip: on.filter((x) => info(x.id).strip),
+    body: on.filter((x) => !isHeader(x) && !info(x.id).strip),
+  }
+}
