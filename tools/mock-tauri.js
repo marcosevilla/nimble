@@ -106,12 +106,15 @@
   // not hex values.
 
   var LABELS = [
-    { id: 'label-deep-work', name: 'deep-work', color: 'blue', position: 0, created_at: iso('2026-07-20') },
-    { id: 'label-design', name: 'design', color: 'grape', position: 1, created_at: iso('2026-07-20') },
-    { id: 'label-bug', name: 'bug', color: 'red', position: 2, created_at: iso('2026-07-21') },
-    { id: 'label-quick-win', name: 'quick-win', color: 'green', position: 3, created_at: iso('2026-07-22') },
-    { id: 'label-errand', name: 'errand', color: 'orange', position: 4, created_at: iso('2026-07-25') },
+    { id: 'label-deep-work', name: 'deep-work', color: 'blue', group: null, archived_at: null, position: 0, created_at: iso('2026-07-20') },
+    { id: 'label-design', name: 'design', color: 'grape', group: null, archived_at: null, position: 1, created_at: iso('2026-07-20') },
+    { id: 'label-bug', name: 'bug', color: 'red', group: null, archived_at: null, position: 2, created_at: iso('2026-07-21') },
+    { id: 'label-quick-win', name: 'quick-win', color: 'green', group: null, archived_at: null, position: 3, created_at: iso('2026-07-22') },
+    { id: 'label-errand', name: 'errand', color: 'orange', group: null, archived_at: null, position: 4, created_at: iso('2026-07-25') },
   ]
+
+  // ── Label groups (C4): empty by default; e2e specs seed their own via invoke ──
+  var LABEL_GROUPS = []
 
   // ── Sections (R1): per-project lanes ─────────────────────────────────────
 
@@ -1468,6 +1471,8 @@
         name: (args && args.name) || 'new label',
         color: (args && args.color) || 'gray',
         position: LABELS.length,
+        group: null,
+        archived_at: null,
         created_at: iso(TODAY, '11:20:00'),
       }
       LABELS.push(label)

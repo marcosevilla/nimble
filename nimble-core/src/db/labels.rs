@@ -7,7 +7,7 @@ use crate::db::sync;
 use crate::db::tasks::SELECT_COLS;
 use crate::types::{Label, LocalTask};
 
-const LABEL_COLS: &str = "id, name, color, position, created_at, \"group\"";
+pub(crate) const LABEL_COLS: &str = "id, name, color, position, created_at, \"group\", archived_at";
 
 /// Set the optional taxonomy group without affecting the existing name/color API.
 pub async fn set_label_group(pool: &SqlitePool, id: &str, group: Option<&str>) -> crate::Result<Label> {

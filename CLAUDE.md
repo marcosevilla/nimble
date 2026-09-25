@@ -66,7 +66,7 @@ nimble/
 - SQLite managed via sqlx (desktop Rust) and expo-sqlite (mobile TypeScript)
 - Versioned migration system in `nimble-core/src/db/migrations.rs` (Rust) and `apps/mobile/services/database.ts` (TypeScript mirror)
 - Both platforms share the same schema — keep migrations in sync
-- Current version: **23** (v1-13: core schema + v14: sync_log table + device_id + v15: external_id/external_source tracking on local_tasks/projects + v16: capture context column + v17: todoist_outbox, integration_sync_state, and remote_updated_at/synced_snapshot columns for two-way sync + v18: vault_notes/vault_links/vault_tags + device-local vault_fts (FTS5) + v19: labels/task_labels/sections tables, due_time/duration_minutes/recurrence_rule/section_id columns on local_tasks, and parent_id on projects for native Todoist-parity scheduling and project nesting; v20: reminder offset, Google publishing intent, label group, and device-local delivery/calendar state; v21: focus engine tables + sync_policy; v22: projects.archived_at; v23: briefs (per-day morning brief snapshots, synced by date))
+- Current version: **24** (v1-13: core schema + v14: sync_log table + device_id + v15: external_id/external_source tracking on local_tasks/projects + v16: capture context column + v17: todoist_outbox, integration_sync_state, and remote_updated_at/synced_snapshot columns for two-way sync + v18: vault_notes/vault_links/vault_tags + device-local vault_fts (FTS5) + v19: labels/task_labels/sections tables, due_time/duration_minutes/recurrence_rule/section_id columns on local_tasks, and parent_id on projects for native Todoist-parity scheduling and project nesting; v20: reminder offset, Google publishing intent, label group, and device-local delivery/calendar state; v21: focus engine tables + sync_policy; v22: projects.archived_at; v23: briefs (per-day morning brief snapshots, synced by date); v24: label_groups, labels.archived_at (synced, gated by turso_schema_v24_upgraded) and device-local tasks_fts (FTS5, never synced))
 - `schema_version` table tracks what's been applied
 
 ## Key Tables
@@ -93,6 +93,8 @@ nimble/
 - `vault_fts` — FTS5 index over note title+content. Device-local, never synced, written by `vault::index`, not by SQL triggers (the migration runner splits on `;`)
 - `labels` — native task labels (id, name, color, position)
 - `task_labels` — many-to-many join between `local_tasks` and `labels` (task_id, label_id)
+- `label_groups` — label taxonomy groups (name, position, exclusive = "Pick one", system = hidden integration group); synced
+- `tasks_fts` — FTS5 index over task title+description. Device-local, never synced, written by `db::task_search`, self-heals on startup
 - `sections` — named groupings of tasks within a project (id, project_id, name, position), with external_id/external_source for Todoist import
 - `briefs` — per-day morning brief snapshot (date PK, layout_json, snapshot_json), written once for today at first open with priorities patched in; synced by date, remote table gated by `turso_schema_v23_upgraded`
 
@@ -163,7 +165,7 @@ nimble/
 - "Seed Existing Data" command backfills sync_log for pre-existing data
 - Turso URL format: `libsql://<db>-<org>.turso.io` (auto-normalized to https)
 - Remote schema initialization runs once, creating every synced table on Turso (the list lives in `initialize_remote` in `nimble-core/src/db/sync.rs`)
-- Vault tables replicate through the same sync_log pipeline; `vault_fts`, `todoist_outbox`, and `integration_sync_state` stay device/Mac-local
+- Vault tables replicate through the same sync_log pipeline; `vault_fts`, `tasks_fts`, `todoist_outbox`, and `integration_sync_state` stay device/Mac-local
 - Remote schema upgrades are gated per version by a `turso_schema_v<N>_upgraded` setting, since `initialize_remote` only runs once per database
 
 ## Current State

@@ -310,6 +310,13 @@ pub async fn restore_export(source: &Path, dest: &Path) -> crate::Result<Recover
         tx.commit().await?;
         sqlx::query("DELETE FROM vault_fts").execute(&pool).await?;
         sqlx::query("INSERT INTO vault_fts(note_id,title,content) SELECT id,title,content FROM vault_notes WHERE deleted_at IS NULL").execute(&pool).await?;
+        if version >= 24 { // schema-v24
+            // Device-local task index: rebuilt from the restored rows, never exported.
+            // Raw SQL (not task_search::rebuild_task_index) so the restored copy gains
+            // no settings row; the app heals the version key on first launch.
+            sqlx::query("DELETE FROM tasks_fts").execute(&pool).await?;
+            sqlx::query("INSERT INTO tasks_fts(task_id,content,description) SELECT id,content,COALESCE(description,'') FROM local_tasks").execute(&pool).await?;
+        }
         validate(&pool).await?;
         let actual = export_portable(&pool).await?;
         // Canonical equality also rejects duplicate JSON object keys and coercion.

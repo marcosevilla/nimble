@@ -178,3 +178,24 @@ async fn reverse_insertion_order_has_identical_export_bytes() {
     assert_eq!(first.data, second.data);
     close(pool, path).await;
 }
+
+// schema-v24
+#[tokio::test]
+async fn v24_exports_label_groups_and_archive_state_but_not_the_task_index() {
+    let (pool, path) = nimble_core::test_util::file_pool().await;
+    sqlx::query("INSERT INTO label_groups (id,name,position,exclusive,system,created_at,updated_at) VALUES ('g1','EFFORT',0,1,0,'2026-09-25 09:00:00','2026-09-25 09:00:00')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO labels (id,name,color,position,\"group\",archived_at) VALUES ('l1','deep','gray',0,'g1',NULL),('l2','old','gray',1,NULL,'2026-09-25 09:00:00')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO tasks_fts (task_id, content, description) VALUES ('t1','x','')")
+        .execute(&pool).await.unwrap();
+    let export = export_portable(&pool).await.unwrap();
+    let data: serde_json::Value = serde_json::from_slice(&export.data).unwrap();
+    assert_eq!(data["label_groups"][0]["exclusive"].as_i64(), Some(1));
+    let old = data["labels"].as_array().unwrap().iter().find(|l| l["id"] == "l2").unwrap();
+    assert_eq!(old["archived_at"], "2026-09-25 09:00:00");
+    assert!(data.get("tasks_fts").is_none(), "the search index is device-local");
+    let format: serde_json::Value = serde_json::from_slice(&export.format).unwrap();
+    assert!(format["excluded"].get("tasks_fts").is_some());
+    close(pool, path).await;
+}

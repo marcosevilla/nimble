@@ -7,14 +7,16 @@
  */
 
 import type { Label } from '@nimble/types'
-import { query, str, strOrNull, num, type Row } from './client'
+import { query, str, strOrNull, num, TursoError, type Row } from './client'
 
 /**
  * The column list from `LABEL_COLS` in labels.rs, spelled out rather than
  * `SELECT *` — the row decoder below indexes by name, so an added column on
  * Turso must not silently change what arrives.
  */
-const LABEL_COLS = 'id, name, color, position, created_at, "group"'
+const LABEL_COLS = 'id, name, color, position, created_at, "group", archived_at'
+/** Pre-v24 remotes (gate not yet run by a desktop push) lack `archived_at`. */
+const LABEL_COLS_V23 = 'id, name, color, position, created_at, "group"'
 
 /**
  * `position` is an INTEGER that the HTTP API hands back as the string "3";
@@ -24,6 +26,7 @@ const LABEL_COLS = 'id, name, color, position, created_at, "group"'
 function toLabel(row: Row): Label {
   return {
     group: strOrNull(row, 'group'),
+    archived_at: 'archived_at' in row ? strOrNull(row, 'archived_at') : null,
     id: str(row, 'id'),
     name: str(row, 'name'),
     color: str(row, 'color'),
@@ -40,6 +43,12 @@ function toLabel(row: Row): Label {
  * like returning, differing between web and desktop.
  */
 export async function listLabels(): Promise<Label[]> {
-  const rows = await query(`SELECT ${LABEL_COLS} FROM labels ORDER BY position, created_at`)
-  return rows.map(toLabel)
+  try {
+    const rows = await query(`SELECT ${LABEL_COLS} FROM labels ORDER BY position, created_at`)
+    return rows.map(toLabel)
+  } catch (e) {
+    if (!(e instanceof TursoError) || !/no such column/i.test(e.message)) throw e
+    const rows = await query(`SELECT ${LABEL_COLS_V23} FROM labels ORDER BY position, created_at`)
+    return rows.map(toLabel)
+  }
 }

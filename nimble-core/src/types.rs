@@ -124,9 +124,26 @@ pub struct Label {
     pub name: String,
     pub color: String,
     pub position: i64,
+    /// `label_groups.id`; a dangling id reads as ungrouped.
     #[serde(default)]
     pub group: Option<String>,
     pub created_at: String,
+    /// Hidden from pickers and the filter when set; still renders on tasks.
+    #[serde(default)]
+    pub archived_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, sqlx::FromRow)]
+pub struct LabelGroup {
+    pub id: String,
+    pub name: String,
+    pub position: i64,
+    /// "Pick one": the UI keeps at most one of this group's labels per task.
+    pub exclusive: bool,
+    /// Integration labels: hidden from pickers and row chips.
+    pub system: bool,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 // ── Sections ──
