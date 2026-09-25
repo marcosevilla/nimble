@@ -76,8 +76,13 @@ export { OVERLAY_SELECTOR }
 /** True while any popover, menu, listbox or dialog is showing anywhere —
  * not only when focus is already inside it. Base UI moves focus into a popup
  * a frame after it opens, and a key typed in that gap reached the row. */
+/** A popup still playing its exit animation (Base UI marks it
+ * `data-closed` / `data-ending-style`) is already closed: `q` pressed right
+ * after Esc must reopen the composer, not be swallowed by the fading one. */
 export function hasOpenOverlay(doc: Document = document): boolean {
-  return Array.from(doc.querySelectorAll(OVERLAY_SELECTOR)).some((el) => el.getClientRects().length > 0)
+  return Array.from(doc.querySelectorAll(OVERLAY_SELECTOR)).some(
+    (el) => !el.matches('[data-closed], [data-ending-style]') && el.getClientRects().length > 0,
+  )
 }
 
 export const TREE_SELECTOR = '[role="tree"]'
