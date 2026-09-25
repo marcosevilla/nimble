@@ -2,6 +2,17 @@
 
 Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + chunk 2 capture vocabulary/NL dates `649ca72` merged, installed with Lane B's install; 393 frontend tests). Updated 2026-09-23 eve (Lane B: Rust batch `bb6ac53` + brief phase 1 `e24daa4` merged; **installed at `649ca72`** = both lanes incl. capture-prefixes; DB migrated v22→v23, 1,335 tasks kept, today's brief snapshot written, `turso_schema_v23_upgraded` set). Before that 2026-09-23 (agentation-1 merged + installed at `0ad4bd5`). Before that 2026-09-22 (Focus Queue: all 12 plan tasks implemented, Task 12 verification recorded; awaiting final whole-branch review + Marco's 30-min human checklist; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
 
+## Loop 3 — autonomous polish (2026-09-24 night) — on `loop3/integration`, NOT merged to main, NOT installed
+
+Four lanes, each fix → tests → before/after shots → self-critique → independent code review → review fixes. Merged into `loop3/integration` (worktree `../.nimble-wt/integration`); one cross-lane fix on top (a popup mid-exit no longer counts as open, so `q` right after Esc reopens the composer). Verified on the combined branch: desktop + web build, 474/474 frontend unit tests, nimble-core Rust suite green, full e2e vs frozen build **424 passed / 0 failed** (axe baseline held). Screenshots: `~/Developer/second-brain/outputs/qa/2026-09-24-loop3/{modal,rail,keys}/`.
+
+- [x] **Modal:** create-task modal 560px, pinned 16vh, roomier spacing, footer strip with ⌘↵ hint; title wraps (1-row auto-grow textarea, Enter → description, IME-safe); description capped 40vh. Shared `Input`/`Textarea` get `variant`: default = inset focus ring (no outside ring/clipping), `ghost` = no box at rest + soft focus well, zero layout shift (task-detail description uses ghost). Chips + chip ✕ are Tab stops in WebKit.
+- [x] **Rail:** sync notice no longer covers rail content in any tab (column ends above it + 24px fade); `?` button clears rail lists; inbox note/task titles aligned; entrance animations no longer leave transforms; demo dot pulses 3× then stops (reduced-motion: none); `--success-tint` token.
+- [x] **Keys:** one `OVERLAY_SELECTOR` + `shellKeyBlocked`/`spaceKeyBlocked` (shell keys skip SELECT/open overlays; Space activates focused buttons instead of pausing); Focus card ⋯ opens upward and returns focus to the card heading; calendar is its own key region.
+- [x] **Errors:** iCal TEXT unescape (`\,` `\;` `\n`); `friendlyError` only uses the vault message for real vault/.md not-found; web `readTodayMd` / calendar `ni()` no longer toast/show "offline".
+- [ ] **Marco reviews, then says merge + install.** Design calls to check: filled chips now always show a dimmed ✕ (was hover-only — also in task detail); Space on a focused button activates it (no longer pauses); rail calendar loses ~170px while the sync notice shows.
+- [ ] Left open from loop 3: dialog backdrop barely dims (`bg-black/10`, shared by every dialog); dialog ✕ close isn't a Tab stop in WebKit; calendar j/k to step through events not built; overlay-open-elsewhere gap for Today `b [ ]`, Docs `n /`; non-warm themes' dark mode lack their own `--success`; "Focus queue" tab label overflows at 200px rail; pre-existing ESLint errors (`CalendarPanel.tsx:347`, `DocsSearch.tsx:64`, `MetadataChips.tsx:488`); older cached calendar days keep escaped titles until refetched.
+
 ## iPhone quick capture (2026-09-24)
 
 - [x] **`/api/capture` live in production** (`fe976ca`, on main, not pushed; Vercel prod deployed by hand). Bearer `CAPTURE_TOKEN` (Vercel env, Production + Preview), exempt from the cookie gate; writes capture + sync_log to Turso like the web `createCapture`; `source = 'iphone'`, `created_at` in `CAPTURE_TZ` (default America/Los_Angeles). Verified: 401 without token, `/api/turso` still gated, capture reached the Mac Inbox on the next Turso pull.
@@ -24,7 +35,7 @@ Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + 
 
 ## Open after 2026-09-24 wrap
 
-- [ ] **Bug (lane A miss):** the sync notice in the right rail covers the bottom of the Focus tab's "N done" tray (seen in `~/Developer/second-brain/outputs/qa/focus-queue-now/10b-main-rail-tab-light.png`). Tests only checked rail buttons/tabs. Fix: pad the rail's scroll content by the notice height (`--sync-notice-space` already exists) + an e2e that the notice doesn't intersect rail list rows. Marco paused changes — do next session.
+- [x] (loop 3) **Bug (lane A miss):** the sync notice in the right rail covers the bottom of the Focus tab's "N done" tray (seen in `~/Developer/second-brain/outputs/qa/focus-queue-now/10b-main-rail-tab-light.png`). Tests only checked rail buttons/tabs. Fix: pad the rail's scroll content by the notice height (`--sync-notice-space` already exists) + an e2e that the notice doesn't intersect rail list rows. Marco paused changes — do next session.
 - [ ] **Focus queue simplification — Marco to say what's still off.** His 09:08 ask (radically simplify the focus queue) shipped as `918c752` (header `+`/`⋯`, no footer rows) and is in the installed `fb16ed4`; Marco felt it hadn't landed. Current states captured (43 shots, light/dark): `~/Developer/second-brain/outputs/qa/focus-queue-now/`. Next: Marco names the surface (rail tab / pop-out / full view) or the 1–2 things still heavy → plan a second pass.
 
 ## Agentation pass 3 + subtasks + focus reopen (2026-09-24) — merged (7cf5627) + installed at `fb16ed4` (bundle `index-DE2HdNhM`; rollback `Nimble Rollbacks/20260924-170000-agentation-3/`)
@@ -54,7 +65,7 @@ Plan `docs/superpowers/plans/2026-09-24-agentation-3.md` (branch `loop3/plan`). 
 - [x] **Second bug, same symptom ("sync is off"):** `useCalendar` returned on any cache hit, so a day with cached rows never refetched (Today was stuck on the 2026-09-22 02:22 UTC snapshot, missing 18 newer events). Now shows the cache at once, then revalidates via `fetch_calendar_events` (backend still serves the cache while under 15 min old); a failed revalidation keeps the cached rows. Logic in `src/lib/calendarLoad.ts`, tests `tests/calendarLoad.test.mjs`.
 - [x] Installed `c3443b5` 2026-09-23 08:55; app refetched at launch. Independent zoneinfo check vs Google feed: **36/36 timed events match** (Sep 20–26; 15 times corrected, 18 newly showing). Page: https://claude.ai/artifact/Ggs3cG3tv1r7oRbGX9TaSL (local copy in second-brain `outputs/2026/`).
 - [ ] Marco: phone spot-check of a few events against Google Calendar (optional).
-- [ ] Minor: event titles show iCal escapes literally (e.g. `shot list\, grade`) — `ical` crate doesn't unescape TEXT values.
+- [x] (loop 3) Minor: event titles show iCal escapes literally (e.g. `shot list\, grade`) — `ical` crate doesn't unescape TEXT values.
 - [ ] "Work" iCal feed returns 404 from Google (likely the revoked Canary calendar) — remove it in Settings → Calendar.
 - [ ] Separate, not fixed: the iCal parser doesn't expand `RRULE` recurring events, so only the first occurrence of a series shows.
 
