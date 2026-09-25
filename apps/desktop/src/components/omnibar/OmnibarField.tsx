@@ -57,7 +57,9 @@ export function OmnibarField({ pills, value, highlight, inputRef, listboxId, act
           aria-expanded={listboxId !== null}
           aria-controls={listboxId ?? undefined}
           aria-activedescendant={activeOptionId ?? undefined}
-          placeholder={pills.length > 0 ? '' : 'Search or create…'}
+          // Not "Search or create…": that is LabelPicker's placeholder, and
+          // e2e detects an open label picker by it (t2-row-keys AC4).
+          placeholder={pills.length > 0 ? '' : 'Search, filter or create…'}
           className="text-body outline-none placeholder:text-muted-foreground"
         />
       </div>
