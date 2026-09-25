@@ -817,7 +817,8 @@
       version: 1,
       status: 'ready',
       source: 'nimble',
-      layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault'],
+      // Phase-1 shape (string ids) plus one id this build doesn't know (B2 AC10).
+      layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault', 'quick_wins'],
       snapshot: {
         schedule: {
           events: [
@@ -957,13 +958,24 @@
     goals: { daily: 5, weekly: 25, days_off: ['sat', 'sun'] },
   }
   var briefSeeded = false
+  // Saved brief settings survive a reload in the same tab (like the Mac's
+  // KV store), so "setup shows once" can be tested across page.reload().
+  var BRIEF_STATE_KEY = '__mock_brief_state'
   function seedBriefSettings() {
     if (briefSeeded) return
     briefSeeded = true
     var seed = window.__MOCK_BRIEF_SETTINGS__
-    if (!seed) return
-    if (seed.modules) briefState.stored_modules = seed.modules
-    ;['time', 'location', 'model', 'effort', 'setup_completed_at', 'goals'].forEach(function (k) { if (k in seed) briefState[k] = seed[k] })
+    if (seed) {
+      if (seed.modules) briefState.stored_modules = seed.modules
+      ;['time', 'location', 'model', 'effort', 'setup_completed_at', 'goals'].forEach(function (k) { if (k in seed) briefState[k] = seed[k] })
+    }
+    try {
+      var saved = window.sessionStorage.getItem(BRIEF_STATE_KEY)
+      if (saved) Object.assign(briefState, JSON.parse(saved))
+    } catch (e) { /* no storage: keep the seed */ }
+  }
+  function persistBriefSettings() {
+    try { window.sessionStorage.setItem(BRIEF_STATE_KEY, JSON.stringify(briefState)) } catch (e) { /* noop */ }
   }
   function briefSettingsView() {
     seedBriefSettings()
@@ -1401,6 +1413,7 @@
       if (p.effort !== undefined) briefState.effort = p.effort
       if (p.goals) briefState.goals = Object.assign({}, briefState.goals, p.goals)
       if (p.complete_setup) briefState.setup_completed_at = nowStamp()
+      persistBriefSettings()
       return briefSettingsView()
     },
     brief_set_notes: function (args) {
