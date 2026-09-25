@@ -98,6 +98,7 @@
     --color-success: var(--success);
     --color-success-fg: var(--success-fg);
     --color-success-hover: var(--success-hover);
+    --color-success-tint: var(--success-tint);
     /* Semantic roles — defined per theme in themes.css (warm light + dark). */
     --color-warning: var(--warning);
     --color-ai: var(--ai);
@@ -319,8 +320,25 @@
   from { opacity: 1; transform: translateY(0) scale(1); }
   to { opacity: 0; transform: translateY(8px) scale(0.98); }
 }
+/* `backwards` fill, never `both`/`forwards`: a held end frame keeps
+   `transform: matrix(1,0,0,1,0,0)` on the element after the entrance —
+   a stacking context and containing block for fixed descendants that the
+   reduced-motion layout doesn't have (SelectionActionBar, Stage C
+   deferred minor). With `backwards` the element carries no transform
+   once it settles; the end frame equals the resting style anyway. */
 .panel-in {
-  animation: panel-in var(--transition-base) var(--ease-entrance) both;
+  animation: panel-in var(--transition-base) var(--ease-entrance) backwards;
+}
+
+/* Right column scrollers while the Todoist sync notice shows: their
+   visible area ends just above it (--sync-notice-clear), and the last
+   24px fade out so a row crossing that edge dissolves instead of being
+   sliced mid-glyph. Each scroller pads its end by ≥24px, so at scroll
+   end the final row sits fully above the fade. The mask is on the
+   scroller's box, so it stays put while content scrolls. */
+:root[data-sync-notice] [data-notice-fade] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
 }
 
 /* Right-rail tab panel: fades in each time it's shown (display:none →
@@ -334,17 +352,26 @@
 
 /* Help panel entrance */
 .help-panel-enter {
-  animation: panel-in var(--transition-base) var(--ease-entrance) forwards;
+  animation: panel-in var(--transition-base) var(--ease-entrance) backwards;
 }
 
 /* Quick-capture strip entrance — replayed on every summon via a key bump */
 .capture-strip-in {
-  animation: panel-in var(--transition-base) var(--ease-entrance) both;
+  animation: panel-in var(--transition-base) var(--ease-entrance) backwards;
 }
 
 /* Bulk action bar entrance */
 .bulk-action-bar-enter {
-  animation: panel-in var(--transition-base) var(--ease-entrance) forwards;
+  animation: panel-in var(--transition-base) var(--ease-entrance) backwards;
+}
+
+/* Demo-mode dot: three slow pulses, then it rests at full opacity (no
+   fill). NavSidebar drops the class on hover/focus of the pill. */
+.demo-dot-pulse {
+  animation: demo-dot-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) 3;
+}
+@keyframes demo-dot-pulse {
+  50% { opacity: 0.4; }
 }
 
 /* AI breakdown star bounce */
@@ -476,7 +503,7 @@
    a visible beat. */
 @keyframes task-complete-exit {
   0%   { opacity: 1; transform: translateX(0); background-color: transparent; }
-  20%  { background-color: oklch(0.85 0.1 145 / 20%); } /* brief green flash */
+  20%  { background-color: var(--success-tint); } /* brief green flash */
   50%  { opacity: 0.5; }
   100% { opacity: 0; transform: translateX(8px); }
 }
@@ -487,7 +514,7 @@
 /* Reduced-motion variant: opacity + tint only (used in the media block). */
 @keyframes task-complete-fade {
   0%   { opacity: 1; background-color: transparent; }
-  20%  { background-color: oklch(0.85 0.1 145 / 20%); }
+  20%  { background-color: var(--success-tint); }
   100% { opacity: 0; }
 }
 
@@ -592,6 +619,7 @@
   .help-panel-enter,
   .capture-strip-in,
   .bulk-action-bar-enter,
+  .demo-dot-pulse,
   .ai-star-1,
   .ai-star-2,
   .ai-star-3,

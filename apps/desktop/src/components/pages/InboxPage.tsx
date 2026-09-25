@@ -514,6 +514,10 @@ function InboxNoteRow({
 
       <div className="flex flex-1 h-9 items-center gap-3 min-w-0 ml-8 border-b border-secondary">
         <PenLine className="size-4 shrink-0 text-muted-foreground" />
+        {/* Empty priority slot (a task row's 12px priority mark), so note
+            and task titles start at one x in the mixed list (Stage C
+            deferred minor, loop 3). */}
+        <span aria-hidden="true" className="w-3 shrink-0" />
 
         <span className="flex-1 min-w-0 truncate text-body">{capture.content}</span>
 
