@@ -133,9 +133,15 @@ export function TodayPage() {
   const focusBrief = useCallback(() => {
     requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-brief-body]')?.focus())
   }, [])
+  // The setup decides today's layout, so nothing that depends on it runs
+  // before it's done: no AI call (a "No AI" preset must mean none) and no
+  // snapshot (written once, it would freeze the default layout). Pending
+  // while the settings load, while setup is open, and while it's due.
+  const setupPending =
+    setupOpen || settingsStatus === 'idle' || settingsStatus === 'loading' || settings?.setup_completed_at === null
 
   // Priorities generate only while their box is on (no AI call for a hidden box).
-  const daily = useDailyPriorities({ today, ready: ready && isOn('priorities'), events, calendarUnavailable: calendarOffline, tasks, projects: allProjects })
+  const daily = useDailyPriorities({ today, ready: ready && !setupPending && isOn('priorities'), events, calendarUnavailable: calendarOffline, tasks, projects: allProjects })
   const location = settings?.location
   const weather = useWeather(isOn('weather'), `${today}|${location ? `${location.lat},${location.lon}` : ''}`)
 
@@ -143,7 +149,7 @@ export function TodayPage() {
   // the web resolves null there and reads the Mac's row instead.
   const snappedFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!ready || snappedFor.current === today) return
+    if (!ready || setupPending || snappedFor.current === today) return
     snappedFor.current = today
     dp.brief.ensureSnapshot(today)
       .then((brief) => brief ?? dp.brief.get(today))
@@ -152,7 +158,7 @@ export function TodayPage() {
         if (brief) setBriefDates((prev) => new Set(prev).add(today))
       })
       .catch(() => {})
-  }, [dp, today, ready])
+  }, [dp, today, ready, setupPending])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

@@ -1,5 +1,5 @@
 import {
-  DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent,
+  DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type Announcements, type DragEndEvent,
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -74,6 +74,17 @@ export function BoxesList({
     else move(index, intent.direction)
   }
 
+  // Drag announcements speak box names ("Schedule"), never ids ("schedule").
+  const position = (id: string | number) => `position ${ids.indexOf(String(id)) + 1} of ${ids.length}`
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => `Picked up ${nameOf(String(active.id))}, ${position(active.id)}.`,
+    onDragOver: ({ active, over }) =>
+      over ? `${nameOf(String(active.id))} is over ${position(over.id)}.` : `${nameOf(String(active.id))} is no longer over the list.`,
+    onDragEnd: ({ active, over }) =>
+      over ? `${nameOf(String(active.id))} dropped at ${position(over.id)}.` : `${nameOf(String(active.id))} dropped.`,
+    onDragCancel: ({ active }) => `Moving ${nameOf(String(active.id))} was cancelled.`,
+  }
+
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over) return
     const next = reorderEntries(entries, String(active.id), String(over.id))
@@ -82,7 +93,7 @@ export function BoxesList({
 
   return (
     <div>
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd} accessibility={{ announcements }}>
         <SortableContext items={ids} strategy={verticalListSortingStrategy}>
           <ul ref={listRef} aria-label={label} className="divide-y divide-border/50 rounded-lg border" onKeyDown={onKeyDown}>
             {entries.map((entry) => (

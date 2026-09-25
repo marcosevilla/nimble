@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHabitLoadGate } from '../src/lib/habitToggle.ts'
 import {
-  FALLBACK_LAYOUT, normalizeLayout, configValue, setModuleConfig, setModuleEnabled, applySettingsPatch, arrangeBrief, moveEntry, reorderEntries, boxRowKey, PRESETS, applyPreset, draftFrom, setupPatch,
+  FALLBACK_LAYOUT, normalizeLayout, configValue, setModuleConfig, setModuleEnabled, applySettingsPatch, arrangeBrief, moveEntry, reorderEntries, boxRowKey, PRESETS, applyPreset, draftFrom, setupPatch, parseGoal,
 } from '../src/lib/briefLayout.ts'
 
 const e = (id, enabled = true, config = {}) => ({ id, enabled, config })
@@ -112,4 +113,24 @@ test('the draft starts from saved settings and Finish writes exactly the setup k
   assert.deepEqual(Object.keys(setupPatch(d)).sort(), ['complete_setup', 'goals', 'location', 'modules', 'time'])
   assert.deepEqual(setupPatch(d).goals, { daily: 5, weekly: 25, days_off: ['sat', 'sun', 'fri'] })
   assert.equal(setupPatch(d).complete_setup, true)
+})
+
+// stores/briefSettingsStore.ts orders loads against saves with this gate.
+test('brief settings: a load that began before Finish never lands after it', () => {
+  const gate = createHabitLoadGate()
+  const sourcesStepLoad = gate.beginLoad() // step 4 re-reads what's connected
+  const settle = gate.beginToggle() // Finish: save({ complete_setup: true })
+  assert.equal(gate.canApply(sourcesStepLoad), false, 'not while the save is in flight')
+  settle()
+  assert.equal(gate.canApply(sourcesStepLoad), false, 'nor after it: it predates the save')
+  settle()
+  assert.equal(gate.pending, 0, 'settling twice (success, then finally) counts once')
+  assert.equal(gate.canApply(gate.beginLoad()), true, 'a load started after the save applies')
+})
+
+test('parseGoal: whole numbers in range only', () => {
+  assert.equal(parseGoal(' 12 ', 100), 12)
+  assert.equal(parseGoal('100', 100), 100)
+  for (const bad of ['', '0', '101', '1.5', '-3', 'ten', '1e2']) assert.equal(parseGoal(bad, 100), null, bad)
+  assert.equal(parseGoal('700', 700), 700)
 })

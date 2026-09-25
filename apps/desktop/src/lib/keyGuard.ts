@@ -160,6 +160,7 @@ export function todayKey(e: CalendarKeyEvent): 'toggle' | 'prev' | 'next' | null
 export function setupKey(e: CalendarKeyEvent & { repeat?: boolean }, overlayOpen: boolean): 'continue' | 'skip' | null {
   if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat || overlayOpen) return null
   if (e.key === 'Escape') return e.target?.closest?.(OVERLAY_SELECTOR) ? null : 'skip'
-  if (e.key === 'Enter') return shouldIgnoreKey(e.target) ? null : 'continue'
+  // A focused Boxes row (Arrange step) keeps ↵ for itself: never Finish.
+  if (e.key === 'Enter') return shouldIgnoreKey(e.target) || e.target?.closest?.('[data-box-row]') ? null : 'continue'
   return null
 }

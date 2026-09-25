@@ -163,3 +163,12 @@ export function setupPatch(d: SetupDraft): BriefSettingsPatch {
     complete_setup: true,
   }
 }
+
+/** A goal field's text as a whole number from 1 to `max`, else null (the
+ *  field keeps the text and shows a hint; nothing is dropped silently). */
+export function parseGoal(text: string, max: number): number | null {
+  const t = text.trim()
+  if (!/^\d+$/.test(t)) return null
+  const n = Number(t)
+  return n >= 1 && n <= max ? n : null
+}

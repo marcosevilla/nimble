@@ -45,6 +45,12 @@ export function TodaySetup({ onDone }: { onDone: () => void }) {
   }, [draft, saving, save, close, onDone])
 
   const next = useCallback(() => {
+    // A goal field holds text it can't save: show why and stay.
+    if (useTodaySetupStore.getState().invalid) {
+      useTodaySetupStore.getState().revealHints()
+      document.querySelector<HTMLElement>('[data-setup-step] [aria-invalid="true"]')?.focus()
+      return
+    }
     if (step < SETUP_STEPS - 1) go(step + 1)
     else void finish()
   }, [step, go, finish])
@@ -68,12 +74,12 @@ export function TodaySetup({ onDone }: { onDone: () => void }) {
   return (
     <section aria-labelledby="today-setup-title" className="@container">
       <div className="grid gap-6 @min-[46rem]:grid-cols-[minmax(0,21rem)_minmax(0,1fr)]">
-        <div className="surface-panel flex min-w-0 flex-col gap-4 p-5">
+        <div data-setup-step className="surface-panel flex min-w-0 flex-col gap-4 p-5">
           <div className="flex items-center gap-2">
             <Meta as="p" aria-live="polite" className="tabular-nums">Step {step + 1} of {SETUP_STEPS}</Meta>
             <div className="ml-auto flex items-center gap-1">
               <Button variant="ghost" size="sm" onClick={() => go(step - 1)} disabled={step === 0 || saving}>Back</Button>
-              <Button variant="ghost" size="sm" onClick={() => void finish()} disabled={saving}>Skip setup</Button>
+              <Button variant="ghost" size="sm" onClick={() => void finish()} disabled={saving}>Finish later</Button>
             </div>
           </div>
           <h2 id="today-setup-title" ref={headingRef} tabIndex={-1} className="text-title outline-none">{TITLES[step]}</h2>
@@ -84,7 +90,7 @@ export function TodaySetup({ onDone }: { onDone: () => void }) {
           {step === 4 && <GoalsStep {...props} />}
           {step === 5 && <ArrangeStep {...props} />}
           <div className="mt-auto flex items-center justify-end gap-3 pt-2">
-            <Meta as="p">↵ to continue · Esc to skip setup</Meta>
+            <Meta as="p">↵ to continue · Esc to finish later</Meta>
             <Button onClick={next} disabled={saving}>{step === SETUP_STEPS - 1 ? 'Finish' : 'Continue'}</Button>
           </div>
         </div>

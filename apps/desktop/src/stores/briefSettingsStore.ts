@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import type { BriefSettings, BriefSettingsPatch } from '@nimble/types'
 import { getDataProvider } from '@/services/provider-context'
 import { applySettingsPatch } from '@/lib/briefLayout'
+import { createHabitLoadGate } from '@/lib/habitToggle'
 import { settingsFailure, type SettingsFailure } from '@/lib/settingsMessage'
 
 /* One copy of the brief settings for Today, the setup and the three
@@ -28,6 +29,11 @@ interface BriefSettingsState {
 
 let queue: Promise<unknown> = Promise.resolve()
 let outstanding = 0
+/* A load (e.g. the setup's Sources step re-reading what's connected) is
+   applied only if no save started after it began and none is in flight:
+   otherwise its older answer could land after Finish and undo it (reopening
+   the setup with setup_completed_at back to null). Same gate as habits. */
+const gate = createHabitLoadGate()
 
 export const useBriefSettingsStore = create<BriefSettingsState>((set, get) => ({
   settings: null,
@@ -42,8 +48,11 @@ export const useBriefSettingsStore = create<BriefSettingsState>((set, get) => ({
     const { status } = get()
     if (!force && (status === 'ready' || status === 'loading')) return
     set({ status: 'loading' })
+    const ticket = gate.beginLoad()
     try {
-      set({ settings: await dp.briefSettings.get(), status: 'ready' })
+      const settings = await dp.briefSettings.get()
+      if (gate.canApply(ticket)) set({ settings, status: 'ready' })
+      else if (get().settings) set({ status: 'ready' })
     } catch {
       set({ status: get().settings ? 'ready' : 'error' })
     }
@@ -52,9 +61,11 @@ export const useBriefSettingsStore = create<BriefSettingsState>((set, get) => ({
     const current = get().settings
     if (current) set({ settings: applySettingsPatch(current, patch) })
     outstanding += 1
+    const settle = gate.beginToggle()
     const run = queue.then(async () => {
       try {
         const next = await getDataProvider().briefSettings.save(patch)
+        settle()
         if (outstanding === 1) set({ settings: next, status: 'ready' })
         set({ lastFailure: null })
         return true
@@ -62,9 +73,11 @@ export const useBriefSettingsStore = create<BriefSettingsState>((set, get) => ({
         const failure = settingsFailure(e)
         set({ lastFailure: failure })
         if (!opts?.silent) toast.error(failure.message, failure.detail ? { description: failure.detail } : undefined)
+        settle()
         if (outstanding === 1) await get().load(true)
         return false
       } finally {
+        settle()
         outstanding -= 1
       }
     })

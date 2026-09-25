@@ -8,10 +8,11 @@
  * The clock is pinned to the mock's TODAY (2026-08-01 07:00) so the weather
  * forecast and events line up.
  *
- * Axe: each check is held to its page's recorded baseline (`today`,
- * `settings`, plus `:dark`). Those rows already carry the dev-only
- * Agentation toolbar and the page scroller, so anything the brief adds
- * (a new rule, or more nodes) still fails.
+ * Axe: the setup and the brief settings page have their own baselines
+ * (`today-setup`, `settings-brief`, plus `:dark`), recorded on this branch.
+ * They hold only what the page already had (the dev-only Agentation
+ * toolbar, the page scroller); anything new still fails. The weather
+ * popover is held to the `today` baseline.
  *
  * Run (frozen build only):
  *   tools/qa-frozen.sh <sha> <scratch>/qa-b2 <port>
@@ -25,9 +26,14 @@ type Entry = { id: string; enabled: boolean; config?: Record<string, unknown> }
 const MOCK_NOW = new Date('2026-08-01T07:00:00')
 
 /** Open a page with every invoke recorded, the clock pinned and optional brief settings seeded. */
-async function openWithSpy(app: App, page: Page, pageId: string, opts: { query?: string; seed?: Record<string, unknown> } = {}) {
+async function openWithSpy(
+  app: App,
+  page: Page,
+  pageId: string,
+  opts: { query?: string; seed?: Record<string, unknown>; noVault?: boolean } = {},
+) {
   await page.clock.setFixedTime(MOCK_NOW)
-  await page.addInitScript((seed) => {
+  await page.addInitScript(({ seed, noVault }) => {
     const w = window as unknown as {
       __MOCK_BRIEF_SETTINGS__?: unknown
       __calls: { cmd: string; args: unknown }[]
@@ -38,9 +44,12 @@ async function openWithSpy(app: App, page: Page, pageId: string, opts: { query?:
     const orig = w.__TAURI_INTERNALS__.invoke
     w.__TAURI_INTERNALS__.invoke = (cmd, args, o) => {
       w.__calls.push({ cmd, args })
+      // noVault: a profile with no Obsidian vault set (optional since phase 2).
+      if (noVault && cmd === 'get_setting' && (args as { key?: string } | undefined)?.key === 'obsidian_vault_path') return Promise.resolve(null)
+      if (noVault && cmd === 'read_session_log') return Promise.reject('Obsidian vault path not configured')
       return orig(cmd, args, o)
     }
-  }, opts.seed ?? null)
+  }, { seed: opts.seed ?? null, noVault: !!opts.noVault })
   await app.open(pageId, opts.query ?? '')
 }
 
@@ -125,7 +134,7 @@ test.describe('B2 brief phase 2', () => {
     await list.getByRole('button', { name: 'Still open options' }).click()
     await list.getByRole('radio', { name: '10' }).or(list.getByRole('button', { name: '10', exact: true })).click()
     await expect.poll(async () => (await lastSavedModules(page))?.find((m) => m.id === 'still_open')?.config).toEqual({ count: 10 })
-    await expectNoNewAxeViolations(page, 'settings')
+    await expectNoNewAxeViolations(page, 'settings-brief')
   })
 
   test('AC6 rapid Boxes changes: the last save equals the last visible state', async ({ app, page }) => {
@@ -205,15 +214,42 @@ test.describe('B2 brief phase 2', () => {
         await expectNoClipping(panel, { allowEllipsis: true })
         await page.keyboard.press('Tab')
         await expectFocusRing(page)
-        await expectNoNewAxeViolations(page, 'today')
+        await expectNoNewAxeViolations(page, 'today-setup')
       })
       test(`AC12 Settings → Today & brief passes axe (${theme})`, async ({ app, page }) => {
         await openWithSpy(app, page, 'settings', { query: 'settings=brief' })
         await expect(page.getByRole('list', { name: 'Boxes' })).toBeVisible()
-        await expectNoNewAxeViolations(page, 'settings')
+        await expectNoNewAxeViolations(page, 'settings-brief')
       })
     })
   }
+
+  test('AC14 nothing brief-dependent runs while setup is open; Finish later snapshots the chosen layout', async ({ app, page }) => {
+    await openWithSpy(app, page, 'today', { query: 'setup=fresh' })
+    await expect(page.getByText('Step 1 of 6')).toBeVisible()
+    await page.getByRole('button', { name: /^Minimal/ }).click()
+    await page.waitForTimeout(500) // let the day's data land: nothing may fire
+    expect(await calls(page, 'brief_ensure_snapshot')).toHaveLength(0)
+    expect(await calls(page, 'generate_priorities')).toHaveLength(0)
+    await page.keyboard.press('Escape')
+    await expect(briefBody(page)).toBeVisible()
+    await expect.poll(async () => (await calls(page, 'brief_ensure_snapshot')).length).toBe(1)
+    const brief = await page.evaluate(() =>
+      (window as unknown as { __TAURI_INTERNALS__: { invoke: (c: string, a: unknown) => Promise<{ layout: { id: string }[] }> } })
+        .__TAURI_INTERNALS__.invoke('brief_get', { date: '2026-08-01' }))
+    expect(brief.layout.map((e) => e.id)).toEqual(['weather', 'schedule', 'due_today', 'vault'])
+    expect(await calls(page, 'generate_priorities')).toHaveLength(0)
+  })
+
+  test('AC15 with no vault set, vault actions hide and the session log is calm', async ({ app, page }) => {
+    await openWithSpy(app, page, 'inbox', { noVault: true })
+    await expect(page.getByRole('heading', { name: 'Inbox', level: 1 })).toBeVisible()
+    await expect(page.getByTitle('Import from Obsidian')).toHaveCount(0)
+    await openWithSpy(app, page, 'settings', { query: 'settings=activity', noVault: true })
+    await page.getByRole('tab', { name: 'Sessions' }).click()
+    await expect(page.getByText('Connect your Obsidian vault to see session notes.')).toBeVisible()
+    await expect(page.getByText(/vault path not configured/i)).toHaveCount(0)
+  })
 
   test('AC13 a narrow Today column hides the preview and keeps the step usable (UX checkpoint 3)', async ({ app, page }) => {
     await page.setViewportSize({ width: 1024, height: 700 })

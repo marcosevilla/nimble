@@ -155,4 +155,6 @@ test('setupKey: ↵ continues and Esc skips, never from fields, controls, overla
   assert.equal(setupKey(ev('Enter', el(), { metaKey: true }), false), null)
   assert.equal(setupKey(ev('Enter', el(), { defaultPrevented: true }), false), null)
   assert.equal(setupKey(ev('Enter', el(), { repeat: true }), false), null, 'a held ↵ does not race through the steps')
+  assert.equal(setupKey(ev('Enter', el({ tag: 'LI', is: ['[data-box-row]'] })), false), null, 'a focused Boxes row never finishes setup')
+  assert.equal(setupKey(ev('Escape', el({ tag: 'LI', is: ['[data-box-row]'] })), false), 'skip', 'Esc still finishes later from a row')
 })
