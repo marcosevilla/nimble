@@ -15,7 +15,9 @@ test('the activity heatmap reads its ramp from theme tokens (session N-P1-1)', (
 })
 
 test('the command bar quoted query uses the strong body token (shell P1-7)', () => {
-  assert.doesNotMatch(read('components/shared/CommandBarResults.tsx'), /truncate font-medium/)
+  const src = read('components/omnibar/OmnibarResults.tsx')
+  assert.doesNotMatch(src, /truncate font-medium/)
+  assert.match(src, /truncate text-body-strong/)
 })
 
 test('the habit ✓ badge has no font-bold stack (goals P1-6)', () => {
