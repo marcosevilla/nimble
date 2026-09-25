@@ -1514,6 +1514,10 @@
       row.action_kind = args.actionKind || null
       row.produced_ref = args.producedRef || null
       row.updated_at = iso(TODAY, '09:45:00').replace('T', ' ')
+      // Like db::brief_items::set_item_state: re-stamped with the day's current
+      // composition, so an Undo after a Regenerate stays listed.
+      var owner = BRIEFS[row.date]
+      if (owner && owner.composed_at) row.composed_at = owner.composed_at
       return withTask(row)
     },
     brief_settings_get: function () { return briefSettingsView() },

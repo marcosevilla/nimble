@@ -143,14 +143,21 @@ pub async fn set_item_state(
         return Err(crate::Error::Other("invalid_action_state".into()));
     }
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let changed = sqlx::query("UPDATE brief_items SET action_state = ?, action_kind = ?, produced_ref = ?, updated_at = ? WHERE id = ?")
+    // Re-stamp with the day's current composition: after a Regenerate an
+    // acted-on row keeps its old stamp, and an Undo back to 'none' would
+    // otherwise drop it from `list_items`.
+    let changed = sqlx::query(
+        "UPDATE brief_items SET action_state = ?, action_kind = ?, produced_ref = ?, updated_at = ?,
+         composed_at = COALESCE((SELECT b.composed_at FROM briefs b WHERE b.date = brief_items.date), composed_at)
+         WHERE id = ?",
+    )
         .bind(state).bind(action_kind).bind(produced_ref).bind(&now).bind(id)
         .execute(pool).await?.rows_affected();
     if changed == 0 {
         return Err(crate::Error::Other("brief_item_missing".into()));
     }
     let item = get_item(pool, id).await?.ok_or_else(|| crate::Error::Other("brief_item_missing".into()))?;
-    let cols = serde_json::json!(["action_state", "action_kind", "produced_ref", "updated_at"]).to_string();
+    let cols = serde_json::json!(["action_state", "action_kind", "produced_ref", "updated_at", "composed_at"]).to_string();
     sync::append_sync_log(pool, "brief_items", id, "UPDATE", Some(&cols), Some(&sync_snapshot(&item))).await.ok();
     Ok(item)
 }
@@ -318,6 +325,27 @@ mod tests {
         let kept = items.iter().find(|i| i.kind == "quick_help").unwrap();
         assert_eq!((kept.action_state.as_str(), kept.produced_ref.as_deref(), kept.position), ("produced", Some("[\"s1\",\"s2\"]"), 0));
         assert_eq!(count(&pool, "SELECT count(*) FROM sync_log WHERE table_name='brief_items' AND operation='DELETE'").await, 1);
+    }
+
+    #[tokio::test]
+    async fn undo_after_a_regenerate_keeps_the_row_in_the_current_brief() {
+        let pool = test_pool().await;
+        let (b, c) = (task(&pool, "B").await, task(&pool, "C").await);
+        briefs::ensure_snapshot(&pool, D, D).await.unwrap();
+        briefs::record_composition(&pool, &record(vec![item("quick_help", &b, 0)], false, 1)).await.unwrap();
+        let id = item_id(D, "quick_help", &b);
+        set_item_state(&pool, &id, "produced", Some("break_down"), Some("[\"s1\"]")).await.unwrap();
+        // Regenerate at noon: the acted-on row is kept with its old stamp.
+        let later = "2026-09-25 12:00:00";
+        briefs::record_composition(&pool, &CompositionRecord { now: later.into(), ..record(vec![item("priority", &c, 0)], true, 1) }).await.unwrap();
+        // Undo resets it: it must stay on screen, stamped with today's composition.
+        let undone = set_item_state(&pool, &id, "none", None, None).await.unwrap();
+        assert_eq!(undone.composed_at.as_deref(), Some(later));
+        let ids: Vec<String> = list_items(&pool, D).await.unwrap().into_iter().map(|i| i.id).collect();
+        assert!(ids.contains(&id), "{ids:?}");
+        let snap: String = sqlx::query_scalar("SELECT snapshot FROM sync_log WHERE table_name='brief_items' AND row_id = ? ORDER BY rowid DESC LIMIT 1")
+            .bind(&id).fetch_one(&pool).await.unwrap();
+        assert!(snap.contains(later), "the new stamp syncs: {snap}");
     }
 
     #[tokio::test]
