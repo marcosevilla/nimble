@@ -14,7 +14,7 @@ function sources(overrides = {}) {
   const calls = []
   const src = {
     searchTasks: async (q, f) => { calls.push(['tasks', q, f]); return [] },
-    listTasks: async (inc) => { calls.push(['list', inc]); return [] },
+    listTasks: async (opts) => { calls.push(['list', opts]); return [] },
     searchNotes: async (q) => { calls.push(['notes', q]); return [] },
     searchDocs: async (q) => { calls.push(['docs', q]); return [] },
     searchVault: async (q) => { calls.push(['vault', q]); return [] },
@@ -91,15 +91,15 @@ test('a pill-only query lists matching tasks, open first (the whole query became
     task('open-photo', 'todo', { labels: ['photo'] }),
     task('open-other'),
   ]
-  const first = sources({ listTasks: async (inc) => { first.calls.push(['list', inc]); return all } })
+  const first = sources({ listTasks: async (opts) => { first.calls.push(['list', opts]); return all } })
   const r = await runSearch(plan('', [label('photo')]), first.src, () => {})
   assert.deepEqual(r.tasks.map((h) => h.task.id), ['open-photo', 'done-photo'])
-  assert.deepEqual(first.calls, [['list', true]])
+  assert.deepEqual(first.calls, [['list', { includeCompleted: true }]])
 
-  const second = sources({ listTasks: async (inc) => { second.calls.push(['list', inc]); return all } })
+  const second = sources({ listTasks: async (opts) => { second.calls.push(['list', opts]); return all } })
   const open = await runSearch(plan('', [label('photo'), { kind: 'status', value: 'open', name: 'open' }]), second.src, () => {})
   assert.deepEqual(open.tasks.map((h) => h.task.id), ['open-photo'])
-  assert.deepEqual(second.calls, [['list', false]], 'completed tasks are not even loaded')
+  assert.deepEqual(second.calls, [['list', { includeCompleted: false }]], 'completed tasks are not even loaded')
   assert.deepEqual(browseTasks(all, { status: 'completed', labelIds: [], projectId: null, type: null }).map((h) => h.task.id), ['done-photo'])
 })
 
@@ -125,4 +125,26 @@ test('capGroup: five rows, then "Show all N"; expanded shows everything', () => 
   assert.deepEqual(capGroup(items, true), { shown: items, more: 0 })
   assert.deepEqual(capGroup([1, 2, 3, 4, 5], false), { shown: [1, 2, 3, 4, 5], more: 0 })
   assert.equal(GROUP_LIMIT, 5)
+})
+
+// ── Checkpoint-2 review follow-ups ──
+
+test('label pills: only the first goes to the backend (any-of + limit), the rest AND client-side', async () => {
+  const s = sources({
+    searchTasks: async (q, f) => {
+      s.calls.push(['tasks', q, f])
+      return [hit(task('both', 'todo', { labels: ['a', 'b'] })), hit(task('one', 'todo', { labels: ['a'] }))]
+    },
+  })
+  const r = await runSearch(plan('x', [label('a'), label('b')]), s.src, () => {})
+  assert.deepEqual(s.calls.find((c) => c[0] === 'tasks')[2], { status: 'all', label_ids: ['a'], project_id: null })
+  assert.deepEqual(r.tasks.map((h) => h.task.id), ['both'])
+})
+
+test('a pill-only query with a project pill lists only that project', async () => {
+  const all = [task('p-open', 'todo', { project_id: 'p' }), task('elsewhere', 'todo', { project_id: 'q' })]
+  const s = sources({ listTasks: async (opts) => { s.calls.push(['list', opts]); return all } })
+  const r = await runSearch(plan('', [{ kind: 'project', value: 'p', name: 'P' }]), s.src, () => {})
+  assert.deepEqual(s.calls, [['list', { includeCompleted: true, projectId: 'p' }]])
+  assert.deepEqual(r.tasks.map((h) => h.task.id), ['p-open'])
 })

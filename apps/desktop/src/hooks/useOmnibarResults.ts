@@ -11,7 +11,7 @@ import {
 function sourcesFrom(dp: DataProvider): SearchSources {
   return {
     searchTasks: (q, filters) => dp.tasks.search(q, filters),
-    listTasks: (includeCompleted) => dp.tasks.list({ includeCompleted }),
+    listTasks: (opts) => dp.tasks.list(opts),
     searchNotes: (q) => dp.captures.search(q, SOURCE_LIMIT),
     searchDocs: (q) => dp.docs.searchDocuments(q),
     searchVault: (q) => dp.vault.search(q, SOURCE_LIMIT),
@@ -27,9 +27,10 @@ function logSourceFailure(source: string, error: unknown) {
 }
 
 /** Debounced fan-out for the open Omnibar. Results for an older query stay
- *  on screen until the new ones land (`settled` is false meanwhile); only the
- *  latest request may render. `searchNow` skips the debounce (Enter typed
- *  before the results arrived). */
+ *  on screen until the new ones land, but they are stale meanwhile
+ *  (`settled` false): the Omnibar re-searches before acting on a fetched row
+ *  (Enter, click, ⌥ keys) rather than trusting it. Only the latest request
+ *  may render. `searchNow` skips the debounce. */
 export function useOmnibarResults(plan: SearchPlan, open: boolean): {
   results: FetchedResults
   settled: boolean
@@ -42,12 +43,14 @@ export function useOmnibarResults(plan: SearchPlan, open: boolean): {
   const key = JSON.stringify(plan)
   const fetches = open && needsFetch(plan)
 
+  // Keyed on the plan's content, not its identity: a re-memoised but equal
+  // plan (new pills array, same pills) must not restart the debounce.
   const search = useCallback(async (): Promise<FetchedResults> => {
     const id = guard.next()
-    const results = await runSearch(plan, sources, logSourceFailure)
+    const results = await runSearch(JSON.parse(key) as SearchPlan, sources, logSourceFailure)
     if (guard.isLatest(id)) setState({ key, results })
     return results
-  }, [guard, plan, sources, key])
+  }, [guard, sources, key])
 
   useEffect(() => {
     if (!fetches) {

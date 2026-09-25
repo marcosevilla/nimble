@@ -1,10 +1,10 @@
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { ArrowRight, FileText, History, ListFilter, PenLine, Plus, Target, Vault } from 'lucide-react'
 import type { LocalTask, Project } from '@nimble/types'
 import { cn } from '@/lib/utils'
 import { suggestionText } from '@/lib/omnibarQuery'
 import { CREATE_NAME } from '@/lib/omnibarCreate'
-import type { OmnibarRow, RowSection } from '@/lib/omnibarRows'
+import { flattenRows, OMNIBAR_LISTBOX_ID, optionId, type OmnibarRow, type RowSection } from '@/lib/omnibarRows'
 import { Icon } from '@/components/shared/Icon'
 import { Meta } from '@/components/shared/typography'
 import { DateChip } from '@/components/capture/CaptureTokens'
@@ -20,6 +20,8 @@ const KBD_CLASS = 'rounded-sm bg-muted px-1 py-0.5 text-label text-muted-foregro
 export interface OmnibarResultsProps {
   sections: readonly RowSection[]
   selectedKey: string | null
+  /** Fetched rows belong to an older query (a newer search is in flight). */
+  busy: boolean
   tokens: readonly string[]
   projects: readonly Project[]
   /** The typed text a create row quotes. */
@@ -34,25 +36,31 @@ export interface OmnibarResultsProps {
   onMove: (task: LocalTask, projectId: string) => void
 }
 
-function RowButton({ row, selected, onHover, onActivate, children }: {
+/** Keeps focus in the combobox input when a row or chip is clicked. */
+const keepFocus = (e: React.MouseEvent) => e.preventDefault()
+
+function RowOption({ row, id, selected, onHover, onActivate, children }: {
   row: OmnibarRow
+  id: string
   selected: boolean
   onHover: (key: string) => void
   onActivate: (row: OmnibarRow) => void
   children: ReactNode
 }) {
   return (
-    <button
-      type="button"
-      tabIndex={-1}
+    <div
+      role="option"
+      id={id}
+      aria-selected={selected}
       data-omnibar-row={row.key}
       data-selected={selected || undefined}
       onMouseEnter={() => onHover(row.key)}
+      onMouseDown={keepFocus}
       onClick={() => onActivate(row)}
       className={cn(ROW_CLASS, selected && 'bg-hover')}
     >
       {children}
-    </button>
+    </div>
   )
 }
 
@@ -115,8 +123,9 @@ function rowBody(row: OmnibarRow, firstFilter: boolean): ReactNode {
   }
 }
 
-function CreateRows({ rows, selectedKey, createText, createTaskTitle, createDateLabel, onHover, onActivate }: {
+function CreateRows({ rows, idOf, selectedKey, createText, createTaskTitle, createDateLabel, onHover, onActivate }: {
   rows: CreateRow[]
+  idOf: (key: string) => string
   selectedKey: string | null
   createText: string
   createTaskTitle: string
@@ -130,27 +139,29 @@ function CreateRows({ rows, selectedKey, createText, createTaskTitle, createDate
   const isTask = first.create === 'task'
   return (
     <>
-      <RowButton row={first} selected={firstSelected} onHover={onHover} onActivate={onActivate}>
+      <RowOption row={first} id={idOf(first.key)} selected={firstSelected} onHover={onHover} onActivate={onActivate}>
         <Icon icon={Plus} className="text-muted-foreground" />
         <span className="text-muted-foreground">Create {CREATE_NAME[first.create].toLowerCase()}</span>
         <span className="min-w-0 flex-1 truncate text-body-strong">"{isTask ? createTaskTitle : createText}"</span>
         {isTask && createDateLabel && <DateChip label={createDateLabel} />}
         {firstSelected && <kbd className={KBD_CLASS}>Enter</kbd>}
-      </RowButton>
+      </RowOption>
       {rest.length > 0 && (
         <div className="flex flex-wrap items-center gap-1 px-2 pb-1 pt-0.5">
-          <Meta className="mr-1">or create</Meta>
+          <Meta className="mr-1" aria-hidden>or create</Meta>
           {rest.map((row) => {
             const selected = row.key === selectedKey
             return (
-              <button
+              <div
                 key={row.key}
-                type="button"
-                tabIndex={-1}
+                role="option"
+                id={idOf(row.key)}
+                aria-selected={selected}
                 data-omnibar-row={row.key}
                 data-selected={selected || undefined}
                 aria-label={`Create ${CREATE_NAME[row.create].toLowerCase()} "${createText}"`}
                 onMouseEnter={() => onHover(row.key)}
+                onMouseDown={keepFocus}
                 onClick={() => onActivate(row)}
                 className={cn(
                   'rounded-md px-2 py-0.5 text-meta text-muted-foreground transition-colors hover:bg-hover hover:text-foreground',
@@ -158,7 +169,7 @@ function CreateRows({ rows, selectedKey, createText, createTaskTitle, createDate
                 )}
               >
                 {CREATE_NAME[row.create]}
-              </button>
+              </div>
             )
           })}
         </div>
@@ -167,14 +178,25 @@ function CreateRows({ rows, selectedKey, createText, createTaskTitle, createDate
   )
 }
 
-/** Grouped Omnibar results: one `role="group"` per section (named by its
- *  title), rows marked `data-omnibar-row` / `data-selected`. Rows are not
- *  tab stops — the field owns the keyboard (Omnibar.tsx). */
+/** Grouped Omnibar results: a `role="listbox"` (the field's combobox
+ *  controls it) holding one `role="group"` per section, named by its title.
+ *  Each row is a `role="option"` with an index-based id, marked
+ *  `data-omnibar-row` / `data-selected`. Rows are not tab stops — the field
+ *  owns the keyboard and points at the highlighted row with
+ *  aria-activedescendant (Omnibar.tsx). */
 export function OmnibarResults(props: OmnibarResultsProps) {
   const { sections, selectedKey, onHover, onActivate } = props
+  const indexByKey = useMemo(() => new Map(flattenRows(sections).map((r, i) => [r.key, i])), [sections])
+  const idOf = (key: string) => optionId(indexByKey.get(key) ?? -1)
   return (
     <div className="overflow-hidden rounded-xl border border-border/50 bg-popover shadow-lg">
-      <div className="max-h-[min(60vh,28rem)] overflow-y-auto p-1">
+      <div
+        id={OMNIBAR_LISTBOX_ID}
+        role="listbox"
+        aria-label="Results"
+        aria-busy={props.busy || undefined}
+        className="max-h-[min(60vh,28rem)] overflow-y-auto p-1"
+      >
         {sections.map((section, si) => (
           <div
             key={section.key}
@@ -188,6 +210,7 @@ export function OmnibarResults(props: OmnibarResultsProps) {
             {section.key === 'create' ? (
               <CreateRows
                 rows={section.rows.filter(isCreateRow)}
+                idOf={idOf}
                 selectedKey={selectedKey}
                 createText={props.createText}
                 createTaskTitle={props.createTaskTitle}
@@ -201,6 +224,7 @@ export function OmnibarResults(props: OmnibarResultsProps) {
                   <TaskRow
                     key={row.key}
                     rowKey={row.key}
+                    optionId={idOf(row.key)}
                     hit={row.hit}
                     selected={row.key === selectedKey}
                     tokens={props.tokens}
@@ -212,9 +236,9 @@ export function OmnibarResults(props: OmnibarResultsProps) {
                     onMove={(projectId) => props.onMove(row.hit.task, projectId)}
                   />
                 ) : (
-                  <RowButton key={row.key} row={row} selected={row.key === selectedKey} onHover={onHover} onActivate={onActivate}>
+                  <RowOption key={row.key} row={row} id={idOf(row.key)} selected={row.key === selectedKey} onHover={onHover} onActivate={onActivate}>
                     {rowBody(row, section.key === 'filters' && i === 0)}
-                  </RowButton>
+                  </RowOption>
                 ),
               )
             )}

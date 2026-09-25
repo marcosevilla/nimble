@@ -52,10 +52,14 @@ function ActionButton({ icon: Glyph, hint, title, onClick, className }: {
 }
 
 /** One task result: open first, completed dimmed with its done date; the
- *  highlighted open row shows ⌥C / focus / ⌥B / ⌥M actions. */
-export function TaskRow({ hit, rowKey, selected, tokens, projects, onHover, onOpen, onComplete, onBreakDown, onMove }: {
+ *  highlighted open row shows ⌥C / focus / ⌥B / ⌥M actions. The option
+ *  element holds only the title — the action buttons are its siblings, since
+ *  an option may not contain interactive content (axe nested-interactive). */
+export function TaskRow({ hit, rowKey, optionId, selected, tokens, projects, onHover, onOpen, onComplete, onBreakDown, onMove }: {
   hit: TaskSearchHit
   rowKey: string
+  /** Index-based DOM id (aria-activedescendant target). */
+  optionId: string
   selected: boolean
   tokens: readonly string[]
   projects: readonly Project[]
@@ -69,13 +73,21 @@ export function TaskRow({ hit, rowKey, selected, tokens, projects, onHover, onOp
   const done = task.status === 'complete'
   const project = projects.find((p) => p.id === task.project_id)
   return (
+    // min-h-9: the 24px action buttons appear on the highlighted row without growing it.
     <div
-      data-omnibar-row={rowKey}
-      data-selected={selected || undefined}
       onMouseEnter={onHover}
-      className={cn('relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors', selected && 'bg-hover')}
+      className={cn('relative flex min-h-9 w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors', selected && 'bg-hover')}
     >
-      <button type="button" tabIndex={-1} onClick={onOpen} className="flex min-w-0 flex-1 items-start gap-2 text-left">
+      <div
+        role="option"
+        id={optionId}
+        aria-selected={selected}
+        data-omnibar-row={rowKey}
+        data-selected={selected || undefined}
+        onMouseDown={(e) => e.preventDefault()} // keep focus in the field
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 items-start gap-2 text-left"
+      >
         <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
           {done ? (
             <Check className="size-3.5" />
@@ -102,7 +114,7 @@ export function TaskRow({ hit, rowKey, selected, tokens, projects, onHover, onOp
             {project.name}
           </span>
         )}
-      </button>
+      </div>
 
       {selected && !done && (
         <div className="flex shrink-0 items-center gap-0.5">

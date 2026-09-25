@@ -116,3 +116,28 @@ export function moveSelection(rows: readonly OmnibarRow[], current: number, delt
   const from = current < 0 ? (delta === 1 ? -1 : 0) : current
   return rows[(from + delta + rows.length) % rows.length].key
 }
+
+/** The results scroller's id (`role="listbox"`, the combobox's aria-controls). */
+export const OMNIBAR_LISTBOX_ID = 'omnibar-listbox'
+
+/** DOM id of the option at flat index `index` — index-based because row keys
+ *  hold vault paths ("/" and spaces). Target of aria-activedescendant. */
+export function optionId(index: number): string {
+  return `omnibar-option-${index}`
+}
+
+/** Rows that came from a fetched source (Tasks, Notes, Docs, Goals and their
+ *  "Show all"). They go stale while a newer query is in flight; filters,
+ *  recents, actions and create rows are derived synchronously from the text. */
+export function isFetchedRow(row: OmnibarRow): boolean {
+  if (row.kind === 'more') return row.group !== 'actions'
+  return row.kind === 'task' || row.kind === 'note' || row.kind === 'doc' || row.kind === 'goal'
+}
+
+/** After a fresh search: the row the user chose if it is still there, the
+ *  default row when nothing was chosen, otherwise nothing (never a stand-in). */
+export function freshRow(rows: readonly OmnibarRow[], key: string | null): OmnibarRow | null {
+  if (key !== null) return rows.find((r) => r.key === key) ?? null
+  const i = defaultIndex(rows)
+  return i >= 0 ? rows[i] : null
+}

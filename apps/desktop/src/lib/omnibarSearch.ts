@@ -41,7 +41,7 @@ export const EMPTY_RESULTS: FetchedResults = { tasks: [], notes: [], docs: [], g
 
 export interface SearchSources {
   searchTasks(query: string, filters: TaskSearchFilters): Promise<TaskSearchHit[]>
-  listTasks(includeCompleted: boolean): Promise<LocalTask[]>
+  listTasks(opts: { includeCompleted: boolean; projectId?: string }): Promise<LocalTask[]>
   searchNotes(query: string): Promise<Capture[]>
   searchDocs(query: string): Promise<Document[]>
   searchVault(query: string): Promise<VaultSearchHit[]>
@@ -114,12 +114,16 @@ export async function runSearch(plan: SearchPlan, src: SearchSources, log: Sourc
   const q = plan.text
   const f = plan.filters
   const byText = q !== ''
-  const taskFilter: TaskSearchFilters = { status: f.status, label_ids: f.labelIds, project_id: f.projectId }
+  // Only the first label pill goes to the backend: its filter is any-of and
+  // capped at SOURCE_LIMIT, so sending every label could fill the cap with
+  // tasks that hold just one of them. The rest AND client-side below.
+  const taskFilter: TaskSearchFilters = { status: f.status, label_ids: f.labelIds.slice(0, 1), project_id: f.projectId }
+  const listOpts = f.projectId ? { includeCompleted: f.status !== 'open', projectId: f.projectId } : { includeCompleted: f.status !== 'open' }
   const tasks: Promise<TaskSearchHit[]> = !want.has('tasks')
     ? none<TaskSearchHit>()
     : byText
       ? settle('tasks', () => src.searchTasks(q, taskFilter), log).then((hits) => hits.filter((h) => matchesAllLabels(h.task, f.labelIds)))
-      : settle('tasks', () => src.listTasks(f.status !== 'open'), log).then((all) => browseTasks(all, f))
+      : settle('tasks', () => src.listTasks(listOpts), log).then((all) => browseTasks(all, f))
   const [taskHits, notes, native, vault, goals] = await Promise.all([
     tasks,
     want.has('notes') && byText ? settle('notes', () => src.searchNotes(q), log) : none<Capture>(),

@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildSections, flattenRows, defaultIndex, selectedIndex, moveSelection } from '../src/lib/omnibarRows.ts'
+import {
+  buildSections, flattenRows, defaultIndex, selectedIndex, moveSelection,
+  optionId, OMNIBAR_LISTBOX_ID, isFetchedRow, freshRow,
+} from '../src/lib/omnibarRows.ts'
 
 const empty = { tasks: [], notes: [], docs: [], goals: [] }
 const hit = (id) => ({ task: { id, content: id, status: 'todo' }, snippet: null, matched_in: 'title' })
@@ -67,4 +70,32 @@ test('arrows move across groups and wrap', () => {
   assert.equal(moveSelection(rows, 2, 1), 'task:a')
   assert.equal(moveSelection(rows, 0, -1), 'create:task')
   assert.equal(moveSelection([], -1, 1), null)
+})
+
+// ── Checkpoint-2 review follow-ups ──
+
+test('option ids are index-based and always valid ids (vault paths hold "/" and spaces)', () => {
+  assert.equal(optionId(0), 'omnibar-option-0')
+  assert.equal(optionId(12), 'omnibar-option-12')
+  assert.match(OMNIBAR_LISTBOX_ID, /^[a-z-]+$/)
+})
+
+test('isFetchedRow: only rows from a fetched source can go stale', () => {
+  const rows = flattenRows(buildSections(input({
+    suggestions: [suggestion],
+    recent: ['zeph'],
+    results: { tasks: ['a', 'b', 'c', 'd', 'e', 'f'].map(hit), notes: [{ id: 'c1', content: 'x' }], docs: [], goals: [{ id: 'g1', name: 'Run' }] },
+    actions: [action('go-today')],
+    creates: ['task'],
+  })))
+  const fetched = rows.filter(isFetchedRow).map((r) => r.key)
+  assert.deepEqual(fetched, ['task:a', 'task:b', 'task:c', 'task:d', 'task:e', 'more:tasks', 'note:c1', 'goal:g1'])
+})
+
+test('freshRow: the same key if it survived, the default row for no key, nothing if it vanished', () => {
+  const rows = flattenRows(buildSections(input({ results: { ...empty, tasks: [hit('a'), hit('b')] }, creates: ['task'] })))
+  assert.equal(freshRow(rows, 'task:b')?.key, 'task:b')
+  assert.equal(freshRow(rows, null)?.key, 'task:a')
+  assert.equal(freshRow(rows, 'task:gone'), null)
+  assert.equal(freshRow([], null), null)
 })

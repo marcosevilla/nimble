@@ -5,12 +5,16 @@ import { Icon } from '@/components/shared/Icon'
 import { HighlightField, type HighlightRange } from '@/components/capture/HighlightField'
 
 /** One row: pills first (`kind: value ×`), then the text input. × is a mouse
- *  target; Backspace in the empty field is the keyboard path (Omnibar.tsx). */
-export function OmnibarField({ pills, value, highlight, inputRef, onChange, onKeyDown, onRemovePill, trailing }: {
+ *  target; Backspace in the empty field is the keyboard path (Omnibar.tsx).
+ *  The input is an ARIA combobox over the results listbox: `listboxId` is
+ *  null while no list shows, `activeOptionId` names the highlighted option. */
+export function OmnibarField({ pills, value, highlight, inputRef, listboxId, activeOptionId, onChange, onKeyDown, onRemovePill, trailing }: {
   pills: readonly Pill[]
   value: string
   highlight: HighlightRange | null
   inputRef: React.RefObject<HTMLInputElement | null>
+  listboxId: string | null
+  activeOptionId: string | null
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void
   onRemovePill: (index: number) => void
@@ -31,6 +35,7 @@ export function OmnibarField({ pills, value, highlight, inputRef, onChange, onKe
               type="button"
               tabIndex={-1}
               aria-label={`Remove ${pillText(pill)}`}
+              onMouseDown={(e) => e.preventDefault()} // keep focus in the field
               onClick={() => onRemovePill(i)}
               className="relative flex size-4 items-center justify-center rounded-full text-muted-foreground transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground after:absolute after:-inset-1"
             >
@@ -46,7 +51,12 @@ export function OmnibarField({ pills, value, highlight, inputRef, onChange, onKe
           wrapperClassName="min-w-[8rem] flex-1"
           onChange={onChange}
           onKeyDown={onKeyDown}
+          role="combobox"
           aria-label="Search or create"
+          aria-autocomplete="list"
+          aria-expanded={listboxId !== null}
+          aria-controls={listboxId ?? undefined}
+          aria-activedescendant={activeOptionId ?? undefined}
           placeholder={pills.length > 0 ? '' : 'Search or create…'}
           className="text-body outline-none placeholder:text-muted-foreground"
         />
