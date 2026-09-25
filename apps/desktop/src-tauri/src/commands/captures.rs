@@ -182,3 +182,12 @@ async fn get_vault_path(app: &AppHandle) -> Result<String, String> {
         Ok(path)
     }
 }
+
+/// Omnibar Notes group: every word must appear, newest first, converted captures excluded.
+#[tauri::command]
+pub async fn search_captures(app: AppHandle, query: String, limit: Option<i64>) -> Result<Vec<Capture>, String> {
+    let pool = app.state::<SqlitePool>();
+    nimble_core::db::captures::search_captures(pool.inner(), &query, limit.unwrap_or(20))
+        .await
+        .map_err(|e| e.to_string())
+}

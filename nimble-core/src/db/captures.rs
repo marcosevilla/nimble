@@ -41,6 +41,53 @@ pub async fn get_captures(
         .collect())
 }
 
+/// `%word%` LIKE patterns, one per whitespace-separated word of `query`, with
+/// `\`, `%` and `_` escaped (bind them with `ESCAPE '\'`). Empty for a blank
+/// query. Shared by the Omnibar searches here and in `goals::search_goals`.
+pub(crate) fn like_patterns(query: &str) -> Vec<String> {
+    query
+        .split_whitespace()
+        .map(|word| {
+            let escaped = word.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+            format!("%{escaped}%")
+        })
+        .collect()
+}
+
+/// Omnibar Notes group: captures holding every word of `query` (LIKE, ASCII
+/// case-insensitive), newest first. Converted captures stay out, like the
+/// Inbox. A blank query returns nothing. `limit` is clamped to 1..=200.
+pub async fn search_captures(pool: &SqlitePool, query: &str, limit: i64) -> crate::Result<Vec<Capture>> {
+    let patterns = like_patterns(query);
+    if patterns.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut sql = String::from(
+        "SELECT id, content, source, converted_to_task_id, routed_to, context, created_at FROM captures WHERE converted_to_task_id IS NULL",
+    );
+    for _ in &patterns {
+        sql.push_str(" AND content LIKE ? ESCAPE '\\'");
+    }
+    sql.push_str(" ORDER BY created_at DESC LIMIT ?");
+    let mut q = sqlx::query_as::<_, (String, String, String, Option<String>, Option<String>, Option<String>, String)>(&sql);
+    for p in &patterns {
+        q = q.bind(p.as_str());
+    }
+    let rows = q.bind(limit.clamp(1, 200)).fetch_all(pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, content, source, converted_to_task_id, routed_to, context, created_at)| Capture {
+            id,
+            content,
+            source,
+            converted_to_task_id,
+            routed_to,
+            context,
+            created_at,
+        })
+        .collect())
+}
+
 /// Create a new capture in SQLite
 pub async fn create_capture(
     pool: &SqlitePool,
@@ -219,4 +266,73 @@ pub async fn save_routed_capture(
     sync::append_sync_log(pool, "captures", &capture_id, "INSERT", None, Some(&snapshot)).await.ok();
 
     Ok(capture_id)
+}
+
+#[cfg(test)]
+mod omnibar_search_tests {
+    use super::*;
+    use crate::test_util::test_pool;
+
+    async fn insert(pool: &SqlitePool, id: &str, content: &str, created_at: &str) {
+        sqlx::query("INSERT INTO captures (id, content, source, created_at) VALUES (?, ?, 'manual', ?)")
+            .bind(id)
+            .bind(content)
+            .bind(created_at)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    fn ids(caps: &[Capture]) -> Vec<&str> {
+        caps.iter().map(|c| c.id.as_str()).collect()
+    }
+
+    #[tokio::test]
+    async fn search_captures_needs_every_word_and_lists_newest_first() {
+        let pool = test_pool().await;
+        insert(&pool, "old", "Portola recap for Sara", "2026-09-01 09:00:00").await;
+        insert(&pool, "new", "portola RECAP draft", "2026-09-20 09:00:00").await;
+        insert(&pool, "other", "Portola credentials", "2026-09-21 09:00:00").await;
+        let hits = search_captures(&pool, "  portola   recap ", 20).await.unwrap();
+        assert_eq!(ids(&hits), vec!["new", "old"]);
+    }
+
+    #[tokio::test]
+    async fn search_captures_leaves_out_converted_captures() {
+        let pool = test_pool().await;
+        insert(&pool, "kept", "portola shot list", "2026-09-01 09:00:00").await;
+        insert(&pool, "done", "portola will call", "2026-09-02 09:00:00").await;
+        sqlx::query("UPDATE captures SET converted_to_task_id = 'task-1' WHERE id = 'done'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(ids(&search_captures(&pool, "portola", 20).await.unwrap()), vec!["kept"]);
+    }
+
+    #[tokio::test]
+    async fn search_captures_caps_at_the_limit() {
+        let pool = test_pool().await;
+        insert(&pool, "a", "run 1", "2026-09-01 09:00:00").await;
+        insert(&pool, "b", "run 2", "2026-09-02 09:00:00").await;
+        insert(&pool, "c", "run 3", "2026-09-03 09:00:00").await;
+        assert_eq!(ids(&search_captures(&pool, "run", 2).await.unwrap()), vec!["c", "b"]);
+    }
+
+    #[tokio::test]
+    async fn search_captures_blank_query_returns_nothing() {
+        let pool = test_pool().await;
+        insert(&pool, "a", "anything", "2026-09-01 09:00:00").await;
+        assert!(search_captures(&pool, "", 20).await.unwrap().is_empty());
+        assert!(search_captures(&pool, "   ", 20).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_captures_treats_like_wildcards_as_text() {
+        let pool = test_pool().await;
+        insert(&pool, "pct", "100% done", "2026-09-01 09:00:00").await;
+        insert(&pool, "plain", "100 done", "2026-09-02 09:00:00").await;
+        insert(&pool, "snake", "snake_case name", "2026-09-03 09:00:00").await;
+        assert_eq!(ids(&search_captures(&pool, "100%", 20).await.unwrap()), vec!["pct"]);
+        assert_eq!(ids(&search_captures(&pool, "_", 20).await.unwrap()), vec!["snake"]);
+    }
 }

@@ -2,6 +2,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::db::activity;
+use crate::db::captures::like_patterns;
 use crate::db::sync;
 use crate::types::{Goal, GoalWithProgress, LifeArea, Milestone};
 
@@ -157,6 +158,33 @@ pub async fn get_goal(pool: &SqlitePool, id: &str) -> crate::Result<GoalWithProg
     let (progress, mc, md, tc, td) = compute_progress(pool, &goal.id).await;
 
     Ok(goal_with_progress(goal, progress, mc, md, tc, td))
+}
+
+/// Omnibar Goals group: goals whose name or description holds every word of
+/// `query` (LIKE, ASCII case-insensitive). Active first, then not started,
+/// paused, and achieved/abandoned last; then by position. A blank query
+/// returns nothing. `limit` is clamped to 1..=200.
+pub async fn search_goals(pool: &SqlitePool, query: &str, limit: i64) -> crate::Result<Vec<Goal>> {
+    let patterns = like_patterns(query);
+    if patterns.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut sql = format!("SELECT {} FROM goals WHERE 1 = 1", GOAL_SELECT);
+    for _ in &patterns {
+        sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR COALESCE(description, '') LIKE ? ESCAPE '\\')");
+    }
+    sql.push_str(
+        " ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'not_started' THEN 1 WHEN 'paused' THEN 2 ELSE 3 END, position, created_at LIMIT ?",
+    );
+    let mut q = sqlx::query_as::<
+        _,
+        (String, String, Option<String>, String, Option<String>, Option<String>, Option<String>, Option<String>, i64, String, String),
+    >(&sql);
+    for p in &patterns {
+        q = q.bind(p.as_str()).bind(p.as_str());
+    }
+    let rows = q.bind(limit.clamp(1, 200)).fetch_all(pool).await?;
+    Ok(rows.into_iter().map(row_to_goal).collect())
 }
 
 pub async fn create_goal(
@@ -490,4 +518,45 @@ pub async fn delete_life_area(pool: &SqlitePool, id: &str) -> crate::Result<()> 
     sync::append_sync_log(pool, "life_areas", id, "DELETE", None, None).await.ok();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod omnibar_search_tests {
+    use super::*;
+    use crate::test_util::test_pool;
+
+    async fn goal(pool: &SqlitePool, name: &str, description: Option<&str>, status: &str) -> String {
+        create_goal(pool, name, description, Some(status), None, None, None, None).await.unwrap().id
+    }
+
+    fn ids(goals: &[Goal]) -> Vec<&str> {
+        goals.iter().map(|g| g.id.as_str()).collect()
+    }
+
+    #[tokio::test]
+    async fn search_goals_matches_name_or_description_active_first() {
+        let pool = test_pool().await;
+        let done = goal(&pool, "Run a marathon", None, "achieved").await;
+        let paused = goal(&pool, "Learn guitar", Some("run scales daily"), "paused").await;
+        let active = goal(&pool, "Run club weekly", None, "active").await;
+        let hits = search_goals(&pool, "RUN", 20).await.unwrap();
+        assert_eq!(ids(&hits), vec![active.as_str(), paused.as_str(), done.as_str()]);
+    }
+
+    #[tokio::test]
+    async fn search_goals_caps_at_the_limit_and_ignores_blank_queries() {
+        let pool = test_pool().await;
+        goal(&pool, "Photograph 20 shows", None, "active").await;
+        goal(&pool, "Photograph a wedding", None, "active").await;
+        assert_eq!(search_goals(&pool, "photograph", 1).await.unwrap().len(), 1);
+        assert!(search_goals(&pool, "  ", 20).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_goals_treats_like_wildcards_as_text() {
+        let pool = test_pool().await;
+        let pct = goal(&pool, "Save 10% of income", None, "active").await;
+        goal(&pool, "Save 10 dollars", None, "active").await;
+        assert_eq!(ids(&search_goals(&pool, "10%", 20).await.unwrap()), vec![pct.as_str()]);
+    }
 }
