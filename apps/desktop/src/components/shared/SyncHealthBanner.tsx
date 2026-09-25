@@ -86,7 +86,10 @@ export function SyncHealthBanner() {
   //   this corner and lift by it;
   // - `--sync-notice-clear` (viewport bottom → its top edge, + 8px gap): the
   //   right column's visible area ends there, so no rail row, tray or
-  //   detail content ever sits behind the notice (loop 3 rail, bug 1).
+  //   detail content ever sits behind the notice (loop 3 rail, bug 1);
+  // plus `data-sync-notice` on <html>, which turns on a short bottom fade
+  // on those scrollers (`[data-notice-fade]`, index.css) so rows dissolve
+  // into the cut above the notice instead of being sliced.
   // Layout sizes (offsetHeight + computed bottom), not the bounding box —
   // the `panel-in` entrance is scaled and shifted on the first frame.
   useLayoutEffect(() => {
@@ -99,6 +102,7 @@ export function SyncHealthBanner() {
       root.style.setProperty('--sync-notice-space', `${h + 8}px`)
       root.style.setProperty('--sync-notice-clear', `${Math.ceil(bottom + h + 8)}px`)
     }
+    root.setAttribute('data-sync-notice', '')
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
@@ -106,6 +110,7 @@ export function SyncHealthBanner() {
       ro.disconnect()
       root.style.removeProperty('--sync-notice-space')
       root.style.removeProperty('--sync-notice-clear')
+      root.removeAttribute('data-sync-notice')
     }
   }, [visible, compact])
 

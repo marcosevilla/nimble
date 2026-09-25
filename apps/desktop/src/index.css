@@ -330,6 +330,17 @@
   animation: panel-in var(--transition-base) var(--ease-entrance) backwards;
 }
 
+/* Right column scrollers while the Todoist sync notice shows: their
+   visible area ends just above it (--sync-notice-clear), and the last
+   24px fade out so a row crossing that edge dissolves instead of being
+   sliced mid-glyph. Each scroller pads its end by ≥24px, so at scroll
+   end the final row sits fully above the fade. The mask is on the
+   scroller's box, so it stays put while content scrolls. */
+:root[data-sync-notice] [data-notice-fade] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+}
+
 /* Right-rail tab panel: fades in each time it's shown (display:none →
    shown restarts the animation). Opacity only, so nothing shifts. */
 .tab-panel-in {

@@ -376,9 +376,11 @@ function TimeGrid({
     <div
       ref={scrollRef}
       // Bottom padding: the grid's last hours scroll clear of the fixed ?
-      // help button (the tab panel's own p-4 supplies the other 16px); none
-      // while the sync notice shows — the rail already ends above it (loop 3).
-      className="overflow-y-auto flex-1 min-h-0 pb-[max(0px,calc(3rem-var(--sync-notice-clear,0px)))]"
+      // help button (the tab panel's own p-4 supplies the other 16px); 24px
+      // while the sync notice shows — the rail already ends above it, and
+      // 24px is the notice edge fade's height (data-notice-fade, loop 3).
+      data-notice-fade
+      className="overflow-y-auto flex-1 min-h-0 pb-[max(1.5rem,calc(3rem-var(--sync-notice-clear,0px)))]"
     >
       <div className="relative" style={{ height: gridHeight }}>
         {/* Hour lines and labels */}

@@ -223,6 +223,21 @@ test.describe('R1 sync notice never covers rail content', () => {
     const lb = await box(last)
     const nb = await box(notice(page))
     expect(lb.y + lb.height, 'last done row ends above the notice').toBeLessThanOrEqual(nb.y)
+    // The scroller fades its last 24px while the notice shows; at scroll
+    // end the final row sits wholly above that fade.
+    const panel = rail(page).locator('[role="tabpanel"][data-notice-fade]:visible')
+    const mask = await panel.evaluate((el) => {
+      const cs = getComputedStyle(el) as CSSStyleDeclaration & { webkitMaskImage?: string }
+      return cs.maskImage || cs.webkitMaskImage || 'none'
+    })
+    expect(mask, 'edge fade on').toContain('gradient')
+    const pb = await box(panel)
+    expect(lb.y + lb.height, 'last row clear of the 24px fade').toBeLessThanOrEqual(pb.y + pb.height - 24)
+    await notice(page).getByRole('button', { name: 'Dismiss' }).click()
+    await expect.poll(() => panel.evaluate((el) => {
+      const cs = getComputedStyle(el) as CSSStyleDeclaration & { webkitMaskImage?: string }
+      return cs.maskImage || cs.webkitMaskImage || 'none'
+    }), 'edge fade off once the notice goes').toBe('none')
   })
 
   test('R1 rail collapsed: the strip buttons clear the compact notice', async ({ app, page }) => {
