@@ -20,6 +20,35 @@ use crate::types::Brief;
 
 pub const MAX_AUTO_ATTEMPTS: i64 = 3;
 
+/// Device-local start time ("YYYY-MM-DD HH:MM:SS") of the last automatic
+/// attempt, for retry spacing. Settings are never synced.
+pub const KEY_LAST_ATTEMPT_AT: &str = "brief.last_attempt_at";
+
+/// How long after attempt `n` (1-based) the next automatic attempt may start:
+/// retry 2 waits 15 minutes, retry 3 waits 45, so a flaky morning doesn't
+/// burn the day's three calls in ten minutes of 5-minute ticks.
+pub fn retry_spacing(attempts_so_far: i64) -> chrono::Duration {
+    match attempts_so_far {
+        1 => chrono::Duration::minutes(15),
+        2 => chrono::Duration::minutes(45),
+        _ => chrono::Duration::zero(),
+    }
+}
+
+/// Whether an automatic retry may start at `now`, measured from the last
+/// attempt's start. A missing or unreadable stamp never blocks.
+async fn retry_spaced_out(pool: &SqlitePool, brief: &Brief, now: chrono::NaiveDateTime) -> crate::Result<bool> {
+    if brief.compose_attempts <= 0 {
+        return Ok(true);
+    }
+    let last = crate::db::settings::get_setting(pool, KEY_LAST_ATTEMPT_AT).await?
+        .and_then(|v| chrono::NaiveDateTime::parse_from_str(&v, "%Y-%m-%d %H:%M:%S").ok());
+    Ok(match last {
+        Some(last) if last.date() == now.date() => now >= last + retry_spacing(brief.compose_attempts),
+        _ => true,
+    })
+}
+
 /// Due until an AI composition landed (`composed_at` set and not the
 /// rule-based `fallback`; an AI success on a `partial` snapshot keeps
 /// `partial`) or today's attempts ran out. The phase-1 shell is written with
@@ -166,6 +195,9 @@ pub async fn compose<L: LlmClient>(pool: &SqlitePool, llm: Option<&L>, run: Comp
     if !run.force && llm.is_none() && brief.composed_at.is_some() {
         return Ok(ComposeOutcome::NotDue);
     }
+    if !run.force && llm.is_some() && !retry_spaced_out(pool, &brief, run.now).await? {
+        return Ok(ComposeOutcome::NotDue);
+    }
     let settings = load_settings(pool).await?;
     let kept: HashSet<String> = crate::db::brief_items::acted_task_ids(pool, run.date).await?;
     let set = candidates::load_candidates(pool, run.date, &settings.labels).await?;
@@ -173,7 +205,13 @@ pub async fn compose<L: LlmClient>(pool: &SqlitePool, llm: Option<&L>, run: Comp
     // An automatic attempt is counted before the call, so a crash or a failed
     // write can't retry forever. Regenerate is the user's and never counts;
     // neither does a run with no client (no call is made).
-    let attempts = if run.force || llm.is_none() { brief.compose_attempts } else { briefs::begin_attempt(pool, run.date).await? };
+    let attempts = if run.force || llm.is_none() {
+        brief.compose_attempts
+    } else {
+        let n = briefs::begin_attempt(pool, run.date).await?;
+        crate::db::settings::set_setting(pool, KEY_LAST_ATTEMPT_AT, &run.now.format("%Y-%m-%d %H:%M:%S").to_string()).await?;
+        n
+    };
     let partial = match &run.regathered {
         Some((_, _, partial)) => *partial,
         None => brief.status == "partial",
@@ -400,7 +438,7 @@ mod tests {
         assert!(compose_due(&b));
         let a = alias(&d.pool, &d.due).await;
         let ok = FakeLlm::json(json!({"summary": "Calm.", "priorities": [{"task_id": a, "reason": "r"}], "quick_help": [], "quick_self": [], "wins": []}));
-        compose(&d.pool, Some(&ok), ComposeRun { date: D, now: at(6, 35), force: false, regathered: None }).await.unwrap();
+        compose(&d.pool, Some(&ok), ComposeRun { date: D, now: at(6, 45), force: false, regathered: None }).await.unwrap();
         let b = brief(&d.pool).await;
         assert_eq!((b.status.as_str(), b.error_code, b.compose_attempts, b.version), ("ready", None, 2, 1));
         assert_eq!(kinds(&d.pool).await, [("priority".to_string(), d.due.clone(), "ai".to_string())]);
@@ -412,12 +450,12 @@ mod tests {
         compose(&d.pool, Some(&FakeLlm::failing(LlmError::Server(503))), run(false)).await.unwrap();
         let rows = crate::db::brief_items::list_items(&d.pool, D).await.unwrap();
         let logged: i64 = sqlx::query_scalar("SELECT count(*) FROM sync_log WHERE table_name='brief_items'").fetch_one(&d.pool).await.unwrap();
-        compose(&d.pool, Some(&FakeLlm::failing(LlmError::RateLimited)), run(false)).await.unwrap();
+        compose(&d.pool, Some(&FakeLlm::failing(LlmError::RateLimited)), ComposeRun { date: D, now: at(6, 45), force: false, regathered: None }).await.unwrap();
         assert_eq!(crate::db::brief_items::list_items(&d.pool, D).await.unwrap(), rows);
         let after: i64 = sqlx::query_scalar("SELECT count(*) FROM sync_log WHERE table_name='brief_items'").fetch_one(&d.pool).await.unwrap();
         assert_eq!(after, logged, "a failed retry writes no item rows");
         assert_eq!(brief(&d.pool).await.error_code.as_deref(), Some("rate_limited"));
-        compose(&d.pool, Some(&FakeLlm::failing(LlmError::Server(500))), run(false)).await.unwrap();
+        compose(&d.pool, Some(&FakeLlm::failing(LlmError::Server(500))), ComposeRun { date: D, now: at(7, 30), force: false, regathered: None }).await.unwrap();
         let b = brief(&d.pool).await;
         assert_eq!(b.compose_attempts, 3);
         assert!(!compose_due(&b));
@@ -523,6 +561,31 @@ mod tests {
         ], "the hidden second priority is neither written nor used up");
     }
 
+    #[tokio::test]
+    async fn retries_are_spaced_from_the_last_attempt() {
+        let d = day().await;
+        let offline = || FakeLlm::failing(LlmError::Offline("dns".into()));
+        let at_run = |h, m| ComposeRun { date: D, now: at(h, m), force: false, regathered: None };
+        compose(&d.pool, Some(&offline()), at_run(6, 30)).await.unwrap();
+        // Retry 2 waits 15 minutes after attempt 1.
+        let early = offline();
+        assert_eq!(compose(&d.pool, Some(&early), at_run(6, 40)).await.unwrap(), ComposeOutcome::NotDue);
+        assert_eq!((early.calls(), brief(&d.pool).await.compose_attempts), (0, 1));
+        compose(&d.pool, Some(&offline()), at_run(6, 45)).await.unwrap();
+        assert_eq!(brief(&d.pool).await.compose_attempts, 2);
+        // Retry 3 waits 45 minutes after attempt 2.
+        let early = offline();
+        assert_eq!(compose(&d.pool, Some(&early), at_run(7, 25)).await.unwrap(), ComposeOutcome::NotDue);
+        assert_eq!(early.calls(), 0);
+        // Regenerate is the user's: never spaced, never counted.
+        let manual = offline();
+        regenerate(&d.pool, Some(&manual), D, at(7, 26)).await.unwrap();
+        assert_eq!((manual.calls(), brief(&d.pool).await.compose_attempts), (1, 2));
+        let third = offline();
+        compose(&d.pool, Some(&third), at_run(7, 30)).await.unwrap();
+        assert_eq!((third.calls(), brief(&d.pool).await.compose_attempts), (1, 3));
+    }
+
     /// A call that never answers: the run is abandoned mid-flight (app quit,
     /// crash, a write that never happens).
     struct Hanging;
@@ -535,8 +598,9 @@ mod tests {
     #[tokio::test]
     async fn an_abandoned_call_still_uses_an_attempt_and_three_is_the_cap() {
         let d = day().await;
-        for n in 1..=3 {
-            let abandoned = tokio::time::timeout(std::time::Duration::from_millis(50), compose(&d.pool, Some(&Hanging), run(false))).await;
+        for (n, now) in [(1, at(6, 30)), (2, at(6, 45)), (3, at(7, 30))] {
+            let run = ComposeRun { date: D, now, force: false, regathered: None };
+            let abandoned = tokio::time::timeout(std::time::Duration::from_millis(50), compose(&d.pool, Some(&Hanging), run)).await;
             assert!(abandoned.is_err(), "the call was still in flight");
             assert_eq!(brief(&d.pool).await.compose_attempts, n, "counted before the call");
         }
