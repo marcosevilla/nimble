@@ -26,6 +26,7 @@ export type ShortcutSection =
   | 'Session'
   | 'Today'
   | 'Capture'
+  | 'Labels'
 
 export interface Shortcut {
   section: ShortcutSection
@@ -163,6 +164,9 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Today', keys: '⌥↑ / ⌥↓', label: 'Move a box up / down (Settings → Boxes, setup)' },
   { section: 'Today', keys: 'Enter (setup)', label: 'Continue to the next setup step' },
   { section: 'Today', keys: 'Escape (setup)', label: 'Finish setup later (keeps what you chose so far)' },
+  // ── C4: label picker (components/tasks/LabelPicker.tsx) ──
+  { section: 'Labels', keys: '↑ / ↓', label: 'Move through labels in the picker, across groups' },
+  { section: 'Labels', keys: 'Space / Enter', label: 'Toggle the focused label ("Pick one" groups swap)' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [
@@ -179,6 +183,7 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
   'Session',
   'Today',
   'Capture',
+  'Labels',
 ]
 
 export function shortcutsBySection(): { title: ShortcutSection; rows: Shortcut[] }[] {

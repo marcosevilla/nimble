@@ -4,86 +4,10 @@ import { useDetailStore } from '@/stores/detailStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { TaskItem } from './TaskItem'
 import { TaskRowActions } from '@/components/focus/FocusTaskEntry'
-import { getDataProvider } from '@/services/provider-context'
 import { labelColor } from '@/lib/labelColors'
-import type { LocalTask, Label } from '@nimble/types'
-
-// ── Labels cache ──
-//
-// Same label list `LabelPicker.tsx` fetches via `dp.labels.list()`, shared at
-// module scope so every visible row doesn't independently re-fetch the full
-// label table. Invalidated by the same 'tasks-changed' event
-// `emitTasksChanged` (hooks/useLocalTasks.ts) dispatches on any task
-// mutation — labels can be created inline mid-session via LabelPicker.
-//
-// The invalidation listener is registered exactly ONCE at module scope (not
-// once per mounted row) and rows subscribe to the shared cache instead of
-// each re-fetching independently — otherwise N visible rows would each add
-// their own listener and fire N near-simultaneous label list calls on
-// every unrelated mutation (e.g. a single drag reorder).
-const TASKS_CHANGED_EVENT = 'tasks-changed'
-
-let labelsCache: Label[] | null = null
-let labelsPromise: Promise<Label[]> | null = null
-const labelsSubscribers = new Set<(labels: Label[]) => void>()
-
-function notifyLabelsSubscribers(labels: Label[]) {
-  labelsSubscribers.forEach((fn) => fn(labels))
-}
-
-function fetchLabels(force = false): Promise<Label[]> {
-  if (force) {
-    labelsCache = null
-    labelsPromise = null
-  }
-  if (labelsCache) return Promise.resolve(labelsCache)
-  if (!labelsPromise) {
-    // Module-scope cache — resolve the provider lazily at call time, never at
-    // module eval (the provider isn't set until app startup).
-    labelsPromise = getDataProvider()
-      .labels.list()
-      .then((ls) => {
-        labelsCache = ls
-        notifyLabelsSubscribers(ls)
-        return ls
-      })
-      .catch((e) => {
-        labelsPromise = null
-        throw e
-      })
-  }
-  return labelsPromise
-}
-
-if (typeof window !== 'undefined') {
-  window.addEventListener(TASKS_CHANGED_EVENT, () => {
-    fetchLabels(true).catch(() => {})
-  })
-}
-
-function useLabelsMap(): Map<string, Label> {
-  const [labels, setLabels] = useState<Label[]>(labelsCache ?? [])
-
-  useEffect(() => {
-    let cancelled = false
-    labelsSubscribers.add(setLabels)
-    if (labelsCache) {
-      setLabels(labelsCache)
-    } else {
-      fetchLabels()
-        .then((ls) => {
-          if (!cancelled) setLabels(ls)
-        })
-        .catch(() => {})
-    }
-    return () => {
-      cancelled = true
-      labelsSubscribers.delete(setLabels)
-    }
-  }, [])
-
-  return useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels])
-}
+import type { LocalTask } from '@nimble/types'
+import { useLabelTaxonomy } from '@/hooks/useLabelTaxonomy'
+import { orderTaskLabels } from '@/lib/labelTaxonomy'
 
 interface LocalTaskRowProps {
   task: LocalTask
@@ -143,14 +67,10 @@ export function LocalTaskRow({
     setAddingSubtaskTo(null)
   }, [subInput, task.id, onAddSubtask, setAddingSubtaskTo])
 
-  const labelsMap = useLabelsMap()
+  const { labels, groups } = useLabelTaxonomy()
   const taskLabels = useMemo(
-    () =>
-      task.labels
-        .map((id) => labelsMap.get(id))
-        .filter((l): l is Label => !!l)
-        .map((l) => ({ name: l.name, color: labelColor(l.color) })),
-    [task.labels, labelsMap],
+    () => orderTaskLabels(task.labels, labels, groups).map((l) => ({ name: l.name, color: labelColor(l.color) })),
+    [task.labels, labels, groups],
   )
 
   return (

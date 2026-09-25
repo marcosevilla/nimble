@@ -7,7 +7,10 @@ import { dueBadgeLabel } from '@/lib/dueLabel'
 import { useDataProvider } from '@/services/provider-context'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import type { DataProvider } from '@/services/data-provider'
-import type { Document, Project, Section } from '@nimble/types'
+import type { Document, Label, Project, Section } from '@nimble/types'
+import { useLabelTaxonomy } from '@/hooks/useLabelTaxonomy'
+import { orderTaskLabels, systemTaskLabels } from '@/lib/labelTaxonomy'
+import { Meta } from '@/components/shared/typography'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { LabelPicker } from '@/components/tasks/LabelPicker'
 import { DueDatePopover, type DueValue } from '@/components/tasks/DueDatePopover'
@@ -38,7 +41,7 @@ interface MetadataChipsProps {
   context: 'composer' | 'details'
   projects?: Project[]
   sections?: Section[]
-  labels: { id: string; name: string; color: string }[]
+  labels: Label[]
   /** Details only: the task whose reminder the Reminder chip edits (it saves
    * straight through dp.tasks.update, not through `onChange`). */
   reminderTask?: ReminderTask
@@ -306,14 +309,14 @@ function LabelsChips({
   onChange,
 }: {
   labelIds: string[]
-  labels: { id: string; name: string; color: string }[]
+  labels: Label[]
   onChange: (ids: string[]) => void
 }) {
   const [open, setOpen] = useState(false)
-  const selected = useMemo(
-    () => labelIds.map((id) => labels.find((l) => l.id === id)).filter((l): l is (typeof labels)[number] => !!l),
-    [labelIds, labels],
-  )
+  const { groups } = useLabelTaxonomy()
+  const selected = useMemo(() => orderTaskLabels(labelIds, labels, groups), [labelIds, labels, groups])
+  // System labels (integrations) are read-only here: muted text, not chips.
+  const system = useMemo(() => systemTaskLabels(labelIds, labels, groups), [labelIds, labels, groups])
 
   /* nativeButton={false} + a <div> host avoids nesting <button> inside
      the default <button> trigger (see the Due chip's comment). The host
@@ -336,38 +339,45 @@ function LabelsChips({
      Enter/Space-synthesized click, so it doesn't need to be
      independently tabbable. */
   return (
-    <LabelsPopover
-      value={labelIds}
-      onChange={onChange}
-      open={open}
-      onOpenChange={setOpen}
-      triggerProps={{
-        className: 'inline-flex items-center gap-1.5',
-        nativeButton: false,
-        render: <div className="inline-flex items-center gap-1.5" tabIndex={-1} />,
-      }}
-    >
-      {/* Real <button>s, not <div>s — see the Due chip's comment above:
-          display:contents trigger wrappers drop non-button children from
-          the tab order entirely. */}
-      {selected.length === 0 ? (
-        <button type="button" tabIndex={0} className={CHIP_EMPTY}>
-          Labels
-        </button>
-      ) : (
-        selected.map((label) => (
-          <FilledChip
-            key={label.id}
-            clear={<ClearButton onClear={() => onChange(labelIds.filter((id) => id !== label.id))} label={`Remove ${label.name}`} />}
-          >
-            <button type="button" tabIndex={0} className={CHIP_FILLED}>
-              <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: labelColor(label.color) }} />
-              {label.name}
-            </button>
-          </FilledChip>
-        ))
+    <>
+      <LabelsPopover
+        value={labelIds}
+        onChange={onChange}
+        open={open}
+        onOpenChange={setOpen}
+        triggerProps={{
+          className: 'inline-flex items-center gap-1.5',
+          nativeButton: false,
+          render: <div className="inline-flex items-center gap-1.5" tabIndex={-1} />,
+        }}
+      >
+        {/* Real <button>s, not <div>s — see the Due chip's comment above:
+            display:contents trigger wrappers drop non-button children from
+            the tab order entirely. */}
+        {selected.length === 0 ? (
+          <button type="button" tabIndex={0} className={CHIP_EMPTY}>
+            Labels
+          </button>
+        ) : (
+          selected.map((label) => (
+            <FilledChip
+              key={label.id}
+              clear={<ClearButton onClear={() => onChange(labelIds.filter((id) => id !== label.id))} label={`Remove ${label.name}`} />}
+            >
+              <button type="button" tabIndex={0} className={CHIP_FILLED}>
+                <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: labelColor(label.color) }} />
+                {label.name}
+              </button>
+            </FilledChip>
+          ))
+        )}
+      </LabelsPopover>
+      {system.length > 0 && (
+        <Meta className="inline-flex items-center" title="Added by an integration">
+          {system.map((l) => l.name).join(' · ')}
+        </Meta>
       )}
-    </LabelsPopover>
+    </>
   )
 }
 

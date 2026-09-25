@@ -90,7 +90,7 @@ const SURFACES: Record<Surface['key'], Surface> = {
     row: 'task-04',
     title: 'Fix capture strip focus bug on second monitor',
     marks: { priority: 'high', due: 'today', label: 'bug', project: 'nimble' },
-    rightTexts: { bug: 196.25, 'deep-work': 101.3, Nimble: 44.22, Today: 4 }, // cluster inset by the focus ring's footprint, T2 it2
+    rightTexts: { 'deep-work': 157.2, bug: 101.3, Nimble: 44.22, Today: 4 }, // cluster inset by the focus ring's footprint, T2 it2; C4: chips in taxonomy order (label position), so deep-work now leads bug
     newPriority: 'Medium',
   },
   // Inbox rows don't show a project; task-14 is seeded with marks (see seedInbox).

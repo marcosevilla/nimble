@@ -185,7 +185,9 @@ export function LabelMarks({
   const update = useTaskMarkUpdate(task)
 
   const chips: { key: string; name: string; color?: string; ariaLabel: string }[] = visible.map((l, i) => ({
-    key: `${l.name}-${i}`,
+    // By slot, not name: a "Pick one" swap replaces the anchor chip's label
+    // (EFFORT sorts first) and a name key would remount — and close — its open picker.
+    key: `label-${i}`,
     name: l.name,
     color: l.color,
     ariaLabel: rowMarkName({ kind: 'label', name: l.name }),

@@ -18,6 +18,9 @@ import { STATUSES } from '@/components/tasks/StatusDropdown'
 import { labelColor } from '@/lib/labelColors'
 import { ALL_GROUP_BY, EMPTY_FILTER, type GroupBy, type TaskFilter } from '@/lib/task-view'
 import { cycleLabelInFilter } from '@/lib/labelFilter'
+import type { Label } from '@nimble/types'
+import { useLabelTaxonomy } from '@/hooks/useLabelTaxonomy'
+import { filterSections, isFlat } from '@/lib/labelTaxonomy'
 
 const GROUP_BY_LABELS: Record<GroupBy, string> = {
   section: 'Section',
@@ -45,7 +48,7 @@ interface TaskListHeaderProps {
   onGroupBy: (g: GroupBy) => void
   filter: TaskFilter
   onFilter: (f: TaskFilter) => void
-  labels: { id: string; name: string; color: string }[]
+  labels: Label[]
   /** Restricts which options the sort menu offers — defaults to all 5.
    * All Tasks passes a narrower list since `section`/`manual` don't have a
    * coherent cross-project meaning (see task-view.ts). The caller is
@@ -69,6 +72,10 @@ export function TaskListHeader({
   const activeCount = filter.statuses.length + filter.priorities.length + activeLabelCount
   const groupByLabel = GROUP_BY_LABELS[groupBy] ?? groupBy
   const nimbleLabel = labels.find((l) => l.name === 'nimble')
+  const { groups } = useLabelTaxonomy()
+  // Callers pass the labels used in this list; archived ones drop out here.
+  const labelSections = filterSections(labels, groups)
+  const flatLabels = isFlat(labelSections)
 
   const toggleStatus = (s: (typeof STATUSES)[number]['value']) => {
     onFilter({
@@ -169,7 +176,7 @@ export function TaskListHeader({
                 ))}
               </DropdownMenuGroup>
 
-              {labels.length > 0 && (
+              {labelSections.length > 0 && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
@@ -180,51 +187,51 @@ export function TaskListHeader({
                       )}
                     </DropdownMenuLabel>
 
-                    {/* Shortcuts against Task 1's auto-applied `nimble`
-                        label — replace the whole label predicate rather
-                        than merge with any per-label toggles below. */}
+                    {/* Shortcuts against the auto-applied `nimble` label —
+                        replace the whole label predicate rather than merge
+                        with the per-label toggles below. */}
                     {nimbleLabel && (
                       <>
                         <DropdownMenuItem
-                          onClick={() =>
-                            onFilter({ ...filter, labelFilter: { include: [nimbleLabel.id], exclude: [] } })
-                          }
+                          onClick={() => onFilter({ ...filter, labelFilter: { include: [nimbleLabel.id], exclude: [] } })}
                         >
                           Made in Nimble
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() =>
-                            onFilter({ ...filter, labelFilter: { include: [], exclude: [nimbleLabel.id] } })
-                          }
+                          onClick={() => onFilter({ ...filter, labelFilter: { include: [], exclude: [nimbleLabel.id] } })}
                         >
                           From Todoist
                         </DropdownMenuItem>
-                        <DropdownMenuSeparator />
                       </>
                     )}
-
-                    {labels.map((l) => {
-                      const included = filter.labelFilter.include.includes(l.id)
-                      const excluded = filter.labelFilter.exclude.includes(l.id)
-                      return (
-                        <DropdownMenuItem
-                          key={l.id}
-                          closeOnClick={false}
-                          onClick={() => cycleLabel(l.id)}
-                          className={cn(excluded && 'opacity-50')}
-                        >
-                          <span
-                            className="size-2 shrink-0 rounded-full"
-                            style={{ background: labelColor(l.color) }}
-                          />
-                          <span className="flex-1 min-w-0 truncate">{l.name}</span>
-                          {(included || excluded) && (
-                            <DropdownMenuShortcut>{included ? 'Only' : 'Hide'}</DropdownMenuShortcut>
-                          )}
-                        </DropdownMenuItem>
-                      )
-                    })}
                   </DropdownMenuGroup>
+
+                  {/* One group per taxonomy section; system groups come last. */}
+                  {labelSections.map((section) => (
+                    <DropdownMenuGroup key={section.group?.id ?? 'ungrouped'}>
+                      {!flatLabels && (
+                        <DropdownMenuLabel className="text-label">{section.group?.name ?? 'Ungrouped'}</DropdownMenuLabel>
+                      )}
+                      {section.labels.map((l) => {
+                        const included = filter.labelFilter.include.includes(l.id)
+                        const excluded = filter.labelFilter.exclude.includes(l.id)
+                        return (
+                          <DropdownMenuItem
+                            key={l.id}
+                            closeOnClick={false}
+                            onClick={() => cycleLabel(l.id)}
+                            className={cn(excluded && 'opacity-50')}
+                          >
+                            <span className="size-2 shrink-0 rounded-full" style={{ background: labelColor(l.color) }} />
+                            <span className="flex-1 min-w-0 truncate">{l.name}</span>
+                            {(included || excluded) && (
+                              <DropdownMenuShortcut>{included ? 'Only' : 'Hide'}</DropdownMenuShortcut>
+                            )}
+                          </DropdownMenuItem>
+                        )
+                      })}
+                    </DropdownMenuGroup>
+                  ))}
                 </>
               )}
 
