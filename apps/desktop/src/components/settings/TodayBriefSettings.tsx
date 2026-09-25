@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { BriefEffort, BriefModel } from '@nimble/types'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { Label as SectionLabel, Meta } from '@/components/shared/typography'
+import { Meta } from '@/components/shared/typography'
 import { useBriefSettingsStore } from '@/stores/briefSettingsStore'
 import { openSettings } from '@/stores/settingsNavStore'
-import { SECTION_CLASS, SectionHeader, SectionSkeleton, SettingFieldRow, type SettingField } from './SettingsFields'
+import type { SettingsFailure } from '@/lib/settingsMessage'
+import { FieldLabel, SECTION_CLASS, SectionHeader, SectionSkeleton, SettingFieldRow, type SettingField } from './SettingsFields'
 
 const TIME_FIELD: SettingField = {
   key: 'brief.time',
@@ -37,12 +37,14 @@ export function TodayBriefSettings() {
   const [timeDraft, setTimeDraft] = useState<string | null>(null)
   const [timeSaving, setTimeSaving] = useState(false)
   const [timeSaved, setTimeSaved] = useState(false)
+  const [timeError, setTimeError] = useState<SettingsFailure | null>(null)
 
   const saveTime = async () => {
     if (timeDraft === null) return
     setTimeSaving(true)
-    const ok = await save({ time: timeDraft })
+    const ok = await save({ time: timeDraft }, { silent: true })
     setTimeSaving(false)
+    setTimeError(ok ? null : useBriefSettingsStore.getState().lastFailure)
     if (ok) {
       setTimeDraft(null)
       setTimeSaved(true)
@@ -59,12 +61,12 @@ export function TodayBriefSettings() {
         <div className="space-y-4">
           <SettingFieldRow
             field={TIME_FIELD}
-            state={{ value: timeDraft ?? settings.time, saving: timeSaving, saved: timeSaved, error: null }}
-            onChange={(v) => { setTimeDraft(v); setTimeSaved(false) }}
+            state={{ value: timeDraft ?? settings.time, saving: timeSaving, saved: timeSaved, error: timeError }}
+            onChange={(v) => { setTimeDraft(v); setTimeSaved(false); setTimeError(null) }}
             onSave={() => void saveTime()}
           />
           <div className="space-y-1.5">
-            <Label htmlFor="brief-model" className="text-body-strong">AI model</Label>
+            <FieldLabel htmlFor="brief-model">AI model</FieldLabel>
             <Select value={settings.model} onValueChange={(v) => { if (v) void save({ model: v as BriefModel }) }}>
               <SelectTrigger id="brief-model" className="w-64">
                 <SelectValue>{MODELS.find((m) => m.value === settings.model)?.label}</SelectValue>
@@ -75,7 +77,7 @@ export function TodayBriefSettings() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <SectionLabel as="div" id="brief-effort-label">Effort</SectionLabel>
+            <FieldLabel id="brief-effort-label">Effort</FieldLabel>
             <ToggleGroup
               aria-labelledby="brief-effort-label"
               value={[settings.effort]}

@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import type { BriefSettings, BriefSettingsPatch } from '@nimble/types'
 import { getDataProvider } from '@/services/provider-context'
 import { applySettingsPatch } from '@/lib/briefLayout'
-import { settingsFailure } from '@/lib/settingsMessage'
+import { settingsFailure, type SettingsFailure } from '@/lib/settingsMessage'
 
 /* One copy of the brief settings for Today, the setup and the three
    Settings sections, so a change in one shows everywhere at once.
@@ -18,8 +18,12 @@ type Status = 'idle' | 'loading' | 'ready' | 'unsupported' | 'error'
 interface BriefSettingsState {
   settings: BriefSettings | null
   status: Status
+  /** Why the last failed save failed (cleared by the next success), for a
+   *  row that shows it inline with FailureNote. */
+  lastFailure: SettingsFailure | null
   load: (force?: boolean) => Promise<void>
-  save: (patch: BriefSettingsPatch) => Promise<boolean>
+  /** `silent`: skip the toast; the caller shows `lastFailure` inline. */
+  save: (patch: BriefSettingsPatch, opts?: { silent?: boolean }) => Promise<boolean>
 }
 
 let queue: Promise<unknown> = Promise.resolve()
@@ -28,6 +32,7 @@ let outstanding = 0
 export const useBriefSettingsStore = create<BriefSettingsState>((set, get) => ({
   settings: null,
   status: 'idle',
+  lastFailure: null,
   load: async (force = false) => {
     const dp = getDataProvider()
     if (!dp.briefSettings.supported) {
@@ -43,7 +48,7 @@ export const useBriefSettingsStore = create<BriefSettingsState>((set, get) => ({
       set({ status: get().settings ? 'ready' : 'error' })
     }
   },
-  save: (patch) => {
+  save: (patch, opts) => {
     const current = get().settings
     if (current) set({ settings: applySettingsPatch(current, patch) })
     outstanding += 1
@@ -51,10 +56,12 @@ export const useBriefSettingsStore = create<BriefSettingsState>((set, get) => ({
       try {
         const next = await getDataProvider().briefSettings.save(patch)
         if (outstanding === 1) set({ settings: next, status: 'ready' })
+        set({ lastFailure: null })
         return true
       } catch (e) {
         const failure = settingsFailure(e)
-        toast.error(failure.message, failure.detail ? { description: failure.detail } : undefined)
+        set({ lastFailure: failure })
+        if (!opts?.silent) toast.error(failure.message, failure.detail ? { description: failure.detail } : undefined)
         if (outstanding === 1) await get().load(true)
         return false
       } finally {

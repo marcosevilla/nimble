@@ -1,6 +1,6 @@
 import { CloudRain, CloudSun, MapPin, Sun } from 'lucide-react'
 import type { CalendarEvent, WeatherView } from '@nimble/types'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Label, Meta } from '@/components/shared/typography'
 import { openSettings } from '@/stores/settingsNavStore'
@@ -73,14 +73,16 @@ export function WeatherChip({
       </PopoverTrigger>
       <PopoverContent align="end" className="surface-popover w-72 gap-3 rounded-xl p-3 shadow-popover ring-0">
         <div className="flex min-w-0 items-baseline justify-between gap-2">
-          <span className="min-w-0 truncate text-body-strong">{view.location?.name}</span>
+          <PopoverTitle className="min-w-0 truncate text-body-strong">{view.location?.name ?? 'Weather'}</PopoverTitle>
           {now != null && <Meta className="shrink-0 tabular-nums">Now {now}°</Meta>}
         </div>
         {points.length > 0 && (
           <ol aria-label="Next hours" className="grid grid-cols-4 gap-1">
-            {points.map((h, i) => (
+            {points.map((h) => (
               <li key={h.time} className="flex flex-col items-center gap-0.5 rounded-md bg-muted/40 py-1.5">
-                <Label>{i === 0 && live ? 'Now' : hourLabel(hourOf(h.time))}</Label>
+                {/* The header carries "Now" (the current temperature); every
+                    point, the first included, shows its hour. */}
+                <Label>{hourLabel(hourOf(h.time))}</Label>
                 <span className="text-body tabular-nums">{toUnit(h.temp_c, unit)}°</span>
                 {h.precip != null && h.precip >= RAIN_SHOWN && <Meta className="tabular-nums">{h.precip}%</Meta>}
               </li>

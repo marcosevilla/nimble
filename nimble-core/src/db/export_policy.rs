@@ -54,7 +54,8 @@ pub(crate) const TABLES: &[TablePolicy] = &[
 /// to portable data; device-local calendar and delivery state is excluded.
 /// V22 adds `projects.archived_at` (reviewed, included).
 /// V23 adds the reviewed, included `briefs` table (per-day brief snapshots).
-/// V25 adds the device-local `module_cache` (reviewed, excluded: a cache, never portable data). (schema-v25)
+/// V25 adds the device-local `module_cache` (reviewed, excluded: a cache, never portable data)
+/// and the synced `brief_notes` table (reviewed, included: the day's scratchpad). (schema-v25)
 pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
     if version == 19 { return Some(TABLES.to_vec()); }
     if version != 20 && version != 21 && version != 22 && version != 23 && version != 25 { return None; } // schema-v25
@@ -107,6 +108,7 @@ pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
     }
     if version >= 25 { // schema-v25
         tables.push(table!("module_cache"; ["module_id","cache_key","payload_json","fetched_at"]; []; ["module_id","cache_key"]));
+        tables.push(table!("brief_notes"; ["date","notes","updated_at"]; ["date","notes","updated_at"]; ["date"]));
     }
     tables.sort_by_key(|policy| policy.name);
     Some(tables)

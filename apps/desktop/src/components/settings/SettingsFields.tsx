@@ -1,12 +1,13 @@
 // Settings building blocks shared by every section (moved out of
 // SettingsPage so section components in components/settings/ reuse them).
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Meta, SectionTitle } from '@/components/shared/typography'
 import type { SettingsFailure } from '@/lib/settingsMessage'
+import { cn } from '@/lib/utils'
 
 export const SECTION_CLASS = 'space-y-4 scroll-mt-[calc(var(--page-header-h)+1.5rem)]'
 
@@ -59,11 +60,9 @@ export function SettingFieldRow({
 
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={field.key} className="text-body-strong">
-        {field.label}
-      </Label>
+      <FieldLabel htmlFor={field.key}>{field.label}</FieldLabel>
       <div className="flex items-center gap-2">
-        <div className="relative flex-1">
+        <div className={cn('relative', field.type === 'time' ? 'w-32 flex-none' : 'flex-1')}>
           <Input
             id={field.key}
             type={isPassword && !visible ? 'password' : field.type === 'time' ? 'time' : 'text'}
@@ -95,6 +94,13 @@ export function SettingFieldRow({
       <FailureNote failure={state.error} />
     </div>
   )
+}
+
+/** Every settings field's label, one size (text-body-strong). Pass `htmlFor`
+ *  for an input, or an `id` for a group that points at it with
+ *  aria-labelledby (toggle groups, switches). */
+export function FieldLabel({ className, ...props }: ComponentProps<typeof Label>) {
+  return <Label className={cn('text-body-strong', className)} {...props} />
 }
 
 export function SectionHeader({

@@ -887,6 +887,14 @@
     },
   }
 
+  // brief_notes (v25): notes are their own row, joined onto a brief when read.
+  var BRIEF_NOTES = {}
+  function withNotes(b) {
+    if (!b) return null
+    var n = BRIEF_NOTES[b.date]
+    return n === undefined ? b : Object.assign({}, b, { notes: n })
+  }
+
   function briefTaskRef(t) {
     return { id: t.id, content: t.content, due_date: t.due_date, priority: t.priority, project_id: t.project_id }
   }
@@ -1331,14 +1339,14 @@
     generate_priorities: function () { return DAILY_STATE.priorities },
 
     // Morning brief (phase 1)
-    brief_get: function (args) { return BRIEFS[args && args.date] || null },
+    brief_get: function (args) { return withNotes(BRIEFS[args && args.date]) },
     brief_list_dates: function () {
       return Object.keys(BRIEFS).sort().reverse()
     },
     brief_ensure_snapshot: function (args) {
       var date = args && args.date
-      if (date !== TODAY) return BRIEFS[date] || null
-      if (BRIEFS[date]) return BRIEFS[date]
+      if (date !== TODAY) return withNotes(BRIEFS[date])
+      if (BRIEFS[date]) return withNotes(BRIEFS[date])
 
       var topLevelOpen = TASKS.filter(function (t) { return !t.parent_id && !t.completed })
       var dueToday = topLevelOpen.filter(function (t) { return t.due_date === TODAY }).map(briefTaskRef)
@@ -1380,7 +1388,7 @@
         updated_at: iso(TODAY, '07:00:00').replace('T', ' '),
       }
       BRIEFS[date] = brief
-      return brief
+      return withNotes(brief)
     },
     brief_settings_get: function () { return briefSettingsView() },
     brief_settings_save: function (args) {
@@ -1396,8 +1404,9 @@
       return briefSettingsView()
     },
     brief_set_notes: function (args) {
-      var b = BRIEFS[args && args.date]
-      if (b) b.notes = args.notes && args.notes.trim() ? args.notes : null
+      // Like db::briefs::set_notes: its own row (brief_notes), today only.
+      if (!args || args.date !== TODAY) throw new Error('notes_read_only')
+      BRIEF_NOTES[args.date] = args.notes && args.notes.trim() ? args.notes : null
       return null
     },
     weather_get: function () {

@@ -36,7 +36,8 @@ export function WeatherModule({ mode, date, config, payload, brief }: BriefBoxPr
 /** Compact strip: the same chip, first segment (UX checkpoint 1). */
 export function WeatherStrip({ config }: BriefStripProps) {
   const live = useBriefLive()
-  if (!live) return null
+  // No chip (off on the web, nothing loading): no segment, so no stray "·".
+  if (!live || (!live.weather.view && !live.weather.loading)) return null
   return (
     <span className={cn('flex shrink-0 items-center', STRIP_DOT)}>
       <WeatherModule mode="live" date={live.today} config={config} />

@@ -363,6 +363,16 @@ const REMOTE_BRIEFS_DDL: &str = "CREATE TABLE IF NOT EXISTS briefs (
     updated_at TEXT NOT NULL
 )";
 
+/// Remote DDL for the v25 `brief_notes` table (schema-v25). Notes are their
+/// own row so row-level LWW never makes a notes edit and a snapshot write
+/// (priorities, weather) on another Mac shadow each other. Shared by the
+/// fresh-init path and the `ensure_remote_v25_schema` gate.
+const REMOTE_BRIEF_NOTES_DDL: &str = "CREATE TABLE IF NOT EXISTS brief_notes (
+    date TEXT PRIMARY KEY,
+    notes TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+)";
+
 /// Create all synced tables on the remote Turso database.
 /// Only runs once — checks for `turso_initialized` setting.
 pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
@@ -397,6 +407,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
                 ensure_remote_v21_schema(pool, turso_url, turso_token).await?;
                 ensure_remote_v22_schema(pool, turso_url, turso_token).await?;
                 ensure_remote_v23_schema(pool, turso_url, turso_token).await?;
+                ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
                 return Ok(());
             },
         }
@@ -521,6 +532,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             focus_paused_at TEXT
         )",
         REMOTE_BRIEFS_DDL,
+        REMOTE_BRIEF_NOTES_DDL, // schema-v25
         // activity_log
         "CREATE TABLE IF NOT EXISTS activity_log (
             id TEXT PRIMARY KEY,
@@ -628,6 +640,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     .await?;
     ensure_remote_v21_schema(pool, turso_url, turso_token).await?;
     ensure_remote_v23_schema(pool, turso_url, turso_token).await?;
+    ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
 
     Ok(())
 }
@@ -861,6 +874,22 @@ async fn ensure_remote_v23_schema(pool: &SqlitePool, turso_url: &str, turso_toke
     Ok(())
 }
 
+// schema-v25 — renumber with the migration if C4 hasn't merged first.
+async fn ensure_remote_v25_schema(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='turso_schema_v25_upgraded'")
+        .fetch_optional(pool).await?;
+    if done.is_some() { return Ok(()); }
+    let requests = [
+        turso_execute(REMOTE_BRIEF_NOTES_DDL, vec![]),
+        serde_json::json!({"type":"close"}),
+    ];
+    let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
+    check_pipeline_statement_errors(&body, "Turso v25 schema upgrade", true)?;
+    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v25_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
+        .execute(pool).await?;
+    Ok(())
+}
+
 // ── Push ──
 
 /// Conflict target (primary-key columns) per synced table, for building the
@@ -868,7 +897,7 @@ async fn ensure_remote_v23_schema(pool: &SqlitePool, turso_url: &str, turso_toke
 fn conflict_target(table_name: &str) -> &'static str {
     match table_name {
         "task_labels" => "task_id, label_id",
-        "daily_state" | "briefs" => "date",
+        "daily_state" | "briefs" | "brief_notes" => "date",
         _ => "id",
     }
 }
@@ -905,29 +934,6 @@ fn build_snapshot_upsert_sql(table_name: &str, columns: &[&str]) -> String {
         target,
         action
     )
-}
-
-/// Briefs sync a notes edit as a partial row (`db::briefs::set_notes`:
-/// date, notes, updated_at) so it can't be undone by, or undo, a whole-row
-/// payload from another device. An upsert can't carry a partial row: SQLite
-/// checks NOT NULL on the insert row before ON CONFLICT applies. So a briefs
-/// payload holding only these columns applies as a plain UPDATE (0 rows when
-/// the day isn't on this side yet). Returns the SQL and the bind order.
-fn partial_update_sql(table_name: &str, columns: &[&str]) -> Option<(String, Vec<String>)> {
-    const BRIEF_PARTIAL: [&str; 2] = ["notes", "updated_at"];
-    if table_name != "briefs" || !columns.contains(&"date") {
-        return None;
-    }
-    let set: Vec<&str> = columns.iter().copied().filter(|c| *c != "date").collect();
-    if set.is_empty() || !set.iter().all(|c| BRIEF_PARTIAL.contains(c)) {
-        return None;
-    }
-    let sql = format!(
-        "UPDATE briefs SET {} WHERE date = ?",
-        set.iter().map(|c| format!("{c} = ?")).collect::<Vec<_>>().join(", ")
-    );
-    let order = set.iter().map(|c| c.to_string()).chain(std::iter::once("date".to_string())).collect();
-    Some((sql, order))
 }
 
 /// Build snapshot-apply statements for a given table (see
@@ -983,10 +989,7 @@ fn build_data_mutation_requests(
 
             let columns: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
 
-            let (mut sql, columns): (String, Vec<String>) = match partial_update_sql(table_name, &columns) {
-                Some(partial) => partial,
-                None => (build_snapshot_upsert_sql(table_name, &columns), columns.iter().map(|c| c.to_string()).collect()),
-            };
+            let mut sql = build_snapshot_upsert_sql(table_name, &columns);
             if table_name == "focus_replica" {
                 // A delayed retry must not regress the remote aggregate.
                 // Epoch changes require a separate stopped-owner takeover.
@@ -996,7 +999,7 @@ fn build_data_mutation_requests(
             let args: Vec<serde_json::Value> = columns
                 .iter()
                 .map(|col| {
-                    let val = &obj[col.as_str()];
+                    let val = &obj[*col];
                     match val {
                         serde_json::Value::Null => turso_null(),
                         serde_json::Value::Bool(b) => {
@@ -1316,6 +1319,9 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     }
     if let Err(e) = ensure_remote_v23_schema(pool, turso_url, turso_token).await {
         log::warn!("Turso v23 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
+    if let Err(e) = ensure_remote_v25_schema(pool, turso_url, turso_token).await { // schema-v25
+        log::warn!("Turso v25 schema gate failed, pushing anyway (gate retries next push): {e}");
     }
 
     // Fetch all unsynced entries
@@ -1961,15 +1967,11 @@ async fn apply_row_conn(
             // internal DELETE fires ON DELETE CASCADE and wiped child rows
             // on the receiving device (see build_snapshot_upsert_sql).
             let columns: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
-            let table = sanitize_table_name(table_name)?;
-            let (sql, columns): (String, Vec<String>) = match partial_update_sql(table, &columns) {
-                Some(partial) => partial,
-                None => (build_snapshot_upsert_sql(table, &columns), columns.iter().map(|c| c.to_string()).collect()),
-            };
+            let sql = build_snapshot_upsert_sql(sanitize_table_name(table_name)?, &columns);
 
             let mut query = sqlx::query(&sql);
             for col in &columns {
-                let val = &obj[col.as_str()];
+                let val = &obj[*col];
                 match val {
                     serde_json::Value::Null => { query = query.bind(None::<String>); }
                     serde_json::Value::Bool(b) => { query = query.bind(if *b { 1i64 } else { 0i64 }); }
@@ -2021,6 +2023,7 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
         "sections",
         "focus_replica",
         "briefs",
+        "brief_notes", // schema-v25
     ];
 
     if ALLOWED.contains(&name) {
@@ -3227,49 +3230,41 @@ mod v19_sync_tests {
         assert!(sql.contains("ON CONFLICT(date) DO UPDATE SET snapshot_json = excluded.snapshot_json"), "got {sql}");
     }
 
-    #[test]
-    fn a_brief_notes_payload_pushes_as_a_plain_update() {
-        let snap = Some(serde_json::json!({"date": "2026-09-26", "notes": "hi", "updated_at": "2026-09-26 08:00:00"}).to_string());
-        let reqs = super::build_data_mutation_requests("briefs", "2026-09-26", "UPDATE", &snap);
-        assert_eq!(reqs.len(), 1);
-        let stmt = &reqs[0]["stmt"];
-        assert_eq!(stmt["sql"], "UPDATE briefs SET notes = ?, updated_at = ? WHERE date = ?", "{stmt}");
-        assert_eq!(stmt["args"][2]["value"], "2026-09-26", "the key binds last");
-        let full = Some(serde_json::json!({"date": "2026-09-26", "snapshot_json": "{}", "notes": null}).to_string());
-        let reqs = super::build_data_mutation_requests("briefs", "2026-09-26", "UPDATE", &full);
-        assert!(reqs[0]["stmt"]["sql"].as_str().unwrap().starts_with("INSERT INTO briefs"), "whole rows still upsert");
-        assert!(super::partial_update_sql("local_tasks", &["id", "notes"]).is_none(), "briefs only");
-        assert!(super::partial_update_sql("briefs", &["date", "status"]).is_none(), "only the notes columns");
+    fn pulled(table: &str, row: &str, op: &str, snapshot: String, timestamp: &str) -> super::RemoteRow {
+        super::RemoteRow {
+            entry_id: uuid::Uuid::new_v4().to_string(), table_name: table.into(), row_id: row.into(), operation: op.into(),
+            changed_columns: None, snapshot: Some(snapshot), device_id: "mac-a".into(), timestamp: timestamp.into(),
+        }
     }
 
     #[tokio::test]
-    async fn incoming_brief_payloads_never_clear_notes() {
-        // Device A writes the day's row and patches priorities; device B has
-        // notes on the same day. A's payloads must leave B's notes alone.
-        let a = test_pool().await;
-        crate::db::briefs::ensure_snapshot(&a, "2026-09-26", "2026-09-26").await.unwrap();
-        let p = vec![crate::types::Priority { title: "Ship".into(), source: "General".into(), reasoning: "Because".into() }];
-        crate::db::briefs::set_priorities(&a, "2026-09-26", &p).await.unwrap();
-        let from_a: Vec<(String, String)> = sqlx::query_as(
-            "SELECT operation, snapshot FROM sync_log WHERE table_name='briefs' ORDER BY rowid").fetch_all(&a).await.unwrap();
-        assert_eq!(from_a.len(), 2);
-
+    async fn notes_and_snapshot_writes_never_shadow_each_other() { // schema-v25
+        assert!(super::sanitize_table_name("brief_notes").is_ok());
+        // Mac B opened Today after Mac A wrote notes but before pulling: B's
+        // local briefs INSERT + priorities patch are NEWER than A's notes.
         let b = test_pool().await;
-        crate::db::briefs::set_notes(&b, "2026-09-26", "2026-09-26", "Call the venue").await.unwrap();
-        for (op, snap) in &from_a {
-            super::apply_remote_change(&b, "briefs", "2026-09-26", op, Some(snap)).await.unwrap();
-        }
+        crate::db::briefs::ensure_snapshot(&b, "2026-09-26", "2026-09-26").await.unwrap();
+        let p = vec![crate::types::Priority { title: "Ship".into(), source: "General".into(), reasoning: "Because".into() }];
+        crate::db::briefs::set_priorities(&b, "2026-09-26", &p).await.unwrap();
+        let notes = serde_json::json!({"date": "2026-09-26", "notes": "Call the venue", "updated_at": "2026-09-26 08:00:00"}).to_string();
+        let n = super::apply_remote_rows_with_focus(&b, None, &[pulled("brief_notes", "2026-09-26", "INSERT", notes, "2020-01-01T00:00:00.000Z")]).await.unwrap();
+        assert_eq!(n, 1, "a newer local briefs row doesn't shadow notes");
         let got = crate::db::briefs::get_brief(&b, "2026-09-26").await.unwrap().unwrap();
         assert_eq!(got.notes.as_deref(), Some("Call the venue"));
-        assert_eq!(got.snapshot["priorities"][0]["title"], "Ship", "the payloads still applied");
-
-        // And B's notes edit lands on A without touching A's snapshot.
-        let notes: String = sqlx::query_scalar(
-            "SELECT snapshot FROM sync_log WHERE table_name='briefs' AND operation='UPDATE'").fetch_one(&b).await.unwrap();
-        super::apply_remote_change(&a, "briefs", "2026-09-26", "UPDATE", Some(&notes)).await.unwrap();
-        let got = crate::db::briefs::get_brief(&a, "2026-09-26").await.unwrap().unwrap();
-        assert_eq!(got.notes.as_deref(), Some("Call the venue"));
         assert_eq!(got.snapshot["priorities"][0]["title"], "Ship");
+
+        // And the other way: Mac A has a newer local notes edit; B's older
+        // priorities patch still lands.
+        let a = test_pool().await;
+        let insert: String = sqlx::query_scalar("SELECT snapshot FROM sync_log WHERE table_name='briefs' AND operation='INSERT'").fetch_one(&b).await.unwrap();
+        let patch: String = sqlx::query_scalar("SELECT snapshot FROM sync_log WHERE table_name='briefs' AND operation='UPDATE'").fetch_one(&b).await.unwrap();
+        super::apply_remote_rows_with_focus(&a, None, &[pulled("briefs", "2026-09-26", "INSERT", insert, "2020-01-01T00:00:00.000Z")]).await.unwrap();
+        crate::db::briefs::set_notes(&a, "2026-09-26", "2026-09-26", "Mine").await.unwrap();
+        let n = super::apply_remote_rows_with_focus(&a, None, &[pulled("briefs", "2026-09-26", "UPDATE", patch, "2020-01-01T00:00:01.000Z")]).await.unwrap();
+        assert_eq!(n, 1, "a newer local notes edit doesn't shadow the snapshot");
+        let got = crate::db::briefs::get_brief(&a, "2026-09-26").await.unwrap().unwrap();
+        assert_eq!(got.snapshot["priorities"][0]["title"], "Ship");
+        assert_eq!(got.notes.as_deref(), Some("Mine"));
     }
 
     #[tokio::test]

@@ -3,12 +3,12 @@ import { MapPin } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { Label as SectionLabel, Meta } from '@/components/shared/typography'
+import { Meta } from '@/components/shared/typography'
 import { CitySearch } from '@/components/today/CitySearch'
 import { useDataProvider } from '@/services/provider-context'
 import { useBriefSettingsStore } from '@/stores/briefSettingsStore'
 import { configValue, setModuleConfig } from '@/lib/briefLayout'
-import { SECTION_CLASS, SectionHeader, SectionSkeleton } from './SettingsFields'
+import { FieldLabel, SECTION_CLASS, SectionHeader, SectionSkeleton } from './SettingsFields'
 
 const UNITS = [
   { value: 'auto', label: 'Auto' },
@@ -39,7 +39,7 @@ export function BriefLocationSettings() {
       ) : (
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <SectionLabel as="div">Location</SectionLabel>
+            <FieldLabel id="brief-location-label">Location</FieldLabel>
             {settings.location && !changing ? (
               <div className="flex min-w-0 items-center gap-2">
                 <MapPin className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -56,7 +56,7 @@ export function BriefLocationSettings() {
             )}
           </div>
           <div className="space-y-1.5">
-            <SectionLabel as="div" id="weather-units-label">Units</SectionLabel>
+            <FieldLabel id="weather-units-label">Units</FieldLabel>
             <ToggleGroup
               aria-labelledby="weather-units-label"
               value={[String(weather?.config.units ?? 'auto')]}
@@ -67,7 +67,7 @@ export function BriefLocationSettings() {
           </div>
           <div className="flex items-center justify-between gap-3">
             <div className="space-y-0.5">
-              <span id="rain-notes-label" className="text-body-strong">Rain notes</span>
+              <FieldLabel id="rain-notes-label">Rain notes</FieldLabel>
               <Meta as="p">Flags a timed event when rain is likely at that hour.</Meta>
             </div>
             <Switch

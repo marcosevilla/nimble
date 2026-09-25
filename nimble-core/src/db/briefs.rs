@@ -10,7 +10,12 @@ use crate::types::{Brief, Priority};
 const SNAPSHOT_SCHEMA: i64 = 1;
 
 type Row = (String, i64, String, String, String, String, i64, Option<String>, String, String);
-const COLS: &str = "date, version, status, source, layout_json, snapshot_json, snapshot_schema, notes, generated_at, updated_at";
+/// What a snapshot INSERT writes. The phase-1 `briefs.notes` column is left
+/// unused: notes live in `brief_notes` (v25, their own synced row).
+const COLS: &str = "date, version, status, source, layout_json, snapshot_json, snapshot_schema, generated_at, updated_at";
+/// A brief as read, with the day's notes joined in (blank reads as none).
+const SELECT: &str = "SELECT b.date, b.version, b.status, b.source, b.layout_json, b.snapshot_json, b.snapshot_schema,
+    NULLIF(n.notes, ''), b.generated_at, b.updated_at FROM briefs b LEFT JOIN brief_notes n ON n.date = b.date";
 const NOTES_MAX: usize = 20_000;
 
 fn to_brief(r: Row) -> Brief {
@@ -23,7 +28,7 @@ fn to_brief(r: Row) -> Brief {
 }
 
 pub async fn get_brief(pool: &SqlitePool, date: &str) -> crate::Result<Option<Brief>> {
-    let row: Option<Row> = sqlx::query_as(&format!("SELECT {COLS} FROM briefs WHERE date = ?"))
+    let row: Option<Row> = sqlx::query_as(&format!("{SELECT} WHERE b.date = ?"))
         .bind(date).fetch_optional(pool).await?;
     Ok(row.map(to_brief))
 }
@@ -32,11 +37,8 @@ pub async fn list_brief_dates(pool: &SqlitePool) -> crate::Result<Vec<String>> {
     Ok(sqlx::query_scalar("SELECT date FROM briefs ORDER BY date DESC").fetch_all(pool).await?)
 }
 
-/// The row as sync sees it: DB column names, JSON columns as text. `notes`
-/// is deliberately left out: receivers upsert with `DO UPDATE SET` over the
-/// columns sent, so an omitted column keeps its value. A device that opened
-/// Today before pulling (notes still null) must not wipe notes written on
-/// another device; only `set_notes` sends that column (`notes_snapshot`).
+/// The row as sync sees it: DB column names, JSON columns as text. Notes are
+/// not part of it: they sync as their own `brief_notes` row.
 fn sync_snapshot(b: &Brief) -> String {
     serde_json::json!({
         "date": b.date, "version": b.version, "status": b.status, "source": b.source,
@@ -46,23 +48,29 @@ fn sync_snapshot(b: &Brief) -> String {
     }).to_string()
 }
 
-/// The partial payload a notes edit syncs: just the columns it changed.
-fn notes_snapshot(date: &str, notes: Option<&str>, updated_at: &str) -> String {
-    serde_json::json!({"date": date, "notes": notes, "updated_at": updated_at}).to_string()
-}
-
-/// Today's scratchpad (the `notes` module). Past days are read-only; the
-/// first write of the day also writes the day's snapshot. Blank clears.
+/// Today's scratchpad (the `notes` module) in `brief_notes` (v25), synced as
+/// its own row so row-level LWW never plays notes against the snapshot.
+/// Past days are read-only. Blank clears. Writing notes doesn't write the
+/// day's snapshot (that waits for the day's data); they show on it once it's there.
 pub async fn set_notes(pool: &SqlitePool, date: &str, today: &str, notes: &str) -> crate::Result<()> {
     if date != today { return Err(crate::Error::Other("notes_read_only".into())); }
     if notes.chars().count() > NOTES_MAX { return Err(crate::Error::Other("notes_too_long".into())); }
-    if ensure_snapshot(pool, date, today).await?.is_none() { return Err(crate::Error::Other("no_brief".into())) }
-    let notes = if notes.trim().is_empty() { None } else { Some(notes) };
+    let notes = if notes.trim().is_empty() { "" } else { notes };
     let updated_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    sqlx::query("UPDATE briefs SET notes = ?, updated_at = ? WHERE date = ?")
-        .bind(notes).bind(&updated_at).bind(date).execute(pool).await?;
-    sync::append_sync_log(pool, "briefs", date, "UPDATE",
-        Some(&serde_json::json!(["notes", "updated_at"]).to_string()), Some(&notes_snapshot(date, notes, &updated_at))).await.ok();
+    let existed: Option<String> = sqlx::query_scalar("SELECT date FROM brief_notes WHERE date = ?")
+        .bind(date).fetch_optional(pool).await?;
+    sqlx::query(
+        "INSERT INTO brief_notes (date, notes, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(date) DO UPDATE SET notes = excluded.notes, updated_at = excluded.updated_at",
+    )
+    .bind(date).bind(notes).bind(&updated_at).execute(pool).await?;
+    let snapshot = serde_json::json!({"date": date, "notes": notes, "updated_at": updated_at}).to_string();
+    let (op, changed) = if existed.is_some() {
+        ("UPDATE", Some(serde_json::json!(["notes", "updated_at"]).to_string()))
+    } else {
+        ("INSERT", None)
+    };
+    sync::append_sync_log(pool, "brief_notes", date, op, changed.as_deref(), Some(&snapshot)).await.ok();
     Ok(())
 }
 
@@ -81,10 +89,10 @@ pub async fn ensure_snapshot(pool: &SqlitePool, date: &str, today: &str) -> crat
         layout: serde_json::json!(used), snapshot,
         snapshot_schema: SNAPSHOT_SCHEMA, notes: None, generated_at: now.clone(), updated_at: now,
     };
-    let inserted = sqlx::query(&format!("INSERT OR IGNORE INTO briefs ({COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"))
+    let inserted = sqlx::query(&format!("INSERT OR IGNORE INTO briefs ({COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"))
         .bind(&brief.date).bind(brief.version).bind(&brief.status).bind(&brief.source)
         .bind(brief.layout.to_string()).bind(brief.snapshot.to_string()).bind(brief.snapshot_schema)
-        .bind(&brief.notes).bind(&brief.generated_at).bind(&brief.updated_at)
+        .bind(&brief.generated_at).bind(&brief.updated_at)
         .execute(pool).await?.rows_affected();
     if inserted == 1 {
         sync::append_sync_log(pool, "briefs", date, "INSERT", None, Some(&sync_snapshot(&brief))).await.ok();
@@ -261,23 +269,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn notes_save_for_today_and_sync() {
+    async fn notes_save_for_today_and_sync_as_their_own_row() {
         let pool = test_pool().await;
         super::set_notes(&pool, "2026-09-23", "2026-09-23", "Call the venue").await.unwrap();
+        assert!(super::get_brief(&pool, "2026-09-23").await.unwrap().is_none(), "notes don't write the snapshot early");
+        super::ensure_snapshot(&pool, "2026-09-23", "2026-09-23").await.unwrap();
         let b = super::get_brief(&pool, "2026-09-23").await.unwrap().unwrap();
-        assert_eq!(b.notes.as_deref(), Some("Call the venue"), "the first write also creates the day's snapshot");
-        let snap: String = sqlx::query_scalar("SELECT snapshot FROM sync_log WHERE table_name='briefs' AND operation='UPDATE'")
-            .fetch_one(&pool).await.unwrap();
-        let snap: serde_json::Value = serde_json::from_str(&snap).unwrap();
-        let mut keys: Vec<&String> = snap.as_object().unwrap().keys().collect();
-        keys.sort();
-        assert_eq!(keys, ["date", "notes", "updated_at"], "a notes edit syncs only what it changed");
-        assert_eq!(snap["notes"], "Call the venue");
-        let insert: String = sqlx::query_scalar("SELECT snapshot FROM sync_log WHERE table_name='briefs' AND operation='INSERT'")
-            .fetch_one(&pool).await.unwrap();
-        assert!(!insert.contains("\"notes\""), "whole-row payloads never carry notes, so they can't wipe them remotely");
+        assert_eq!(b.notes.as_deref(), Some("Call the venue"), "joined in from brief_notes");
+        let logged: Vec<(String, String)> = sqlx::query_as(
+            "SELECT table_name, snapshot FROM sync_log WHERE table_name IN ('briefs','brief_notes') ORDER BY rowid")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(logged[0].0, "brief_notes");
+        let snap: serde_json::Value = serde_json::from_str(&logged[0].1).unwrap();
+        assert_eq!(snap, serde_json::json!({"date": "2026-09-23", "notes": "Call the venue", "updated_at": snap["updated_at"]}));
+        assert!(!logged[1].1.contains("\"notes\""), "the briefs row never carries notes");
+        let unused: Option<String> = sqlx::query_scalar("SELECT notes FROM briefs WHERE date = '2026-09-23'").fetch_one(&pool).await.unwrap();
+        assert!(unused.is_none(), "the phase-1 briefs.notes column stays unused");
         super::set_notes(&pool, "2026-09-23", "2026-09-23", "   ").await.unwrap();
         assert!(super::get_brief(&pool, "2026-09-23").await.unwrap().unwrap().notes.is_none(), "blank clears");
+        let ops: Vec<String> = sqlx::query_scalar("SELECT operation FROM sync_log WHERE table_name='brief_notes' ORDER BY rowid")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(ops, ["INSERT", "UPDATE"]);
     }
 
     #[tokio::test]

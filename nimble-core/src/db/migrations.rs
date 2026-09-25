@@ -678,13 +678,18 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
     },
     Migration {
         version: 25, // schema-v25 — C4 owns 24; renumber per plan Global Constraints if C4 hasn't merged
-        description: "Device-local brief module cache (weather)",
+        description: "Device-local brief module cache (weather) + synced brief notes",
         sql: "CREATE TABLE IF NOT EXISTS module_cache (
             module_id TEXT NOT NULL,
             cache_key TEXT NOT NULL,
             payload_json TEXT NOT NULL,
             fetched_at TEXT NOT NULL,
             PRIMARY KEY (module_id, cache_key)
+        );
+        CREATE TABLE IF NOT EXISTS brief_notes (
+            date TEXT PRIMARY KEY,
+            notes TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL
         )",
     },
 ];
@@ -880,5 +885,15 @@ mod v25_tests {
             ("payload_json".to_string(), 0), ("fetched_at".to_string(), 0),
         ]);
         assert_eq!(super::CURRENT_SCHEMA_VERSION, 25); // schema-v25
+    }
+
+    #[tokio::test]
+    async fn v25_creates_the_synced_brief_notes_table() { // schema-v25
+        let pool = test_pool().await;
+        let cols: Vec<(String, i64, i64)> = sqlx::query_as("SELECT name, pk, \"notnull\" FROM pragma_table_info('brief_notes') ORDER BY cid")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(cols, vec![
+            ("date".to_string(), 1, 0), ("notes".to_string(), 0, 1), ("updated_at".to_string(), 0, 1),
+        ]);
     }
 }
