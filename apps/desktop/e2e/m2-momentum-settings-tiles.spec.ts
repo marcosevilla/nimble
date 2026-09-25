@@ -67,6 +67,14 @@ test('Goals & momentum: validate, save, pause from the keyboard, honest karma li
   await page.keyboard.press('Space')
   await expect.poll(async () => (await calls(page, 'momentum_set_paused')).map((c) => c.args?.paused)).toEqual([true])
   await expect(pause).toHaveAttribute('aria-checked', 'true')
+  await expect(pause).toBeFocused()
+
+  // The karma switch saves only karma: an unsaved goal edit stays out of it.
+  await s.getByLabel('Daily goal').fill('9')
+  await s.getByRole('switch', { name: 'Todoist-style karma' }).click()
+  await expect.poll(async () => (await calls(page, 'goals_save')).map((c) => c.args?.targets).at(-1))
+    .toEqual({ daily: 4, weekly: 25, days_off: ['mon', 'sun'], karma_enabled: true })
+  await expect(s.getByText(/Counted from when you turn it on\./)).toBeVisible()
   await expectNoClipping(s)
 })
 
@@ -96,4 +104,25 @@ test('Activity tab stat tiles follow the 7d / 30d / All toggle', async ({ app, p
   expect((await calls(page, 'momentum_summary')).some((c) => c.args?.range === '30d')).toBe(true)
   await expectNoClipping(tiles)
   await expectNoNewAxeViolations(page, 'today')
+})
+
+test('one days-off rule: Settings and the setup both refuse all seven', async ({ app, page }) => {
+  await record(page)
+  await openBriefSettings(app, page)
+  const s = page.locator('section#momentum')
+  for (const day of ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']) {
+    await s.getByRole('button', { name: day }).click() // sun is already off in the mock
+  }
+  await s.getByRole('button', { name: 'Save goals' }).click()
+  await expect(s.getByRole('alert')).toHaveText("Leave at least one day that isn't a day off.")
+  expect(await calls(page, 'goals_save')).toHaveLength(0)
+
+  await app.open('today', 'setup=fresh')
+  for (let n = 1; n <= 4; n++) await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByText('Step 5 of 6')).toBeVisible()
+  for (const day of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']) await page.getByRole('button', { name: day, exact: true }).click()
+  await expect(page.getByRole('alert')).toHaveText("Leave at least one day that isn't a day off.")
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByText('Step 5 of 6')).toBeVisible()
+  await expect(page.locator('[data-setup-step]')).not.toContainText(/miss/i)
 })

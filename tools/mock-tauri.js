@@ -1512,7 +1512,7 @@
       MOMENTUM_SETTINGS.paused = paused
       return Object.assign({}, MOMENTUM_SETTINGS)
     },
-    momentum_backfill: function () { return { tasks: 0, recurrences: 0, goal_days: 0, goal_weeks: 0 } },
+    momentum_backfill: function () { return { tasks: 0, recurrences: 0, goal_days: 0, goal_weeks: 0, bulk_skipped: 0 } },
 
     // Morning brief (phase 1)
     brief_get: function (args) { return withNotes(BRIEFS[args && args.date]) },
@@ -1618,6 +1618,7 @@
       if (p.modules !== undefined) briefState.stored_modules = p.modules
       if (p.model !== undefined) briefState.model = p.model
       if (p.effort !== undefined) briefState.effort = p.effort
+      if (p.goals && p.goals.days_off && p.goals.days_off.length >= 7) throw 'invalid: goals.days_off' // mirrors brief::settings
       if (p.goals) {
         briefState.goals = Object.assign({}, briefState.goals, p.goals)
         // One set of goals.* keys on the Mac: the momentum mock reads them too.

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef } from 'react'
 import { MoreHorizontal } from 'lucide-react'
 import { toast } from 'sonner'
 import { Progress as ProgressPrimitive } from '@base-ui/react/progress'
@@ -26,13 +26,13 @@ function Meter({ meter }: { meter: MeterView }) {
       value={Math.min(meter.value, meter.max)}
       max={meter.max}
       getAriaValueText={() => meter.text}
-      className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-2"
+      className="grid grid-cols-[4.5rem_1fr_4.5rem] items-center gap-2"
     >
       <ProgressLabel className="text-meta text-muted-foreground">{meter.label}</ProgressLabel>
       <ProgressTrack className="h-1.5 bg-muted">
         <ProgressIndicator className="bg-success" />
       </ProgressTrack>
-      <Meta className="tabular-nums">{meter.text}</Meta>
+      <Meta className="text-right tabular-nums">{meter.text}</Meta>
     </ProgressPrimitive.Root>
   )
 }
@@ -86,13 +86,15 @@ function MomentumSkeleton() {
 export function MomentumBox({ snapshot, live, interactive }: { snapshot: MomentumSummary | null; live: boolean; interactive: boolean }) {
   const dp = useDataProvider()
   const { summary, loading, refresh } = useMomentumSummary('7d', live)
-  const [busy, setBusy] = useState(false)
+  // A ref, not disabled state: disabling the ⋯ trigger would drop keyboard
+  // focus to <body> when the menu closes.
+  const busy = useRef(false)
   const data = live ? summary : snapshot
   const view = data ? momentumView(data) : null
 
   async function togglePause() {
-    if (!data) return
-    setBusy(true)
+    if (!data || busy.current) return
+    busy.current = true
     try {
       await dp.momentum.setPaused(!data.settings.paused)
       await refresh()
@@ -100,14 +102,13 @@ export function MomentumBox({ snapshot, live, interactive }: { snapshot: Momentu
     } catch {
       toast("Momentum didn't change. Try again.")
     } finally {
-      setBusy(false)
+      busy.current = false
     }
   }
 
   const action = interactive && live && data ? (
     <DropdownMenu>
       <DropdownMenuTrigger
-        disabled={busy}
         render={<IconButton aria-label="Momentum options" title="Momentum options" className="focus-ring data-popup-open:bg-hover data-popup-open:text-foreground" />}
       >
         <MoreHorizontal className="size-3.5" aria-hidden />

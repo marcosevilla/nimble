@@ -23,9 +23,11 @@ function loadRange(): MomentumRange {
 export function StatTiles() {
   const dp = useDataProvider()
   const [range, setRange] = useState<MomentumRange>(loadRange)
-  const { summary, loading } = useMomentumSummary(range, dp.momentum.supported)
+  const { summary } = useMomentumSummary(range, dp.momentum.supported)
   if (!dp.momentum.supported) return null
-  const tiles = statTiles(summary?.stats ?? EMPTY)
+  // Until the reply for *this* range arrives, skeletons: never the last range's numbers.
+  const current = summary?.range === range ? summary : null
+  const tiles = statTiles(current?.stats ?? EMPTY)
 
   const select = (next: MomentumRange) => {
     setRange(next)
@@ -55,7 +57,7 @@ export function StatTiles() {
         {tiles.map((t) => (
           <div key={t.label} className="surface-panel min-w-0 space-y-0.5 px-3 py-2">
             <dt className="truncate text-label text-muted-foreground">{t.label}</dt>
-            <dd className="text-title tabular-nums">{loading && !summary ? <Skeleton className="h-5 w-12" /> : t.value}</dd>
+            <dd className="text-title tabular-nums">{current ? t.value : <Skeleton className="h-5 w-12" />}</dd>
           </div>
         ))}
       </dl>

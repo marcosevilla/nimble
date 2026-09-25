@@ -27,7 +27,16 @@ export const WEEKDAY_OPTIONS: readonly { value: WeekdayKey; short: string; name:
 ]
 
 export const KARMA_DESCRIPTION =
-  "Todoist's full system: points, levels, daily and weekly streaks, and −1 point when an open task reaches 5 days past due. Off by default."
+  "Todoist's full system: points, levels, daily and weekly streaks, and −1 point when an open task reaches 5 days past due. Counted from when you turn it on. Off by default."
+
+/** One days-off rule for the setup, Settings and Rust (`karma::save_goals`,
+ *  `brief::settings`): at least one day is a goal day. */
+export const DAYS_OFF_ERROR = "Leave at least one day that isn't a day off."
+
+export function daysOffError(days: readonly string[]): string | null {
+  const distinct = new Set(WEEKDAY_OPTIONS.map((d) => d.value).filter((d) => days.includes(d)))
+  return distinct.size >= WEEKDAY_OPTIONS.length ? DAYS_OFF_ERROR : null
+}
 
 export interface MeterView { label: 'Today' | 'This week'; value: number; max: number; percent: number; text: string }
 export interface TrendBar { date: string; initial: string; done: number; height: number; tone: 'amber' | 'grey' | 'empty'; title: string }
@@ -133,6 +142,7 @@ export function goalTargetsFrom(input: { daily: string; weekly: string; daysOff:
   if (input.daily.trim() === '' || !Number.isInteger(daily) || daily < 1 || daily > 100) return { error: 'Daily goal must be a whole number from 1 to 100.' }
   if (input.weekly.trim() === '' || !Number.isInteger(weekly) || weekly < 1 || weekly > 700) return { error: 'Weekly goal must be a whole number from 1 to 700.' }
   const days = WEEKDAY_OPTIONS.map((d) => d.value).filter((d) => input.daysOff.includes(d))
-  if (days.length > 6) return { error: "Leave at least one day that isn't a day off." }
+  const daysError = daysOffError(days)
+  if (daysError) return { error: daysError }
   return { value: { daily, weekly, days_off: days, karma_enabled: input.karmaEnabled } }
 }

@@ -40,6 +40,10 @@ test('wins first, then meters and a 7-day trend', async ({ app, page }) => {
   await expect(b.getByRole('progressbar', { name: 'Today' })).toBeVisible()
   await expect(b.getByRole('progressbar', { name: 'This week' })).toBeVisible()
   await expect(b.getByText('3 of 5')).toBeVisible()
+  // The value column has one width, so both tracks line up.
+  const tracks = await b.locator('[data-slot="progress-track"]').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)))
+  expect(tracks).toHaveLength(2)
+  expect(tracks[0]).toBe(tracks[1])
   await expect(b.getByRole('img', { name: /^Last 7 days/ })).toBeVisible()
   await expect(b.getByText(/points|streak|level/i)).toHaveCount(0)
   await expectNoClipping(b, { allowEllipsis: true })
@@ -60,13 +64,15 @@ test('Pause and resume from the keyboard, with neutral copy', async ({ app, page
   await expect(b.getByText('Paused', { exact: true })).toBeVisible()
   await expect(b.getByRole('progressbar')).toHaveCount(0)
   expect((await calls(page, 'momentum_set_paused')).map((c) => c.args?.paused)).toEqual([true])
+  // Focus comes back to ⋯ by itself (the trigger never disables itself).
+  await expect(trigger).toBeFocused()
 
-  await trigger.focus()
   await page.keyboard.press('Enter')
   const resume = page.getByRole('menuitem', { name: 'Resume momentum' })
   await resume.focus()
   await page.keyboard.press('Enter')
   await expect(b.getByRole('progressbar', { name: 'Today' })).toBeVisible()
+  await expect(trigger).toBeFocused()
   await expect(page.getByRole('alertdialog')).toHaveCount(0)
   await expect(b).not.toContainText(/since|while you were|welcome back|missed|away|gap/i)
 })

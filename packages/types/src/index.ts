@@ -846,7 +846,14 @@ export interface MomentumSummary {
   karma: KarmaParity | null
 }
 
-export interface MomentumBackfillReport { tasks: number; recurrences: number; goal_days: number; goal_weeks: number }
+export interface MomentumBackfillReport {
+  tasks: number
+  recurrences: number
+  goal_days: number
+  goal_weeks: number
+  /** Completions skipped for sharing a bulk stamp (10+ in one second). */
+  bulk_skipped: number
+}
 
 /** Desktop computes momentum from its ledger; the web reports `supported: false`. */
 export interface MomentumCapability {

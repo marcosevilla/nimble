@@ -211,3 +211,25 @@ async fn the_launch_backfill_runs_until_one_full_run_succeeds() {
     karma::backfill_if_needed(&pool).await;
     assert!(!karma::list_events(&pool).await.unwrap().iter().any(|e| e.task_id.as_deref() == Some(later.as_str())));
 }
+
+#[tokio::test]
+async fn backfill_skips_a_bulk_stamp_but_keeps_a_parent_with_its_subtasks() {
+    let pool = test_pool().await;
+    // A Todoist reconcile stamped 12 old completions with the same second.
+    for i in 0..12 {
+        let id = format!("bulk{i}");
+        insert_task(&pool, &id).await;
+        sqlx::query("UPDATE local_tasks SET status='complete', completed=1, completed_at='2026-09-23 08:34:49' WHERE id=?")
+            .bind(&id).execute(&pool).await.unwrap();
+    }
+    // A parent closing its two subtasks shares one second too, and is real.
+    for id in ["parent", "child1", "child2"] {
+        insert_task(&pool, id).await;
+        sqlx::query("UPDATE local_tasks SET status='complete', completed=1, completed_at='2026-09-22 18:05:10' WHERE id=?")
+            .bind(id).execute(&pool).await.unwrap();
+    }
+    let r = karma::backfill_at(&pool, d("2026-09-23")).await.unwrap();
+    assert_eq!((r.tasks, r.bulk_skipped), (3, 12));
+    let s = karma::read_summary_at(&pool, "7d", d("2026-09-23")).await.unwrap();
+    assert_eq!((s.today_done, s.week_done), (0, 3));
+}

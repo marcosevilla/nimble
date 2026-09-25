@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MomentumSettings as Settings, WeekdayKey } from '@nimble/types'
 import { useDataProvider } from '@/services/provider-context'
 import { Button } from '@/components/ui/button'
@@ -25,7 +25,6 @@ export function MomentumSettings() {
   const [weekly, setWeekly] = useState('')
   const [daysOff, setDaysOff] = useState<WeekdayKey[]>([])
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
 
   const apply = useCallback((s: Settings) => {
     setSaved(s)
@@ -49,55 +48,65 @@ export function MomentumSettings() {
     void useBriefSettingsStore.getState().load(true)
   }
 
-  async function save(karmaEnabled?: boolean) {
+  // Re-entry guard (a ref: disabling a control mid-save would drop
+  // keyboard focus to <body>).
+  const writing = useRef(false)
+
+  async function write(run: () => Promise<Settings>, fallback = FALLBACK) {
+    if (writing.current) return
+    writing.current = true
+    setError('')
+    try {
+      afterWrite(await run())
+    } catch (e) {
+      setError(typeof e === 'string' ? e : fallback)
+    } finally {
+      writing.current = false
+    }
+  }
+
+  /** The goal form: daily, weekly, days off (karma unchanged). */
+  function saveGoals() {
     if (!saved) return
-    const targets = goalTargetsFrom({ daily, weekly, daysOff, karmaEnabled: karmaEnabled ?? saved.karma_enabled })
+    const targets = goalTargetsFrom({ daily, weekly, daysOff, karmaEnabled: saved.karma_enabled })
     if ('error' in targets) {
       setError(targets.error)
       return
     }
-    setBusy(true)
-    setError('')
-    try {
-      afterWrite(await dp.momentum.saveGoals(targets.value))
-    } catch (e) {
-      setError(typeof e === 'string' ? e : FALLBACK)
-    } finally {
-      setBusy(false)
-    }
+    void write(() => dp.momentum.saveGoals(targets.value))
   }
 
-  async function setPaused(paused: boolean) {
-    setBusy(true)
-    setError('')
-    try {
-      afterWrite(await dp.momentum.setPaused(paused))
-    } catch {
-      setError(FALLBACK)
-    } finally {
-      setBusy(false)
-    }
+  /** The karma switch saves only karma: the goals as saved, not the form. */
+  function setKarma(on: boolean) {
+    if (!saved) return
+    void write(() => dp.momentum.saveGoals({
+      daily: saved.daily_goal, weekly: saved.weekly_goal, days_off: saved.days_off, karma_enabled: on,
+    }))
+  }
+
+  function setPaused(paused: boolean) {
+    void write(() => dp.momentum.setPaused(paused))
   }
 
   return (
     <section id="momentum" className={SECTION_CLASS}>
-      <SectionHeader title="Goals & momentum" description="Targets for the Momentum box on Today. A missed day changes nothing." />
+      <SectionHeader title="Goals & momentum" description="Targets for the Momentum box on Today. Each day and week start fresh." />
       {!saved ? (
         <SectionSkeleton failed={loadFailed} onRetry={load} />
       ) : (
         <div className="space-y-4">
           {error && <p role="alert" className="text-body text-foreground">{error}</p>}
-          <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); void save() }}>
+          <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); saveGoals() }}>
             <div className="flex flex-wrap gap-4">
               <div className="space-y-1.5">
                 <FieldLabel htmlFor="goal-daily">Daily goal</FieldLabel>
                 <Input id="goal-daily" type="text" inputMode="numeric" value={daily}
-                  onChange={(e) => setDaily(e.target.value)} disabled={busy} className="w-24 tabular-nums" />
+                  onChange={(e) => setDaily(e.target.value)} className="w-24 tabular-nums" />
               </div>
               <div className="space-y-1.5">
                 <FieldLabel htmlFor="goal-weekly">Weekly goal</FieldLabel>
                 <Input id="goal-weekly" type="text" inputMode="numeric" value={weekly}
-                  onChange={(e) => setWeekly(e.target.value)} disabled={busy} className="w-24 tabular-nums" />
+                  onChange={(e) => setWeekly(e.target.value)} className="w-24 tabular-nums" />
               </div>
             </div>
             <div className="space-y-1.5">
@@ -107,25 +116,25 @@ export function MomentumSettings() {
                   <ToggleGroupItem key={d.value} value={d.value} aria-label={d.name} className="px-2 text-label">{d.short}</ToggleGroupItem>
                 ))}
               </ToggleGroup>
-              <Meta as="p">Days off count toward nothing. Missing a goal never changes anything the next day.</Meta>
+              <Meta as="p">Days off count toward nothing. Each day and week start fresh.</Meta>
             </div>
-            <Button type="submit" size="sm" variant="outline" disabled={busy}>Save goals</Button>
+            <Button type="submit" size="sm" variant="outline">Save goals</Button>
           </form>
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-0.5">
               <FieldLabel htmlFor="momentum-pause">Pause momentum</FieldLabel>
               <Meta as="p">Goals and meters wait until you resume.</Meta>
             </div>
-            <Switch id="momentum-pause" aria-label="Pause momentum" checked={saved.paused} disabled={busy}
-              onCheckedChange={(v) => void setPaused(v)} />
+            <Switch id="momentum-pause" aria-label="Pause momentum" checked={saved.paused}
+              onCheckedChange={(v) => setPaused(v)} />
           </div>
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-0.5">
               <FieldLabel htmlFor="karma-enabled">Todoist-style karma</FieldLabel>
               <Meta as="p">{KARMA_DESCRIPTION}</Meta>
             </div>
-            <Switch id="karma-enabled" aria-label="Todoist-style karma" checked={saved.karma_enabled} disabled={busy}
-              onCheckedChange={(v) => void save(v)} />
+            <Switch id="karma-enabled" aria-label="Todoist-style karma" checked={saved.karma_enabled}
+              onCheckedChange={(v) => setKarma(v)} />
           </div>
         </div>
       )}

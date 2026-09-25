@@ -335,7 +335,9 @@ pub async fn load_settings(pool: &SqlitePool) -> crate::Result<MomentumSettings>
     let d = MomentumSettings::default();
     let days_off = match setting(pool, K_DAYS_OFF).await? {
         None => d.days_off.clone(),
-        Some(json) => serde_json::from_str::<Vec<String>>(&json).map(|v| normalize_days(&v)).unwrap_or(d.days_off.clone()),
+        // All seven off is never valid (save_goals refuses it): read as the default.
+        Some(json) => serde_json::from_str::<Vec<String>>(&json).map(|v| normalize_days(&v))
+            .ok().filter(|v| v.len() < WEEKDAYS.len()).unwrap_or(d.days_off.clone()),
     };
     Ok(MomentumSettings {
         daily_goal: positive_int(setting(pool, K_DAILY).await?, d.daily_goal),
@@ -612,7 +614,20 @@ pub struct MomentumSummary {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
-pub struct BackfillReport { pub tasks: u64, pub recurrences: u64, pub goal_days: u64, pub goal_weeks: u64 }
+pub struct BackfillReport {
+    pub tasks: u64,
+    pub recurrences: u64,
+    pub goal_days: u64,
+    pub goal_weeks: u64,
+    /// Completions skipped because their exact `completed_at` second is a
+    /// bulk stamp (`BULK_STAMP_MIN`+ tasks), e.g. a Todoist reconcile.
+    pub bulk_skipped: u64,
+}
+
+/// This many completions sharing one exact second is a bulk stamp (an
+/// import or reconcile), not work done then. A parent closing a few
+/// subtasks stays well under it.
+pub const BULK_STAMP_MIN: usize = 10;
 
 /// A completion row whose reversal exists doesn't count (for wins/peak hour).
 const NOT_REVERSED: &str = "NOT EXISTS (SELECT 1 FROM karma_events u WHERE u.id = 'un' || e.id)";
@@ -739,8 +754,14 @@ pub async fn backfill_at(pool: &SqlitePool, today: NaiveDate) -> crate::Result<B
     let recurred: Vec<(Option<String>, Option<String>, String)> = sqlx::query_as(
         "SELECT target_id, metadata, created_at FROM activity_log WHERE action_type = 'task_recurred'")
         .fetch_all(pool).await?;
+    let mut per_stamp: HashMap<&str, usize> = HashMap::new();
+    for (_, _, at) in &completed { *per_stamp.entry(at.as_str()).or_default() += 1; }
     let mut tx = pool.begin().await?;
     for (id, p, at) in &completed {
+        if per_stamp.get(at.as_str()).copied().unwrap_or(0) >= BULK_STAMP_MIN {
+            r.bulk_skipped += 1;
+            continue;
+        }
         if let Some(e) = completion_event(id, *p, at) {
             if record_tx(&mut tx, &e).await? { r.tasks += 1; }
         }
@@ -755,6 +776,9 @@ pub async fn backfill_at(pool: &SqlitePool, today: NaiveDate) -> crate::Result<B
         }
     }
     tx.commit().await?;
+    if r.bulk_skipped > 0 {
+        log::info!("karma backfill: skipped {} completions sharing a bulk stamp ({}+ per second)", r.bulk_skipped, BULK_STAMP_MIN);
+    }
     let first: Option<String> = sqlx::query_scalar("SELECT MIN(date) FROM karma_events WHERE kind IN ('task','recur')")
         .fetch_one(pool).await?;
     if let Some(first) = first.and_then(|v| NaiveDate::parse_from_str(&v, "%Y-%m-%d").ok()) {
@@ -1070,6 +1094,9 @@ mod goal_tests {
         crate::db::settings::set_setting(&pool, "goals.days_off", r#"["SUN","fri","someday"]"#).await.unwrap();
         let s = load_settings(&pool).await.unwrap();
         assert_eq!((s.daily_goal, s.days_off.clone()), (5, vec!["fri".to_string(), "sun".to_string()]));
+        crate::db::settings::set_setting(&pool, "goals.days_off", &serde_json::to_string(&WEEKDAYS).unwrap()).await.unwrap();
+        assert_eq!(load_settings(&pool).await.unwrap().days_off, ["sat", "sun"], "one rule: never all seven");
+        crate::db::settings::set_setting(&pool, "goals.days_off", r#"["SUN","fri","someday"]"#).await.unwrap();
 
         let today = d("2026-09-23");
         let bad = [

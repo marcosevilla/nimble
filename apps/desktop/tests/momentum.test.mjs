@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   momentumView, trendBars, karmaLine, formatPeakHour, formatFocused, statTiles,
-  goalTargetsFrom, parseRange, isMomentumSummary, WEEKDAY_OPTIONS, KARMA_DESCRIPTION,
+  goalTargetsFrom, parseRange, isMomentumSummary, WEEKDAY_OPTIONS, KARMA_DESCRIPTION, daysOffError, DAYS_OFF_ERROR,
 } from '../src/lib/momentum.ts'
 
 const settings = (o = {}) => ({ daily_goal: 5, weekly_goal: 25, days_off: ['sat', 'sun'], paused: false, paused_at: null, karma_enabled: false, karma_enabled_at: null, ...o })
@@ -123,7 +123,16 @@ test('ranges and snapshot payloads are parsed defensively', () => {
 test('the karma switch says exactly what it turns on', () => {
   assert.match(KARMA_DESCRIPTION, /points, levels, daily and weekly streaks/)
   assert.match(KARMA_DESCRIPTION, /−1 point/)
+  assert.match(KARMA_DESCRIPTION, /Counted from when you turn it on\./)
   assert.match(KARMA_DESCRIPTION, /Off by default\.$/)
+})
+
+test('one days-off rule everywhere: never all seven', () => {
+  assert.equal(DAYS_OFF_ERROR, "Leave at least one day that isn't a day off.")
+  assert.equal(daysOffError(WEEKDAY_OPTIONS.map((d) => d.value)), DAYS_OFF_ERROR)
+  assert.equal(daysOffError(['sat', 'sun']), null)
+  assert.equal(daysOffError([]), null)
+  assert.equal(daysOffError(['mon', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']), null, 'six distinct days')
 })
 
 test('the Focused setup preset keeps the Momentum box on (A5); Minimal leaves it off', async () => {

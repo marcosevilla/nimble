@@ -25,3 +25,18 @@ test('meters fill with --success on a neutral track; the trend is amber', () => 
 test('stats use tabular figures', () => {
   assert.match(read('src/components/activity/StatTiles.tsx'), /tabular-nums/)
 })
+
+test('goal copy never talks about missing (setup and settings alike)', () => {
+  for (const file of [...SURFACES, 'src/components/today/setup/SetupSteps.tsx']) {
+    assert.doesNotMatch(read(file), /\b[Mm]iss(ed|ing)\b/, file)
+  }
+})
+
+test('the setup Goals step uses the shared days-off rule', () => {
+  assert.match(read('src/components/today/setup/SetupSteps.tsx'), /daysOffError/)
+})
+
+test('focus stays on the Pause controls: they never disable themselves', () => {
+  assert.doesNotMatch(read('src/components/today/MomentumBox.tsx'), /disabled=\{busy\}/)
+  assert.doesNotMatch(read('src/components/settings/MomentumSettings.tsx'), /<Switch[^>]*disabled=\{busy\}/s)
+})
