@@ -52,6 +52,7 @@ import { VaultSection } from '@/components/settings/VaultSection'
 import { LabelManager } from '@/components/settings/LabelManager'
 import { TodayBriefSettings } from '@/components/settings/TodayBriefSettings'
 import { BriefLocationSettings } from '@/components/settings/BriefLocationSettings'
+import { BriefBoxesSettings } from '@/components/settings/BriefBoxesSettings'
 import { ActivityLog } from '@/components/activity/ActivityLog'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
 import {
@@ -1672,6 +1673,7 @@ export function SettingsPage() {
 
     'today-brief': <TodayBriefSettings />,
     'today-location': <BriefLocationSettings />,
+    'today-boxes': <BriefBoxesSettings />,
 
     /* One-time migrations and developer verbs, collapsed and last
        (settings P2-1). Each keeps its old id so deep links still land. */

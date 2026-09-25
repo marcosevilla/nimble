@@ -48,7 +48,7 @@ test('six pages in the decided order (Activity last), each section on the decide
   const byPage = Object.fromEntries(SETTINGS_PAGES.map((p) => [p.id, sectionsOnPage(SETTINGS_SECTIONS, p.id).map((s) => s.id)]))
   assert.deepEqual(byPage, {
     general: ['appearance', 'demo', 'about'],
-    brief: ['today-brief', 'today-location'],
+    brief: ['today-brief', 'today-location', 'today-boxes'],
     tasks: ['capture-routes', 'labels', 'reminders'],
     connections: ['integrations', 'obsidian', 'todoist-sync', 'calendars', 'google-calendar'],
     data: ['sync', 'backups', 'maintenance'],
@@ -154,7 +154,7 @@ test('activeSectionId resolves to the last section once the scroller is at its e
 
 test('Today & brief sections are desktop-only and named for the addendum', () => {
   const brief = SETTINGS_SECTIONS.filter((s) => s.page === 'brief')
-  assert.deepEqual(brief.map((s) => [s.id, s.label]), [['today-brief', 'Brief'], ['today-location', 'Location & weather']])
+  assert.deepEqual(brief.map((s) => [s.id, s.label]), [['today-brief', 'Brief'], ['today-location', 'Location & weather'], ['today-boxes', 'Boxes']])
   for (const s of brief) assert.equal(s.requires, 'briefSettings', s.id)
   assert.ok(!visiblePages(visibleSections(NONE)).some((p) => p.id === 'brief'), 'the web never shows the page')
   assert.deepEqual(settingsTarget('today-location'), { page: 'brief', section: 'today-location' })

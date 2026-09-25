@@ -53,6 +53,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'about', label: 'About', page: 'general' },
   { id: 'today-brief', label: 'Brief', page: 'brief', requires: 'briefSettings' },
   { id: 'today-location', label: 'Location & weather', page: 'brief', requires: 'briefSettings' },
+  { id: 'today-boxes', label: 'Boxes', page: 'brief', requires: 'briefSettings' },
   { id: 'capture-routes', label: 'Capture routes', page: 'tasks' },
   { id: 'labels', label: 'Labels', page: 'tasks' },
   { id: 'reminders', label: 'Reminders', page: 'tasks', requires: 'reminders', standalone: true },

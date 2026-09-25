@@ -159,6 +159,8 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Tasks', keys: '⇧D', label: 'Set due date of focused task' },
   { section: 'Tasks', keys: 'l', label: 'Edit labels of focused task' },
   { section: 'Tasks', keys: 'm', label: 'Move focused task to a project' },
+  // ── Today: brief phase 2 (components/today/BoxesList.tsx → lib/briefLayout.ts boxRowKey) ──
+  { section: 'Today', keys: '⌥↑ / ⌥↓', label: 'Move a box up / down (Settings → Boxes, setup)' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [

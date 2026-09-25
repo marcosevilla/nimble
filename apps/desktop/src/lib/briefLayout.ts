@@ -75,3 +75,43 @@ export function arrangeBrief(
     body: on.filter((x) => !isHeader(x) && !info(x.id).strip),
   }
 }
+
+export function moveEntry(entries: BriefLayoutEntry[], index: number, direction: 'up' | 'down'): BriefLayoutEntry[] {
+  const to = direction === 'up' ? index - 1 : index + 1
+  if (index < 0 || index >= entries.length || to < 0 || to >= entries.length) return entries
+  const next = entries.slice()
+  ;[next[index], next[to]] = [next[to], next[index]]
+  return next
+}
+
+export function reorderEntries(entries: BriefLayoutEntry[], activeId: string, overId: string): BriefLayoutEntry[] {
+  const from = entries.findIndex((x) => x.id === activeId)
+  const to = entries.findIndex((x) => x.id === overId)
+  if (from < 0 || to < 0 || from === to) return entries
+  const next = entries.slice()
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  return next
+}
+
+export type BoxRowIntent = { kind: 'focus'; index: number } | { kind: 'move'; direction: 'up' | 'down' }
+
+/** Keys on a focused Boxes row. Only plain arrows/Home/End and ⌥↑/⌥↓. */
+export function boxRowKey(
+  key: string,
+  mods: { alt?: boolean; meta?: boolean; ctrl?: boolean; shift?: boolean },
+  index: number,
+  length: number,
+): BoxRowIntent | null {
+  if (length <= 0 || index < 0 || index >= length || mods.meta || mods.ctrl || mods.shift) return null
+  if (mods.alt) {
+    if (key === 'ArrowUp') return index > 0 ? { kind: 'move', direction: 'up' } : null
+    if (key === 'ArrowDown') return index < length - 1 ? { kind: 'move', direction: 'down' } : null
+    return null
+  }
+  if (key === 'ArrowUp') return { kind: 'focus', index: Math.max(0, index - 1) }
+  if (key === 'ArrowDown') return { kind: 'focus', index: Math.min(length - 1, index + 1) }
+  if (key === 'Home') return { kind: 'focus', index: 0 }
+  if (key === 'End') return { kind: 'focus', index: length - 1 }
+  return null
+}

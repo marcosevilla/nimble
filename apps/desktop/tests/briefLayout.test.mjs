@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  FALLBACK_LAYOUT, normalizeLayout, configValue, setModuleConfig, setModuleEnabled, applySettingsPatch, arrangeBrief,
+  FALLBACK_LAYOUT, normalizeLayout, configValue, setModuleConfig, setModuleEnabled, applySettingsPatch, arrangeBrief, moveEntry, reorderEntries, boxRowKey,
 } from '../src/lib/briefLayout.ts'
 
 const e = (id, enabled = true, config = {}) => ({ id, enabled, config })
@@ -60,4 +60,31 @@ test('arrangeBrief: header modules in the header, strip modules collapse when co
   assert.deepEqual(compact.header, [], 'the chip moves into the strip (UX checkpoint 1)')
   assert.deepEqual(compact.strip.map((x) => x.id), ['weather', 'schedule', 'priorities'])
   assert.deepEqual(compact.body.map((x) => x.id), ['due_today', 'vault'])
+})
+
+test('moveEntry swaps with a neighbor and ignores moves off either end', () => {
+  const list = [e('a'), e('b'), e('c')]
+  assert.deepEqual(moveEntry(list, 1, 'up').map((x) => x.id), ['b', 'a', 'c'])
+  assert.deepEqual(moveEntry(list, 1, 'down').map((x) => x.id), ['a', 'c', 'b'])
+  assert.equal(moveEntry(list, 0, 'up'), list)
+  assert.equal(moveEntry(list, 2, 'down'), list)
+})
+
+test('reorderEntries moves a dragged box onto the drop target', () => {
+  const list = [e('a'), e('b'), e('c'), e('d')]
+  assert.deepEqual(reorderEntries(list, 'a', 'c').map((x) => x.id), ['b', 'c', 'a', 'd'])
+  assert.deepEqual(reorderEntries(list, 'd', 'b').map((x) => x.id), ['a', 'd', 'b', 'c'])
+  assert.equal(reorderEntries(list, 'a', 'a'), list)
+  assert.equal(reorderEntries(list, 'a', 'zz'), list)
+})
+
+test('boxRowKey: arrows move focus, ⌥ arrows move the box, chords are left alone', () => {
+  assert.deepEqual(boxRowKey('ArrowDown', {}, 0, 3), { kind: 'focus', index: 1 })
+  assert.deepEqual(boxRowKey('ArrowUp', {}, 0, 3), { kind: 'focus', index: 0 })
+  assert.deepEqual(boxRowKey('End', {}, 0, 3), { kind: 'focus', index: 2 })
+  assert.deepEqual(boxRowKey('ArrowDown', { alt: true }, 0, 3), { kind: 'move', direction: 'down' })
+  assert.equal(boxRowKey('ArrowUp', { alt: true }, 0, 3), null, 'already first')
+  assert.equal(boxRowKey('ArrowDown', { meta: true }, 0, 3), null)
+  assert.equal(boxRowKey('ArrowDown', { alt: true, shift: true }, 0, 3), null)
+  assert.equal(boxRowKey('Enter', {}, 0, 3), null)
 })
