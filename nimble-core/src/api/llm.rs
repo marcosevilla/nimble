@@ -21,7 +21,17 @@ pub const ANTHROPIC_API_BASE: &str = "https://api.anthropic.com/";
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// Thinking counts toward `max_tokens` even though its text isn't returned.
 pub const MAX_TOKENS: u32 = 16_000;
-const REQUEST_TIMEOUT_SECS: u64 = 120;
+const CONNECT_TIMEOUT_SECS: u64 = 15;
+
+/// How long one call may take, by effort: deeper thinking takes longer, and a
+/// timeout here reads as `timeout` (retryable), never as offline.
+pub fn timeout_for(effort: &str) -> std::time::Duration {
+    std::time::Duration::from_secs(match effort {
+        "high" => 180,
+        "xhigh" | "max" => 300,
+        _ => 120,
+    })
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LlmRequest {
@@ -50,8 +60,10 @@ pub struct LlmResponse {
 pub enum LlmError {
     /// No API key configured. Built by the caller; a client never sees it.
     NoKey,
-    /// Couldn't reach the API (DNS, connect, timeout, reset).
+    /// Couldn't reach the API (DNS, connect, reset).
     Offline(String),
+    /// Reached it, but no answer within `timeout_for(effort)`.
+    Timeout,
     RateLimited,
     Server(u16),
     /// 401/403: the key is wrong or revoked.
@@ -71,6 +83,7 @@ impl LlmError {
         match self {
             LlmError::NoKey => "no_key",
             LlmError::Offline(_) => "offline",
+            LlmError::Timeout => "timeout",
             LlmError::RateLimited => "rate_limited",
             LlmError::Server(_) => "server_error",
             LlmError::Auth => "auth",
@@ -85,7 +98,7 @@ impl LlmError {
     pub fn retryable(&self) -> bool {
         matches!(
             self,
-            LlmError::Offline(_) | LlmError::RateLimited | LlmError::Server(_) | LlmError::Truncated { .. } | LlmError::InvalidOutput { .. }
+            LlmError::Offline(_) | LlmError::Timeout | LlmError::RateLimited | LlmError::Server(_) | LlmError::Truncated { .. } | LlmError::InvalidOutput { .. }
         )
     }
 
@@ -211,8 +224,11 @@ pub struct AnthropicLlm {
 
 impl AnthropicLlm {
     pub fn new(key: String) -> crate::Result<Self> {
+        // No redirects: the key must only ever go to the configured host.
+        // The per-call timeout is set from the effort (`timeout_for`).
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .connect_timeout(std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| crate::Error::Api(format!("Anthropic client: {e}")))?;
         Self::with_base(client, ANTHROPIC_API_BASE, key)
@@ -231,23 +247,32 @@ impl AnthropicLlm {
 
 impl LlmClient for AnthropicLlm {
     async fn structured(&self, req: &LlmRequest) -> Result<LlmResponse, LlmError> {
+        // Sensitive: never printed by reqwest's Debug output or logs.
+        let mut key = reqwest::header::HeaderValue::from_str(&self.key)
+            .map_err(|_| LlmError::Auth)?;
+        key.set_sensitive(true);
         let response = self
             .client
             .post(self.url.clone())
-            .header("x-api-key", &self.key)
+            .timeout(timeout_for(&req.effort))
+            .header("x-api-key", key)
             .header("anthropic-version", ANTHROPIC_VERSION)
             .header("content-type", "application/json")
             .json(&anthropic_body(req))
             .send()
             .await
-            .map_err(|e| LlmError::Offline(e.to_string()))?;
+            .map_err(transport_error)?;
         let status = response.status().as_u16();
-        let body = response.text().await.map_err(|e| LlmError::Offline(e.to_string()))?;
+        let body = response.text().await.map_err(transport_error)?;
         if !(200..300).contains(&status) {
             return Err(classify_status(status, &body));
         }
         parse_anthropic_response(&body)
     }
+}
+
+fn transport_error(e: reqwest::Error) -> LlmError {
+    if e.is_timeout() { LlmError::Timeout } else { LlmError::Offline(e.to_string()) }
 }
 
 /// Scripted client for tests: replies in order, then `Offline` once exhausted.
@@ -379,6 +404,17 @@ mod tests {
         assert!(LlmError::RateLimited.retryable() && LlmError::Server(503).retryable() && LlmError::Offline("dns".into()).retryable());
         assert_eq!(LlmError::NoKey.code(), "no_key");
         assert_eq!(LlmError::Offline("x".into()).code(), "offline");
+    }
+
+    #[test]
+    fn timeouts_scale_with_effort_and_are_retryable() {
+        assert_eq!(timeout_for("low").as_secs(), 120);
+        assert_eq!(timeout_for("medium").as_secs(), 120);
+        assert_eq!(timeout_for("high").as_secs(), 180);
+        assert_eq!(timeout_for("xhigh").as_secs(), 300);
+        assert_eq!(timeout_for("max").as_secs(), 300);
+        assert_eq!(LlmError::Timeout.code(), "timeout");
+        assert!(LlmError::Timeout.retryable());
     }
 
     #[test]

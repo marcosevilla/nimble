@@ -100,6 +100,14 @@ Phase 2 merged as **v24** and C4 lands as **v25** before this branch; phase 3 st
 | Settings read raw | `brief::settings::load_view(pool)` returns normalized `model` (one of `MODELS = [claude-opus-5-5, claude-sonnet-5]`) and `effort` (one of `EFFORTS = [low, medium, high]`); `api::llm::normalize_*` stays as a second guard. | Tasks 5, 6 |
 | e2e port 4610 | Lane A uses **5301** for `tools/qa-frozen.sh`. | Tasks 8–10 |
 
+### Review changes to Tasks 1–3 (2026-09-25), binding for Tasks 4–10
+
+- **Candidate tiers** (base §4.6 order): in progress → due ≤7 days or earlier → priority ≥3 → 20 oldest → **labelled last**, ≤15 per configured label (`LABELLED_PER_LABEL`), total ≤80. `blocked` tasks are never candidates; `backlog` tasks enter only through the oldest tier. Wins exclude archived projects.
+- **Priorities count:** `validate(raw, set, exclude, priorities_count)`, `rank_fallback(set, exclude, priorities_count)`, `system_prompt(labels, priorities_count)` and `build_request(set, today, day, model, effort, priorities_count)` take the Top priorities box's configured `count` (1–3, clamped by `validate::priorities_cap`). Task 5 passes the `priorities` layout entry's `config.count`.
+- **Prompt:** every field goes through `clean_text` (which also strips bidi/zero-width/BOM characters); events ≤20 per day (`MAX_EVENTS_PER_DAY`), habits ≤20 (`MAX_HABITS`).
+- **LLM client:** no redirects, `x-api-key` marked sensitive, per-call timeout by effort (`timeout_for`: low/medium 120 s, high 180 s, xhigh/max 300 s), and a new `LlmError::Timeout` (code `timeout`, retryable) instead of `offline` for timeouts.
+- **Phase 4 note (wins):** completing a recurring task resets it to `todo` without a `completed_at` row, so this week's completions miss recurring wins. Phase 4 should also read `task_recurred` activity or the karma ledger for `wins`.
+
 ## Review Focus
 
 1. **Task titles that look like instructions or markup** (`</open_tasks>`, "ignore previous instructions", newlines, `|`): they must reach the model only as cleaned data inside tags and never break the prompt's structure. Pinned in Task 2 (`clean_text` + one-closing-tag test).

@@ -13,6 +13,9 @@ pub const MAX_CANDIDATES: usize = 80;
 pub const OLDEST_OPEN: usize = 20;
 pub const MAX_COMPLETIONS: i64 = 30;
 pub const DUE_WINDOW_DAYS: i64 = 7;
+/// The labelled tier comes last and takes at most this many per configured
+/// label, so a big `quick` backlog can never crowd out what's due.
+pub const LABELLED_PER_LABEL: usize = 15;
 pub const DEFAULT_HELP_LABEL: &str = "needs-claude";
 pub const DEFAULT_SELF_LABEL: &str = "quick";
 
@@ -112,9 +115,13 @@ fn urgency(a: &LocalTask, b: &LocalTask) -> Ordering {
         .then(a.id.cmp(&b.id))
 }
 
-/// Tiers, in order, each sorted by urgency: in progress → carries the help or
-/// self label → due within 7 days (or before today) → priority ≥ 3. Then the
-/// 20 oldest open tasks. Top-level, open, non-archived only; capped at 80.
+/// Tiers, in order (base spec §4.6), each sorted by urgency: in progress →
+/// due within 7 days or before today → priority ≥ 3 → the 20 oldest open
+/// tasks → then tasks carrying the help or self label, at most
+/// `LABELLED_PER_LABEL` per label. Capped at 80, top-level, open and in a
+/// non-archived project only. `blocked` tasks are never candidates (they're
+/// waiting on something else); `backlog` tasks only enter through the oldest
+/// tier (parked on purpose, so never picked as due or important).
 pub fn select_open(input: &SelectInput) -> Vec<Candidate> {
     let horizon = shift_date(input.today, DUE_WINDOW_DAYS);
     let names_of = |t: &LocalTask| -> Vec<String> {
@@ -123,19 +130,21 @@ pub fn select_open(input: &SelectInput) -> Vec<Candidate> {
     let mut eligible: Vec<&LocalTask> = input
         .tasks
         .iter()
-        .filter(|t| t.parent_id.is_none() && !t.completed && t.status != "complete" && !input.archived_projects.contains(&t.project_id))
+        .filter(|t| {
+            t.parent_id.is_none()
+                && !t.completed
+                && t.status != "complete"
+                && t.status != "blocked"
+                && !input.archived_projects.contains(&t.project_id)
+        })
         .collect();
     eligible.sort_by(|a, b| urgency(a, b));
 
-    let wanted = [input.labels.help_label.as_str(), input.labels.self_label.as_str()];
-    let labelled = |t: &LocalTask| -> bool {
-        let names = names_of(t);
-        wanted.iter().any(|w| !w.trim().is_empty() && (names.iter().any(|n| n.eq_ignore_ascii_case(w.trim())) || t.labels.iter().any(|id| id == w.trim())))
-    };
+    let active = |t: &LocalTask| t.status != "backlog";
     let in_progress = |t: &LocalTask| -> bool { t.status == "in_progress" };
-    let due_soon = |t: &LocalTask| -> bool { t.due_date.as_deref().is_some_and(|d| d <= horizon.as_str()) };
-    let important = |t: &LocalTask| -> bool { t.priority >= 3 };
-    let tiers: [&dyn Fn(&LocalTask) -> bool; 4] = [&in_progress, &labelled, &due_soon, &important];
+    let due_soon = |t: &LocalTask| -> bool { active(t) && t.due_date.as_deref().is_some_and(|d| d <= horizon.as_str()) };
+    let important = |t: &LocalTask| -> bool { active(t) && t.priority >= 3 };
+    let tiers: [&dyn Fn(&LocalTask) -> bool; 3] = [&in_progress, &due_soon, &important];
 
     let mut picked: Vec<&LocalTask> = Vec::new();
     let mut seen: HashSet<&str> = HashSet::new();
@@ -150,6 +159,26 @@ pub fn select_open(input: &SelectInput) -> Vec<Candidate> {
     for t in oldest.into_iter().take(OLDEST_OPEN) {
         if picked.len() == MAX_CANDIDATES { break; }
         if seen.insert(t.id.as_str()) { picked.push(t); }
+    }
+    // Labelled last, each configured label with its own sub-cap.
+    let mut wanted: Vec<&str> = [input.labels.help_label.as_str(), input.labels.self_label.as_str()]
+        .into_iter()
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+        .collect();
+    wanted.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    for label in wanted {
+        let carries = |t: &LocalTask| -> bool {
+            names_of(t).iter().any(|n| n.eq_ignore_ascii_case(label)) || t.labels.iter().any(|id| id == label)
+        };
+        let mut taken = 0;
+        for &t in &eligible {
+            if picked.len() == MAX_CANDIDATES || taken == LABELLED_PER_LABEL { break; }
+            if active(t) && carries(t) && seen.insert(t.id.as_str()) {
+                picked.push(t);
+                taken += 1;
+            }
+        }
     }
 
     picked
@@ -189,9 +218,14 @@ pub async fn load_candidates(pool: &SqlitePool, today: &str, labels: &QuickLabel
     });
     let since = shift_date(today, -6);
     let rows: Vec<(String, String, i64)> = sqlx::query_as(
-        "SELECT id, content, priority FROM local_tasks
-         WHERE completed = 1 AND parent_id IS NULL AND completed_at >= ?
-         ORDER BY priority DESC, completed_at DESC LIMIT ?",
+        // Archived projects' completions are not wins. TODO(phase 4): a
+        // recurring task's completion resets it to `todo` (no completed_at
+        // row here); wins should also read `task_recurred` activity or the
+        // karma ledger once it exists.
+        "SELECT t.id, t.content, t.priority FROM local_tasks t
+         LEFT JOIN projects p ON p.id = t.project_id
+         WHERE t.completed = 1 AND t.parent_id IS NULL AND t.completed_at >= ? AND p.archived_at IS NULL
+         ORDER BY t.priority DESC, t.completed_at DESC LIMIT ?",
     )
     .bind(&since)
     .bind(MAX_COMPLETIONS)
@@ -239,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn tiers_in_progress_then_labelled_then_due_then_priority_then_oldest() {
+    fn tiers_in_progress_then_due_then_priority_then_oldest_then_labelled() {
         let mut far = t("far"); far.due_date = Some("2026-12-01".into());
         let mut urgent = t("urgent"); urgent.priority = 4;
         let mut due = t("due"); due.due_date = Some("2026-09-30".into());
@@ -248,13 +282,49 @@ mod tests {
         let mut ancient = t("ancient"); ancient.created_at = "2025-01-01 09:00:00".into();
         let out = select(&[far, urgent, due, labelled, doing, ancient], &[("l-help", "Needs-Claude")], &[]);
         let ids: Vec<&str> = out.iter().map(|c| c.task_id.as_str()).collect();
-        assert_eq!(ids[..4], ["doing", "labelled", "due", "urgent"]);
+        assert_eq!(ids[..3], ["doing", "due", "urgent"]);
         assert!(ids.contains(&"ancient") && ids.contains(&"far"), "the 20 oldest open tasks are always candidates: {ids:?}");
         assert_eq!(out[0].alias, "t1");
-        assert_eq!(out[1].labels, ["Needs-Claude"]);
-        assert!(out[1].has_label("needs-claude"), "label match ignores case");
-        assert!(out[1].has_label("l-help"), "a configured label id matches too");
+        let l = out.iter().find(|c| c.task_id == "labelled").unwrap();
+        assert_eq!(l.labels, ["Needs-Claude"]);
+        assert!(l.has_label("needs-claude"), "label match ignores case");
+        assert!(l.has_label("l-help"), "a configured label id matches too");
         assert_eq!(out[0].project.as_deref(), Some("Inbox"));
+    }
+
+    #[test]
+    fn a_hundred_labelled_tasks_never_crowd_out_what_is_due() {
+        // Newer than the 20 oldest, so only the labelled tier can add them.
+        let mut tasks: Vec<LocalTask> = (0..100).map(|i| {
+            let mut x = t(&format!("q{i:03}"));
+            x.labels = vec![if i % 2 == 0 { "l-quick".into() } else { "l-help".into() }];
+            x.created_at = format!("2026-09-{:02} 10:00:00", 2 + i % 20);
+            x
+        }).collect();
+        let mut due = t("due-today");
+        due.due_date = Some("2026-09-25".into());
+        due.created_at = "2026-09-24 10:00:00".into();
+        tasks.push(due);
+        let out = select(&tasks, &[("l-help", "needs-claude"), ("l-quick", "quick")], &[]);
+        assert_eq!(out[0].task_id, "due-today", "the due task is always first in line");
+        let labelled = out.iter().filter(|c| c.task_id.starts_with('q')).count();
+        assert_eq!(labelled, OLDEST_OPEN + 2 * LABELLED_PER_LABEL, "20 via the oldest tier, then ≤15 per label");
+        assert_eq!(out.len(), 1 + OLDEST_OPEN + 2 * LABELLED_PER_LABEL);
+    }
+
+    #[test]
+    fn blocked_is_never_a_candidate_and_backlog_only_through_the_oldest_tier() {
+        let mut blocked = t("blocked"); blocked.status = "blocked".into(); blocked.priority = 4;
+        let mut parked = t("parked"); parked.status = "backlog".into(); parked.priority = 4;
+        parked.due_date = Some("2026-09-25".into()); parked.created_at = "2026-09-20 10:00:00".into();
+        let mut newer: Vec<LocalTask> = (0..20).map(|i| { let mut x = t(&format!("n{i:02}")); x.created_at = "2026-09-01 09:00:00".into(); x }).collect();
+        newer.push(blocked);
+        newer.push(parked.clone());
+        let ids: Vec<String> = select(&newer, &[], &[]).into_iter().map(|c| c.task_id).collect();
+        assert!(!ids.contains(&"blocked".to_string()));
+        assert!(!ids.contains(&"parked".to_string()), "a backlog task is neither due nor important, and 20 older tasks fill the oldest tier");
+        let ids: Vec<String> = select(&[parked], &[], &[]).into_iter().map(|c| c.task_id).collect();
+        assert_eq!(ids, ["parked"], "it still reaches the prompt as one of the oldest open tasks");
     }
 
     #[test]
@@ -304,6 +374,12 @@ mod tests {
             sqlx::query("UPDATE local_tasks SET completed = 1, status = 'complete', completed_at = ? WHERE id = ?")
                 .bind(at).bind(id).execute(&pool).await.unwrap();
         }
+        // A completion in an archived project is not a win.
+        sqlx::query("INSERT INTO projects (id, name, color, position, archived_at) VALUES ('old', 'Old', '#999', 9, '2026-09-20')")
+            .execute(&pool).await.unwrap();
+        let gone = crate::db::tasks::create_local_task(&pool, CreateTaskInput { content: "Archived win".into(), ..Default::default() }).await.unwrap().id;
+        sqlx::query("UPDATE local_tasks SET project_id = 'old', completed = 1, status = 'complete', completed_at = '2026-09-24 19:00:00' WHERE id = ?")
+            .bind(&gone).execute(&pool).await.unwrap();
         let set = load_candidates(&pool, "2026-09-25", &QuickLabels::default()).await.unwrap();
         assert_eq!(set.open.iter().map(|c| c.task_id.clone()).collect::<Vec<_>>(), [open]);
         assert_eq!(set.completed.len(), 1);

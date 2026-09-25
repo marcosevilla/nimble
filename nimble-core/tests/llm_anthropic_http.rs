@@ -14,8 +14,17 @@ async fn listener() -> Option<TcpListener> {
     }
 }
 
+/// Accepts one connection; fails fast (not hangs) if the client never connects.
+async fn accept(listener: &TcpListener) -> tokio::net::TcpStream {
+    tokio::time::timeout(std::time::Duration::from_secs(10), listener.accept())
+        .await
+        .expect("no client connected within 10s")
+        .unwrap()
+        .0
+}
+
 async fn serve_one(listener: &TcpListener, status: u16, body: &str) -> String {
-    let (mut stream, _) = listener.accept().await.unwrap();
+    let mut stream = accept(listener).await;
     let mut bytes = Vec::new();
     let mut chunk = [0u8; 4096];
     loop {
@@ -93,9 +102,12 @@ async fn rate_limit_is_retryable_and_bad_key_is_not() {
 }
 
 #[tokio::test]
-async fn nothing_listening_reads_as_offline() {
+async fn a_dropped_connection_reads_as_offline() {
+    // The listener stays bound (no release-then-reconnect race on the port):
+    // the server accepts and hangs up without answering.
     let Some(listener) = listener().await else { return };
     let port = listener.local_addr().unwrap().port();
-    drop(listener);
+    let server = tokio::spawn(async move { drop(accept(&listener).await) });
     assert_eq!(client(port).structured(&request()).await.unwrap_err().code(), "offline");
+    server.await.unwrap();
 }

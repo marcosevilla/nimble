@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use crate::brief::candidates::{Candidate, CandidateSet};
-use crate::brief::validate::{Composition, Pick, MAX_PER_LIST};
+use crate::brief::validate::{priorities_cap, Composition, Pick, MAX_PER_LIST};
 
 pub fn fallback_order(a: &Candidate, b: &Candidate) -> Ordering {
     let in_progress = |c: &Candidate| c.status == "in_progress";
@@ -19,10 +19,10 @@ pub fn fallback_order(a: &Candidate, b: &Candidate) -> Ordering {
         .then(a.task_id.cmp(&b.task_id))
 }
 
-fn pick(ranked: &[&Candidate], used: &mut HashSet<String>, keep: impl Fn(&Candidate) -> bool) -> Vec<Pick> {
+fn pick(ranked: &[&Candidate], used: &mut HashSet<String>, cap: usize, keep: impl Fn(&Candidate) -> bool) -> Vec<Pick> {
     let mut out = Vec::new();
     for &c in ranked {
-        if out.len() == MAX_PER_LIST { break; }
+        if out.len() == cap { break; }
         if used.contains(&c.task_id) || !keep(c) { continue; }
         used.insert(c.task_id.clone());
         out.push(Pick { task_id: c.task_id.clone(), title: c.title.clone(), reason: String::new() });
@@ -30,13 +30,14 @@ fn pick(ranked: &[&Candidate], used: &mut HashSet<String>, keep: impl Fn(&Candid
     out
 }
 
-pub fn rank_fallback(set: &CandidateSet, exclude: &HashSet<String>) -> Composition {
+/// `priorities_count`: the Top priorities box's configured count (1–3).
+pub fn rank_fallback(set: &CandidateSet, exclude: &HashSet<String>, priorities_count: usize) -> Composition {
     let mut ranked: Vec<&Candidate> = set.open.iter().collect();
     ranked.sort_by(|a, b| fallback_order(a, b));
     let mut used = exclude.clone();
-    let priorities = pick(&ranked, &mut used, |_| true);
-    let quick_help = pick(&ranked, &mut used, |c| c.has_label(&set.labels.help_label));
-    let quick_self = pick(&ranked, &mut used, |c| c.has_label(&set.labels.self_label));
+    let priorities = pick(&ranked, &mut used, priorities_cap(priorities_count), |_| true);
+    let quick_help = pick(&ranked, &mut used, MAX_PER_LIST, |c| c.has_label(&set.labels.help_label));
+    let quick_self = pick(&ranked, &mut used, MAX_PER_LIST, |c| c.has_label(&set.labels.self_label));
     Composition { summary: String::new(), priorities, quick_help, quick_self, wins: Vec::new() }
 }
 
@@ -67,7 +68,7 @@ mod tests {
             c("high-due-late", "todo", 3, Some("2026-10-01"), "2026-09-01", &[]),
             c("high-due-soon", "todo", 3, Some("2026-09-26"), "2026-09-05", &[]),
             c("high-no-due-old", "todo", 3, None, "2025-01-01", &[]),
-        ]), &HashSet::new());
+        ]), &HashSet::new(), 3);
         assert_eq!(ids(&out.priorities), ["doing-low", "urgent", "high-due-soon"]);
         assert!(out.priorities.iter().all(|p| p.reason.is_empty()));
         assert!(out.summary.is_empty() && out.wins.is_empty());
@@ -82,7 +83,7 @@ mod tests {
             c("help", "todo", 1, None, "2026-09-04", &["needs-claude"]),
             c("errand", "todo", 1, None, "2026-09-05", &["quick"]),
             c("plain", "todo", 1, None, "2026-09-06", &[]),
-        ]), &HashSet::new());
+        ]), &HashSet::new(), 3);
         assert_eq!(ids(&out.priorities), ["p1", "p2", "p3"]);
         assert_eq!(ids(&out.quick_help), ["help"]);
         assert_eq!(ids(&out.quick_self), ["errand"], "p3 is already a priority");
@@ -91,8 +92,18 @@ mod tests {
     #[test]
     fn excluded_tasks_and_an_empty_set() {
         let exclude: HashSet<String> = ["a".to_string()].into();
-        let out = rank_fallback(&set(vec![c("a", "in_progress", 4, None, "2026-09-01", &[]), c("b", "todo", 1, None, "2026-09-02", &[])]), &exclude);
+        let out = rank_fallback(&set(vec![c("a", "in_progress", 4, None, "2026-09-01", &[]), c("b", "todo", 1, None, "2026-09-02", &[])]), &exclude, 3);
         assert_eq!(ids(&out.priorities), ["b"]);
-        assert_eq!(rank_fallback(&set(vec![]), &HashSet::new()), Composition::default());
+        assert_eq!(rank_fallback(&set(vec![]), &HashSet::new(), 3), Composition::default());
+    }
+
+    #[test]
+    fn a_priorities_count_of_one_leaves_the_rest_for_quick_wins() {
+        let out = rank_fallback(&set(vec![
+            c("p1", "todo", 4, None, "2026-09-01", &[]),
+            c("p2", "todo", 4, None, "2026-09-02", &["quick"]),
+        ]), &HashSet::new(), 1);
+        assert_eq!(ids(&out.priorities), ["p1"]);
+        assert_eq!(ids(&out.quick_self), ["p2"], "not hidden behind a priority the box doesn't show");
     }
 }
