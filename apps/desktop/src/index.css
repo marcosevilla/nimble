@@ -319,8 +319,14 @@
   from { opacity: 1; transform: translateY(0) scale(1); }
   to { opacity: 0; transform: translateY(8px) scale(0.98); }
 }
+/* `backwards` fill, never `both`/`forwards`: a held end frame keeps
+   `transform: matrix(1,0,0,1,0,0)` on the element after the entrance —
+   a stacking context and containing block for fixed descendants that the
+   reduced-motion layout doesn't have (SelectionActionBar, Stage C
+   deferred minor). With `backwards` the element carries no transform
+   once it settles; the end frame equals the resting style anyway. */
 .panel-in {
-  animation: panel-in var(--transition-base) var(--ease-entrance) both;
+  animation: panel-in var(--transition-base) var(--ease-entrance) backwards;
 }
 
 /* Right-rail tab panel: fades in each time it's shown (display:none →
@@ -334,17 +340,17 @@
 
 /* Help panel entrance */
 .help-panel-enter {
-  animation: panel-in var(--transition-base) var(--ease-entrance) forwards;
+  animation: panel-in var(--transition-base) var(--ease-entrance) backwards;
 }
 
 /* Quick-capture strip entrance — replayed on every summon via a key bump */
 .capture-strip-in {
-  animation: panel-in var(--transition-base) var(--ease-entrance) both;
+  animation: panel-in var(--transition-base) var(--ease-entrance) backwards;
 }
 
 /* Bulk action bar entrance */
 .bulk-action-bar-enter {
-  animation: panel-in var(--transition-base) var(--ease-entrance) forwards;
+  animation: panel-in var(--transition-base) var(--ease-entrance) backwards;
 }
 
 /* AI breakdown star bounce */
