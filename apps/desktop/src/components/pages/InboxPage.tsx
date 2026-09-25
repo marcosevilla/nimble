@@ -1,4 +1,6 @@
 import { subscribeDataChanges } from '@/lib/dataChanges'
+import { shellKeyBlocked } from '@/lib/keyGuard'
+import { hasOpenOverlay } from '@/lib/rowNav'
 import { useEffect, useCallback, useMemo, useState, useRef } from 'react'
 // Window-to-window event bus, not data access — the web build aliases
 // '@tauri-apps/api/event' to a no-op stub (src/platform/), so this stays
@@ -45,17 +47,6 @@ type InboxItem =
 
 // Row ids for keyboard navigation — unique across the two kinds.
 const rowId = (item: InboxItem) => `${item.kind}:${item.data.id}`
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null
-  if (!el) return false
-  return (
-    el.tagName === 'INPUT' ||
-    el.tagName === 'TEXTAREA' ||
-    el.isContentEditable ||
-    !!el.closest?.('[role="dialog"]')
-  )
-}
 
 const noop = () => {}
 
@@ -133,7 +124,8 @@ export function InboxPage() {
     if (currentPage !== 'inbox') return
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key !== 'c' || e.metaKey || e.ctrlKey || e.altKey) return
-      if (isEditableTarget(e.target)) return
+      // Fields (SELECT included) and open menus/popovers/dialogs keep `c`.
+      if (shellKeyBlocked(e.target as HTMLElement | null, hasOpenOverlay())) return
       e.preventDefault()
       inputRef.current?.focus()
     }
