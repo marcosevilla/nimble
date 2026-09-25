@@ -1,12 +1,12 @@
 import type { Priority } from '@nimble/types'
-import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { IconButton } from '@/components/shared/IconButton'
 import { Meta } from '@/components/shared/typography'
 import { cn } from '@/lib/utils'
-import { RefreshCw } from 'lucide-react'
+import { itemsOf, MAX_PER_BOX } from '@/lib/briefItems'
 import { BriefBox } from './BriefBox'
+import { BriefTaskRow } from './BriefTaskRow'
+import { useBriefItems } from './briefContext'
 
 /* Source is a licensed semantic hue (§1.4) but only on the 6px dot — the
    pill itself is the neutral LabelChipPill recipe (today P1-6). */
@@ -61,56 +61,31 @@ export function PrioritiesSkeleton() {
   )
 }
 
-/** Top priorities, as rendered. Generation lives in `useDailyPriorities`
- *  (TodayPage), so it runs whether the brief is expanded or compact; this
- *  box only shows the result. Snapshots pass `priorities` alone, which reads
- *  the stored set with no regenerate control. */
-export function PrioritiesBox({
-  priorities,
-  loading = false,
-  error = null,
-  noKey = false,
-  onRegenerate,
-}: {
-  priorities: Priority[] | null
-  loading?: boolean
-  error?: string | null
-  noKey?: boolean
-  /** Live only. Always offered when idle, so a key added in Settings can be
-   *  used the same day. */
-  onRegenerate?: () => void
-}) {
+/** Top priorities. Composed days (phase 3) show `brief_items` rows with a
+ *  status control and a one-line reason; days composed before phase 3 show
+ *  their frozen free-text `priorities`. Skeletons only while today composes. */
+export function PrioritiesBox({ priorities = null, count = MAX_PER_BOX }: { priorities?: Priority[] | null; count?: number }) {
+  const c = useBriefItems()
+  const rows = itemsOf(c?.items, 'priority', count)
+  const pending = !!c && rows.length === 0 && (c.view === 'pending' || c.items === undefined)
   return (
-    <BriefBox
-      title="Top priorities"
-      action={
-        onRegenerate && !loading && !error ? (
-          <IconButton size="sm" onClick={onRegenerate} aria-label="Regenerate priorities" title="Regenerate">
-            <RefreshCw className="size-3" />
-          </IconButton>
-        ) : undefined
-      }
-    >
-      {loading ? (
-        <PrioritiesSkeleton />
-      ) : error && onRegenerate ? (
-        <div className="space-y-2">
-          <Meta as="p">{error}</Meta>
-          <Button variant="outline" size="sm" onClick={onRegenerate}>
-            Try again
-          </Button>
+    <BriefBox title="Top priorities">
+      {rows.length > 0 ? (
+        <div className="divide-y divide-border/50">
+          {rows.map((item) => (
+            <BriefTaskRow key={item.id} item={item} readOnly={c?.readOnly ?? true} />
+          ))}
         </div>
+      ) : pending ? (
+        <PrioritiesSkeleton />
       ) : priorities && priorities.length > 0 ? (
         <div className="divide-y divide-border/50">
-          {priorities.map((p, i) => (
+          {priorities.slice(0, count).map((p, i) => (
             <PriorityCard key={i} priority={p} index={i} />
           ))}
         </div>
       ) : (
-        <div className="space-y-1">
-          <Meta as="p">Nothing pressing today. Pick something you want to do.</Meta>
-          {noKey && <Meta as="p">Add an Anthropic key in Settings for AI priorities.</Meta>}
-        </div>
+        <Meta as="p">Nothing pressing today. Pick something you want to do.</Meta>
       )}
     </BriefBox>
   )

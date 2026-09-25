@@ -821,7 +821,7 @@
       status: 'ready',
       source: 'nimble',
       // Phase-1 shape (string ids) plus one id this build doesn't know (B2 AC10).
-      layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault', 'quick_wins'],
+      layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault', 'not_a_module'],
       snapshot: {
         schedule: {
           events: [
@@ -886,6 +886,7 @@
       },
       snapshot_schema: 1,
       notes: null,
+      composed_at: null, compose_attempts: 0, model: null, input_tokens: null, output_tokens: null, error_code: null,
       generated_at: '2026-07-31 07:05:00',
       updated_at: '2026-07-31 07:05:00',
     },
@@ -902,6 +903,72 @@
   function briefTaskRef(t) {
     return { id: t.id, content: t.content, due_date: t.due_date, priority: t.priority, project_id: t.project_id }
   }
+  // ── Brief composition (phase 3) ─────────────────────────────────────────
+  // Mirrors nimble-core brief/compose.rs + db/brief_items.rs. Composition
+  // resolves after BRIEF_COMPOSE_MS (use page.clock in e2e) so the skeletons
+  // are observable. ?brief=fallback = the AI is unavailable (rule-based picks).
+  var briefScenario = new URLSearchParams(window.location.search).get('brief') || 'ai'
+  // ?regen=fail: Regenerate fails over AI picks (Rust writes nothing and errors).
+  var regenScenario = new URLSearchParams(window.location.search).get('regen') || 'ok'
+  var BRIEF_COMPOSE_MS = 800
+  var BRIEF_ITEMS = {} // date -> rows without the joined task
+
+  function briefItemRow(date, kind, taskId, position, body, origin) {
+    var t = TASKS.find(function (x) { return x.id === taskId })
+    var at = iso(TODAY, '07:00:05').replace('T', ' ')
+    return {
+      id: date + ':' + kind + ':' + taskId, date: date, module_id: kind === 'priority' ? 'priorities' : 'quick_wins',
+      kind: kind, title: t ? t.content : taskId, body: body, task_id: taskId, origin: origin, dedupe_key: kind + ':' + taskId,
+      action_kind: null, action_state: 'none', produced_ref: null, position: position, created_at: at, updated_at: at,
+      composed_at: at,
+    }
+  }
+
+  function withTask(row) {
+    var t = TASKS.find(function (x) { return x.id === row.task_id })
+    return Object.assign({}, row, {
+      task: t ? { status: t.status, completed: !!t.completed, due_date: t.due_date, content: t.content, description: t.description, project_id: t.project_id } : null,
+    })
+  }
+
+  function composeMock(date, bumpVersion) {
+    var brief = BRIEFS[date]
+    if (!brief) return null
+    var ai = briefScenario !== 'fallback'
+    var origin = ai ? 'ai' : 'rule'
+    var kept = (BRIEF_ITEMS[date] || []).filter(function (r) { return r.action_state !== 'none' })
+    var keptTasks = kept.map(function (r) { return r.task_id })
+    var fresh = [
+      briefItemRow(date, 'priority', 'task-01', 0, ai ? 'Review is at 11:30; the draft is the input.' : null, origin),
+      briefItemRow(date, 'priority', 'task-04', 1, ai ? 'It blocks the v1.5 release notes.' : null, origin),
+      briefItemRow(date, 'priority', 'task-05', 2, ai ? 'Ship day is Monday; polish lands today.' : null, origin),
+      briefItemRow(date, 'quick_help', 'task-06', 0, ai ? 'Claude can draft the three empty-state lines.' : null, origin),
+      briefItemRow(date, 'quick_help', 'task-12', 1, ai ? 'Claude can pull the Q2 numbers into bullets.' : null, origin),
+      briefItemRow(date, 'quick_self', 'task-10', 0, null, origin),
+      briefItemRow(date, 'quick_self', 'task-09', 1, null, origin),
+    ].filter(function (r) { return keptTasks.indexOf(r.task_id) === -1 })
+    BRIEF_ITEMS[date] = kept.concat(fresh)
+    var at = iso(TODAY, '07:00:05').replace('T', ' ')
+    fresh.forEach(function (r) { r.composed_at = at })
+    brief.status = ai ? 'ready' : 'fallback'
+    brief.composed_at = at
+    brief.compose_attempts = (brief.compose_attempts || 0) + 1
+    brief.model = 'claude-opus-5-5'
+    brief.error_code = ai ? null : 'no_key'
+    brief.input_tokens = ai ? 9120 : null
+    brief.output_tokens = ai ? 640 : null
+    if (bumpVersion) brief.version += 1
+    brief.snapshot = Object.assign({}, brief.snapshot, {
+      compose: { summary: ai ? 'A lighter morning: one call, then open time after lunch.' : '', origin: origin, wins: ai ? ['task-13'] : [] },
+    })
+    brief.updated_at = at
+    return brief
+  }
+
+  function afterCompose(fn) {
+    return new Promise(function (resolve) { setTimeout(function () { resolve(fn()) }, BRIEF_COMPOSE_MS) })
+  }
+
 
   // ── Brief settings (phase 2) ────────────────────────────────────────────
   // Mirrors nimble-core brief::settings. ?setup=fresh = a profile that never
@@ -920,6 +987,12 @@
       config_schema: [boolField('tomorrow_peek', 'Tomorrow peek'), boolField('free_block', 'Free block')] },
     { id: 'priorities', name: 'Top priorities', kind: 'ai', requires: ['ai'], default_enabled: true,
       config_schema: [choiceField('count', 'How many', [[1, '1'], [2, '2'], [3, '3']], 3)] },
+    // Phase 3 (brief/modules/quick_wins.rs): label pickers stored as label names.
+    { id: 'quick_wins', name: 'Quick wins', kind: 'ai', requires: [], default_enabled: true,
+      config_schema: [
+        { type: 'label', key: 'help_label', label: 'I can help', default_name: 'needs-claude' },
+        { type: 'label', key: 'self_label', label: 'Only you', default_name: 'quick' },
+      ] },
     { id: 'due_today', name: 'Due today', kind: 'live', requires: [], default_enabled: true,
       config_schema: [boolField('show_completed', 'Show completed')] },
     { id: 'still_open', name: 'Still open', kind: 'fixed', requires: [], default_enabled: true,
@@ -1399,11 +1472,53 @@
         snapshot: snapshot,
         snapshot_schema: 1,
         notes: null,
+        composed_at: null, compose_attempts: 0, model: null, input_tokens: null, output_tokens: null, error_code: null,
         generated_at: iso(TODAY, '07:00:00').replace('T', ' '),
         updated_at: iso(TODAY, '07:00:00').replace('T', ' '),
       }
       BRIEFS[date] = brief
       return withNotes(brief)
+    },
+    brief_items_list: function (args) {
+      // Like list_items: the brief's current composition plus acted-on rows.
+      var date = args && args.date
+      var stamp = BRIEFS[date] ? BRIEFS[date].composed_at : null
+      return (BRIEF_ITEMS[date] || [])
+        .filter(function (r) { return r.action_state !== 'none' || r.composed_at === stamp })
+        .map(withTask)
+    },
+    brief_compose_if_due: function (args) {
+      var date = args && args.date
+      if (date !== TODAY) return BRIEFS[date] || null
+      if (!BRIEFS[date]) commands.brief_ensure_snapshot({ date: date })
+      var b = BRIEFS[date]
+      if (b.composed_at && b.status === 'ready') return b
+      return afterCompose(function () { return composeMock(date, false) })
+    },
+    brief_regenerate: function (args) {
+      var date = args && args.date
+      if (!BRIEFS[date]) commands.brief_ensure_snapshot({ date: date })
+      if (regenScenario === 'fail') {
+        return new Promise(function (_resolve, reject) {
+          setTimeout(function () { reject(new Error('regenerate_failed: server_error')) }, BRIEF_COMPOSE_MS)
+        })
+      }
+      return afterCompose(function () { return composeMock(date, true) })
+    },
+    brief_item_set_state: function (args) {
+      var rows = []
+      Object.keys(BRIEF_ITEMS).forEach(function (d) { rows = rows.concat(BRIEF_ITEMS[d]) })
+      var row = rows.find(function (r) { return r.id === args.id })
+      if (!row) return Promise.reject(new Error('brief_item_missing'))
+      row.action_state = args.state
+      row.action_kind = args.actionKind || null
+      row.produced_ref = args.producedRef || null
+      row.updated_at = iso(TODAY, '09:45:00').replace('T', ' ')
+      // Like db::brief_items::set_item_state: re-stamped with the day's current
+      // composition, so an Undo after a Regenerate stays listed.
+      var owner = BRIEFS[row.date]
+      if (owner && owner.composed_at) row.composed_at = owner.composed_at
+      return withTask(row)
     },
     brief_settings_get: function () { return briefSettingsView() },
     brief_settings_save: function (args) {

@@ -11,6 +11,11 @@
 
 pub mod modules;
 pub mod settings;
+pub mod candidates;
+pub mod prompt;
+pub mod validate;
+pub mod fallback;
+pub mod compose;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -88,6 +93,7 @@ pub fn manifests() -> Vec<ModuleManifest> {
         weather::Weather::manifest(),
         schedule::Schedule::manifest(),
         priorities::Priorities::manifest(),
+        quick_wins::QuickWins::manifest(),
         due_today::DueToday::manifest(),
         still_open::StillOpen::manifest(),
         habits::Habits::manifest(),
@@ -103,6 +109,7 @@ pub async fn gather_module(id: &str, ctx: &BriefCtx<'_>, config: &Value) -> Opti
         "weather" => weather::Weather.gather(ctx, config).await,
         "schedule" => schedule::Schedule.gather(ctx, config).await,
         "priorities" => priorities::Priorities.gather(ctx, config).await,
+        "quick_wins" => quick_wins::QuickWins.gather(ctx, config).await,
         "due_today" => due_today::DueToday.gather(ctx, config).await,
         "still_open" => still_open::StillOpen.gather(ctx, config).await,
         "habits" => habits::Habits.gather(ctx, config).await,
@@ -146,7 +153,7 @@ mod tests {
         for m in manifests() {
             assert!(gather_module(m.id, &ctx, &Value::Null).await.is_some(), "{} has no gather arm", m.id);
         }
-        assert!(gather_module("quick_wins", &ctx, &Value::Null).await.is_none());
+        assert!(gather_module("not_a_module", &ctx, &Value::Null).await.is_none());
     }
 
     #[test]

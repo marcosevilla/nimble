@@ -1,36 +1,25 @@
 import type { Priority } from '@nimble/types'
 import { configValue } from '@/lib/briefLayout'
+import { legacyPriorities, stripTitles } from '@/lib/briefItems'
 import { cn } from '@/lib/utils'
 import { PrioritiesBox } from '../PrioritiesBox'
-import { useBriefLive } from '../briefLive'
+import { useBriefItems } from '../briefContext'
 import { STRIP_DOT } from '../stripSegment'
 import type { BriefBoxProps, BriefStripProps } from '../briefModules'
 
+/** Top priorities (phase 3): composed `brief_items` rows from
+ *  `BriefItemsContext`; days composed before phase 3 show their frozen
+ *  free-text `priorities` payload. */
 export function PrioritiesModule({ mode, config, payload }: BriefBoxProps) {
-  const live = useBriefLive()
   const count = configValue(config, 'count', 3)
-  if (mode === 'snapshot') {
-    return <PrioritiesBox priorities={Array.isArray(payload) ? (payload as Priority[]).slice(0, count) : null} />
-  }
-  if (!live) return null
-  const p = live.priorities
-  const list = p.list ? p.list.slice(0, count) : null
-  if (mode === 'preview') return <PrioritiesBox priorities={list} loading={p.list === undefined || p.generating} />
-  return (
-    <PrioritiesBox
-      priorities={list}
-      loading={p.list === undefined || (p.list === null && !live.ready) || p.generating}
-      error={p.error}
-      noKey={p.noKey}
-      onRegenerate={p.regenerate}
-    />
-  )
+  const legacy = mode === 'snapshot' && Array.isArray(payload) ? (payload as Priority[]) : null
+  return <PrioritiesBox priorities={legacy} count={count} />
 }
 
 /** Compact strip: the top `count` priority titles as numbered chips. */
 export function PrioritiesStrip({ config }: BriefStripProps) {
-  const live = useBriefLive()
-  const top = (live?.priorities.list ?? []).slice(0, configValue(config, 'count', 3))
+  const c = useBriefItems()
+  const top = (stripTitles(c?.items, legacyPriorities(c?.brief)) ?? []).slice(0, configValue(config, 'count', 3))
   if (top.length === 0) return null
   return (
     <div className={cn('flex min-w-0 flex-1 items-center gap-2', STRIP_DOT)}>

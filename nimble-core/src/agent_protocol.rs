@@ -22,6 +22,8 @@ pub enum Domain {
     Labels,
     Captures,
     Activity,
+    /// Morning brief rows and composition (phase 3).
+    Brief,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]

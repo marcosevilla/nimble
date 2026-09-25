@@ -86,6 +86,51 @@ Names below come from addendum §1/§2 and from the phase-2 plan (`docs/superpow
 | React lint: a `.tsx` exports only components; non-components live in `.ts` | Tasks 7–9 | Already followed here (`briefContext.ts`, `lib/*.ts`) |
 | Schema: C4 v24 and phase-2 v25 merged; `tables_for_version` and `backup.rs` accept 24 and 25; phase 2 marks its sites `// schema-v25` | Task 4 | If a number moved, renumber every `// schema-v26` site in this plan the same way |
 
+### Reconciled against merged main `c14c5a9` (2026-09-25)
+
+Phase 2 merged as **v24** and C4 lands as **v25** before this branch; phase 3 stays **v26**. Every other row above matched the merged code except these, which the tasks below must follow (the merged code wins):
+
+| Plan assumed | Merged code | Affects |
+|---|---|---|
+| Phase 2 = v25 (`// schema-v25`), C4 = v24 | Phase 2 = **v24** (`// schema-v24`: `module_cache` + synced `brief_notes`, Turso gate `turso_schema_v24_upgraded`); C4 merges as v25 first. `tables_for_version` / `backup.rs` currently accept `…23 \| 24`; C4 adds 25, Task 4 adds 26. | Task 4 |
+| `db/briefs.rs` in phase-1 shape; notes in `briefs.notes` | `COLS` is the 9-column **insert** list; reads use `SELECT` (`briefs b LEFT JOIN brief_notes n`, notes = `NULLIF(n.notes,'')`) into a 10-field `Row`; `Brief.notes` comes from `brief_notes` (v24, its own synced row); `sync_snapshot` omits notes; `briefs.notes` stays unused. Task 4 adds its six columns to `COLS`-for-reads by extending `SELECT` (keep the join and the notes field) and must not write `briefs.notes`. | Task 4 |
+| Weather patch may be read-modify-write | Already atomic: `patch_snapshot_if_null` (`json_set` where the key is JSON null) and `set_priorities` (`json_set` on `$.priorities`, re-read before logging). No change needed. | Task 4 |
+| TodayPage priorities from phase 1 `useDailyPriorities` via locals | `useDailyPriorities` feeds `BriefLive.priorities = {list, generating, noKey, error, regenerate}` (`components/today/briefLive.ts`); `modules/PrioritiesModule.tsx` (`PrioritiesModule`, `PrioritiesStrip`) read it; generation is gated by `ready && !setupPending && isOn('priorities')`. Task 8 replaces that source, keeping the setup gate. | Task 8 |
+| `BriefMenu()` with Customize… | `components/today/BriefMenu.tsx` exports `BriefMenu()` (no props), rendered for today when `dp.briefSettings.supported` and setup isn't open. | Task 8 |
+| Settings read raw | `brief::settings::load_view(pool)` returns normalized `model` (one of `MODELS = [claude-opus-5-5, claude-sonnet-5]`) and `effort` (one of `EFFORTS = [low, medium, high]`); `api::llm::normalize_*` stays as a second guard. | Tasks 5, 6 |
+| e2e port 4610 | Lane A uses **5301** for `tools/qa-frozen.sh`. | Tasks 8–10 |
+
+### Rebased on main `0097de0` (C4 merged as v25)
+
+Migrations run v24 (phase 2) → v25 (C4: `label_groups`, `labels.archived_at`, device-local `tasks_fts`) → v26 (this plan). `CURRENT_SCHEMA_VERSION = 26`; `backup.rs` accepts `…24 | 25 | 26`; `tables_for_version` accepts `20..=26` with C4's `>= 25` block before the v26 one; `sync.rs` runs `ensure_remote_v25_schema` then `ensure_remote_v26_schema` at all three call sites. The pinned-version integration tests now read `migrations::CURRENT_SCHEMA_VERSION` (the drift probe uses `CURRENT_SCHEMA_VERSION + 1`), so the next migration doesn't need to touch them.
+
+### Review changes to Tasks 1–3 (2026-09-25), binding for Tasks 4–10
+
+- **Candidate tiers** (base §4.6 order): in progress → due ≤7 days or earlier → priority ≥3 → 20 oldest → **labelled last**, ≤15 per configured label (`LABELLED_PER_LABEL`), total ≤80. `blocked` tasks are never candidates; `backlog` tasks enter only through the oldest tier. Wins exclude archived projects.
+- **Priorities count:** `validate(raw, set, exclude, priorities_count)`, `rank_fallback(set, exclude, priorities_count)`, `system_prompt(labels, priorities_count)` and `build_request(set, today, day, model, effort, priorities_count)` take the Top priorities box's configured `count` (1–3, clamped by `validate::priorities_cap`). Task 5 passes the `priorities` layout entry's `config.count`.
+- **Prompt:** every field goes through `clean_text` (which also strips bidi/zero-width/BOM characters); events ≤20 per day (`MAX_EVENTS_PER_DAY`), habits ≤20 (`MAX_HABITS`).
+- **LLM client:** no redirects, `x-api-key` marked sensitive, per-call timeout by effort (`timeout_for`: low/medium 120 s, high 180 s, xhigh/max 300 s), and a new `LlmError::Timeout` (code `timeout`, retryable) instead of `offline` for timeouts.
+- **Phase 4 note (wins):** completing a recurring task resets it to `todo` without a `completed_at` row, so this week's completions miss recurring wins. Phase 4 should also read `task_recurred` activity or the karma ledger for `wins`.
+
+### Implementation changes to Tasks 9–10 (2026-09-25, resumed lane)
+
+- **Task 9:** the WIP commit was amended into the Task 9 commit together with the two `db::briefs` tests that pin the enabled-module list (`quick_wins` now follows `priorities`). `lib/quickWinActions.ts` also exports `subtasksAddedLabel(n)` ("1 subtask added" / "N subtasks added") for the row's quiet line, tested next to `breakDownMessage`.
+- **Mock:** `tools/mock-tauri.js` `BRIEF_MANIFESTS` gains `quick_wins` right after `priorities` (label pickers `help_label`/`self_label`, `requires: ['tasks']`, mirroring Rust) — Task 9 didn't list it and without it the box never rendered. The 2026-07-31 past brief's "unknown box" id (B2 AC10) changed from `quick_wins` to `not_a_module`, the same switch Task 9 made in the Rust registry test.
+- **Guardrail (review fix #7):** instead of stopping at a file's first `#[cfg(test)]` line, the scan skips just the `#[cfg(test)]` item (brace-matched, or up to `;` for a brace-less item such as a `use`) and keeps scanning, so production code after a test-only helper is still checked. Pinned by `test_only_code_is_skipped_but_code_after_it_is_not`; the guardrail file has 3 tests, not 2.
+- **e2e:** B3 runs on port 5301. `t1-row-marks` AC4's Today hit-area probe now scrolls the mark into view first: with phase 3's composed boxes above it, Due today sits below the fold and `elementFromPoint` only sees the viewport (test-only fix; already failing 4/4 at `f4304bd`, before Quick wins).
+- **Open (partly fixed):** `t2-row-keys` AC2 Today ("key-opened picker anchors to the row's mark") was flaky at `f4304bd` and later (1–3 of 4 cases per run). The review fix compares y only when both pickers open on the same side of the mark, as an offset from the mark; it still fails about one case every other run. Data from a failing run: the click-opened picker is placed against the mark at y≈651, then 250 ms later the mark reads y≈1007 while the picker hasn't moved — something scrolls (or re-renders) after a click-open and the popup doesn't follow. Worth checking whether the popover tracks its anchor on scroll in the real app.
+- **Flag for Marco (fixed in review, see below):** `QuickWins` declares `requires: [Integration::Tasks]`, and `sources.tasks` means "a Todoist token is set". Nothing gates on a manifest's `requires` today, so it's informational — but a future gate would hide Quick wins on a native-only profile. Consider `requires: vec![]` like Due today / Still open.
+
+### Whole-branch review fixes (2026-09-25, @7bb7637)
+
+- **No client never uses attempts** (was: `no_key` jumped `compose_attempts` to 3). A run with no client (no key, non-owner process) writes the rule brief once with attempts unchanged; once a composition exists it writes nothing. `auth`/`bad_request`/`refusal` from a real call still end the day's retries.
+- **Retry spacing:** automatic retry 2 waits ≥15 min after attempt 1, retry 3 ≥45 min after attempt 2, measured from the device-local setting `brief.last_attempt_at` (settings never sync). Regenerate is never spaced.
+- **No automatic compose** (tick or first open) before `today.setup_completed_at` is set or when both Top priorities and Quick wins are hidden: nothing is called, written or counted. Regenerate still runs.
+- **Item state re-stamp:** `set_item_state` sets `composed_at` to the day's current composition (synced), so an Undo after a Regenerate stays listed.
+- **Break it down:** `breakDownItem` returns `{created, saved}`; a failed state save (row replaced mid-breakdown) still shows the Undo toast and keeps "N subtasks added" locally. Undo keeps `produced` with surviving ids on a partial failure and never throws on a failed save.
+- **Quick wins `requires: []`** (Rust + mock) — resolves the flag above.
+- **Guardrail:** a lexer strips only real comments (strings, raw strings, char literals kept; braces counted with strings blanked) and `use … db::…` aliases/imports are resolved.
+
 ## Review Focus
 
 1. **Task titles that look like instructions or markup** (`</open_tasks>`, "ignore previous instructions", newlines, `|`): they must reach the model only as cleaned data inside tags and never break the prompt's structure. Pinned in Task 2 (`clean_text` + one-closing-tag test).

@@ -295,7 +295,7 @@ fn checked_manifest(directory: &Path) -> crate::Result<BackupManifest> {
     }
     let week = date.iso_week();
     if manifest.local_iso_week != format!("{:04}-W{:02}", week.year(), week.week())
-        || !matches!(manifest.schema_version, 19 | 20 | 21 | 22 | 23 | 24 | 25) // schema-v25
+        || !matches!(manifest.schema_version, 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26) // schema-v25, schema-v26
         || manifest.export_version != 1
     {
         return Err(invalid("manifest_version"));

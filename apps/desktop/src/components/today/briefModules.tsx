@@ -3,6 +3,7 @@ import type { Brief, BriefLayoutEntry } from '@nimble/types'
 import { WeatherModule, WeatherStrip } from './modules/WeatherModule'
 import { ScheduleModule, ScheduleStrip } from './modules/ScheduleModule'
 import { PrioritiesModule, PrioritiesStrip } from './modules/PrioritiesModule'
+import { QuickWinsBox } from './QuickWinsBox'
 import { DueTodayBox } from './modules/DueTodayBox'
 import { StillOpenModule } from './modules/StillOpenModule'
 import { HabitsBox } from './modules/HabitsBox'
@@ -49,6 +50,7 @@ export const BRIEF_MODULES: Record<string, BriefModuleView> = {
   weather: { Box: WeatherModule, Strip: WeatherStrip, slot: 'header' },
   schedule: { Box: ScheduleModule, Strip: ScheduleStrip },
   priorities: { Box: PrioritiesModule, Strip: PrioritiesStrip },
+  quick_wins: { Box: QuickWinsBox },
   due_today: { Box: DueTodayBox },
   still_open: { Box: StillOpenModule },
   habits: { Box: HabitsBox },

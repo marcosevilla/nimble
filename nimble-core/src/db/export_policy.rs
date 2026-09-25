@@ -57,9 +57,10 @@ pub(crate) const TABLES: &[TablePolicy] = &[
 /// V24 adds the device-local `module_cache` (reviewed, excluded: a cache, never portable data)
 /// and the synced `brief_notes` table (reviewed, included: the day's scratchpad). (schema-v24)
 /// V25 (C4) adds reviewed, included label_groups + labels.archived_at; tasks_fts is device-local and excluded.
+/// V26 adds the reviewed, included `brief_items` table and `briefs.composed_at`/`compose_attempts`. (schema-v26)
 pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
     if version == 19 { return Some(TABLES.to_vec()); }
-    if !(20..=25).contains(&version) { return None; } // schema-v25
+    if !(20..=26).contains(&version) { return None; } // schema-v25, schema-v26
     let mut tables = TABLES.to_vec();
     for policy in &mut tables {
         match policy.name {
@@ -118,6 +119,14 @@ pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
             }
         }
         tables.push(table!("label_groups"; ["id","name","position","exclusive","system","created_at","updated_at"]; ["id","name","position","exclusive","system","created_at","updated_at"]));
+    }
+    if version >= 26 { // schema-v26
+        for policy in &mut tables {
+            if policy.name == "briefs" {
+                *policy = table!("briefs"; ["date","version","status","source","layout_json","snapshot_json","snapshot_schema","energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at","composed_at","compose_attempts"]; ["date","version","status","source","layout_json","snapshot_json","snapshot_schema","energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at","composed_at","compose_attempts"]; ["date"]);
+            }
+        }
+        tables.push(table!("brief_items"; ["id","date","module_id","kind","title","body","task_id","origin","dedupe_key","action_kind","action_state","produced_ref","position","created_at","updated_at","composed_at"]; ["id","date","module_id","kind","title","body","task_id","origin","dedupe_key","action_kind","action_state","produced_ref","position","created_at","updated_at","composed_at"]));
     }
     tables.sort_by_key(|policy| policy.name);
     Some(tables)

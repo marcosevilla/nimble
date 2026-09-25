@@ -397,9 +397,60 @@ pub struct Brief {
     pub layout: serde_json::Value,     // ["schedule","priorities","due_today","still_open","vault"]
     pub snapshot: serde_json::Value,   // BriefSnapshotV1
     pub snapshot_schema: i64,          // 1
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub input_tokens: Option<i64>,
+    #[serde(default)]
+    pub output_tokens: Option<i64>,
+    #[serde(default)]
+    pub error_code: Option<String>,
+    /// Set when the AI slots were composed (AI or rule-based); null = shell only.
+    #[serde(default)]
+    pub composed_at: Option<String>,
+    #[serde(default)]
+    pub compose_attempts: i64,
     pub notes: Option<String>,
     pub generated_at: String,
     pub updated_at: String,
+}
+
+/// Live state of the task a brief item points at, joined at read time.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct BriefItemTask {
+    pub status: String,
+    pub completed: bool,
+    pub due_date: Option<String>,
+    pub content: String,
+    pub description: Option<String>,
+    pub project_id: String,
+}
+
+/// One row the brief shows with its own state (addendum §5, schema v26).
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct BriefItem {
+    pub id: String,
+    pub date: String,
+    pub module_id: String,
+    pub kind: String,          // priority | quick_help | quick_self
+    pub title: String,         // task title when composed
+    pub body: Option<String>,  // the one-line reason
+    pub task_id: Option<String>,
+    pub origin: String,        // ai | rule
+    pub dedupe_key: Option<String>,
+    pub action_kind: Option<String>,
+    pub action_state: String,  // none | produced | dismissed | confirmed
+    pub produced_ref: Option<String>,
+    pub position: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    /// The `briefs.composed_at` of the composition that wrote it: a list
+    /// shows only the brief's current composition plus acted-on rows, so two
+    /// Macs composing the same day never merge their picks.
+    #[serde(default)]
+    pub composed_at: Option<String>,
+    #[serde(default)]
+    pub task: Option<BriefItemTask>,
 }
 
 /// Where the brief's weather comes from (`brief.location`, addendum §2).

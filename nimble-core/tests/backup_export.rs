@@ -32,7 +32,7 @@ async fn export_is_repeatable_typed_and_excludes_integration_state() {
     assert!(data.get("settings").is_none());
     assert!(data.get("vault_notes").is_some());
     let format: serde_json::Value = serde_json::from_slice(&first.format).unwrap();
-    assert_eq!(format["schema_version"], 25); // schema-v25
+    assert_eq!(format["schema_version"], nimble_core::db::migrations::CURRENT_SCHEMA_VERSION); // schema-v26
     assert_eq!(format["export_version"], 1);
     close(pool, path).await;
 }
@@ -56,7 +56,7 @@ async fn schema_drift_fails_closed() {
     close(pool, path).await;
 
     let (pool, path) = nimble_core::test_util::file_pool().await;
-    sqlx::query("INSERT INTO schema_version(version,description,applied_at) VALUES (26,'future','2026-09-21')") // schema-v25: current + 1
+    sqlx::query("INSERT INTO schema_version(version,description,applied_at) VALUES (?,'future','2026-09-21')").bind(nimble_core::db::migrations::CURRENT_SCHEMA_VERSION + 1) // one past current
         .execute(&pool).await.unwrap();
     assert!(export_portable(&pool).await.is_err());
     close(pool, path).await;

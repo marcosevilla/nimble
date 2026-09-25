@@ -9,26 +9,51 @@ use crate::types::{Brief, Priority};
 
 const SNAPSHOT_SCHEMA: i64 = 1;
 
-type Row = (String, i64, String, String, String, String, i64, Option<String>, String, String);
-/// What a snapshot INSERT writes. The phase-1 `briefs.notes` column is left
-/// unused: notes live in `brief_notes` (v24, their own synced row).
+/// What a snapshot INSERT writes; the rest take their defaults. The phase-1
+/// `briefs.notes` column is left unused: notes live in `brief_notes` (v24,
+/// their own synced row).
 const COLS: &str = "date, version, status, source, layout_json, snapshot_json, snapshot_schema, generated_at, updated_at";
-/// A brief as read, with the day's notes joined in (blank reads as none).
+/// A brief as read, with the day's notes joined in (blank reads as none) and
+/// the v26 composition columns.
 const SELECT: &str = "SELECT b.date, b.version, b.status, b.source, b.layout_json, b.snapshot_json, b.snapshot_schema,
-    NULLIF(n.notes, ''), b.generated_at, b.updated_at FROM briefs b LEFT JOIN brief_notes n ON n.date = b.date";
+    b.model, b.input_tokens, b.output_tokens, b.error_code, b.composed_at, b.compose_attempts,
+    NULLIF(n.notes, '') AS notes, b.generated_at, b.updated_at FROM briefs b LEFT JOIN brief_notes n ON n.date = b.date";
 const NOTES_MAX: usize = 20_000;
 
-fn to_brief(r: Row) -> Brief {
+#[derive(sqlx::FromRow)]
+struct BriefRow {
+    date: String,
+    version: i64,
+    status: String,
+    source: String,
+    layout_json: String,
+    snapshot_json: String,
+    snapshot_schema: i64,
+    model: Option<String>,
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    error_code: Option<String>,
+    composed_at: Option<String>,
+    compose_attempts: i64,
+    notes: Option<String>,
+    generated_at: String,
+    updated_at: String,
+}
+
+fn to_brief(r: BriefRow) -> Brief {
     Brief {
-        date: r.0, version: r.1, status: r.2, source: r.3,
-        layout: serde_json::from_str(&r.4).unwrap_or(serde_json::Value::Null),
-        snapshot: serde_json::from_str(&r.5).unwrap_or(serde_json::Value::Null),
-        snapshot_schema: r.6, notes: r.7, generated_at: r.8, updated_at: r.9,
+        date: r.date, version: r.version, status: r.status, source: r.source,
+        layout: serde_json::from_str(&r.layout_json).unwrap_or(serde_json::Value::Null),
+        snapshot: serde_json::from_str(&r.snapshot_json).unwrap_or(serde_json::Value::Null),
+        snapshot_schema: r.snapshot_schema,
+        model: r.model, input_tokens: r.input_tokens, output_tokens: r.output_tokens, error_code: r.error_code,
+        composed_at: r.composed_at, compose_attempts: r.compose_attempts,
+        notes: r.notes, generated_at: r.generated_at, updated_at: r.updated_at,
     }
 }
 
 pub async fn get_brief(pool: &SqlitePool, date: &str) -> crate::Result<Option<Brief>> {
-    let row: Option<Row> = sqlx::query_as(&format!("{SELECT} WHERE b.date = ?"))
+    let row: Option<BriefRow> = sqlx::query_as(&format!("{SELECT} WHERE b.date = ?"))
         .bind(date).fetch_optional(pool).await?;
     Ok(row.map(to_brief))
 }
@@ -43,8 +68,9 @@ fn sync_snapshot(b: &Brief) -> String {
     serde_json::json!({
         "date": b.date, "version": b.version, "status": b.status, "source": b.source,
         "layout_json": b.layout.to_string(), "snapshot_json": b.snapshot.to_string(),
-        "snapshot_schema": b.snapshot_schema,
-        "generated_at": b.generated_at, "updated_at": b.updated_at,
+        "snapshot_schema": b.snapshot_schema, "model": b.model, "input_tokens": b.input_tokens,
+        "output_tokens": b.output_tokens, "error_code": b.error_code, "composed_at": b.composed_at,
+        "compose_attempts": b.compose_attempts, "generated_at": b.generated_at, "updated_at": b.updated_at,
     }).to_string()
 }
 
@@ -87,7 +113,9 @@ pub async fn ensure_snapshot(pool: &SqlitePool, date: &str, today: &str) -> crat
     let brief = Brief {
         date: date.into(), version: 1, status: if partial { "partial" } else { "ready" }.into(), source: "nimble".into(),
         layout: serde_json::json!(used), snapshot,
-        snapshot_schema: SNAPSHOT_SCHEMA, notes: None, generated_at: now.clone(), updated_at: now,
+        snapshot_schema: SNAPSHOT_SCHEMA,
+        model: None, input_tokens: None, output_tokens: None, error_code: None, composed_at: None, compose_attempts: 0,
+        notes: None, generated_at: now.clone(), updated_at: now,
     };
     let inserted = sqlx::query(&format!("INSERT OR IGNORE INTO briefs ({COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"))
         .bind(&brief.date).bind(brief.version).bind(&brief.status).bind(&brief.source)
@@ -144,6 +172,100 @@ pub async fn patch_snapshot_if_null(pool: &SqlitePool, date: &str, key: &str, va
     Ok(true)
 }
 
+/// Everything one composition attempt writes (addendum §5 "single txn").
+pub struct CompositionRecord {
+    pub date: String,
+    /// "ready" (AI answered) or "fallback" (rule-based).
+    pub status: String,
+    pub model: Option<String>,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub error_code: Option<String>,
+    /// `{summary, origin, wins}` → `snapshot_json.compose`.
+    pub compose: serde_json::Value,
+    pub items: Vec<crate::db::brief_items::NewBriefItem>,
+    /// The new total for today.
+    pub attempts: i64,
+    /// Regenerate: `version + 1`.
+    pub bump_version: bool,
+    /// Regenerate: freshly gathered `(layout_json, snapshot_json)`.
+    pub regathered: Option<(serde_json::Value, serde_json::Value)>,
+    /// The snapshot is `partial` (a module failed to gather): an AI success
+    /// keeps that flag instead of flipping the row to `ready`.
+    pub partial: bool,
+    /// Local "YYYY-MM-DD HH:MM:SS".
+    pub now: String,
+}
+
+/// Patch the day's row and replace its un-acted items in one transaction.
+/// No row for the date → error, nothing written.
+pub async fn record_composition(pool: &SqlitePool, rec: &CompositionRecord) -> crate::Result<Brief> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let row: Option<BriefRow> = sqlx::query_as(&format!("{SELECT} WHERE b.date = ?"))
+        .bind(&rec.date).fetch_optional(&mut *tx).await?;
+    let mut b = to_brief(row.ok_or_else(|| crate::Error::Other("brief_missing".into()))?);
+    if let Some((layout, snapshot)) = &rec.regathered {
+        b.layout = layout.clone();
+        b.snapshot = snapshot.clone();
+    }
+    if !b.snapshot.is_object() {
+        b.snapshot = serde_json::json!({});
+    }
+    b.snapshot["compose"] = rec.compose.clone();
+    b.status = if rec.status == "ready" && rec.partial { "partial".into() } else { rec.status.clone() };
+    b.model = rec.model.clone();
+    b.input_tokens = rec.input_tokens;
+    b.output_tokens = rec.output_tokens;
+    b.error_code = rec.error_code.clone();
+    b.composed_at = Some(rec.now.clone());
+    b.compose_attempts = rec.attempts;
+    if rec.bump_version {
+        b.version += 1;
+    }
+    b.updated_at = rec.now.clone();
+    sqlx::query(
+        "UPDATE briefs SET version = ?, status = ?, layout_json = ?, snapshot_json = ?, model = ?, input_tokens = ?,
+         output_tokens = ?, error_code = ?, composed_at = ?, compose_attempts = ?, updated_at = ? WHERE date = ?",
+    )
+    .bind(b.version).bind(&b.status).bind(b.layout.to_string()).bind(b.snapshot.to_string()).bind(&b.model)
+    .bind(b.input_tokens).bind(b.output_tokens).bind(&b.error_code).bind(&b.composed_at).bind(b.compose_attempts)
+    .bind(&b.updated_at).bind(&b.date)
+    .execute(&mut *tx).await?;
+    let cols = serde_json::json!(["version","status","layout_json","snapshot_json","model","input_tokens","output_tokens","error_code","composed_at","compose_attempts","updated_at"]).to_string();
+    sync::append_sync_log_tx(&mut tx, "briefs", &b.date, "UPDATE", Some(&cols), Some(&sync_snapshot(&b))).await?;
+    crate::db::brief_items::replace_unacted_tx(&mut tx, &rec.date, &rec.items, &rec.now, &rec.now).await?;
+    tx.commit().await?;
+    Ok(b)
+}
+
+/// Count an automatic attempt before its network call, so a crash, quit or
+/// failed write mid-call still uses one of the day's 3 attempts. Returns the
+/// new count. Device bookkeeping: the next composition write syncs it.
+pub async fn begin_attempt(pool: &SqlitePool, date: &str) -> crate::Result<i64> {
+    let n: Option<i64> = sqlx::query_scalar(
+        "UPDATE briefs SET compose_attempts = compose_attempts + 1 WHERE date = ? RETURNING compose_attempts",
+    )
+    .bind(date)
+    .fetch_optional(pool)
+    .await?;
+    n.ok_or_else(|| crate::Error::Other("brief_missing".into()))
+}
+
+/// A retry that failed again while rule-based picks are already on screen:
+/// count it, keep every row as it is (never re-sort under the user).
+pub async fn record_failed_retry(pool: &SqlitePool, date: &str, attempts: i64, error_code: &str, now: &str) -> crate::Result<Brief> {
+    let changed = sqlx::query("UPDATE briefs SET compose_attempts = ?, error_code = ?, updated_at = ? WHERE date = ?")
+        .bind(attempts).bind(error_code).bind(now).bind(date)
+        .execute(pool).await?.rows_affected();
+    if changed == 0 {
+        return Err(crate::Error::Other("brief_missing".into()));
+    }
+    let b = get_brief(pool, date).await?.ok_or_else(|| crate::Error::Other("brief_missing".into()))?;
+    let cols = serde_json::json!(["compose_attempts", "error_code", "updated_at"]).to_string();
+    sync::append_sync_log(pool, "briefs", date, "UPDATE", Some(&cols), Some(&sync_snapshot(&b))).await.ok();
+    Ok(b)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::test_util::test_pool;
@@ -174,10 +296,10 @@ mod tests {
         assert_eq!(b.status, "ready");
         // (replaces the LAYOUT_V1 assertion)
         let ids: Vec<&str> = b.layout.as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, ["weather", "schedule", "priorities", "due_today", "still_open", "vault"]);
+        assert_eq!(ids, ["weather", "schedule", "priorities", "quick_wins", "due_today", "still_open", "vault"]);
         let mut keys: Vec<&String> = b.snapshot.as_object().unwrap().keys().collect();
         keys.sort();
-        assert_eq!(keys, ["due_today", "priorities", "schedule", "still_open", "vault", "weather"]);
+        assert_eq!(keys, ["due_today", "priorities", "quick_wins", "schedule", "still_open", "vault", "weather"]);
         let s = &b.snapshot;
         assert_eq!(s["due_today"][0]["content"], "Today A");
         assert_eq!(s["still_open"]["total"], 2);
@@ -244,7 +366,7 @@ mod tests {
                 {"id":"still_open","enabled":true,"config":{"count":3}}]"#).await.unwrap();
         let b = super::ensure_snapshot(&pool, "2026-09-23", "2026-09-23").await.unwrap().unwrap();
         let ids: Vec<&str> = b.layout.as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, ["due_today", "still_open", "weather", "priorities", "vault"], "stored order, then enabled defaults");
+        assert_eq!(ids, ["due_today", "still_open", "weather", "priorities", "quick_wins", "vault"], "stored order, then enabled defaults");
         assert_eq!(b.layout[1]["config"]["count"], 3, "the layout records the config used");
         assert!(b.snapshot.get("schedule").is_none(), "a hidden module is not gathered");
         assert_eq!(b.snapshot["still_open"]["total"], 4);

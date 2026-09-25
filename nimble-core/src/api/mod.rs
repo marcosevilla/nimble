@@ -4,3 +4,4 @@ pub mod calendar;
 pub mod todoist_migration;
 pub mod updater;
 pub mod weather;
+pub mod llm;

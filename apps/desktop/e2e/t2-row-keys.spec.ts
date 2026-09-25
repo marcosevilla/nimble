@@ -361,6 +361,7 @@ for (const key of ['tasks', 'today'] as const) {
       await expectPicker(page, kind, '(click)')
       await page.waitForTimeout(250)
       const clickBox = (await popupRects(page))[0]
+      const clickAnchor = await rectOf(m)
       await closeAllPopups(page)
 
       await focusByKeyboard(page, s, s.row)
@@ -368,7 +369,14 @@ for (const key of ['tasks', 'today'] as const) {
       const [p] = await popupRects(page)
       const anchor = await rectOf(m)
       expect(Math.abs(p.left - clickBox.left), 'same x as the click-opened picker').toBeLessThanOrEqual(4)
-      expect(Math.abs(p.top - clickBox.top), 'same y as the click-opened picker').toBeLessThanOrEqual(4)
+      // Click and keyboard focus can scroll a row near the fold differently,
+      // so a picker may flip to the other side of the mark (by exactly its
+      // height). Same side → same offset from the mark; either side must
+      // stay adjacent (checked below).
+      const below = (r: Rect, a: Rect) => r.top >= a.bottom - 6
+      if (below(p, anchor) === below(clickBox, clickAnchor)) {
+        expect(Math.abs((p.top - anchor.top) - (clickBox.top - clickAnchor.top)), 'same y as the click-opened picker').toBeLessThanOrEqual(4)
+      }
       expect(Math.min(p.right, anchor.right) - Math.max(p.left, anchor.left), 'popup overlaps the mark horizontally').toBeGreaterThan(0)
       expectVerticallyAdjacent(p, anchor, `${kind} mark`)
       await expectPopupsInViewport(page)

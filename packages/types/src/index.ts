@@ -120,8 +120,63 @@ export interface Brief {
   snapshot_schema: number
   /** Today's scratchpad (the `notes` module). */
   notes: string | null
+  model: string | null
+  input_tokens: number | null
+  output_tokens: number | null
+  /** Why the last attempt fell back (`no_key`, `offline`, `refusal`, …). */
+  error_code: string | null
+  /** Set once the AI slots were composed (AI or rule-based); null = shell only. */
+  composed_at: string | null
+  compose_attempts: number
   generated_at: string
   updated_at: string
+}
+
+/** `snapshot_json.compose`: the day's AI output that isn't a row. */
+export interface BriefCompose {
+  summary: string
+  origin: 'ai' | 'rule'
+  /** Task ids of this week's wins (read by phase 4). */
+  wins: string[]
+}
+
+export type BriefItemKind = 'priority' | 'quick_help' | 'quick_self'
+export type BriefItemActionState = 'none' | 'produced' | 'dismissed' | 'confirmed'
+
+/** The task a brief item points at, as it is now. */
+export interface BriefItemTask {
+  status: TaskStatus
+  completed: boolean
+  due_date: string | null
+  content: string
+  description: string | null
+  project_id: string
+}
+
+export interface BriefItem {
+  id: string
+  date: string
+  module_id: string
+  kind: BriefItemKind
+  /** The task title when the brief was composed. */
+  title: string
+  /** The one-line reason. */
+  body: string | null
+  task_id: string | null
+  origin: 'ai' | 'rule'
+  dedupe_key: string | null
+  action_kind: string | null
+  action_state: BriefItemActionState
+  /** JSON: what an action produced (Break it down → subtask ids). */
+  produced_ref: string | null
+  position: number
+  created_at: string
+  updated_at: string
+  /** The brief's `composed_at` when this row was written: lists show the
+   *  current composition plus acted-on rows only (two Macs never merge). */
+  composed_at: string | null
+  /** Null when the task no longer exists. */
+  task: BriefItemTask | null
 }
 
 // ── Brief settings (phase 2, addendum §1–§2) ──

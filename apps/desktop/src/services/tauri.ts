@@ -12,7 +12,7 @@ import type {
   FocusReply,
   FocusSnapshot,
 } from '@nimble/types'
-import type { BriefSettings, BriefSettingsPatch, GeoPlace, WeatherView } from '@nimble/types'
+import type { BriefItem, BriefItemActionState, BriefSettings, BriefSettingsPatch, GeoPlace, WeatherView } from '@nimble/types'
 import { FocusRequestError } from './focus-events'
 
 // Re-export all types from the shared package so existing imports continue to work
@@ -260,6 +260,29 @@ export async function listBriefSnapshots(): Promise<string[]> {
 
 export async function ensureBriefSnapshot(date: string): Promise<Brief | null> {
   return invoke<Brief | null>('brief_ensure_snapshot', { date })
+}
+
+// ── Morning Brief composition (phase 3) ──
+
+export async function briefItems(date: string): Promise<BriefItem[]> {
+  return invoke<BriefItem[]>('brief_items_list', { date })
+}
+
+export async function briefComposeIfDue(date: string): Promise<Brief | null> {
+  return invoke<Brief | null>('brief_compose_if_due', { date })
+}
+
+export async function briefRegenerate(date: string): Promise<Brief | null> {
+  return invoke<Brief | null>('brief_regenerate', { date })
+}
+
+export async function briefSetItemState(
+  id: string,
+  state: BriefItemActionState,
+  actionKind: string | null,
+  producedRef: string | null,
+): Promise<BriefItem> {
+  return invoke<BriefItem>('brief_item_set_state', { id, state, actionKind, producedRef })
 }
 
 // ── Morning Brief settings (phase 2) ──
