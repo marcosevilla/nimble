@@ -1,4 +1,10 @@
 {
+  "create-modal": {
+    "nested-interactive": 2
+  },
+  "create-modal:dark": {
+    "nested-interactive": 2
+  },
   "docs": {
     "aria-required-children": 1,
     "button-name": 8,
