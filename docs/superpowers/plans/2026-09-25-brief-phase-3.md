@@ -100,6 +100,10 @@ Phase 2 merged as **v24** and C4 lands as **v25** before this branch; phase 3 st
 | Settings read raw | `brief::settings::load_view(pool)` returns normalized `model` (one of `MODELS = [claude-opus-5-5, claude-sonnet-5]`) and `effort` (one of `EFFORTS = [low, medium, high]`); `api::llm::normalize_*` stays as a second guard. | Tasks 5, 6 |
 | e2e port 4610 | Lane A uses **5301** for `tools/qa-frozen.sh`. | Tasks 8–10 |
 
+### Rebased on main `0097de0` (C4 merged as v25)
+
+Migrations run v24 (phase 2) → v25 (C4: `label_groups`, `labels.archived_at`, device-local `tasks_fts`) → v26 (this plan). `CURRENT_SCHEMA_VERSION = 26`; `backup.rs` accepts `…24 | 25 | 26`; `tables_for_version` accepts `20..=26` with C4's `>= 25` block before the v26 one; `sync.rs` runs `ensure_remote_v25_schema` then `ensure_remote_v26_schema` at all three call sites. The pinned-version integration tests now read `migrations::CURRENT_SCHEMA_VERSION` (the drift probe uses `CURRENT_SCHEMA_VERSION + 1`), so the next migration doesn't need to touch them.
+
 ### Review changes to Tasks 1–3 (2026-09-25), binding for Tasks 4–10
 
 - **Candidate tiers** (base §4.6 order): in progress → due ≤7 days or earlier → priority ≥3 → 20 oldest → **labelled last**, ≤15 per configured label (`LABELLED_PER_LABEL`), total ≤80. `blocked` tasks are never candidates; `backlog` tasks enter only through the oldest tier. Wins exclude archived projects.
