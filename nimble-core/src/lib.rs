@@ -2,6 +2,7 @@ pub mod agent_protocol;
 pub mod focus_types;
 pub mod reminders;
 pub mod api;
+pub mod brief;
 pub mod db;
 pub mod integrations;
 pub mod parsers;
