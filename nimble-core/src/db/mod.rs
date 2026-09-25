@@ -13,6 +13,7 @@ pub mod goals;
 pub mod habits;
 pub mod labels;
 pub mod migrations;
+pub mod module_cache;
 pub mod origin_label;
 pub mod projects;
 pub mod sections;

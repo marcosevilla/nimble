@@ -28,3 +28,4 @@ pub mod updater;
 pub mod vault;
 
 pub mod backup;
+pub mod weather;

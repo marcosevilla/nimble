@@ -97,6 +97,7 @@ export function createTursoProvider(): DataProvider {
     // Settings live in the Mac's local KV store and are not synced, so the
     // web has nothing to read; Today falls back to the synced row's layout.
     briefSettings: { supported: false, get: ni('briefSettings.get'), save: ni('briefSettings.save') },
+    weather: { supported: false, get: ni('weather.get'), geocode: ni('weather.geocode') }, // HTTP stays in Rust (§6)
     settings: {
       // See note 2 in the file header — deliberately resolves.
       checkSetupComplete: () => Promise.resolve(true),

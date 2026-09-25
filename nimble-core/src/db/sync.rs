@@ -3186,6 +3186,11 @@ mod v19_sync_tests {
     }
 
     #[test]
+    fn the_module_cache_never_syncs() {
+        assert!(super::sanitize_table_name("module_cache").is_err(), "device-local, like vault_fts");
+    }
+
+    #[test]
     fn briefs_sync_by_date() {
         assert!(super::sanitize_table_name("briefs").is_ok());
         let sql = super::build_snapshot_upsert_sql("briefs", &["date", "snapshot_json"]);

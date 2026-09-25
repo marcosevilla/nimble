@@ -27,6 +27,7 @@ export function createTauriProvider(): DataProvider {
       activateRestoredProfile: tauri.backupActivateRestoredProfile,
     },
     briefSettings: { supported: true, get: tauri.briefSettingsGet, save: tauri.briefSettingsSave },
+    weather: { supported: true, get: tauri.weatherGet, geocode: tauri.weatherGeocode },
     settings: {
       checkSetupComplete: tauri.checkSetupComplete,
       get: tauri.getSetting,

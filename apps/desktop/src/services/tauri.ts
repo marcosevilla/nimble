@@ -12,7 +12,7 @@ import type {
   FocusReply,
   FocusSnapshot,
 } from '@nimble/types'
-import type { BriefSettings, BriefSettingsPatch } from '@nimble/types'
+import type { BriefSettings, BriefSettingsPatch, GeoPlace, WeatherView } from '@nimble/types'
 import { FocusRequestError } from './focus-events'
 
 // Re-export all types from the shared package so existing imports continue to work
@@ -266,6 +266,16 @@ export async function briefSettingsSave(patch: BriefSettingsPatch): Promise<Brie
 
 export async function briefSetNotes(date: string, notes: string): Promise<void> {
   return invoke<void>('brief_set_notes', { date, notes })
+}
+
+// ── Weather (phase 2) ──
+
+export async function weatherGet(): Promise<WeatherView> {
+  return invoke<WeatherView>('weather_get')
+}
+
+export async function weatherGeocode(query: string): Promise<GeoPlace[]> {
+  return invoke<GeoPlace[]>('weather_geocode', { query })
 }
 
 // ── Projects ──

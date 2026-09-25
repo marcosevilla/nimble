@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn defaults_match_the_phase_one_layout() {
         let l = resolve_layout(None);
-        assert_eq!(enabled(&l), ["schedule", "priorities", "due_today", "still_open", "vault"]);
+        assert_eq!(enabled(&l), ["weather", "schedule", "priorities", "due_today", "still_open", "vault"]);
         let off: Vec<&str> = l.iter().filter(|e| !e.enabled).map(|e| e.id.as_str()).collect();
         assert_eq!(off, ["habits", "notes"]);
         assert_eq!(l.iter().find(|e| e.id == "still_open").unwrap().config, json!({"count": 5}));
@@ -316,7 +316,7 @@ mod tests {
             r#"[{"id":"vault","enabled":false},{"id":"quick_wins","enabled":true},{"id":"schedule"},{"id":"vault","enabled":true}]"#,
         ));
         let ids: Vec<&str> = l.iter().map(|e| e.id.as_str()).collect();
-        assert_eq!(ids, ["vault", "schedule", "priorities", "due_today", "still_open", "habits", "notes"]);
+        assert_eq!(ids, ["vault", "schedule", "weather", "priorities", "due_today", "still_open", "habits", "notes"]);
         assert!(!l[0].enabled, "the first vault entry wins");
         assert!(l[1].enabled, "a missing `enabled` reads as on");
     }

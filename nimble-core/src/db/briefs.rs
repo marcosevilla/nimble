@@ -96,6 +96,30 @@ pub async fn set_priorities(pool: &SqlitePool, date: &str, priorities: &[Priorit
     Ok(())
 }
 
+/// Fill one module's payload if that morning recorded it empty (key
+/// present, value JSON null). An absent key means the module was off; a
+/// filled one stays frozen. Atomic in SQL. Returns whether it wrote.
+pub async fn patch_snapshot_if_null(pool: &SqlitePool, date: &str, key: &str, value: serde_json::Value) -> crate::Result<bool> {
+    if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(crate::Error::Other(format!("invalid snapshot key: {key}")));
+    }
+    let path = format!("$.{key}");
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let changed = sqlx::query(
+        "UPDATE briefs SET snapshot_json = json_set(snapshot_json, ?, json(?)), updated_at = ?
+         WHERE date = ? AND json_type(snapshot_json, ?) = 'null'",
+    )
+    .bind(&path).bind(value.to_string()).bind(&now).bind(date).bind(&path)
+    .execute(pool).await?
+    .rows_affected();
+    if changed == 0 { return Ok(false); }
+    if let Some(b) = get_brief(pool, date).await? {
+        sync::append_sync_log(pool, "briefs", date, "UPDATE",
+            Some(&serde_json::json!(["snapshot_json", "updated_at"]).to_string()), Some(&sync_snapshot(&b))).await.ok();
+    }
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::test_util::test_pool;
@@ -126,10 +150,10 @@ mod tests {
         assert_eq!(b.status, "ready");
         // (replaces the LAYOUT_V1 assertion)
         let ids: Vec<&str> = b.layout.as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, ["schedule", "priorities", "due_today", "still_open", "vault"]);
+        assert_eq!(ids, ["weather", "schedule", "priorities", "due_today", "still_open", "vault"]);
         let mut keys: Vec<&String> = b.snapshot.as_object().unwrap().keys().collect();
         keys.sort();
-        assert_eq!(keys, ["due_today", "priorities", "schedule", "still_open", "vault"]);
+        assert_eq!(keys, ["due_today", "priorities", "schedule", "still_open", "vault", "weather"]);
         let s = &b.snapshot;
         assert_eq!(s["due_today"][0]["content"], "Today A");
         assert_eq!(s["still_open"]["total"], 2);
@@ -196,7 +220,7 @@ mod tests {
                 {"id":"still_open","enabled":true,"config":{"count":3}}]"#).await.unwrap();
         let b = super::ensure_snapshot(&pool, "2026-09-23", "2026-09-23").await.unwrap().unwrap();
         let ids: Vec<&str> = b.layout.as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, ["due_today", "still_open", "priorities", "vault"], "stored order, then enabled defaults");
+        assert_eq!(ids, ["due_today", "still_open", "weather", "priorities", "vault"], "stored order, then enabled defaults");
         assert_eq!(b.layout[1]["config"]["count"], 3, "the layout records the config used");
         assert!(b.snapshot.get("schedule").is_none(), "a hidden module is not gathered");
         assert_eq!(b.snapshot["still_open"]["total"], 4);

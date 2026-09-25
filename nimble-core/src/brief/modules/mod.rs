@@ -8,6 +8,7 @@ pub mod priorities;
 pub mod schedule;
 pub mod still_open;
 pub mod vault;
+pub mod weather;
 
 use serde_json::{json, Value};
 

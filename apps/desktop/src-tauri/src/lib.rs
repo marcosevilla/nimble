@@ -30,7 +30,7 @@ use tauri::{
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-use commands::{activity, ai, brief, calendar, capture_routes, captures, demo, docs, focus, goals, habits, import, labels, local_tasks, obsidian, open_url, priorities, progress, projects, sections, settings, sync, todoist, todoist_sync, updater, vault};
+use commands::{activity, ai, brief, calendar, capture_routes, captures, demo, docs, focus, goals, habits, import, labels, local_tasks, obsidian, open_url, priorities, progress, projects, sections, settings, sync, todoist, todoist_sync, updater, vault, weather};
 
 /// Show and focus the main window
 fn show_window(app: &tauri::AppHandle) {
@@ -658,6 +658,8 @@ pub fn run() {
             brief::brief_settings_get,
             brief::brief_settings_save,
             brief::brief_set_notes,
+            weather::weather_get,
+            weather::weather_geocode,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

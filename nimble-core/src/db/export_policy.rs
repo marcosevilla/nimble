@@ -54,9 +54,10 @@ pub(crate) const TABLES: &[TablePolicy] = &[
 /// to portable data; device-local calendar and delivery state is excluded.
 /// V22 adds `projects.archived_at` (reviewed, included).
 /// V23 adds the reviewed, included `briefs` table (per-day brief snapshots).
+/// V25 adds the device-local `module_cache` (reviewed, excluded: a cache, never portable data). (schema-v25)
 pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
     if version == 19 { return Some(TABLES.to_vec()); }
-    if version != 20 && version != 21 && version != 22 && version != 23 { return None; }
+    if version != 20 && version != 21 && version != 22 && version != 23 && version != 25 { return None; } // schema-v25
     let mut tables = TABLES.to_vec();
     for policy in &mut tables {
         match policy.name {
@@ -103,6 +104,9 @@ pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
     }
     if version >= 23 {
         tables.push(table!("briefs"; ["date","version","status","source","layout_json","snapshot_json","snapshot_schema","energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at"]; ["date","version","status","source","layout_json","snapshot_json","snapshot_schema","energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at"]; ["date"]));
+    }
+    if version >= 25 { // schema-v25
+        tables.push(table!("module_cache"; ["module_id","cache_key","payload_json","fetched_at"]; []; ["module_id","cache_key"]));
     }
     tables.sort_by_key(|policy| policy.name);
     Some(tables)

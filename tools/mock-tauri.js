@@ -902,6 +902,8 @@
     return { type: 'choice', key: key, label: label, options: pairs.map(function (p) { return { value: p[0], label: p[1] } }), default: def }
   }
   var BRIEF_MANIFESTS = [
+    { id: 'weather', name: 'Weather chip', kind: 'fixed', requires: ['location'], default_enabled: true,
+      config_schema: [choiceField('units', 'Units', [['auto', 'Auto'], ['F', '°F'], ['C', '°C']], 'auto'), boolField('rain_notes', 'Rain notes')] },
     { id: 'schedule', name: 'Schedule', kind: 'fixed', requires: ['calendar'], default_enabled: true,
       config_schema: [boolField('tomorrow_peek', 'Tomorrow peek'), boolField('free_block', 'Free block')] },
     { id: 'priorities', name: 'Top priorities', kind: 'ai', requires: ['ai'], default_enabled: true,
@@ -969,6 +971,33 @@
       manifests: BRIEF_MANIFESTS,
     }
   }
+
+  // ── Weather (phase 2) ─ ?weather=fresh (default) | stale | none | unavailable
+  // TODAY in San Francisco: 21.1/13.9 °C (70/57 °F), 60% rain 19:00–21:00,
+  // which puts a rain note on the 19:00 Warfield event.
+  var weatherScenario = new URLSearchParams(window.location.search).get('weather') || 'fresh'
+  function mockForecast() {
+    var hourly = []
+    ;[TODAY, '2026-08-02'].forEach(function (d) {
+      for (var h = 0; h < 24; h++) {
+        hourly.push({
+          time: d + 'T' + String(h).padStart(2, '0') + ':00',
+          temp_c: Math.round((13.9 + 7.2 * Math.max(0, Math.sin(((h - 6) / 12) * Math.PI))) * 10) / 10,
+          precip: d === TODAY && h >= 19 && h <= 21 ? 60 : 10,
+        })
+      }
+    })
+    return {
+      timezone: 'America/Los_Angeles', current_time: TODAY + 'T07:00', current_c: 15.0, hourly: hourly,
+      days: [{ date: TODAY, high_c: 21.1, low_c: 13.9, precip_max: 60 }, { date: '2026-08-02', high_c: 20.0, low_c: 13.0, precip_max: 10 }],
+    }
+  }
+  var MOCK_PLACES = [
+    { name: 'San Francisco', admin1: 'California', country: 'United States', lat: 37.7749, lon: -122.4194, tz: 'America/Los_Angeles' },
+    { name: 'San Diego', admin1: 'California', country: 'United States', lat: 32.7157, lon: -117.1611, tz: 'America/Los_Angeles' },
+    { name: 'Santiago', admin1: 'Santiago Metropolitan', country: 'Chile', lat: -33.4489, lon: -70.6693, tz: 'America/Santiago' },
+    { name: 'Lisbon', admin1: 'Lisbon', country: 'Portugal', lat: 38.7223, lon: -9.1393, tz: 'Europe/Lisbon' },
+  ]
 
   // ── Obsidian today.md ────────────────────────────────────────────────────
 
@@ -1347,6 +1376,18 @@
       var b = BRIEFS[args && args.date]
       if (b) b.notes = args.notes && args.notes.trim() ? args.notes : null
       return null
+    },
+    weather_get: function () {
+      var loc = briefSettingsView().location
+      if (weatherScenario === 'none' || !loc) return { status: 'no_location', location: null, forecast: null, fetched_at: null }
+      if (weatherScenario === 'unavailable') return { status: 'unavailable', location: loc, forecast: null, fetched_at: null }
+      var stale = weatherScenario === 'stale'
+      return { status: stale ? 'stale' : 'fresh', location: loc, forecast: mockForecast(), fetched_at: stale ? '2026-08-01T13:31:00Z' : '2026-08-01T14:00:00Z' }
+    },
+    weather_geocode: function (args) {
+      var q = String((args && args.query) || '').trim().toLowerCase()
+      if (q.length < 2) return []
+      return MOCK_PLACES.filter(function (p) { return p.name.toLowerCase().indexOf(q) === 0 }).slice(0, 5)
     },
     break_down_task: function () {
       return [

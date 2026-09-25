@@ -80,6 +80,7 @@ export interface DataProvider {
   reminders: import('./index').ReminderCapability
   backup: import('./index').BackupCapability
   briefSettings: import('./index').BriefSettingsCapability
+  weather: import('./index').WeatherCapability
   settings: {
     checkSetupComplete(): Promise<boolean>
     get(key: string): Promise<string | null>

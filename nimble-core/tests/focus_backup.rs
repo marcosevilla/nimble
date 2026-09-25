@@ -28,7 +28,7 @@ async fn archive(source: &std::path::Path, root: &std::path::Path) -> std::path:
         chrono::DateTime::parse_from_rfc3339("2026-09-22T12:00:00-07:00").unwrap(),
         "focus-test", &guard,
     ).await.unwrap();
-    assert_eq!(backup::verify_generation(generation.directory()).await.unwrap().manifest().schema_version, 23);
+    assert_eq!(backup::verify_generation(generation.directory()).await.unwrap().manifest().schema_version, 25); // schema-v25
     generation.directory().to_path_buf()
 }
 

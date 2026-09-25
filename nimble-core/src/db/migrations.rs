@@ -676,9 +676,20 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             updated_at TEXT NOT NULL
         )",
     },
+    Migration {
+        version: 25, // schema-v25 — C4 owns 24; renumber per plan Global Constraints if C4 hasn't merged
+        description: "Device-local brief module cache (weather)",
+        sql: "CREATE TABLE IF NOT EXISTS module_cache (
+            module_id TEXT NOT NULL,
+            cache_key TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            PRIMARY KEY (module_id, cache_key)
+        )",
+    },
 ];
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 23;
+pub const CURRENT_SCHEMA_VERSION: i64 = 25; // schema-v25
 
 pub async fn current_schema_version(pool: &SqlitePool) -> crate::Result<i64> {
     let version = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM schema_version")
@@ -852,6 +863,22 @@ mod v23_tests {
             .fetch_all(&pool).await.unwrap();
         assert_eq!(cols, ["date","version","status","source","layout_json","snapshot_json","snapshot_schema",
             "energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at"]);
-        assert_eq!(super::CURRENT_SCHEMA_VERSION, 23);
+    }
+}
+
+#[cfg(test)]
+mod v25_tests {
+    use crate::test_util::test_pool;
+
+    #[tokio::test]
+    async fn v25_creates_the_device_local_module_cache() { // schema-v25
+        let pool = test_pool().await;
+        let cols: Vec<(String, i64)> = sqlx::query_as("SELECT name, pk FROM pragma_table_info('module_cache') ORDER BY cid")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(cols, vec![
+            ("module_id".to_string(), 1), ("cache_key".to_string(), 2),
+            ("payload_json".to_string(), 0), ("fetched_at".to_string(), 0),
+        ]);
+        assert_eq!(super::CURRENT_SCHEMA_VERSION, 25); // schema-v25
     }
 }

@@ -85,6 +85,7 @@ pub struct LayoutEntry {
 pub fn manifests() -> Vec<ModuleManifest> {
     use modules::*;
     vec![
+        weather::Weather::manifest(),
         schedule::Schedule::manifest(),
         priorities::Priorities::manifest(),
         due_today::DueToday::manifest(),
@@ -99,6 +100,7 @@ pub fn manifests() -> Vec<ModuleManifest> {
 pub async fn gather_module(id: &str, ctx: &BriefCtx<'_>, config: &Value) -> Option<crate::Result<Value>> {
     use modules::*;
     Some(match id {
+        "weather" => weather::Weather.gather(ctx, config).await,
         "schedule" => schedule::Schedule.gather(ctx, config).await,
         "priorities" => priorities::Priorities.gather(ctx, config).await,
         "due_today" => due_today::DueToday.gather(ctx, config).await,

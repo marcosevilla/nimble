@@ -104,6 +104,7 @@ export interface BriefSnapshotV1 {
   due_today?: BriefTaskRef[]
   still_open?: { total: number; oldest: BriefTaskRef[] }
   habits?: BriefHabitRef[] | null
+  weather?: WeatherSnapshot | null
   [module: string]: unknown
 }
 
@@ -658,4 +659,53 @@ export interface GoogleCalendarCapability {
   syncNow(): Promise<{ changedTaskIds: string[]; errorCode: string | null }>
   listConflicts(): Promise<GoogleCalendarConflict[]>
   resolveConflict(taskId: string, resolution: 'keep_nimble' | 'use_calendar'): Promise<void>
+}
+
+// ── Weather (phase 2, addendum §4) — temperatures in °C, converted for display ──
+
+export interface WeatherDay {
+  date: string
+  high_c: number
+  low_c: number
+  precip_max: number | null
+}
+export interface WeatherHour {
+  /** Location-local "YYYY-MM-DDTHH:MM". */
+  time: string
+  temp_c: number
+  precip: number | null
+}
+export interface Forecast {
+  timezone: string
+  current_time: string | null
+  current_c: number | null
+  days: WeatherDay[]
+  hourly: WeatherHour[]
+}
+export type WeatherStatus = 'no_location' | 'fresh' | 'stale' | 'unavailable'
+export interface WeatherView {
+  status: WeatherStatus
+  location: BriefLocation | null
+  forecast: Forecast | null
+  /** RFC 3339 UTC. */
+  fetched_at: string | null
+}
+export interface GeoPlace {
+  name: string
+  admin1: string | null
+  country: string | null
+  lat: number
+  lon: number
+  tz: string
+}
+/** `snapshot.weather`: the forecast the brief showed that morning. */
+export interface WeatherSnapshot {
+  location: BriefLocation
+  forecast: Forecast
+  fetched_at: string
+}
+export interface WeatherCapability {
+  supported: boolean
+  get(): Promise<WeatherView>
+  geocode(query: string): Promise<GeoPlace[]>
 }
