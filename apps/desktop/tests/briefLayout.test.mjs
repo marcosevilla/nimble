@@ -115,6 +115,18 @@ test('the draft starts from saved settings and Finish writes exactly the setup k
   assert.equal(setupPatch(d).complete_setup, true)
 })
 
+test('setup Finish later with all seven days off drops only the days-off value', () => {
+  const d = draftFrom({
+    time: '07:00', location: null, modules: [e('schedule')], setup_completed_at: null,
+    goals: { daily: 5, weekly: 25, days_off: ['sat', 'sun'] },
+  })
+  d.goals.days_off = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+  const patch = setupPatch(d)
+  assert.deepEqual(patch.goals, { daily: 5, weekly: 25 }, 'the stored days off stay; the rest of the goals save')
+  assert.equal(patch.complete_setup, true, 'the setup still completes')
+  assert.deepEqual(patch.modules, [e('schedule')])
+})
+
 // stores/briefSettingsStore.ts orders loads against saves with this gate.
 test('brief settings: a load that began before Finish never lands after it', () => {
   const gate = createHabitLoadGate()

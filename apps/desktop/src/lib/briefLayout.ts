@@ -1,6 +1,7 @@
 // Pure helpers for the brief's module layout and settings (addendum §1–§2).
 // Plain TS (type-only imports) so node tests import it directly.
 import type { BriefGoals, BriefLayoutEntry, BriefLocation, BriefSettings, BriefSettingsPatch } from '@nimble/types'
+import { daysOffError } from './momentum.ts'
 
 /** The phase-1 boxes: a brief with no readable layout (the web without a
  *  synced row, or a malformed one) renders these. */
@@ -156,11 +157,17 @@ export function draftFrom(s: BriefSettings): SetupDraft {
 
 /** Finish (and Skip): every setup key in one save (addendum §3). */
 export function setupPatch(d: SetupDraft): BriefSettingsPatch {
+  // All seven days off is refused by Rust (`brief::settings`), which would fail
+  // the whole save — so Finish later / Skip drops just that value and the
+  // stored days off stay.
+  const goals: BriefSettingsPatch['goals'] = daysOffError(d.goals.days_off)
+    ? { daily: d.goals.daily, weekly: d.goals.weekly }
+    : { daily: d.goals.daily, weekly: d.goals.weekly, days_off: d.goals.days_off }
   return {
     time: d.time,
     location: d.location,
     modules: d.modules,
-    goals: { daily: d.goals.daily, weekly: d.goals.weekly, days_off: d.goals.days_off },
+    goals,
     complete_setup: true,
   }
 }
