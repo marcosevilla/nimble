@@ -92,9 +92,9 @@ export function DetailSidebar() {
         </div>
       </div>
 
-      {/* Scrollable content. pb-16 scrolls its end clear of the fixed ?
-          help button (loop 3 rail). */}
-      <div className="flex-1 overflow-y-auto p-4 pb-16">
+      {/* Scrollable content. Its end scrolls clear of the fixed ? help
+          button; back to 16px while the sync notice shows (loop 3 rail). */}
+      <div className="flex-1 overflow-y-auto p-4 pb-[max(1rem,calc(4rem-var(--sync-notice-clear,0px)))]">
         {target.type === 'task' ? <TaskDetailPage /> : target.type === 'goal' ? <GoalDetailPage /> : <CaptureDetailPage />}
       </div>
     </aside>

@@ -23,10 +23,13 @@ const TAB_META: Record<RightTab, { label: string; icon: LucideIcon }> = {
 }
 
 /** Scrolling body shared by the non-calendar tabs. `tab-panel-in` fades
- *  the panel in each time it's shown (Agentation pass 3, A5). `pb-16`:
- *  the list's end scrolls clear of the fixed `?` help button (bottom-4,
- *  36px → its top is 52px up) with an 8px+ gap (loop 3 rail). */
-const PANEL_CLASS = 'tab-panel-in flex-1 min-h-0 overflow-y-auto p-4 pt-3 pb-16 [scrollbar-gutter:stable]'
+ *  the panel in each time it's shown (Agentation pass 3, A5). Bottom
+ *  padding: the list's end scrolls clear of the fixed `?` help button
+ *  (bottom-4, 36px → its top is 52px up) with an 8px+ gap. While the sync
+ *  notice shows, the body already ends above both, so it drops back to
+ *  the usual 16px instead of stacking the two (loop 3 rail). */
+const PANEL_CLASS =
+  'tab-panel-in flex-1 min-h-0 overflow-y-auto p-4 pt-3 pb-[max(1rem,calc(4rem-var(--sync-notice-clear,0px)))] [scrollbar-gutter:stable]'
 
 /* The active tab's pill, drawn once behind the tabs and slid between them
    (Agentation pass 3, A5) instead of each tab painting its own. Measured
