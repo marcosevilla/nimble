@@ -175,7 +175,7 @@ async fn both_routes_round_trip_without_changing_source() {
                     .await
                     .unwrap();
             assert_eq!(count, 1);
-            // schema-v24
+            // schema-v25
             let (indexed, tasks): (i64, i64) = sqlx::query_as(
                 "SELECT (SELECT COUNT(*) FROM tasks_fts), (SELECT COUNT(*) FROM local_tasks)",
             )

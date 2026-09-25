@@ -15,7 +15,7 @@ import { query, str, strOrNull, num, bool, TursoError, type Row } from './client
  * Turso must not silently change what arrives.
  */
 const LABEL_COLS = 'id, name, color, position, created_at, "group", archived_at'
-/** Pre-v24 remotes (gate not yet run by a desktop push) lack `archived_at`. */
+/** Pre-v25 remotes (gate not yet run by a desktop push) lack `archived_at`. */
 const LABEL_COLS_V23 = 'id, name, color, position, created_at, "group"'
 
 /**
@@ -67,7 +67,7 @@ function toGroup(row: Row): LabelGroup {
   }
 }
 
-/** Groups in desktop order. A remote without the v24 table reads as "no groups". */
+/** Groups in desktop order. A remote without the v25 table reads as "no groups". */
 export async function listLabelGroups(): Promise<LabelGroup[]> {
   try {
     const rows = await query(`SELECT ${GROUP_COLS} FROM label_groups ORDER BY position, created_at`)
@@ -97,8 +97,8 @@ export async function unusedLabelIds(): Promise<string[]> {
     )
     return rows.map((r) => str(r, 'id'))
   } catch (e) {
-    // Pre-v24 remote (no label_groups table / archived_at column yet): nothing
-    // to archive until a desktop push runs the v24 gate. Other errors surface.
+    // Pre-v25 remote (no label_groups table / archived_at column yet): nothing
+    // to archive until a desktop push runs the v25 gate. Other errors surface.
     if (e instanceof TursoError && /no such (table|column)/i.test(e.message)) return []
     throw e
   }

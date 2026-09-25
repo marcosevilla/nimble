@@ -310,7 +310,7 @@ pub async fn restore_export(source: &Path, dest: &Path) -> crate::Result<Recover
         tx.commit().await?;
         sqlx::query("DELETE FROM vault_fts").execute(&pool).await?;
         sqlx::query("INSERT INTO vault_fts(note_id,title,content) SELECT id,title,content FROM vault_notes WHERE deleted_at IS NULL").execute(&pool).await?;
-        if version >= 24 { // schema-v24
+        if version >= 25 { // schema-v25
             // Device-local task index: rebuilt from the restored rows, never exported.
             // Raw SQL (not task_search::rebuild_task_index) so the restored copy gains
             // no settings row; the app heals the version key on first launch.

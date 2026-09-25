@@ -3320,7 +3320,7 @@ mod v19_sync_tests {
         assert_eq!(b.layout, serde_json::json!(["schedule"]));
     }
 
-    // schema-v24
+    // schema-v25
     #[test]
     fn label_groups_sync_but_the_task_index_never_does() {
         assert!(super::sanitize_table_name("label_groups").is_ok());
@@ -3328,7 +3328,7 @@ mod v19_sync_tests {
     }
 
     #[tokio::test]
-    async fn remote_label_groups_ddl_matches_the_local_v24_table() {
+    async fn remote_label_groups_ddl_matches_the_local_v25_table() {
         let local = crate::test_util::test_pool().await;
         let remote = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
         sqlx::query(super::REMOTE_LABEL_GROUPS_DDL).execute(&remote).await.unwrap();

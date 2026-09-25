@@ -32,7 +32,7 @@ async fn export_is_repeatable_typed_and_excludes_integration_state() {
     assert!(data.get("settings").is_none());
     assert!(data.get("vault_notes").is_some());
     let format: serde_json::Value = serde_json::from_slice(&first.format).unwrap();
-    assert_eq!(format["schema_version"], 24); // schema-v24
+    assert_eq!(format["schema_version"], 25); // schema-v25
     assert_eq!(format["export_version"], 1);
     close(pool, path).await;
 }
@@ -56,7 +56,7 @@ async fn schema_drift_fails_closed() {
     close(pool, path).await;
 
     let (pool, path) = nimble_core::test_util::file_pool().await;
-    sqlx::query("INSERT INTO schema_version(version,description,applied_at) VALUES (25,'future','2026-09-21')") // schema-v24: current + 1
+    sqlx::query("INSERT INTO schema_version(version,description,applied_at) VALUES (26,'future','2026-09-21')") // schema-v25: current + 1
         .execute(&pool).await.unwrap();
     assert!(export_portable(&pool).await.is_err());
     close(pool, path).await;
@@ -179,9 +179,9 @@ async fn reverse_insertion_order_has_identical_export_bytes() {
     close(pool, path).await;
 }
 
-// schema-v24
+// schema-v25
 #[tokio::test]
-async fn v24_exports_label_groups_and_archive_state_but_not_the_task_index() {
+async fn v25_exports_label_groups_and_archive_state_but_not_the_task_index() {
     let (pool, path) = nimble_core::test_util::file_pool().await;
     sqlx::query("INSERT INTO label_groups (id,name,position,exclusive,system,created_at,updated_at) VALUES ('g1','EFFORT',0,1,0,'2026-09-25 09:00:00','2026-09-25 09:00:00')")
         .execute(&pool).await.unwrap();
