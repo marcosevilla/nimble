@@ -1,5 +1,5 @@
 /** Local invalidation bus. Events carry identifiers, never private task bodies. */
-export type DataDomain = 'tasks' | 'projects' | 'sections' | 'labels' | 'captures' | 'activity'
+export type DataDomain = 'tasks' | 'projects' | 'sections' | 'labels' | 'captures' | 'activity' | 'brief'
 const subscribers = new Map<DataDomain, Set<() => void>>()
 export function subscribeDataChanges(domain: DataDomain, callback: () => void): () => void {
   let callbacks = subscribers.get(domain)

@@ -186,6 +186,11 @@ export function createTauriProvider(): DataProvider {
       listDates: tauri.listBriefSnapshots,
       ensureSnapshot: tauri.ensureBriefSnapshot,
       setNotes: tauri.briefSetNotes,
+      composeSupported: true,
+      items: tauri.briefItems,
+      composeIfDue: tauri.briefComposeIfDue,
+      regenerate: tauri.briefRegenerate,
+      setItemState: tauri.briefSetItemState,
     },
 
     goals: {

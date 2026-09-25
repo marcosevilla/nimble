@@ -46,7 +46,7 @@ import { searchTasksLike } from '@/services/turso/search'
 import { listSections } from '@/services/turso/sections'
 import { readFocusHistory, readFocusSnapshot } from '@/services/turso/focus'
 import { focusUnsupported } from '@/services/focus-events'
-import { getBrief, listBriefDates } from '@/services/turso/briefs'
+import { getBrief, listBriefDates, listBriefItems } from '@/services/turso/briefs'
 
 const WEB_FOCUS_REASON =
   'The web shows the settled focus queue and history. Start, reorder, timing and import happen in the desktop app.'
@@ -295,6 +295,11 @@ export function createTursoProvider(): DataProvider {
       listDates: listBriefDates,
       ensureSnapshot: () => Promise.resolve(null),
       setNotes: ni('brief.setNotes'),
+      composeSupported: false,
+      items: listBriefItems,
+      composeIfDue: ni('brief.composeIfDue'),
+      regenerate: ni('brief.regenerate'),
+      setItemState: ni('brief.setItemState'),
     },
 
     // Out of v1 (§5).

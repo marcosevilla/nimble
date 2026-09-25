@@ -23,6 +23,8 @@ import type {
   Priority,
   DailyState,
   Brief,
+  BriefItem,
+  BriefItemActionState,
   Project,
   Label,
   LabelGroup,
@@ -337,6 +339,7 @@ export interface DataProvider {
 
   dailyState: {
     get(): Promise<DailyState>
+    /** @deprecated Today no longer calls this (brief phase 3 composes priorities in Rust). Remove once nothing calls it. */
     generatePriorities(
       calendarSummary: string,
       tasksSummary: string,
@@ -362,6 +365,18 @@ export interface DataProvider {
     ensureSnapshot(date: string): Promise<Brief | null>
     /** Today's scratchpad. Desktop only; past days are read-only. */
     setNotes(date: string, notes: string): Promise<void>
+    /** Desktop composes the AI slots; the web only reads (`false`). */
+    composeSupported: boolean
+    /** Items for `date` (current composition + acted-on), each joined with its task's live state. */
+    items(date: string): Promise<BriefItem[]>
+    /** First Today open: ensure today's shell and compose it if due (at most
+     *  3 attempts a day). Waits for an in-flight run. Desktop only. */
+    composeIfDue(date: string): Promise<Brief | null>
+    /** ⋯ → Regenerate brief: gather again, recompose, keep acted-on items.
+     *  Rejects (and changes nothing) when it fails over AI picks. Desktop only. */
+    regenerate(date: string): Promise<Brief | null>
+    /** Record what the user did with an item (Break it down → 'produced'). Desktop only. */
+    setItemState(id: string, state: BriefItemActionState, actionKind: string | null, producedRef: string | null): Promise<BriefItem>
   }
 
   goals: {

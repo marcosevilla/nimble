@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
-const COMMANDS = ['brief_settings_get', 'brief_settings_save', 'brief_set_notes', 'weather_get', 'weather_geocode']
+const COMMANDS = ['brief_settings_get', 'brief_settings_save', 'brief_set_notes', 'weather_get', 'weather_geocode',
+  'brief_items_list', 'brief_compose_if_due', 'brief_regenerate', 'brief_item_set_state']
 
 // A command missing from any of these fails only in the real app (lib.rs),
 // only on desktop (tauri.ts) or only in the browser harness (mock).
