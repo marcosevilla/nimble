@@ -81,6 +81,8 @@ async function layout(dialog: Locator) {
 
 /** The focused element's indicator: ring extent, fill, and whether any overflow ancestor clips it. */
 async function indicator(page: Page) {
+  // Read the settled state: the well fades in over --transition-fast.
+  await page.evaluate(() => Promise.all((document.activeElement as HTMLElement).getAnimations().map((a) => a.finished)))
   return page.evaluate(() => {
     const el = document.activeElement as HTMLElement
     const cs = getComputedStyle(el)
@@ -117,6 +119,8 @@ for (const theme of ['light', 'dark'] as const) {
     test(`every Tab stop shows an unclipped indicator, in order (${theme})`, async ({ app, page }) => {
       const dialog = await openModal(app, page)
       await expect(title(dialog)).toBeFocused()
+      // A title enables Save (a disabled button is not a Tab stop).
+      await page.keyboard.type('Plan the week')
       const order: string[] = []
       const start = await indicator(page)
       order.push(start.name)
@@ -180,7 +184,10 @@ for (const theme of ['light', 'dark'] as const) {
       await page.keyboard.press('Tab')
       await page.keyboard.press('Tab') // Priority chip
       for (const field of [title(dialog), description(dialog)]) {
-        const bg = await field.evaluate((el) => getComputedStyle(el).backgroundColor)
+        const bg = await field.evaluate(async (el) => {
+          await Promise.all(el.getAnimations().map((a) => a.finished))
+          return getComputedStyle(el).backgroundColor
+        })
         expect(bg === 'transparent' || /rgba\([^)]*,\s*0\)$/.test(bg) || /\/\s*0\)$/.test(bg), `resting bg ${bg}`).toBe(true)
       }
 
@@ -208,7 +215,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(title(dialog)).toHaveValue('Write the case study intro')
       expect(await calls(page, 'create_local_task')).toHaveLength(0)
       // A picker's Esc closes only the picker.
-      await dialog.getByRole('button', { name: 'Due' }).click()
+      await dialog.locator('button', { hasText: /^Due$/ }).click()
       await expect(page.getByRole('dialog').filter({ hasNot: page.getByRole('textbox', { name: 'Task title' }) }).or(page.locator('[data-slot=popover-content]')).first()).toBeVisible()
       await page.keyboard.press('Escape')
       await expect(dialog).toBeVisible()

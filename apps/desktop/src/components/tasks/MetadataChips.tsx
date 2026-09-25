@@ -70,7 +70,7 @@ const EMPTY_DUE: DueValue = { dueDate: null, dueTime: null, durationMinutes: nul
 // skipped the Due and Labels chips in the create modal (loop 3).
 const CHIP_EMPTY =
   'h-6 rounded-md border border-border px-2.5 text-body text-muted-foreground hover:bg-accent transition-colors inline-flex items-center'
-const CHIP_FILLED = 'h-6 rounded-md bg-secondary border border-input pl-2.5 pr-1 text-body text-foreground flex items-center gap-[5px]'
+const CHIP_FILLED = 'h-6 rounded-md bg-secondary border border-border pl-2.5 pr-1 text-body text-foreground flex items-center gap-[5px]'
 const CHIP_PLUS =
   'h-6 rounded-md border border-dashed border-input px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors inline-flex items-center justify-center'
 
