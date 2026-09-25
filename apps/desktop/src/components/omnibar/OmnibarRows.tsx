@@ -75,7 +75,7 @@ export function TaskRow({ hit, rowKey, optionId, selected, tokens, projects, onH
   return (
     // min-h-9: the 24px action buttons appear on the highlighted row without growing it.
     <div
-      onMouseEnter={onHover}
+      onMouseMove={onHover}
       className={cn('relative flex min-h-9 w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors', selected && 'bg-hover')}
     >
       <div

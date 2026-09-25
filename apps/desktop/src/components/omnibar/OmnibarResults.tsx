@@ -54,7 +54,7 @@ function RowOption({ row, id, selected, onHover, onActivate, children }: {
       aria-selected={selected}
       data-omnibar-row={row.key}
       data-selected={selected || undefined}
-      onMouseEnter={() => onHover(row.key)}
+      onMouseMove={() => onHover(row.key)}
       onMouseDown={keepFocus}
       onClick={() => onActivate(row)}
       className={cn(ROW_CLASS, selected && 'bg-hover')}
@@ -160,7 +160,7 @@ function CreateRows({ rows, idOf, selectedKey, createText, createTaskTitle, crea
                 data-omnibar-row={row.key}
                 data-selected={selected || undefined}
                 aria-label={`Create ${CREATE_NAME[row.create].toLowerCase()} "${createText}"`}
-                onMouseEnter={() => onHover(row.key)}
+                onMouseMove={() => onHover(row.key)}
                 onMouseDown={keepFocus}
                 onClick={() => onActivate(row)}
                 className={cn(

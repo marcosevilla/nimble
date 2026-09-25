@@ -185,6 +185,81 @@ test('Escape closes and returns focus to where the bar was opened', async ({ app
   await expect(row).toBeFocused()
 })
 
+// ── Whole-branch review follow-ups ──
+
+const tomorrow = (page: Page) =>
+  page.evaluate(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })
+
+/** Slow every `search_tasks` call by `ms` so stale rows stay on screen. */
+const slowTaskSearch = (page: Page, ms: number) =>
+  page.evaluate((delay) => {
+    const internals = (window as unknown as Win).__TAURI_INTERNALS__
+    const inner = internals.invoke
+    internals.invoke = (cmd, args) =>
+      cmd === 'search_tasks' ? new Promise((r) => setTimeout(r, delay)).then(() => inner(cmd, args)) : inner(cmd, args)
+  }, ms)
+
+test('fast Enter over stale rows still creates the task with its parsed date', async ({ app, page }) => {
+  await app.open('tasks')
+  await seedSearch(page)
+  await openBar(page)
+  await page.keyboard.type('zeph')
+  await expect(rowsIn(page, 'Tasks')).toHaveCount(3) // these rows go stale below
+  await page.keyboard.press('Meta+a')
+  await page.keyboard.type('orthodontist tomorrow 3pm')
+  await page.keyboard.press('Enter') // inside the debounce: the highlight is still on a zephyr row
+  await expect(bar(page)).toHaveCount(0)
+  const hits = (await searchTasks(page, 'orthodontist')) as unknown as { task: { content: string; due_date: string | null; due_time: string | null } }[]
+  expect(hits.map((h) => [h.task.content, h.task.due_date, h.task.due_time])).toEqual([['orthodontist', await tomorrow(page), '15:00']])
+})
+
+test("a new session never shows the previous session's rows", async ({ app, page }) => {
+  await app.open('tasks')
+  await seedSearch(page)
+  await openBar(page)
+  await page.keyboard.type('zeph')
+  await expect(rowsIn(page, 'Tasks')).toHaveCount(3)
+  await page.keyboard.press('Escape')
+  await expect(bar(page)).toHaveCount(0)
+  await slowTaskSearch(page, 3000)
+  await openBar(page)
+  await page.keyboard.type('zz')
+  await page.waitForTimeout(400) // debounce passed, the slowed search still in flight
+  expect(await rowsIn(page, 'Tasks').count()).toBe(0)
+})
+
+test('Escape then ⌘F at once reopens the bar (a fading bar is not an open overlay)', async ({ app, page }) => {
+  await app.open('tasks')
+  await openBar(page)
+  await expect(group(page, 'Actions')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Meta+f') // well inside the 200 ms fade-out
+  await expect(field(page)).toBeFocused()
+  await page.waitForTimeout(400) // past the old close timer
+  await expect(bar(page)).toHaveCount(1)
+  await expect(field(page)).toBeFocused()
+})
+
+test('a double Enter on a toggle action toggles once', async ({ app, page }) => {
+  await app.open('tasks')
+  const help = page.getByRole('button', { name: 'Keyboard shortcuts (?)' })
+  await expect(help).toHaveAttribute('aria-expanded', 'false')
+  await openBar(page)
+  await page.keyboard.type('keyboard shortcuts')
+  await expect(rowsIn(page, 'Actions')).toHaveCount(1)
+  await expect(bar(page).getByRole('listbox')).not.toHaveAttribute('aria-busy', 'true')
+  await expect(rowsIn(page, 'Actions').first()).toHaveAttribute('data-selected', 'true')
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Enter') // lands during the fade-out
+  await expect(bar(page)).toHaveCount(0)
+  await page.waitForTimeout(300)
+  await expect(help).toHaveAttribute('aria-expanded', 'true')
+})
+
 /** Axe over the bar alone, once its fade/slide-in animations have finished
  *  (a mid-fade scan measures contrast at partial opacity). */
 async function axeBar(page: Page) {

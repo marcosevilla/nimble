@@ -11,6 +11,7 @@ import { rememberRowFocus } from '@/hooks/useTaskNavigation'
 import { useAppStore } from '@/stores/appStore'
 import { useDetailStore } from '@/stores/detailStore'
 import { useDocsStore } from '@/stores/docsStore'
+import { useGoalsStore } from '@/stores/goalsStore'
 import { useHelpPanelStore } from '@/stores/helpPanelStore'
 import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { navigateTo } from '@/stores/settingsNavStore'
@@ -74,6 +75,8 @@ export function Omnibar() {
   const [breakdownTask, setBreakdownTask] = useState<LocalTask | null>(null)
   const [breakdownLoading, setBreakdownLoading] = useState(false)
   const [breakdownItems, setBreakdownItems] = useState<string[]>([])
+  // One per opening: results never carry over from the previous session.
+  const [session, setSession] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const openerRef = useRef<HTMLElement | null>(null)
   const closeTimer = useRef<number | undefined>(undefined)
@@ -81,6 +84,9 @@ export function Omnibar() {
   // second Enter must not start a second early search.
   const submittingRef = useRef(false)
   const enterPendingRef = useRef(false)
+  // Set synchronously in closeBar: a second key in the same frame as the
+  // closing one (double Enter) must see it before the re-render does.
+  const closingRef = useRef(false)
 
   const { projects } = useProjects()
   const { labels } = useLabelTaxonomy()
@@ -95,7 +101,7 @@ export function Omnibar() {
     [mode, isBareSlash, rawQuery, pills, labels, projects],
   )
   const plan = useMemo(() => planSearch({ text, pills, mode, capability }), [text, pills, mode, capability])
-  const { results, settled, searchNow } = useOmnibarResults(plan, open)
+  const { results, settled, searchNow } = useOmnibarResults(plan, open, session)
   const actions = useMemo(() => (plan.groups.includes('actions') ? matchActions(text) : []), [plan, text])
   const creates = useMemo(
     () => createKinds({ text, mode, pills, capability, labelNames: labels.map((l) => l.name) }),
@@ -132,10 +138,15 @@ export function Omnibar() {
 
   const openBar = useCallback(() => {
     window.clearTimeout(closeTimer.current)
-    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    // Reopened while fading out after an item opened: focus is still in our
+    // own input, so keep the original opener.
+    const active = document.activeElement
+    if (active !== inputRef.current) openerRef.current = active instanceof HTMLElement ? active : null
     reset()
+    setSession((n) => n + 1)
     setOpen(true)
     setClosing(false)
+    closingRef.current = false
     submittingRef.current = false
     enterPendingRef.current = false
     setRecent(loadRecent(safeStorage()))
@@ -145,17 +156,20 @@ export function Omnibar() {
     })
   }, [dp, reset])
 
-  /** Escape, ⌘K and the backdrop return focus to where the bar was opened;
-   *  opening an item hands focus onward instead. */
+  /** Escape, ⌘K and the backdrop return focus to where the bar was opened —
+   *  at once, so keys typed during the fade-out reach the page, not the
+   *  fading field; opening an item hands focus onward instead. */
   const closeBar = useCallback((restoreFocus = false) => {
+    closingRef.current = true
     setClosing(true)
     const opener = openerRef.current
+    if (restoreFocus && opener?.isConnected) opener.focus()
     window.clearTimeout(closeTimer.current)
     closeTimer.current = window.setTimeout(() => {
       setOpen(false)
       setClosing(false)
+      closingRef.current = false
       reset()
-      if (restoreFocus && opener?.isConnected) opener.focus()
     }, CLOSE_MS)
   }, [reset])
 
@@ -240,7 +254,9 @@ export function Omnibar() {
   const handleCreate = useCallback(async (kind: CreateKind) => {
     if (!text || submittingRef.current) return
     submittingRef.current = true
-    const date = kind === 'task' ? capDate.date : null
+    // The highlight may never have reached Create task (Enter acting on the
+    // fresh row while stale ones showed), so parse here if it didn't.
+    const date = kind === 'task' ? (capDate.date ?? capDate.parseNow()) : null
     try {
       const created = await runCreate(dp, kind, text, pills, date, capability)
       const message = createdMessage(created, date?.label ?? null)
@@ -251,11 +267,20 @@ export function Omnibar() {
         toast.success(message)
       }
       closeBar()
+      if (created.kind === 'doc') {
+        // As the Docs page's own "new doc": refresh its lists, then open it.
+        const docs = useDocsStore.getState()
+        void docs.refresh().then(() => docs.selectDoc(created.id))
+        useAppStore.getState().setCurrentPage('docs')
+      } else if (created.kind === 'goal') {
+        void useGoalsStore.getState().refresh()
+        useDetailStore.getState().openGoal(created.id)
+      }
     } catch (e) {
       submittingRef.current = false
       toast.error(`Couldn't create ${CREATE_NAME[kind].toLowerCase()}: ${e}`)
     }
-  }, [text, capDate.date, dp, pills, capability, closeBar])
+  }, [text, capDate, dp, pills, capability, closeBar])
 
   const handleRoute = useCallback(async () => {
     if (!route || !text || submittingRef.current) return
@@ -385,11 +410,22 @@ export function Omnibar() {
   }, [settled, withFresh, activate])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Fading out: the bar is already closed; its keys act on nothing.
+    if (closingRef.current) { e.preventDefault(); return }
+    // An IME is composing (Enter confirms the composition, not a row).
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
     if (capDate.onKeyDown(e)) return
 
     if (breakdownTask && !breakdownLoading) {
       if (e.key === 'Escape') { e.preventDefault(); setBreakdownTask(null); setBreakdownItems([]); return }
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleBreakdownConfirm(); return }
+      return
+    }
+
+    // Breakdown loading: the rows are hidden behind its panel — nothing to
+    // move to or act on (Escape still closes).
+    if (breakdownTask && breakdownLoading && e.key !== 'Escape') {
+      if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Tab' || e.altKey) e.preventDefault()
       return
     }
 
@@ -454,7 +490,12 @@ export function Omnibar() {
 
     if (e.key !== 'Enter') return
     e.preventDefault()
-    if (selectedTask && (e.metaKey || e.ctrlKey)) { openInProject(selectedTask); return }
+    if (selectedTask && (e.metaKey || e.ctrlKey)) {
+      // Stale highlight: open that task's project only if it is still a result.
+      if (!settled) withFresh(selectedKey, (row) => { if (row.kind === 'task') openInProject(row.hit.task) })
+      else openInProject(selectedTask)
+      return
+    }
     if (!settled && (picked === null || (selectedRow !== null && isFetchedRow(selectedRow)))) {
       // Typed faster than the debounce, or the highlighted result is stale:
       // search now and act on the fresh row for exactly this text — never a
