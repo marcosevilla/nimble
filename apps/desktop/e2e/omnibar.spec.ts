@@ -3,7 +3,7 @@
  * Replaces c4-search.spec.ts. `seedSearch` adds three "zephyr" tasks through
  * the mock: an open title match, an open description match, a completed one.
  */
-import { test, expect } from './fixtures'
+import { test, expect, expectNoNewAxeViolations } from './fixtures'
 import type { Page } from '@playwright/test'
 
 type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
@@ -30,6 +30,8 @@ async function seedSearch(page: Page) {
   })
 }
 
+/** The bar alone: axe scans only it (the page behind has its own baseline). */
+const BAR = '[role="dialog"][aria-label="Command bar"]'
 const bar = (page: Page) => page.getByRole('dialog', { name: 'Command bar' })
 const field = (page: Page) => bar(page).getByRole('combobox', { name: 'Search or create' })
 const group = (page: Page, name: string) => bar(page).getByRole('group', { name, exact: true })
@@ -182,3 +184,34 @@ test('Escape closes and returns focus to where the bar was opened', async ({ app
   await expect(bar(page)).toHaveCount(0)
   await expect(row).toBeFocused()
 })
+
+/** Axe over the bar alone, once its fade/slide-in animations have finished
+ *  (a mid-fade scan measures contrast at partial opacity). */
+async function axeBar(page: Page) {
+  await page.waitForFunction((sel) => {
+    const el = document.querySelector(sel)
+    return !!el && el.getAnimations({ subtree: true }).every((a) => a.playState !== 'running')
+  }, BAR)
+  await expectNoNewAxeViolations(page, 'omnibar', { include: BAR })
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test.describe(`axe (${theme})`, () => {
+    test.use({ theme })
+
+    test('the empty bar, then filters + results + create rows, then a pill, are violation-free', async ({ app, page }) => {
+      await app.open('tasks')
+      await seedSearch(page)
+      await openBar(page)
+      await expect(group(page, 'Actions')).toBeVisible()
+      await axeBar(page)
+      await page.keyboard.type('zeph comp')
+      await expect(rowsIn(page, 'Filters').first()).toContainText('Filter by status: completed')
+      await expect(group(page, 'Create')).toBeVisible()
+      await axeBar(page)
+      await page.keyboard.press('Tab')
+      await expect(pills(page)).toHaveCount(1)
+      await axeBar(page)
+    })
+  })
+}
