@@ -99,3 +99,31 @@ test('todayKey: b toggles, [ and ] step days, never from fields, overlays or cho
   assert.equal(todayKey(ev('B', { shiftKey: true })), null)
   assert.equal(todayKey({ key: 'b', target: el({ tag: 'INPUT' }) }), null)
 })
+
+import { shellKeyBlocked, spaceKeyBlocked, ROW_SELECTOR } from '../src/lib/keyGuard.ts'
+
+test('shell keys (? ⇧F ⇧H q digits g-chord) skip every text entry, a SELECT included', () => {
+  for (const tag of ['INPUT', 'TEXTAREA', 'SELECT']) assert.equal(shellKeyBlocked(el({ tag }), false), true, tag)
+  assert.equal(shellKeyBlocked(el({ editable: true }), false), true, 'contenteditable')
+})
+
+test('shell keys skip while any overlay is open, focused or not', () => {
+  assert.equal(shellKeyBlocked(el({ inside: [OVERLAY_SELECTOR] }), false), true, 'focus inside a menu/dialog')
+  assert.equal(shellKeyBlocked(el({ tag: 'BODY' }), true), true, 'an overlay open elsewhere')
+})
+
+test('shell keys still act from the page and from a focused button', () => {
+  assert.equal(shellKeyBlocked(el({ tag: 'BODY' }), false), false)
+  assert.equal(shellKeyBlocked(el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR] }), false), false, 'a nav button keeps digits')
+  assert.equal(shellKeyBlocked(null, false), false)
+})
+
+test('Space leaves buttons, fields and overlays alone but not a list row', () => {
+  assert.equal(spaceKeyBlocked(el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR] }), false), true, 'a button activates')
+  assert.equal(spaceKeyBlocked(el({ tag: 'SELECT' }), false), true)
+  assert.equal(spaceKeyBlocked(el({ inside: [OVERLAY_SELECTOR] }), false), true, 'inside a dialog')
+  assert.equal(spaceKeyBlocked(el({ tag: 'BODY' }), true), true, 'an overlay open elsewhere')
+  const row = el({ tag: 'DIV', is: [INTERACTIVE_SELECTOR, ROW_SELECTOR] })
+  assert.equal(spaceKeyBlocked(row, false), false, 'a task row (role=button) hands Space to the session')
+  assert.equal(spaceKeyBlocked(el({ tag: 'BODY' }), false), false)
+})

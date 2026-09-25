@@ -45,6 +45,34 @@ export function shouldIgnoreKey(
   return false
 }
 
+/** A page list row (TaskItem, InboxNoteRow): `role="button"` rows that
+ * hand Space to a running focus session (they check `focusSpaceAction`). */
+export const ROW_SELECTOR = '[data-nav-row]'
+
+/**
+ * Dashboard's single-key shell shortcuts (`?`, ⇧F, ⇧H, `q`, digits and the
+ * `g` chord) stand down for any text entry — a SELECT included — and while
+ * a menu, popover or dialog is open, whether or not focus is inside it
+ * (1b follow-up). `overlayOpen` is `hasOpenOverlay()` from lib/rowNav,
+ * passed in so this stays DOM-free. A focused button keeps them: digits
+ * still navigate after clicking a nav item.
+ */
+export function shellKeyBlocked(target: KeyTargetLike | null | undefined, overlayOpen: boolean): boolean {
+  if (overlayOpen) return true
+  if (!target) return false
+  return isTextEntry(target) || !!target.closest?.(OVERLAY_SELECTOR)
+}
+
+/**
+ * Space-pauses-focus stands down like the shell keys, and also for any
+ * focused control but a list row, so Space activates the button it was
+ * aimed at (the project delete-confirm's "Keep it") instead of pausing.
+ */
+export function spaceKeyBlocked(target: KeyTargetLike | null | undefined, overlayOpen: boolean): boolean {
+  if (overlayOpen) return true
+  return shouldIgnoreKey(target, { rowSelector: ROW_SELECTOR })
+}
+
 /** An Up next row (the roving list owns its own keys: Enter promotes it). */
 export const QUEUE_ROW_SELECTOR = '[data-focus-entry]'
 
