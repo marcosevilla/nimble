@@ -29,8 +29,16 @@ export function subtasksAddedLabel(n: number): string {
   return n === 1 ? '1 subtask added' : `${n} subtasks added`
 }
 
-/** Returns the ids of the subtasks it created (empty = nothing changed). */
-export async function breakDownItem(deps: BreakDownDeps, item: BriefItem): Promise<string[]> {
+export interface BreakDownResult {
+  /** Subtasks created (empty = nothing changed). Undo deletes exactly these. */
+  created: string[]
+  /** The row recorded them. False when its state couldn't be saved — e.g. a
+   *  composition replaced the row mid-breakdown — so the caller still offers
+   *  Undo by `created` and refreshes the items. */
+  saved: boolean
+}
+
+export async function breakDownItem(deps: BreakDownDeps, item: BriefItem): Promise<BreakDownResult> {
   const task = item.task
   const parentId = item.task_id
   if (!task || !parentId) throw new Error(GONE)
@@ -43,8 +51,13 @@ export async function breakDownItem(deps: BreakDownDeps, item: BriefItem): Promi
       // Same as the task detail breakdown: one failed row doesn't stop the rest.
     }
   }
-  if (created.length > 0) await deps.setItemState(item.id, 'produced', 'break_down', JSON.stringify(created))
-  return created
+  if (created.length === 0) return { created, saved: false }
+  try {
+    await deps.setItemState(item.id, 'produced', 'break_down', JSON.stringify(created))
+    return { created, saved: true }
+  } catch {
+    return { created, saved: false }
+  }
 }
 
 export interface UndoDeps {
@@ -52,18 +65,27 @@ export interface UndoDeps {
   setItemState: SetItemState
 }
 
-/** Deletes exactly the subtasks Break it down created; returns how many failed. */
+/**
+ * Deletes exactly the subtasks Break it down created; returns how many
+ * failed. The row goes back to `none`, or stays `produced` with the subtasks
+ * that survived. A failed state save (the row is gone) never throws.
+ */
 export async function undoBreakDown(deps: UndoDeps, itemId: string, created: string[]): Promise<number> {
-  let failed = 0
+  const survivors: string[] = []
   for (const id of created) {
     try {
       await deps.deleteTask(id)
     } catch {
-      failed += 1
+      survivors.push(id)
     }
   }
-  await deps.setItemState(itemId, 'none', null, null)
-  return failed
+  try {
+    if (survivors.length > 0) await deps.setItemState(itemId, 'produced', 'break_down', JSON.stringify(survivors))
+    else await deps.setItemState(itemId, 'none', null, null)
+  } catch {
+    // The row was replaced meanwhile; the subtasks are what mattered.
+  }
+  return survivors.length
 }
 
 export interface CopyDeps {

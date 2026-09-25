@@ -51,13 +51,17 @@ function Column({ title, children, empty }: { title: string; children: React.Rea
 function HelpRow({ item, readOnly }: { item: BriefItem; readOnly: boolean }) {
   const dp = useDataProvider()
   const [busy, setBusy] = useState<'break' | 'copy' | null>(null)
-  const created = producedIds(item)
+  // What this row added, kept locally until Undo: if the row's state
+  // couldn't be saved, the button must not come back and add them twice.
+  const [added, setAdded] = useState<string[] | null>(null)
+  const saved = producedIds(item)
+  const created = saved.length > 0 ? saved : (added ?? [])
   const taskId = item.task_id
 
   const onBreakDown = async () => {
     setBusy('break')
     try {
-      const ids = await breakDownItem(
+      const { created: ids } = await breakDownItem(
         { breakDown: dp.ai.breakDownTask, createSubtask: (o) => dp.tasks.create(o), setItemState: dp.brief.setItemState },
         item,
       )
@@ -65,12 +69,16 @@ function HelpRow({ item, readOnly }: { item: BriefItem; readOnly: boolean }) {
         toast.error('Couldn’t add subtasks. Try again.')
         return
       }
+      setAdded(ids)
+      // Also re-reads the brief's items (useBriefComposition listens), so a
+      // row a composition replaced mid-breakdown drops out.
       emitTasksChanged()
       if (taskId) dp.activity.log('task_breakdown_applied', taskId, { subtask_count: ids.length, source: 'brief' }).catch(() => {})
       const pending = createUndoable({
         onCommit: () => {},
         onUndo: () => {
           void undoBreakDown({ deleteTask: (id) => dp.tasks.delete(id), setItemState: dp.brief.setItemState }, item.id, ids).then((failed) => {
+            setAdded(null)
             emitTasksChanged()
             if (failed > 0) toast.error('Some subtasks couldn’t be removed.')
           })

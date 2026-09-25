@@ -26,8 +26,9 @@ function recorder() {
 
 test('Break it down creates subtasks under the task and marks the item produced', async () => {
   const r = recorder()
-  const created = await breakDownItem(r.deps, item())
+  const { created, saved } = await breakDownItem(r.deps, item())
   assert.deepEqual(created, ['s1', 's3'], 'blank titles are skipped, a failed create is skipped')
+  assert.equal(saved, true)
   assert.deepEqual(r.calls[0], ['breakDown', 'Outline the reply', 'For the Oct 1 post'])
   assert.deepEqual(r.calls.filter((c) => c[0] === 'create').map((c) => c[1]), [
     { content: 'Draft intro', parentId: 't1', projectId: 'p1' },
@@ -45,16 +46,34 @@ test('Break it down on a deleted task, or with nothing created, changes nothing'
   const r = recorder()
   await assert.rejects(breakDownItem(r.deps, item({ task: null })), /no longer available/)
   const none = { ...r.deps, breakDown: async () => [] }
-  assert.deepEqual(await breakDownItem(none, item()), [])
+  assert.deepEqual(await breakDownItem(none, item()), { created: [], saved: false })
   assert.equal(r.calls.filter((c) => c[0] === 'state').length, 0)
+})
+
+test('the subtasks are kept for Undo when the row vanished mid-breakdown', async () => {
+  // A compose (scheduled retry or Regenerate) deleted the row meanwhile.
+  const r = recorder()
+  const gone = { ...r.deps, setItemState: async () => { throw new Error('brief_item_missing') } }
+  const { created, saved } = await breakDownItem(gone, item())
+  assert.deepEqual(created, ['s1', 's3'], 'Undo still deletes by these ids')
+  assert.equal(saved, false)
 })
 
 test('Undo deletes exactly the created subtasks and resets the item', async () => {
   const r = recorder()
+  assert.equal(await undoBreakDown(r.deps, item().id, ['s1', 's3']), 0)
+  assert.deepEqual(r.calls.filter((c) => c[0] === 'delete').map((c) => c[1]), ['s1', 's3'])
+  assert.deepEqual(r.calls.at(-1), ['state', item().id, 'none', null, null])
+})
+
+test('a partial Undo keeps the item produced with the subtasks that survived', async () => {
+  const r = recorder()
   const failed = await undoBreakDown(r.deps, item().id, ['s1', 'bad', 's3'])
   assert.equal(failed, 1)
   assert.deepEqual(r.calls.filter((c) => c[0] === 'delete').map((c) => c[1]), ['s1', 'bad', 's3'])
-  assert.deepEqual(r.calls.at(-1), ['state', item().id, 'none', null, null])
+  assert.deepEqual(r.calls.at(-1), ['state', item().id, 'produced', 'break_down', '["bad"]'])
+  const broken = { ...r.deps, setItemState: async () => { throw new Error('brief_item_missing') } }
+  assert.equal(await undoBreakDown(broken, item().id, ['s1']), 0, 'a failed state save never throws')
 })
 
 test('Copy for Claude builds the focus prompt for that task and copies it', async () => {
