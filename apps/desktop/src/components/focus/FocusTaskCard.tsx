@@ -93,7 +93,11 @@ export function FocusTaskMenu({
         >
           <MoreHorizontal className="size-3.5" aria-hidden />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
+        {/* The card's ⋯ sits in the timer row with Up next right below it:
+            open upward over the card it acts on, never down over the list
+            (loop 2 minor). Base UI flips it down only when there's no room
+            above. Row menus keep the default: below, flipping near the end. */}
+        <DropdownMenuContent side={place === 'card' ? 'top' : 'bottom'} align="end" className="w-52">
           {items.map((item) => (
             <div key={item.id}>
               {item.destructive && <DropdownMenuSeparator />}
