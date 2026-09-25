@@ -141,6 +141,45 @@ for (const theme of ['light', 'dark'] as const) {
       expect(order).toEqual(['Task title', 'Description', 'Priority', 'Due', 'Labels', 'Inbox', 'Add field', 'Cancel', 'Save'])
     })
 
+    test(`the project chip's focus ring is the chip's own rounded box, and the chip hugs its text (${theme})`, async ({ app, page }) => {
+      const dialog = await openModal(app, page)
+      const chip = dialog.getByRole('button', { name: 'Inbox', exact: true })
+      await chip.focus()
+      // Reach it by keyboard so :focus-visible applies: back to Labels, then forward.
+      await page.keyboard.press('Shift+Tab')
+      await page.keyboard.press('Tab')
+      await expect(chip).toBeFocused()
+      const m = await page.evaluate(() => {
+        const el = document.activeElement as HTMLElement
+        const row = document.querySelector('[data-composer-chips] > div') as HTMLElement
+        let box: HTMLElement = el
+        while (box.parentElement && box.parentElement !== row) box = box.parentElement
+        const cs = getComputedStyle(el)
+        const r = el.getBoundingClientRect()
+        const b = box.getBoundingClientRect()
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        const text = range.getBoundingClientRect()
+        const clear = box.querySelector('[aria-label="Clear project"]')?.getBoundingClientRect() ?? null
+        return {
+          outline: cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) >= 2,
+          radius: parseFloat(cs.borderTopLeftRadius),
+          focused: [r.left, r.top, r.width, r.height].map(Math.round),
+          chipBox: [b.left, b.top, b.width, b.height].map(Math.round),
+          trailing: b.right - text.right,
+          clear: clear && { left: clear.left - text.right, right: b.right - clear.right, visible: getComputedStyle(box.querySelector('[aria-label="Clear project"]')!).opacity },
+        }
+      })
+      expect(m.outline, 'ring on the focused chip').toBe(true)
+      expect(m.radius, 'ring follows a rounded box').toBeGreaterThan(0)
+      expect(m.focused, 'focused element is the whole chip').toEqual(m.chipBox)
+      // Right side = the ✕ slot only (a visible ✕, 4px clear of the text), no dead space.
+      expect(m.clear).not.toBeNull()
+      expect(m.clear!.visible).toBe('1')
+      expect(m.clear!.left).toBeGreaterThanOrEqual(2)
+      expect(m.trailing).toBeLessThanOrEqual(26)
+    })
+
     test(`focus never moves the layout, by keyboard or mouse (${theme})`, async ({ app, page }) => {
       const dialog = await openModal(app, page)
       const base = await layout(dialog)
