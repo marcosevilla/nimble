@@ -15,6 +15,7 @@ pub mod candidates;
 pub mod prompt;
 pub mod validate;
 pub mod fallback;
+pub mod compose;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
