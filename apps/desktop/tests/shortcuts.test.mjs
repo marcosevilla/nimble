@@ -140,5 +140,5 @@ test('Today lists the brief setup and Boxes keys', () => {
 
 test('Labels section (C4) lists the picker keys', () => {
   const keys = SHORTCUTS.filter((s) => s.section === 'Labels').map((s) => s.keys)
-  for (const k of ['↑ / ↓', 'Space / Enter']) assert.ok(keys.includes(k), `missing Labels ${k}`)
+  for (const k of ['↑ / ↓', 'Space / Enter', '⌥↑ / ⌥↓']) assert.ok(keys.includes(k), `missing Labels ${k}`)
 })

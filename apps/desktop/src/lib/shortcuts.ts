@@ -167,6 +167,7 @@ export const SHORTCUTS: Shortcut[] = [
   // ── C4: label picker (components/tasks/LabelPicker.tsx) ──
   { section: 'Labels', keys: '↑ / ↓', label: 'Move through labels in the picker, across groups' },
   { section: 'Labels', keys: 'Space / Enter', label: 'Toggle the focused label ("Pick one" groups swap)' },
+  { section: 'Labels', keys: '⌥↑ / ⌥↓', label: 'Move the focused label or group (Settings → Labels, from its grip)' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [
