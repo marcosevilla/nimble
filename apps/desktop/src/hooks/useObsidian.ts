@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '@/stores/appStore'
 import { useDataProvider } from '@/services/provider-context'
 import type { ParsedTodayMd } from '@nimble/types'
-import { friendlyError, isMissingTodayNote } from '@/lib/errors'
+import { friendlyError, isMissingTodayNote, isWebNotImplemented } from '@/lib/errors'
 import { toast } from 'sonner'
 
 export function useObsidian() {
@@ -25,6 +25,14 @@ export function useObsidian() {
     } catch (e) {
       // No vault-root today.md: show no daily note, not a vault-path toast.
       if (isMissingTodayNote(e)) {
+        setTodayData(null)
+        setObsidianToday(null)
+        return
+      }
+      // Web has no vault to read at all (Mac-only, architecture doc §6) —
+      // treat the legacy today.md read as "no daily note" there too, rather
+      // than toasting "Something went wrong" on every web Today load.
+      if (isWebNotImplemented(e)) {
         setTodayData(null)
         setObsidianToday(null)
         return
