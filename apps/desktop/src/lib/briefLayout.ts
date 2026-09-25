@@ -1,6 +1,6 @@
 // Pure helpers for the brief's module layout and settings (addendum §1–§2).
 // Plain TS (type-only imports) so node tests import it directly.
-import type { BriefLayoutEntry, BriefSettings, BriefSettingsPatch } from '@nimble/types'
+import type { BriefGoals, BriefLayoutEntry, BriefLocation, BriefSettings, BriefSettingsPatch } from '@nimble/types'
 
 /** The phase-1 boxes: a brief with no readable layout (the web without a
  *  synced row, or a malformed one) renders these. */
@@ -54,6 +54,9 @@ export function applySettingsPatch(settings: BriefSettings, patch: BriefSettings
   if (patch.model !== undefined) next.model = patch.model
   if (patch.effort !== undefined) next.effort = patch.effort
   if (patch.goals !== undefined) next.goals = { ...settings.goals, ...patch.goals }
+  // Optimistic too, so the first-visit setup trigger can't reopen while
+  // Rust's answer is still queued behind another save (Rust's stamp wins).
+  if (patch.complete_setup && !next.setup_completed_at) next.setup_completed_at = new Date().toISOString()
   return next
 }
 
@@ -114,4 +117,49 @@ export function boxRowKey(
   if (key === 'Home') return { kind: 'focus', index: 0 }
   if (key === 'End') return { kind: 'focus', index: length - 1 }
   return null
+}
+
+export type PresetId = 'focused' | 'full' | 'minimal'
+
+/** Setup step 1 (base §3.4; UX checkpoint 4). Presets only toggle; the
+ *  order stays the user's. Phase 3 appends 'quick_wins' to Focused. */
+export const PRESETS: { id: PresetId; name: string; description: string; enabled: string[] | 'all' }[] = [
+  { id: 'focused', name: 'Focused', description: 'Your schedule, top priorities and what’s due today.', enabled: ['weather', 'schedule', 'priorities', 'due_today', 'vault'] },
+  { id: 'full', name: 'Full', description: 'Every box, including habits and notes.', enabled: 'all' },
+  { id: 'minimal', name: 'Minimal', description: 'Your schedule and what’s due today. No AI.', enabled: ['weather', 'schedule', 'due_today', 'vault'] },
+]
+
+export function applyPreset(entries: BriefLayoutEntry[], id: PresetId): BriefLayoutEntry[] {
+  const preset = PRESETS.find((p) => p.id === id)
+  if (!preset) return entries
+  return entries.map((x) => ({ ...x, enabled: preset.enabled === 'all' || preset.enabled.includes(x.id) }))
+}
+
+export interface SetupDraft {
+  preset: PresetId | null
+  time: string
+  location: BriefLocation | null
+  modules: BriefLayoutEntry[]
+  goals: BriefGoals
+}
+
+export function draftFrom(s: BriefSettings): SetupDraft {
+  return {
+    preset: null,
+    time: s.time,
+    location: s.location,
+    modules: s.modules.map((x) => ({ ...x, config: { ...x.config } })),
+    goals: { daily: s.goals.daily, weekly: s.goals.weekly, days_off: [...s.goals.days_off] },
+  }
+}
+
+/** Finish (and Skip): every setup key in one save (addendum §3). */
+export function setupPatch(d: SetupDraft): BriefSettingsPatch {
+  return {
+    time: d.time,
+    location: d.location,
+    modules: d.modules,
+    goals: { daily: d.goals.daily, weekly: d.goals.weekly, days_off: d.goals.days_off },
+    complete_setup: true,
+  }
 }

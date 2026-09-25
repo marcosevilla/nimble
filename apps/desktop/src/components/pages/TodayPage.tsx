@@ -25,6 +25,8 @@ import { briefReady, loadTodayCompact, saveTodayCompact, splitDueTasks } from '@
 import { cn } from '@/lib/utils'
 import { useWeather } from '@/hooks/useWeather'
 import { useBriefSettingsStore } from '@/stores/briefSettingsStore'
+import { TodaySetup } from '@/components/today/setup/TodaySetup'
+import { useTodaySetupStore } from '@/stores/todaySetupStore'
 
 /** The greeting lives in the header's meta slot — one title per page
  *  (cross-cutting move 1: the second text-title h2 is gone). */
@@ -119,6 +121,19 @@ export function TodayPage() {
       : null)
   const isOn = (id: string) => !!layout?.some((e) => e.id === id && e.enabled)
 
+  // First Today visit while the setup never completed (addendum §3). Desktop
+  // only: the web has no settings. Closing always follows a successful save,
+  // so this can't reopen in a loop.
+  const setupOpen = useTodaySetupStore((s) => s.open)
+  useEffect(() => {
+    if (settings && settings.setup_completed_at === null && !useTodaySetupStore.getState().open) {
+      useTodaySetupStore.getState().start(settings)
+    }
+  }, [settings])
+  const focusBrief = useCallback(() => {
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-brief-body]')?.focus())
+  }, [])
+
   // Priorities generate only while their box is on (no AI call for a hidden box).
   const daily = useDailyPriorities({ today, ready: ready && isOn('priorities'), events, calendarUnavailable: calendarOffline, tasks, projects: allProjects })
   const location = settings?.location
@@ -141,6 +156,8 @@ export function TodayPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The setup owns ↵/Esc; b, [ and ] stand down while it's open.
+      if (useTodaySetupStore.getState().open) return
       const action = todayKey({
         key: e.key,
         target: e.target as HTMLElement | null,
@@ -212,22 +229,28 @@ export function TodayPage() {
         actions={
           <div className="flex min-w-0 items-center gap-3">
             {completed > 0 && <ProgressBar completed={completed} total={total} />}
-            {selected === today && arranged?.header.map((e) => (
-              <ModuleBox key={e.id} id={e.id} mode="live" date={today} config={e.config} />
-            ))}
-            <DateStrip briefDates={briefDates} selected={selected} today={today} onSelect={select} />
-            {selected === today && (
-              <IconButton aria-label={compact ? 'Expand the brief' : 'Compact the brief'} aria-expanded={!compact} onClick={toggleCompact}>
-                <ChevronDown className={cn('size-3.5 transition-transform duration-(--transition-fast)', !compact && 'rotate-180')} />
-              </IconButton>
+            {!setupOpen && (
+              <>
+                {selected === today && arranged?.header.map((e) => (
+                  <ModuleBox key={e.id} id={e.id} mode="live" date={today} config={e.config} />
+                ))}
+                <DateStrip briefDates={briefDates} selected={selected} today={today} onSelect={select} />
+                {selected === today && (
+                  <IconButton aria-label={compact ? 'Expand the brief' : 'Compact the brief'} aria-expanded={!compact} onClick={toggleCompact}>
+                    <ChevronDown className={cn('size-3.5 transition-transform duration-(--transition-fast)', !compact && 'rotate-180')} />
+                  </IconButton>
+                )}
+                {selected === today && dp.briefSettings.supported && <BriefMenu />}
+              </>
             )}
-            {selected === today && dp.briefSettings.supported && <BriefMenu />}
           </div>
         }
         bodyClassName="space-y-4"
       >
         <ReminderCatchUp />
-        {selected !== today ? (
+        {setupOpen ? (
+          <TodaySetup onDone={focusBrief} />
+        ) : selected !== today ? (
           <PastBrief date={selected} today={today} />
         ) : !arranged ? (
           <BriefSkeleton />

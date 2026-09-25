@@ -6,6 +6,8 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Meta } from '@/components/shared/typography'
 import { useBriefSettingsStore } from '@/stores/briefSettingsStore'
 import { openSettings } from '@/stores/settingsNavStore'
+import { useAppStore } from '@/stores/appStore'
+import { useTodaySetupStore } from '@/stores/todaySetupStore'
 import type { SettingsFailure } from '@/lib/settingsMessage'
 import { FieldLabel, SECTION_CLASS, SectionHeader, SectionSkeleton, SettingFieldRow, type SettingField } from './SettingsFields'
 
@@ -93,6 +95,19 @@ export function TodayBriefSettings() {
               <Button variant="ghost" size="sm" onClick={() => openSettings('integrations')}>Add a key</Button>
             </div>
           )}
+          <div className="space-y-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                useTodaySetupStore.getState().start(settings)
+                useAppStore.getState().setCurrentPage('today')
+              }}
+            >
+              Run setup again
+            </Button>
+            <Meta as="p">Walks through layout, location, brief time, sources, goals and boxes. Everything is kept until you finish.</Meta>
+          </div>
         </div>
       )}
     </section>

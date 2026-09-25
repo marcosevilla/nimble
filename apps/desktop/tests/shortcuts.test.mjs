@@ -135,5 +135,5 @@ test('g s is labelled as Activity in Settings, and number keys match the five-pa
 
 test('Today lists the brief setup and Boxes keys', () => {
   const keys = keysIn('Today')
-  for (const k of ['⌥↑ / ⌥↓']) assert.ok(keys.includes(k), `Today missing ${k}`)
+  for (const k of ['⌥↑ / ⌥↓', 'Enter (setup)', 'Escape (setup)']) assert.ok(keys.includes(k), `Today missing ${k}`)
 })

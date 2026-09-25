@@ -161,6 +161,8 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Tasks', keys: 'm', label: 'Move focused task to a project' },
   // ── Today: brief phase 2 (components/today/BoxesList.tsx → lib/briefLayout.ts boxRowKey) ──
   { section: 'Today', keys: '⌥↑ / ⌥↓', label: 'Move a box up / down (Settings → Boxes, setup)' },
+  { section: 'Today', keys: 'Enter (setup)', label: 'Continue to the next setup step' },
+  { section: 'Today', keys: 'Escape (setup)', label: 'Skip setup (keeps what you chose so far)' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [
