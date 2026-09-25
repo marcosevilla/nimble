@@ -181,3 +181,33 @@ async fn backfill_rebuilds_history_once() {
     assert!(e.iter().any(|x| x.id == format!("recur:{repeat}:2026-09-20") && x.date == "2026-09-20"));
     assert_eq!(karma::backfill_at(&pool, d("2026-09-23")).await.unwrap(), BackfillReport::default(), "a rerun adds nothing");
 }
+
+async fn backfill_version(pool: &SqlitePool) -> Option<String> {
+    nimble_core::db::settings::get_setting(pool, "momentum.backfill_version").await.unwrap()
+}
+
+#[tokio::test]
+async fn the_launch_backfill_runs_until_one_full_run_succeeds() {
+    let pool = test_pool().await;
+    let old = task(&pool, "Done before v27", 1).await;
+    sqlx::query("UPDATE local_tasks SET status='complete', completed=1, completed_at='2026-09-01 10:00:00' WHERE id=?")
+        .bind(&old).execute(&pool).await.unwrap();
+    // A live hook row lands first: the ledger isn't empty, but history is missing.
+    let fresh = task(&pool, "Done today", 1).await;
+    nimble_core::db::tasks::update_task_status(&pool, &fresh, "complete", None).await.unwrap();
+    // The first attempt fails part-way (here: its history table is unreadable).
+    sqlx::query("ALTER TABLE activity_log RENAME TO activity_log_away").execute(&pool).await.unwrap();
+    karma::backfill_if_needed(&pool).await;
+    assert_eq!(backfill_version(&pool).await, None, "a failed run is retried");
+    sqlx::query("ALTER TABLE activity_log_away RENAME TO activity_log").execute(&pool).await.unwrap();
+    karma::backfill_if_needed(&pool).await;
+    assert!(backfill_version(&pool).await.is_some());
+    let ids: Vec<String> = karma::list_events(&pool).await.unwrap().into_iter().map(|e| e.id).collect();
+    assert!(ids.contains(&format!("task:{old}:2026-09-01 10:00:00")), "{ids:?}");
+    // Once done, it doesn't run again at launch (rerun with `dt momentum backfill`).
+    let later = task(&pool, "Imported later", 1).await;
+    sqlx::query("UPDATE local_tasks SET status='complete', completed=1, completed_at='2026-09-02 10:00:00' WHERE id=?")
+        .bind(&later).execute(&pool).await.unwrap();
+    karma::backfill_if_needed(&pool).await;
+    assert!(!karma::list_events(&pool).await.unwrap().iter().any(|e| e.task_id.as_deref() == Some(later.as_str())));
+}

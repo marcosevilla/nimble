@@ -19,8 +19,15 @@
 //!
 //! Days are LOCAL calendar dates. `created_at` is the local moment the event
 //! happened (a completion's `completed_at`), which is what Peak hour reads.
-//! Known limit: complete → reopen → complete inside one wall-clock second
+//! Known limits: complete → reopen → complete inside one wall-clock second
 //! reuses the `completed_at` key, so the second completion isn't counted.
+//! Pause is day-granular (a mid-day pause pauses the whole day). A Todoist
+//! reconcile's completions all land on the day it runs. A Todoist recurring
+//! completion counts only once the activity log confirms it
+//! (`sync_loop::confirm_recurrences`); two completions of one item between
+//! syncs count once, and an unavailable log counts none.
+//! Goal bonus rows are recorded whether or not parity mode is on; only parity
+//! mode renders them (total, streaks).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -169,25 +176,29 @@ pub(crate) async fn on_completed_tx(conn: &mut SqliteConnection, task_id: &str) 
     Ok(())
 }
 
-/// A row that was complete (stamped `prior_completed_at`) is open again.
-/// Reverses the original once, on the original's day. Nothing when there is
-/// no original (e.g. completed before the ledger existed and never backfilled).
+/// A row that was complete is open again. Reverses its completion once, on
+/// the original's day: the row keyed on `prior_completed_at` when it is still
+/// unreversed, else the most recent unreversed `task:<id>:…` row (last-write-
+/// wins can replace `completed_at`, e.g. the Mac's stamp with the web's).
+/// Nothing when the ledger never saw an unreversed completion (e.g. one from
+/// before the ledger existed and never backfilled).
 pub(crate) async fn on_reopened_tx(conn: &mut SqliteConnection, task_id: &str, prior_completed_at: Option<&str>) -> crate::Result<()> {
-    let Some(stamp) = prior_completed_at else { return Ok(()) };
-    let original_id = format!("task:{task_id}:{stamp}");
-    let original: Result<Option<KarmaEvent>, sqlx::Error> =
-        sqlx::query_as(&format!("SELECT {COLS} FROM karma_events WHERE id = ?"))
-            .bind(&original_id).fetch_optional(&mut *conn).await;
+    let exact = prior_completed_at.map(|stamp| format!("task:{task_id}:{stamp}")).unwrap_or_default();
+    let original: Result<Option<KarmaEvent>, sqlx::Error> = sqlx::query_as(&format!(
+        "SELECT {COLS} FROM karma_events e WHERE e.kind = 'task' AND e.task_id = ? \
+           AND NOT EXISTS (SELECT 1 FROM karma_events u WHERE u.id = 'un' || e.id) \
+         ORDER BY (e.id = ?) DESC, e.created_at DESC, e.id DESC LIMIT 1"))
+        .bind(task_id).bind(&exact).fetch_optional(&mut *conn).await;
     let original = match original {
         Ok(Some(o)) => o,
         Ok(None) => return Ok(()),
         Err(err) => {
-            log::warn!("karma: reversal of {original_id} not read: {err}");
+            log::warn!("karma: reversal for {task_id} not read: {err}");
             return Ok(());
         }
     };
     let reversal = KarmaEvent {
-        id: format!("un{original_id}"),
+        id: format!("un{}", original.id),
         date: original.date,
         kind: "untask".into(),
         points: -original.points,
@@ -479,16 +490,18 @@ pub fn daily_streak(earned: &BTreeSet<NaiveDate>, s: &MomentumSettings, paused: 
 }
 
 /// Parity mode: goal weeks in a row (keyed by their Monday), ending this week
-/// once it is earned. A week whose every day was off or paused is stepped over.
+/// once it is earned. An unearned week that was all days off, or had any
+/// paused day, is stepped over: pausing never breaks a streak.
 pub fn weekly_streak(earned_mondays: &BTreeSet<NaiveDate>, s: &MomentumSettings, paused: &BTreeSet<NaiveDate>, today: NaiveDate) -> i64 {
     let Some(first) = earned_mondays.iter().next().copied() else { return 0 };
     let this = week_start(today);
     let mut w = if earned_mondays.contains(&this) { this } else { this - Duration::days(7) };
     let mut n = 0;
     while w >= first {
+        let days = || (0..7).map(|i| w + Duration::days(i));
         if earned_mondays.contains(&w) {
             n += 1;
-        } else if !(0..7).map(|i| w + Duration::days(i)).all(|d| skipped(d, s, paused)) {
+        } else if !(days().all(|d| skipped(d, s, paused)) || days().any(|d| paused.contains(&d))) {
             break;
         }
         w = w - Duration::days(7);
@@ -534,6 +547,15 @@ pub async fn evaluate_at(pool: &SqlitePool, from: NaiveDate, today: NaiveDate) -
             .bind(day(today - Duration::days(PENALTY_AFTER_DAYS))).fetch_all(pool).await?;
         events.extend(penalty_events(&open, &s, &paused, today, &at));
     }
+    // Summary reads call this every time: skip ids already persisted, and open
+    // no write transaction when nothing is new.
+    let ids = serde_json::to_string(&events.iter().map(|e| e.id.as_str()).collect::<Vec<_>>())
+        .map_err(|e| crate::Error::Other(e.to_string()))?;
+    let existing: std::collections::HashSet<String> = sqlx::query_scalar(
+        "SELECT id FROM karma_events WHERE id IN (SELECT value FROM json_each(?))")
+        .bind(ids).fetch_all(pool).await?.into_iter().collect();
+    events.retain(|e| !existing.contains(&e.id));
+    if events.is_empty() { return Ok(report); }
     let mut tx = pool.begin().await?;
     for e in &events {
         if record_tx(&mut tx, e).await? {
@@ -743,14 +765,28 @@ pub async fn backfill_at(pool: &SqlitePool, today: NaiveDate) -> crate::Result<B
     Ok(r)
 }
 
-/// Launch hook: rebuild once, the first time the ledger is empty. Fire-and-forget.
-pub async fn backfill_if_empty(pool: &SqlitePool) {
-    let empty = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM karma_events")
-        .fetch_one(pool).await.map(|n| n == 0).unwrap_or(false);
-    if !empty { return; }
+/// Bumped when a backfill change should rerun on every Mac at next launch.
+pub const BACKFILL_VERSION: &str = "1";
+const K_BACKFILL: &str = "momentum.backfill_version";
+
+/// Launch hook: rebuild until one run succeeds for this `BACKFILL_VERSION`
+/// (stamped in `momentum.backfill_version` only after a fully successful run).
+/// A non-empty ledger is no signal: a live completion can land first. The
+/// backfill is idempotent by id, so a retry is harmless. Fire-and-forget.
+pub async fn backfill_if_needed(pool: &SqlitePool) {
+    match get_setting(pool, K_BACKFILL).await {
+        Ok(Some(v)) if v == BACKFILL_VERSION => return,
+        Ok(_) => {}
+        Err(e) => { log::warn!("karma backfill check failed: {e}"); return; }
+    }
     match backfill(pool).await {
-        Ok(r) => log::info!("karma backfill: {r:?}"),
-        Err(e) => log::warn!("karma backfill failed: {e}"),
+        Ok(r) => {
+            log::info!("karma backfill: {r:?}");
+            if let Err(e) = set_setting(pool, K_BACKFILL, BACKFILL_VERSION).await {
+                log::warn!("karma backfill done but not stamped (reruns next launch): {e}");
+            }
+        }
+        Err(e) => log::warn!("karma backfill failed (retries next launch): {e}"),
     }
 }
 
@@ -864,6 +900,47 @@ mod ledger_tests {
     }
 
     #[tokio::test]
+    async fn a_reopen_after_the_stamp_changed_reverses_the_latest_unreversed_completion() {
+        // LWW replaced completed_at (Mac L, then the web's W) before the reopen.
+        let pool = test_pool().await;
+        let mut tx = pool.begin().await.unwrap();
+        let mut old = ev("task:t8:2026-09-10 08:00:00");
+        old.created_at = "2026-09-10 08:00:00".into();
+        old.task_id = Some("t8".into());
+        record_tx(&mut tx, &old).await.unwrap();
+        on_reopened_tx(&mut tx, "t8", Some("2026-09-10 08:00:00")).await.unwrap(); // an earlier, already reversed pair
+        let mut latest = ev("task:t8:2026-09-20 09:00:00");
+        latest.created_at = "2026-09-20 09:00:00".into();
+        latest.task_id = Some("t8".into());
+        latest.date = "2026-09-20".into();
+        record_tx(&mut tx, &latest).await.unwrap();
+        on_reopened_tx(&mut tx, "t8", Some("2026-09-20 09:00:05")).await.unwrap(); // W: not in the ledger
+        on_reopened_tx(&mut tx, "t8", Some("2026-09-20 09:00:05")).await.unwrap();
+        tx.commit().await.unwrap();
+        let e = list_events(&pool).await.unwrap();
+        let mut rev: Vec<(&str, &str, i64)> = e.iter().filter(|x| x.kind == "untask").map(|x| (x.id.as_str(), x.date.as_str(), x.points)).collect();
+        rev.sort();
+        assert_eq!(rev, [("untask:t8:2026-09-10 08:00:00", "2026-09-25", -1), ("untask:t8:2026-09-20 09:00:00", "2026-09-20", -1)]);
+        assert_eq!(e.iter().map(|x| x.points).sum::<i64>(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_read_with_nothing_new_to_persist_writes_nothing() {
+        let pool = test_pool().await;
+        let mut tx = pool.begin().await.unwrap();
+        for i in 0..5 {
+            record_tx(&mut tx, &completion_event(&format!("t{i}"), 1, &format!("2026-09-23 1{i}:00:00")).unwrap()).await.unwrap();
+        }
+        tx.commit().await.unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 9, 23).unwrap();
+        assert_eq!(evaluate_at(&pool, today, today).await.unwrap().goal_days, 1);
+        // Any further insert would abort the whole transaction.
+        sqlx::raw_sql("CREATE TRIGGER karma_boom BEFORE INSERT ON karma_events BEGIN SELECT RAISE(ROLLBACK, 'boom'); END")
+            .execute(&pool).await.unwrap();
+        assert_eq!(evaluate_at(&pool, today, today).await.unwrap(), EvaluateReport::default());
+    }
+
+    #[tokio::test]
     async fn repeated_toggles_with_distinct_stamps_each_count_and_reverse() {
         use crate::db::tasks::update_task_status;
         let pool = test_pool().await;
@@ -960,6 +1037,11 @@ mod goal_tests {
         // Weeks (keyed by Monday): W37 + W38 earned, this week not yet.
         let weeks: BTreeSet<NaiveDate> = ["2026-09-07", "2026-09-14"].map(d).into();
         assert_eq!(weekly_streak(&weeks, &s, &BTreeSet::new(), d("2026-09-23")), 2);
+        // W38 unearned but with a paused day: stepped over, never breaks W37.
+        let w37: BTreeSet<NaiveDate> = [d("2026-09-07")].into();
+        let wed: BTreeSet<NaiveDate> = [d("2026-09-16")].into();
+        assert_eq!(weekly_streak(&w37, &s, &wed, d("2026-09-23")), 1);
+        assert_eq!(weekly_streak(&w37, &s, &BTreeSet::new(), d("2026-09-23")), 0);
     }
 
     #[test]

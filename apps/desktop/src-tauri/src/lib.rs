@@ -344,10 +344,10 @@ pub fn run() {
                     Ok(false) => {}
                     Err(e) => log::warn!("Task search index check failed: {e}"),
                 }
-                // Momentum: the first launch on v27 rebuilds the ledger from
-                // history in the background (db::karma::backfill_if_empty).
+                // Momentum: the first launch on v27 (until one run succeeds) rebuilds the ledger from
+                // history in the background (db::karma::backfill_if_needed).
                 let karma_pool = pool.clone();
-                tauri::async_runtime::spawn(async move { nimble_core::db::karma::backfill_if_empty(&karma_pool).await });
+                tauri::async_runtime::spawn(async move { nimble_core::db::karma::backfill_if_needed(&karma_pool).await });
 
                 if demo_mode {
                     log::info!("DEMO MODE — database initialized at {:?}", db_path);
