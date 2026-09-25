@@ -40,7 +40,7 @@ import type { DataProvider } from '@nimble/types'
 // share the transport in `turso/client.ts` — do not add another fetch path.
 import { createTask, listTasks, setTaskStatus, updateReminderIntent } from '@/services/turso/tasks'
 import { listProjects } from '@/services/turso/projects'
-import { createCapture, listCaptures } from '@/services/turso/captures'
+import { createCapture, listCaptures, searchCaptures } from '@/services/turso/captures'
 import { listLabels, listLabelGroups, unusedLabelIds } from '@/services/turso/labels'
 import { searchTasksLike } from '@/services/turso/search'
 import { listSections } from '@/services/turso/sections'
@@ -110,6 +110,10 @@ export function createTursoProvider(): DataProvider {
       setPaused: ni('momentum.setPaused'),
       backfill: ni('momentum.backfill'),
     },
+    // Web searches Tasks + Notes and creates Tasks + Notes only: doc/goal
+    // search and project/label/doc creation are ni() below, and turso/tasks.ts
+    // refuses labelIds on create — so the Omnibar never offers them here.
+    omnibar: { docs: false, goals: false, createProject: false, createLabel: false, taskLabelsOnCreate: false },
     settings: {
       // See note 2 in the file header — deliberately resolves.
       checkSetupComplete: () => Promise.resolve(true),
@@ -148,6 +152,7 @@ export function createTursoProvider(): DataProvider {
     captures: {
       list: listCaptures,
       create: createCapture,
+      search: searchCaptures,
       convertToTask: ni('captures.convertToTask'),
       delete: ni('captures.delete'),
       readQuickCaptures: ni('captures.readQuickCaptures'),
@@ -316,6 +321,7 @@ export function createTursoProvider(): DataProvider {
     goals: {
       list: ni('goals.list'),
       get: ni('goals.get'),
+      search: ni('goals.search'),
       create: ni('goals.create'),
       update: ni('goals.update'),
       delete: ni('goals.delete'),

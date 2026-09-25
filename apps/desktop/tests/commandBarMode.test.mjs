@@ -81,12 +81,9 @@ test('query is always a suffix of the raw input, including leading spaces', () =
   }
 })
 
-import { searchHandoff } from '../src/lib/commandBarMode.ts'
-
-test('/search hands its text to ⌘F; other input stays in ⌘K', () => {
-  assert.equal(searchHandoff('/search '), '')
-  assert.equal(searchHandoff('  /search portfolio deck'), 'portfolio deck')
-  assert.equal(searchHandoff('/search'), null, 'not until the space')
-  assert.equal(searchHandoff('portfolio'), null)
-  assert.equal(searchHandoff('/searching'), null)
+test('/search is a silent alias for plain search (no handoff since the Omnibar)', () => {
+  const { mode, query, route } = parseMode('/search portfolio deck', [])
+  assert.equal(mode, 'search')
+  assert.equal(query, 'portfolio deck')
+  assert.equal(route, null)
 })

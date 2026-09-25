@@ -116,3 +116,12 @@ pub async fn delete_life_area(app: AppHandle, id: String) -> Result<(), String> 
     let pool = app.state::<SqlitePool>();
     nimble_core::db::goals::delete_life_area(pool.inner(), &id).await.map_err(|e| e.to_string())
 }
+
+/// Omnibar Goals group: LIKE over name + description, active goals first.
+#[tauri::command]
+pub async fn search_goals(app: AppHandle, query: String, limit: Option<i64>) -> Result<Vec<Goal>, String> {
+    let pool = app.state::<SqlitePool>();
+    nimble_core::db::goals::search_goals(pool.inner(), &query, limit.unwrap_or(20))
+        .await
+        .map_err(|e| e.to_string())
+}

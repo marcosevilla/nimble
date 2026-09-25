@@ -34,9 +34,8 @@ test('likeSnippet: window around the first hit, every hit marked, ellipses when 
   assert.equal(likeSnippet(null, ['portfolio']), null)
 })
 
-import {
-  groupHits, createLatestGuard, formatDoneDate, EMPTY_SEARCH_FILTERS, hasActiveFilters, activeFilterLabels,
-} from '../src/lib/taskSearch.ts'
+import * as taskSearch from '../src/lib/taskSearch.ts'
+const { groupHits, createLatestGuard, formatDoneDate } = taskSearch
 
 const hit = (id, status) => ({ task: { id, status, content: id }, snippet: null, matched_in: 'title' })
 
@@ -64,9 +63,8 @@ test('formatDoneDate: short date, year only outside the current year', () => {
   assert.equal(formatDoneDate('garbage', now), 'Done')
 })
 
-test('filters: active check and plain-language list for the empty state', () => {
-  assert.equal(hasActiveFilters(EMPTY_SEARCH_FILTERS), false)
-  const f = { status: 'completed', label_ids: ['l1', 'gone'], project_id: 'p1' }
-  assert.equal(hasActiveFilters(f), true)
-  assert.deepEqual(activeFilterLabels(f, [{ id: 'l1', name: 'deep' }], [{ id: 'p1', name: 'Portfolio' }]), ['Completed', 'deep', 'Portfolio'])
+test('the ⌘F chip helpers are gone (filters are Omnibar pills now)', () => {
+  for (const name of ['EMPTY_SEARCH_FILTERS', 'STATUS_LABEL', 'hasActiveFilters', 'activeFilterLabels', 'SEARCH_DEBOUNCE_MS']) {
+    assert.equal(taskSearch[name], undefined, name)
+  }
 })

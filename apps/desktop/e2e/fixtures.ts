@@ -118,14 +118,18 @@ function readBaseline(): Baseline {
 }
 
 /**
- * WCAG 2.1 A/AA axe scan of the whole page. Fails on any rule that is new for
- * `pageKey`, or that now hits more nodes than the baseline recorded on main.
+ * WCAG 2.1 A/AA axe scan of the whole page (or only `opts.include`, a CSS
+ * selector, for an overlay that must be clean on its own over a page with its
+ * own baseline). Fails on any rule that is new for `pageKey`, or that now hits
+ * more nodes than the baseline recorded on main.
  * Run with UPDATE_AXE_BASELINE=1 --workers=1 (against a frozen main build) to re-record.
  */
-export async function expectNoNewAxeViolations(page: Page, pageKey: string) {
+export async function expectNoNewAxeViolations(page: Page, pageKey: string, opts: { include?: string } = {}) {
   // Dark mode has its own baseline row (`<page>:dark`).
   if (await page.evaluate(() => document.documentElement.classList.contains('dark'))) pageKey += ':dark'
-  const results = await new AxeBuilder({ page })
+  let builder = new AxeBuilder({ page })
+  if (opts.include) builder = builder.include(opts.include)
+  const results = await builder
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     // Base UI injects unnamed `role=button` focus guards (6) whenever any
     // popup is open — library-internal, present on main with any popover, so

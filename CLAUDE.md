@@ -161,6 +161,15 @@ nimble/
 - Implementations: `TauriProvider` (desktop, delegates to invoke wrappers) and `TursoProvider` (web, `services/turso-provider.ts` — implements the web data layer; desktop-only backups explicitly report unsupported).
 - ⚠️ `apps/mobile/services/data-provider.ts` is still a **stale parallel copy** (mobile is DORMANT). It has drifted badly: missing the `todoist`, `vault` and `sections` domains entirely, `captures.create` lacks the v16 `context` param, and `tasks.create/update` lack every R1/v19 field. If mobile is ever revived, delete that copy and import from `@nimble/types` — but expect to fix all of the above first.
 
+## Omnibar (⌘K / ⌘F)
+- One bar: `components/omnibar/Omnibar.tsx`, mounted once in `Dashboard`. ⌘K toggles it; ⌘F opens it (or re-selects its text); the nav's `open-command-bar` event opens it. There is no separate ⌘F overlay any more.
+- The logic is pure and node-tested: `lib/omnibarQuery.ts` (pills + inferred filter suggestions over any run of consecutive words), `lib/omnibarSearch.ts` (group plan, parallel fan-out, a failed source → empty group), `lib/omnibarRows.ts` (the one keyboard list, default highlight, option ids, stale-row helpers), `lib/omnibarCreate.ts` (create rows, `type:` promotion, pill carry-over), `lib/omnibarActions.ts` (the Actions group).
+- Platform differences go through `dp.omnibar` (`OmnibarCapability`), never `if (web)`. Web: Tasks + Notes search, Create Task/Note only.
+- Notes and Goals search are `captures.search` / `goals.search` (Rust `search_captures` / `search_goals`): LIKE per word, ASCII case folding only; Notes hide converted and routed captures like the Inbox; Goals follow Goals page order. Label pills: only the first goes to `search_tasks` (any-of, capped), the rest AND client-side. A pill-only query lists tasks through `tasks.list` (with `projectId` when a project pill is set).
+- ARIA: the input is a combobox over a `role="listbox"`; rows are `role="option"` with index-based ids (`optionId(i)`, never row keys — vault paths hold `/` and spaces). Task quick-action buttons sit beside the option, never inside it.
+- Enter before the 120 ms debounce settles — or on / clicking a stale fetched row — calls `searchNow` and acts on the fresh row (`freshRow`), never a stale one.
+- Its placeholder must not be "Search or create…": that is `LabelPicker`'s, and e2e detects an open label picker by it. Axe scans the bar alone (`expectNoNewAxeViolations(page, 'omnibar', { include })`).
+
 ## Sync Protocol
 - Every mutation appends to `sync_log` (fire-and-forget, never blocks the mutation)
 - Push: send unsynced entries + data mutations to Turso via HTTP pipeline API

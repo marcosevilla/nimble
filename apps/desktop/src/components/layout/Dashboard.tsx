@@ -11,8 +11,7 @@ import { navigateTo } from '@/stores/settingsNavStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { NavSidebar } from './NavSidebar'
 import { RightRailSpacer, RightSidebar } from './RightSidebar'
-import { CommandBar } from '@/components/shared/CommandBar'
-import { TaskSearch } from '@/components/search/TaskSearch'
+import { Omnibar } from '@/components/omnibar/Omnibar'
 import { HelpPanel } from '@/components/shared/HelpPanel'
 import { useHelpPanelStore } from '@/stores/helpPanelStore'
 import { G_PREFIX_PAGES, G_PREFIX_TIMEOUT_MS, isHabitsShortcut, isModifierOnlyKey } from '@/lib/shortcuts'
@@ -379,9 +378,8 @@ export function Dashboard() {
       {/* Help panel (shortcuts + roadmap) */}
       <HelpPanel />
 
-      {/* Command bar overlay */}
-      <CommandBar />
-      <TaskSearch />
+      {/* Omnibar: ⌘K / ⌘F search, filters, create and actions */}
+      <Omnibar />
 
       {/* Focus recovery notice (shows a paused total; never starts) */}
       <FocusResumeDialog />

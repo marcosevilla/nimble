@@ -148,3 +148,9 @@ test('⌘F and the Search section (C4)', () => {
   const keys = SHORTCUTS.filter((s) => s.section === 'Search').map((s) => s.keys)
   for (const k of ['↑ / ↓', 'Enter', '⌘Enter', 'Tab', 'Escape']) assert.ok(keys.includes(k), `missing Search ${k}`)
 })
+
+test('Omnibar rows: ⌘F reads "Search", ⌫ removes a filter, /search is gone', () => {
+  assert.equal(SHORTCUTS.find((s) => s.section === 'Navigation' && s.keys === '⌘F')?.label, 'Search')
+  assert.ok(SHORTCUTS.some((s) => s.section === 'Search' && s.keys === '⌫'))
+  assert.ok(!SHORTCUTS.some((s) => s.keys === '/search'))
+})

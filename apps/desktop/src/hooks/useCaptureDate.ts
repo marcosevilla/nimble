@@ -46,5 +46,13 @@ export function useCaptureDate(full: string, content: string, enabled: boolean) 
     [date, highlight, full],
   )
 
-  return { date, highlight, onKeyDown }
+  /** Parse now even where the field isn't task-bound yet — Enter acting on a
+   *  fresh Create task row the highlight never reached (Omnibar). Honours the
+   *  "keep as text" choices. */
+  const parseNow = useCallback(
+    (): ParsedCaptureDate | null => (content.trim() ? parseCaptureDate(content, new Date(), ignored) : null),
+    [content, ignored],
+  )
+
+  return { date, highlight, onKeyDown, parseNow }
 }

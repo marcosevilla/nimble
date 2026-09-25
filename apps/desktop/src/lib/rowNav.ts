@@ -81,7 +81,9 @@ export { OVERLAY_SELECTOR }
  * after Esc must reopen the composer, not be swallowed by the fading one. */
 export function hasOpenOverlay(doc: Document = document): boolean {
   return Array.from(doc.querySelectorAll(OVERLAY_SELECTOR)).some(
-    (el) => !el.matches('[data-closed], [data-ending-style]') && el.getClientRects().length > 0,
+    // closest(): everything inside a fading popup is closed too (the fading
+    // Omnibar's listbox), not only the element carrying the marker.
+    (el) => !el.closest('[data-closed], [data-ending-style]') && el.getClientRects().length > 0,
   )
 }
 

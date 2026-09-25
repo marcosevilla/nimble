@@ -36,6 +36,7 @@ export function createTauriProvider(): DataProvider {
       setPaused: tauri.momentumSetPaused,
       backfill: tauri.momentumBackfill,
     },
+    omnibar: { docs: true, goals: true, createProject: true, createLabel: true, taskLabelsOnCreate: true },
     settings: {
       checkSetupComplete: tauri.checkSetupComplete,
       get: tauri.getSetting,
@@ -67,6 +68,7 @@ export function createTauriProvider(): DataProvider {
     captures: {
       list: tauri.getCaptures,
       create: tauri.createCapture,
+      search: tauri.searchCaptures,
       convertToTask: tauri.convertCaptureToTask,
       delete: tauri.deleteCapture,
       readQuickCaptures: tauri.readQuickCaptures,
@@ -204,6 +206,7 @@ export function createTauriProvider(): DataProvider {
     goals: {
       list: tauri.getGoals,
       get: tauri.getGoal,
+      search: tauri.searchGoals,
       create: tauri.createGoal,
       update: tauri.updateGoal,
       delete: tauri.deleteGoal,
