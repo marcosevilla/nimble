@@ -353,6 +353,15 @@
   animation: panel-in var(--transition-base) var(--ease-entrance) backwards;
 }
 
+/* Demo-mode dot: three slow pulses, then it rests at full opacity (no
+   fill). NavSidebar drops the class on hover/focus of the pill. */
+.demo-dot-pulse {
+  animation: demo-dot-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) 3;
+}
+@keyframes demo-dot-pulse {
+  50% { opacity: 0.4; }
+}
+
 /* AI breakdown star bounce */
 .ai-star-1 { animation: ai-star-bounce 1.2s ease-in-out infinite; }
 .ai-star-2 { animation: ai-star-bounce 1.2s ease-in-out 0.2s infinite; }
@@ -598,6 +607,7 @@
   .help-panel-enter,
   .capture-strip-in,
   .bulk-action-bar-enter,
+  .demo-dot-pulse,
   .ai-star-1,
   .ai-star-2,
   .ai-star-3,

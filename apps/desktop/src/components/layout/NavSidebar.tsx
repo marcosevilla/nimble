@@ -260,6 +260,11 @@ export function NavSidebar() {
   // Demo mode indicator — always visible while the throwaway db is active
   const dp = useDataProvider()
   const [demoMode, setDemoMode] = useState(false)
+  // The dot pulses a few times to announce demo mode, then rests — and
+  // stops at once when the pill is pointed at or focused (Stage C deferred
+  // minor: it used to pulse forever). Not remembered: a relaunch in demo
+  // mode announces it again.
+  const [demoSeen, setDemoSeen] = useState(false)
   useEffect(() => {
     dp.system.getDemoStatus().then(setDemoMode).catch(() => {})
   }, [dp])
@@ -352,8 +357,10 @@ export function NavSidebar() {
                 expanded ? 'px-2.5 py-1 text-label' : 'size-6 justify-center',
               )}
               onClick={() => openSettings('demo')}
+              onPointerEnter={() => setDemoSeen(true)}
+              onFocus={() => setDemoSeen(true)}
             >
-              <span className="size-1.5 rounded-full bg-warning animate-pulse" />
+              <span data-demo-dot className={cn('size-1.5 rounded-full bg-warning', !demoSeen && 'demo-dot-pulse')} />
               {expanded && 'Demo'}
             </TooltipTrigger>
             <TooltipContent side="right">Demo mode — real data hidden. Click to manage.</TooltipContent>
