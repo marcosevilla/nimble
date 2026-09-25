@@ -214,6 +214,15 @@ pub(crate) async fn on_recurred_on_tx(conn: &mut SqliteConnection, task_id: &str
     Ok(())
 }
 
+/// A synced task UPDATE whose changed columns name both `due_date` and
+/// `status` is a recurring completion: desktop `set_status_tx` and the web's
+/// `setTaskStatus` write exactly that pair; a reschedule never touches status.
+pub fn is_roll_forward(changed_columns: Option<&str>) -> bool {
+    changed_columns
+        .and_then(|c| serde_json::from_str::<Vec<String>>(c).ok())
+        .is_some_and(|cols| cols.iter().any(|c| c == "due_date") && cols.iter().any(|c| c == "status"))
+}
+
 /// Every event, oldest day first (tests, `dt`, debugging).
 pub async fn list_events(pool: &SqlitePool) -> crate::Result<Vec<KarmaEvent>> {
     Ok(sqlx::query_as(&format!("SELECT {COLS} FROM karma_events ORDER BY date, id")).fetch_all(pool).await?)
@@ -355,5 +364,15 @@ mod ledger_tests {
         ];
         want.sort();
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn only_a_due_plus_status_change_is_a_roll_forward() {
+        assert!(is_roll_forward(Some(r#"["due_date","due_time","status","completed","completed_at"]"#)));
+        assert!(is_roll_forward(Some(r#"["due_date","due_time","status"]"#)));
+        assert!(!is_roll_forward(Some(r#"["due_date"]"#)), "a reschedule");
+        assert!(!is_roll_forward(Some(r#"["status","completed","completed_at"]"#)));
+        assert!(!is_roll_forward(None));
+        assert!(!is_roll_forward(Some("not json")));
     }
 }

@@ -406,6 +406,7 @@ async fn apply_structure_tx(
         .execute(&mut *conn)
         .await?;
         expect_one(res, || format!("task {id} is missing or already complete"))?;
+        crate::db::karma::on_completed_tx(&mut *conn, id).await?;
         rows.logged.push((id.clone(), "UPDATE"));
     }
 
@@ -946,6 +947,20 @@ mod tests {
         assert!(snap.checked, "base now matches Todoist, so a later reopen there merges cleanly");
         let status: String = sqlx::query_scalar("SELECT status FROM local_tasks WHERE id='t5'").fetch_one(&pool).await.unwrap();
         assert_eq!(status, "complete");
+    }
+
+    #[tokio::test]
+    async fn a_reconciled_completion_counts_once_through_the_final_pull() {
+        let pool = test_pool().await;
+        seed_legacy(&pool).await;
+        let mut st = HashMap::new();
+        st.insert("R5".to_string(), RemoteStatus::Completed);
+        let plan = build_plan(&pool, &full(), &st).await.unwrap();
+        apply(&pool, &full(), &plan).await.unwrap();
+        let rows: Vec<String> = sqlx::query_scalar("SELECT id FROM karma_events WHERE task_id = 't5'")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert!(rows[0].starts_with("task:t5:"), "{rows:?}");
     }
 
     #[tokio::test]

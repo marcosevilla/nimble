@@ -1913,14 +1913,25 @@ pub async fn apply_remote_rows_with_focus(
     // Completion state of each task before this chunk first touched it, so a
     // pull that un-completes a task is reported as a reopen (focus restore).
     let mut was_complete: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    // Momentum (db::karma): each task's completion stamp and due date before
+    // this chunk first touched it, and the rows that rolled a repeat forward.
+    let mut prior_stamps: std::collections::HashMap<String, (Option<String>, Option<String>)> = std::collections::HashMap::new();
+    let mut rolled_forward: std::collections::HashSet<String> = std::collections::HashSet::new();
     let result: crate::Result<()> = async {
         for plan in &planned {
             let row = plan.row;
             let conn = write.conn();
             if row.table_name == "local_tasks" && row.operation != "DELETE" && !was_complete.contains_key(&row.row_id) {
-                let prior: Option<(i64, String)> = sqlx::query_as("SELECT completed,status FROM local_tasks WHERE id = ?")
-                    .bind(&row.row_id).fetch_optional(&mut *conn).await?;
-                was_complete.insert(row.row_id.clone(), prior.is_some_and(|(done, status)| done != 0 || status == "complete"));
+                let prior: Option<(i64, String, Option<String>, Option<String>)> =
+                    sqlx::query_as("SELECT completed,status,completed_at,due_date FROM local_tasks WHERE id = ?")
+                        .bind(&row.row_id).fetch_optional(&mut *conn).await?;
+                was_complete.insert(row.row_id.clone(), prior.as_ref().is_some_and(|(done, status, _, _)| *done != 0 || status == "complete"));
+                if let Some((_, _, completed_at, due_date)) = prior {
+                    prior_stamps.insert(row.row_id.clone(), (completed_at, due_date));
+                }
+            }
+            if row.table_name == "local_tasks" && crate::db::karma::is_roll_forward(row.changed_columns.as_deref()) {
+                rolled_forward.insert(row.row_id.clone());
             }
             sqlx::query("SAVEPOINT pulled_row").execute(&mut *conn).await?;
             let outcome: crate::Result<Vec<LocalTask>> = async {
@@ -1996,6 +2007,35 @@ pub async fn apply_remote_rows_with_focus(
     // without going through any task hook, so drop their search rows here.
     if applied_rows.iter().any(|p| p.row.table_name == "projects" && p.row.operation == "DELETE") {
         crate::db::task_search::prune_orphans_conn(write.conn()).await?;
+    }
+    // Momentum ledger (fire-and-forget; see db::karma), judged against each
+    // task's state before this chunk so a complete-then-reopen chunk nets out.
+    // Only a lost transaction (see karma::record_tx) comes back as an error.
+    let ledger: crate::Result<()> = async {
+        let conn = write.conn();
+        for task in &effects.changed {
+            let was = was_complete.get(&task.id).copied().unwrap_or(false);
+            let now = task.completed || task.status == "complete";
+            let (prior_done_at, prior_due) = prior_stamps.get(&task.id).cloned().unwrap_or((None, None));
+            if now && !was {
+                crate::db::karma::on_completed_tx(conn, &task.id).await?;
+            } else if !now && was {
+                crate::db::karma::on_reopened_tx(conn, &task.id, prior_done_at.as_deref()).await?;
+            } else if !now && rolled_forward.contains(&task.id) {
+                let recurring = task.recurrence_rule.as_deref().and_then(crate::recurrence::parse_rule).is_some();
+                if let (true, Some(before), Some(after)) = (recurring, prior_due.as_deref(), task.due_date.as_deref()) {
+                    if after > before {
+                        crate::db::karma::on_recurred_tx(conn, &task.id, before, task.priority, &crate::db::karma::now_local()).await?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(e) = ledger {
+        let _ = write.abandon().await;
+        return Err(e);
     }
     write.commit(&effects).await?;
 
