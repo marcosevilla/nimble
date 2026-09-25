@@ -26,15 +26,9 @@ export function parseMode(raw: string, routes: readonly CaptureRoute[]): ParsedB
   if (trimmed.startsWith('/capture ')) return { mode: 'capture', query: trimmed.slice(9), route: null }
   if (trimmed.startsWith('/note ')) return { mode: 'capture', query: trimmed.slice(6), route: null }
   if (trimmed.startsWith('/doc ')) return { mode: 'doc', query: trimmed.slice(5), route: null }
+  // Silent alias for plain search (the ⌘F handoff went with the Omnibar).
   if (trimmed.startsWith('/search ')) return { mode: 'search', query: trimmed.slice(8), route: null }
   const { route, content } = parseRoutePrefix(trimmed, [...routes])
   if (route && content) return { mode: 'route', query: content, route }
   return { mode: 'search', query: trimmed, route: null }
-}
-
-/** ⌘K `/search ` hands its text to the ⌘F overlay (C4). Returns the text to
- *  hand over (possibly empty), or null when the input is not a search handoff. */
-export function searchHandoff(raw: string): string | null {
-  const trimmed = raw.trimStart()
-  return trimmed.startsWith('/search ') ? trimmed.slice('/search '.length) : null
 }

@@ -60,7 +60,7 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Navigation', keys: 'g ,', label: 'Go to Settings' },
   { section: 'Navigation', keys: '1–5', label: 'Jump to page (sidebar order)' },
   { section: 'Navigation', keys: '⌘1–5', label: 'Jump to page, even while typing' },
-  { section: 'Navigation', keys: '⌘K', label: 'Command bar' },
+  { section: 'Navigation', keys: '⌘K', label: 'Omnibar: search, create, run actions' },
   { section: 'Navigation', keys: '⌘,', label: 'Settings' },
   { section: 'Navigation', keys: '?', label: 'Keyboard shortcuts' },
 
@@ -77,14 +77,13 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Focus', keys: '⇧F', label: 'Open / close the focus queue in the right column (starts nothing)' },
   { section: 'Focus', keys: 'Enter / Escape', label: 'Dismiss completion note (next task waits for Start)' },
 
-  // ── Command bar (CommandBar.tsx) ──
+  // ── Command bar (components/omnibar/Omnibar.tsx) ──
   { section: 'Command bar', keys: '⌥C', label: 'Complete selected task' },
   { section: 'Command bar', keys: '⌥B', label: 'AI breakdown' },
   { section: 'Command bar', keys: '⌥M', label: 'Move to project' },
   { section: 'Command bar', keys: '/task', label: 'Force create mode' },
   { section: 'Command bar', keys: '/capture', label: 'Force note mode' },
-  { section: 'Command bar', keys: '/doc', label: 'Search docs' },
-  { section: 'Command bar', keys: '/search', label: 'Search every task (switches to ⌘F)' },
+  { section: 'Command bar', keys: '/doc', label: 'Search docs and vault notes only' },
   { section: 'Command bar', keys: 'Escape', label: 'Close' },
 
   // ── Calendar rail (CalendarPanel.tsx, while focus is in the calendar) ──
@@ -125,7 +124,7 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Docs', keys: 'Enter', label: 'Open the focused document or note' },
   { section: 'Docs', keys: '⌫', label: 'Delete the focused document or folder (asks first)' },
   { section: 'Docs', keys: 'N', label: 'New document' },
-  { section: 'Docs', keys: '/', label: 'Search docs and vault (⌘K /doc searches native docs only)' },
+  { section: 'Docs', keys: '/', label: 'Search docs and vault (⌘K finds them too)' },
 
   // ── Goals (HabitsSection.tsx habit circles; GoalTimeline.tsx) ──
   { section: 'Goals', keys: 'Enter / Space', label: 'Check off the focused habit' },
@@ -169,13 +168,14 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Labels', keys: '↑ / ↓', label: 'Move through labels in the picker, across groups' },
   { section: 'Labels', keys: 'Space / Enter', label: 'Toggle the focused label ("Pick one" groups swap)' },
   { section: 'Labels', keys: '⌥↑ / ⌥↓', label: 'Move the focused label or group (Settings → Labels, from its grip)' },
-  // ── C4: task search (components/search/TaskSearch.tsx) ──
-  { section: 'Navigation', keys: '⌘F', label: 'Search tasks, open and done' },
-  { section: 'Search', keys: '↑ / ↓', label: 'Move through results' },
-  { section: 'Search', keys: 'Enter', label: 'Open the task' },
+  // ── Omnibar search (components/omnibar/Omnibar.tsx; was the C4 ⌘F overlay) ──
+  { section: 'Navigation', keys: '⌘F', label: 'Search' },
+  { section: 'Search', keys: '↑ / ↓', label: 'Move through results, across groups' },
+  { section: 'Search', keys: 'Enter', label: 'Open, run or create the highlighted row' },
   { section: 'Search', keys: '⌘Enter', label: 'Open the task in its project' },
-  { section: 'Search', keys: 'Tab', label: 'Move to the filters' },
-  { section: 'Search', keys: 'Escape', label: 'Close search; focus goes back' },
+  { section: 'Search', keys: 'Tab', label: 'Turn the suggested word into a filter' },
+  { section: 'Search', keys: '⌫', label: 'In an empty field: remove the last filter' },
+  { section: 'Search', keys: 'Escape', label: 'Close; focus goes back' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [
