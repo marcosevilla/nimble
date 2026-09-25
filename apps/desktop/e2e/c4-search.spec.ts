@@ -130,3 +130,15 @@ test('recent searches show on an empty query', async ({ app, page }) => {
   const recent = search(page).getByRole('group', { name: 'Recent' })
   await expect(recent.getByRole('option', { name: 'zeph' })).toBeVisible()
 })
+
+test.describe('dark theme', () => {
+  test.use({ theme: 'dark' })
+
+  test('axe: search results are violation-free (dark)', async ({ app, page }) => {
+    await app.open('tasks')
+    await seedSearch(page)
+    await openAndType(page, 'zeph')
+    await expect(search(page).getByRole('option').first()).toBeVisible()
+    await expectNoNewAxeViolations(page, 'task-search')
+  })
+})

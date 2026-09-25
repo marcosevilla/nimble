@@ -48,6 +48,17 @@ async function seedTaxonomy(page: Page) {
   })
 }
 
+async function openPicker(page: Page) {
+  const row = page.locator('main [data-nav-row="task-01"]')
+  await expect(row).toBeVisible()
+  await row.focus()
+  await page.keyboard.press('l')
+  const add = page.getByRole('dialog').getByRole('button', { name: 'Add label' })
+  await add.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('radiogroup', { name: 'Effort', exact: true })).toBeVisible()
+}
+
 test('picker: group sections, Pick-one radios, archived and system hidden, arrows cross sections', async ({ app, page }) => {
   await app.open('tasks')
   const ids = await seedTaxonomy(page)
@@ -104,7 +115,9 @@ test('picker: group sections, Pick-one radios, archived and system hidden, arrow
   await field.fill('from-instinct')
   await expect(list.getByText('System label — applied automatically')).toBeVisible()
   await field.fill('')
-  await expectNoNewAxeViolations(page, 'c4-picker')
+  // Whole-page scan: judged against the Tasks page baseline (the dev toolbar,
+  // nav tree etc. are recorded there); the open picker must add nothing.
+  await expectNoNewAxeViolations(page, 'tasks')
 })
 
 test('row chips hide system labels; the detail shows them muted', async ({ app, page }) => {
@@ -120,14 +133,19 @@ test('row chips hide system labels; the detail shows them muted', async ({ app, 
 test('label filter: grouped sections, system last, archived absent', async ({ app, page }) => {
   await app.open('tasks')
   await seedTaxonomy(page)
-  await page.getByTestId('task-list-header').getByRole('button', { name: /^(All|\d+ filters?)$/ }).click()
+  const trigger = page.getByTestId('task-list-header').getByRole('button', { name: /^(All|\d+ filters?)$/ })
   const menu = page.getByRole('menu')
-  const headings = await menu.locator('[data-slot="dropdown-menu-label"]').allInnerTexts()
-  const order = headings.map((h) => h.trim()).filter((h) => ['Effort', 'Type', 'Ungrouped', 'Integrations'].includes(h))
-  expect(order.at(-1)).toBe('Integrations')
-  expect(order.indexOf('Effort')).toBeLessThan(order.indexOf('Type'))
-  await expect(menu.getByRole('menuitem', { name: 'errand' })).toHaveCount(0)
-  await expect(menu.getByRole('menuitem', { name: 'from-instinct' })).toBeVisible()
+  // The seed lands through the async labels cache: reopen until it shows.
+  await expect(async () => {
+    if (!(await menu.isVisible())) await trigger.click()
+    const headings = await menu.locator('[data-slot="dropdown-menu-label"]').allInnerTexts()
+    const order = headings.map((h) => h.trim()).filter((h) => ['Effort', 'Type', 'Ungrouped', 'Integrations'].includes(h))
+    if (order.at(-1) !== 'Integrations') await page.keyboard.press('Escape')
+    expect(order.at(-1)).toBe('Integrations')
+    expect(order.indexOf('Effort')).toBeLessThan(order.indexOf('Type'))
+    await expect(menu.getByRole('menuitem', { name: 'errand' })).toHaveCount(0)
+    await expect(menu.getByRole('menuitem', { name: 'from-instinct' })).toBeVisible({ timeout: 500 })
+  }).toPass({ timeout: 8000 })
 })
 
 test('label filter keeps a selected archived label listed (muted) so it can be removed', async ({ app, page }) => {
@@ -189,4 +207,15 @@ test('Label Manager: ⌥↑ moves a label into the group above, Pick one, archiv
   expect(await calls(page, 'delete_label_group')).toEqual([])
 
   await expectNoNewAxeViolations(page, 'settings')
+})
+
+test.describe('dark theme', () => {
+  test.use({ theme: 'dark' })
+
+  test('axe: the open grouped picker adds nothing to the Tasks page baseline (dark)', async ({ app, page }) => {
+    await app.open('tasks')
+    await seedTaxonomy(page)
+    await openPicker(page)
+    await expectNoNewAxeViolations(page, 'tasks')
+  })
 })

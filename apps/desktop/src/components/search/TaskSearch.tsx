@@ -60,7 +60,7 @@ function Marked({ segments }: { segments: Segment[] }) {
     <>
       {segments.map((s, i) =>
         s.mark
-          ? <mark key={i} className="rounded-[3px] bg-primary/15 px-px text-inherit">{s.text}</mark>
+          ? <mark key={i} className="rounded-[3px] bg-primary/15 px-px text-foreground">{s.text}</mark>
           : <Fragment key={i}>{s.text}</Fragment>,
       )}
     </>
