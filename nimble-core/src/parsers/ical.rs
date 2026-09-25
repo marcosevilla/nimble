@@ -54,9 +54,9 @@ pub fn parse_ical_for_date_in<Z: TimeZone>(ical_content: &str, target_date: Naiv
             for prop in &event.properties {
                 match prop.name.as_str() {
                     "UID" => uid = prop.value.clone().unwrap_or_default(),
-                    "SUMMARY" => summary = prop.value.clone().unwrap_or_default(),
-                    "DESCRIPTION" => description = prop.value.clone(),
-                    "LOCATION" => location = prop.value.clone(),
+                    "SUMMARY" => summary = prop.value.as_deref().map(unescape_text).unwrap_or_default(),
+                    "DESCRIPTION" => description = prop.value.as_deref().map(unescape_text),
+                    "LOCATION" => location = prop.value.as_deref().map(unescape_text),
                     "DTSTART" => {
                         dtstart = prop.value.clone();
                         start_tzid = tzid(prop);
@@ -123,6 +123,51 @@ pub fn parse_ical_for_date_in<Z: TimeZone>(ical_content: &str, target_date: Naiv
 
     events.sort_by(|a, b| a.start_time.cmp(&b.start_time));
     events
+}
+
+/// Unescape an RFC 5545 §3.3.11 TEXT value: `\\` -> `\`, `\,` -> `,`,
+/// `\;` -> `;`, `\n`/`\N` -> a real newline. The `ical` crate hands us the
+/// raw property text, so SUMMARY/DESCRIPTION/LOCATION show these escapes
+/// literally (e.g. `shot list\, grade`) unless we unescape them ourselves.
+///
+/// Single left-to-right pass: a backslash only ever consumes the ONE
+/// character after it. This is what makes `\\n` (an escaped backslash
+/// followed by a plain `n`) come out as `\n` (backslash + n), not a real
+/// newline -- the second backslash is already spent unescaping the first
+/// one before the `n` is ever looked at. An unrecognized escape (e.g. `\x`)
+/// or a trailing backslash with nothing after it is left as-is.
+fn unescape_text(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            result.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('\\') => {
+                result.push('\\');
+                chars.next();
+            }
+            Some(',') => {
+                result.push(',');
+                chars.next();
+            }
+            Some(';') => {
+                result.push(';');
+                chars.next();
+            }
+            Some('n') | Some('N') => {
+                result.push('\n');
+                chars.next();
+            }
+            // Unknown escape, or a trailing backslash with nothing after it:
+            // keep the backslash and let the next char (if any) fall through
+            // to the top of the loop as a plain character.
+            _ => result.push('\\'),
+        }
+    }
+    result
 }
 
 fn parse_ical_date(s: &str) -> Option<NaiveDate> {
