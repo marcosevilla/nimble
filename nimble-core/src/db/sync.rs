@@ -907,6 +907,29 @@ fn build_snapshot_upsert_sql(table_name: &str, columns: &[&str]) -> String {
     )
 }
 
+/// Briefs sync a notes edit as a partial row (`db::briefs::set_notes`:
+/// date, notes, updated_at) so it can't be undone by, or undo, a whole-row
+/// payload from another device. An upsert can't carry a partial row: SQLite
+/// checks NOT NULL on the insert row before ON CONFLICT applies. So a briefs
+/// payload holding only these columns applies as a plain UPDATE (0 rows when
+/// the day isn't on this side yet). Returns the SQL and the bind order.
+fn partial_update_sql(table_name: &str, columns: &[&str]) -> Option<(String, Vec<String>)> {
+    const BRIEF_PARTIAL: [&str; 2] = ["notes", "updated_at"];
+    if table_name != "briefs" || !columns.contains(&"date") {
+        return None;
+    }
+    let set: Vec<&str> = columns.iter().copied().filter(|c| *c != "date").collect();
+    if set.is_empty() || !set.iter().all(|c| BRIEF_PARTIAL.contains(c)) {
+        return None;
+    }
+    let sql = format!(
+        "UPDATE briefs SET {} WHERE date = ?",
+        set.iter().map(|c| format!("{c} = ?")).collect::<Vec<_>>().join(", ")
+    );
+    let order = set.iter().map(|c| c.to_string()).chain(std::iter::once("date".to_string())).collect();
+    Some((sql, order))
+}
+
 /// Build snapshot-apply statements for a given table (see
 /// `build_snapshot_upsert_sql` for why these are conflict-target upserts).
 /// Returns a vector of Turso execute requests to apply the data mutation.
@@ -960,7 +983,10 @@ fn build_data_mutation_requests(
 
             let columns: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
 
-            let mut sql = build_snapshot_upsert_sql(table_name, &columns);
+            let (mut sql, columns): (String, Vec<String>) = match partial_update_sql(table_name, &columns) {
+                Some(partial) => partial,
+                None => (build_snapshot_upsert_sql(table_name, &columns), columns.iter().map(|c| c.to_string()).collect()),
+            };
             if table_name == "focus_replica" {
                 // A delayed retry must not regress the remote aggregate.
                 // Epoch changes require a separate stopped-owner takeover.
@@ -970,7 +996,7 @@ fn build_data_mutation_requests(
             let args: Vec<serde_json::Value> = columns
                 .iter()
                 .map(|col| {
-                    let val = &obj[*col];
+                    let val = &obj[col.as_str()];
                     match val {
                         serde_json::Value::Null => turso_null(),
                         serde_json::Value::Bool(b) => {
@@ -1935,11 +1961,15 @@ async fn apply_row_conn(
             // internal DELETE fires ON DELETE CASCADE and wiped child rows
             // on the receiving device (see build_snapshot_upsert_sql).
             let columns: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
-            let sql = build_snapshot_upsert_sql(sanitize_table_name(table_name)?, &columns);
+            let table = sanitize_table_name(table_name)?;
+            let (sql, columns): (String, Vec<String>) = match partial_update_sql(table, &columns) {
+                Some(partial) => partial,
+                None => (build_snapshot_upsert_sql(table, &columns), columns.iter().map(|c| c.to_string()).collect()),
+            };
 
             let mut query = sqlx::query(&sql);
             for col in &columns {
-                let val = &obj[*col];
+                let val = &obj[col.as_str()];
                 match val {
                     serde_json::Value::Null => { query = query.bind(None::<String>); }
                     serde_json::Value::Bool(b) => { query = query.bind(if *b { 1i64 } else { 0i64 }); }
@@ -3195,6 +3225,51 @@ mod v19_sync_tests {
         assert!(super::sanitize_table_name("briefs").is_ok());
         let sql = super::build_snapshot_upsert_sql("briefs", &["date", "snapshot_json"]);
         assert!(sql.contains("ON CONFLICT(date) DO UPDATE SET snapshot_json = excluded.snapshot_json"), "got {sql}");
+    }
+
+    #[test]
+    fn a_brief_notes_payload_pushes_as_a_plain_update() {
+        let snap = Some(serde_json::json!({"date": "2026-09-26", "notes": "hi", "updated_at": "2026-09-26 08:00:00"}).to_string());
+        let reqs = super::build_data_mutation_requests("briefs", "2026-09-26", "UPDATE", &snap);
+        assert_eq!(reqs.len(), 1);
+        let stmt = &reqs[0]["stmt"];
+        assert_eq!(stmt["sql"], "UPDATE briefs SET notes = ?, updated_at = ? WHERE date = ?", "{stmt}");
+        assert_eq!(stmt["args"][2]["value"], "2026-09-26", "the key binds last");
+        let full = Some(serde_json::json!({"date": "2026-09-26", "snapshot_json": "{}", "notes": null}).to_string());
+        let reqs = super::build_data_mutation_requests("briefs", "2026-09-26", "UPDATE", &full);
+        assert!(reqs[0]["stmt"]["sql"].as_str().unwrap().starts_with("INSERT INTO briefs"), "whole rows still upsert");
+        assert!(super::partial_update_sql("local_tasks", &["id", "notes"]).is_none(), "briefs only");
+        assert!(super::partial_update_sql("briefs", &["date", "status"]).is_none(), "only the notes columns");
+    }
+
+    #[tokio::test]
+    async fn incoming_brief_payloads_never_clear_notes() {
+        // Device A writes the day's row and patches priorities; device B has
+        // notes on the same day. A's payloads must leave B's notes alone.
+        let a = test_pool().await;
+        crate::db::briefs::ensure_snapshot(&a, "2026-09-26", "2026-09-26").await.unwrap();
+        let p = vec![crate::types::Priority { title: "Ship".into(), source: "General".into(), reasoning: "Because".into() }];
+        crate::db::briefs::set_priorities(&a, "2026-09-26", &p).await.unwrap();
+        let from_a: Vec<(String, String)> = sqlx::query_as(
+            "SELECT operation, snapshot FROM sync_log WHERE table_name='briefs' ORDER BY rowid").fetch_all(&a).await.unwrap();
+        assert_eq!(from_a.len(), 2);
+
+        let b = test_pool().await;
+        crate::db::briefs::set_notes(&b, "2026-09-26", "2026-09-26", "Call the venue").await.unwrap();
+        for (op, snap) in &from_a {
+            super::apply_remote_change(&b, "briefs", "2026-09-26", op, Some(snap)).await.unwrap();
+        }
+        let got = crate::db::briefs::get_brief(&b, "2026-09-26").await.unwrap().unwrap();
+        assert_eq!(got.notes.as_deref(), Some("Call the venue"));
+        assert_eq!(got.snapshot["priorities"][0]["title"], "Ship", "the payloads still applied");
+
+        // And B's notes edit lands on A without touching A's snapshot.
+        let notes: String = sqlx::query_scalar(
+            "SELECT snapshot FROM sync_log WHERE table_name='briefs' AND operation='UPDATE'").fetch_one(&b).await.unwrap();
+        super::apply_remote_change(&a, "briefs", "2026-09-26", "UPDATE", Some(&notes)).await.unwrap();
+        let got = crate::db::briefs::get_brief(&a, "2026-09-26").await.unwrap().unwrap();
+        assert_eq!(got.notes.as_deref(), Some("Call the venue"));
+        assert_eq!(got.snapshot["priorities"][0]["title"], "Ship");
     }
 
     #[tokio::test]

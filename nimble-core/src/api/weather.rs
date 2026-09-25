@@ -208,10 +208,23 @@ pub async fn cached(pool: &SqlitePool, loc: &BriefLocation) -> crate::Result<Opt
     Ok(serde_json::from_str::<Forecast>(&json).ok().map(|f| (f, at)))
 }
 
+/// Under an hour old. A `fetched_at` in the future (the clock moved back)
+/// is stale, so a bad stamp can't pin an old forecast forever.
 fn is_fresh(fetched_at: &str, now: DateTime<Utc>) -> bool {
     DateTime::parse_from_rfc3339(fetched_at)
-        .map(|t| now.signed_duration_since(t.with_timezone(&Utc)) < chrono::Duration::minutes(FRESH_MINUTES))
+        .map(|t| {
+            let age = now.signed_duration_since(t.with_timezone(&Utc));
+            age >= chrono::Duration::zero() && age < chrono::Duration::minutes(FRESH_MINUTES)
+        })
         .unwrap_or(false)
+}
+
+/// The location-local date a forecast was fetched on ("YYYY-MM-DD"), or
+/// None when the stamp or zone doesn't parse.
+pub fn fetched_on(fetched_at: &str, tz: &str) -> Option<String> {
+    let tz: chrono_tz::Tz = tz.parse().ok()?;
+    let t = DateTime::parse_from_rfc3339(fetched_at).ok()?;
+    Some(t.with_timezone(&tz).format("%Y-%m-%d").to_string())
 }
 
 fn view(status: WeatherStatus, loc: &BriefLocation, forecast: Option<Forecast>, fetched_at: Option<String>) -> WeatherView {
@@ -363,6 +376,34 @@ mod tests {
             lat: 37.77493, lon: -122.41942, tz: "America/Los_Angeles".into(),
         }]);
         assert!(parse_geocode(r#"{"generationtime_ms":0.3}"#).unwrap().is_empty(), "no `results` key = nothing found");
+    }
+
+    #[test]
+    fn unicode_geocode_queries_are_percent_encoded() {
+        let url = geocode_url("São Paulo");
+        assert_eq!(query(&url)["name"], "São Paulo");
+        assert!(url.as_str().contains("name=S%C3%A3o+Paulo"), "{url}");
+        let url = geocode_url("東京");
+        assert_eq!(query(&url)["name"], "東京");
+        assert!(url.as_str().contains("name=%E6%9D%B1%E4%BA%AC"), "{url}");
+        assert_eq!(normalize_query(" 東京 "), Some("東京"), "two characters, not six bytes");
+    }
+
+    #[test]
+    fn fetch_dates_are_read_in_the_locations_zone() {
+        assert_eq!(fetched_on("2026-09-26T02:00:00Z", "America/Los_Angeles").as_deref(), Some("2026-09-25"));
+        assert_eq!(fetched_on("2026-09-26T02:00:00Z", "Asia/Tokyo").as_deref(), Some("2026-09-26"));
+        assert!(fetched_on("garbage", "UTC").is_none() && fetched_on("2026-09-26T02:00:00Z", "Mars/Base").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_fetch_stamped_in_the_future_is_stale() {
+        let pool = test_pool().await;
+        let p = FakeWeather::ok();
+        load_forecast(&pool, &p, Some(&sf()), at("2026-09-25T15:00:00Z")).await.unwrap();
+        let v = load_forecast(&pool, &p, Some(&sf()), at("2026-09-25T14:30:00Z")).await.unwrap();
+        assert_eq!((v.status, v.fetched_at.as_deref()), (WeatherStatus::Fresh, Some("2026-09-25T14:30:00Z")));
+        assert_eq!(p.calls(), 2, "the clock went back: refetch rather than trust the future stamp");
     }
 
     #[test]

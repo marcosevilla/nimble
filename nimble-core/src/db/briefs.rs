@@ -32,15 +32,23 @@ pub async fn list_brief_dates(pool: &SqlitePool) -> crate::Result<Vec<String>> {
     Ok(sqlx::query_scalar("SELECT date FROM briefs ORDER BY date DESC").fetch_all(pool).await?)
 }
 
-/// The row as sync sees it: DB column names, JSON columns as text. Every
-/// synced column is present — receivers upsert what they are sent.
+/// The row as sync sees it: DB column names, JSON columns as text. `notes`
+/// is deliberately left out: receivers upsert with `DO UPDATE SET` over the
+/// columns sent, so an omitted column keeps its value. A device that opened
+/// Today before pulling (notes still null) must not wipe notes written on
+/// another device; only `set_notes` sends that column (`notes_snapshot`).
 fn sync_snapshot(b: &Brief) -> String {
     serde_json::json!({
         "date": b.date, "version": b.version, "status": b.status, "source": b.source,
         "layout_json": b.layout.to_string(), "snapshot_json": b.snapshot.to_string(),
-        "snapshot_schema": b.snapshot_schema, "notes": b.notes,
+        "snapshot_schema": b.snapshot_schema,
         "generated_at": b.generated_at, "updated_at": b.updated_at,
     }).to_string()
+}
+
+/// The partial payload a notes edit syncs: just the columns it changed.
+fn notes_snapshot(date: &str, notes: Option<&str>, updated_at: &str) -> String {
+    serde_json::json!({"date": date, "notes": notes, "updated_at": updated_at}).to_string()
 }
 
 /// Today's scratchpad (the `notes` module). Past days are read-only; the
@@ -48,13 +56,13 @@ fn sync_snapshot(b: &Brief) -> String {
 pub async fn set_notes(pool: &SqlitePool, date: &str, today: &str, notes: &str) -> crate::Result<()> {
     if date != today { return Err(crate::Error::Other("notes_read_only".into())); }
     if notes.chars().count() > NOTES_MAX { return Err(crate::Error::Other("notes_too_long".into())); }
-    let Some(mut b) = ensure_snapshot(pool, date, today).await? else { return Err(crate::Error::Other("no_brief".into())) };
-    b.notes = if notes.trim().is_empty() { None } else { Some(notes.to_string()) };
-    b.updated_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    if ensure_snapshot(pool, date, today).await?.is_none() { return Err(crate::Error::Other("no_brief".into())) }
+    let notes = if notes.trim().is_empty() { None } else { Some(notes) };
+    let updated_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     sqlx::query("UPDATE briefs SET notes = ?, updated_at = ? WHERE date = ?")
-        .bind(&b.notes).bind(&b.updated_at).bind(date).execute(pool).await?;
+        .bind(notes).bind(&updated_at).bind(date).execute(pool).await?;
     sync::append_sync_log(pool, "briefs", date, "UPDATE",
-        Some(&serde_json::json!(["notes", "updated_at"]).to_string()), Some(&sync_snapshot(&b))).await.ok();
+        Some(&serde_json::json!(["notes", "updated_at"]).to_string()), Some(&notes_snapshot(date, notes, &updated_at))).await.ok();
     Ok(())
 }
 
@@ -85,14 +93,22 @@ pub async fn ensure_snapshot(pool: &SqlitePool, date: &str, today: &str) -> crat
 }
 
 /// Patch generated priorities into the day's snapshot. No row → no-op.
+/// One `json_set` in SQL (not read-modify-write), so a concurrent patch to
+/// another key of the same snapshot (weather) can't be lost to a stale read.
 pub async fn set_priorities(pool: &SqlitePool, date: &str, priorities: &[Priority]) -> crate::Result<()> {
-    let Some(mut b) = get_brief(pool, date).await? else { return Ok(()) };
-    b.snapshot["priorities"] = serde_json::to_value(priorities).unwrap_or(serde_json::Value::Null);
-    b.updated_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    sqlx::query("UPDATE briefs SET snapshot_json = ?, updated_at = ? WHERE date = ?")
-        .bind(b.snapshot.to_string()).bind(&b.updated_at).bind(date).execute(pool).await?;
-    sync::append_sync_log(pool, "briefs", date, "UPDATE",
-        Some(&serde_json::json!(["snapshot_json", "updated_at"]).to_string()), Some(&sync_snapshot(&b))).await.ok();
+    let value = serde_json::to_value(priorities).unwrap_or(serde_json::Value::Null);
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let changed = sqlx::query(
+        "UPDATE briefs SET snapshot_json = json_set(snapshot_json, '$.priorities', json(?)), updated_at = ? WHERE date = ?",
+    )
+    .bind(value.to_string()).bind(&now).bind(date)
+    .execute(pool).await?
+    .rows_affected();
+    if changed == 0 { return Ok(()); }
+    if let Some(b) = get_brief(pool, date).await? {
+        sync::append_sync_log(pool, "briefs", date, "UPDATE",
+            Some(&serde_json::json!(["snapshot_json", "updated_at"]).to_string()), Some(&sync_snapshot(&b))).await.ok();
+    }
     Ok(())
 }
 
@@ -252,7 +268,14 @@ mod tests {
         assert_eq!(b.notes.as_deref(), Some("Call the venue"), "the first write also creates the day's snapshot");
         let snap: String = sqlx::query_scalar("SELECT snapshot FROM sync_log WHERE table_name='briefs' AND operation='UPDATE'")
             .fetch_one(&pool).await.unwrap();
-        assert!(snap.contains("Call the venue"), "the sync snapshot carries notes (receivers would null an omitted column)");
+        let snap: serde_json::Value = serde_json::from_str(&snap).unwrap();
+        let mut keys: Vec<&String> = snap.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["date", "notes", "updated_at"], "a notes edit syncs only what it changed");
+        assert_eq!(snap["notes"], "Call the venue");
+        let insert: String = sqlx::query_scalar("SELECT snapshot FROM sync_log WHERE table_name='briefs' AND operation='INSERT'")
+            .fetch_one(&pool).await.unwrap();
+        assert!(!insert.contains("\"notes\""), "whole-row payloads never carry notes, so they can't wipe them remotely");
         super::set_notes(&pool, "2026-09-23", "2026-09-23", "   ").await.unwrap();
         assert!(super::get_brief(&pool, "2026-09-23").await.unwrap().unwrap().notes.is_none(), "blank clears");
     }

@@ -992,6 +992,13 @@
       days: [{ date: TODAY, high_c: 21.1, low_c: 13.9, precip_max: 60 }, { date: '2026-08-02', high_c: 20.0, low_c: 13.0, precip_max: 10 }],
     }
   }
+  // snapshot.weather as Rust freezes it; null when there's nothing to show.
+  // Both fetch stamps fall on TODAY in San Francisco, so both freeze.
+  function mockWeatherPayload() {
+    var loc = briefSettingsView().location
+    if (!loc || weatherScenario === 'none' || weatherScenario === 'unavailable') return null
+    return { location: loc, forecast: mockForecast(), fetched_at: weatherScenario === 'stale' ? '2026-08-01T13:31:00Z' : '2026-08-01T14:00:00Z' }
+  }
   var MOCK_PLACES = [
     { name: 'San Francisco', admin1: 'California', country: 'United States', lat: 37.7749, lon: -122.4194, tz: 'America/Los_Angeles' },
     { name: 'San Diego', admin1: 'California', country: 'United States', lat: 32.7157, lon: -117.1611, tz: 'America/Los_Angeles' },
@@ -1339,18 +1346,34 @@
         .filter(function (t) { return t.due_date && t.due_date < TODAY })
         .sort(function (a, b) { return a.due_date < b.due_date ? -1 : a.due_date > b.due_date ? 1 : 0 })
 
+      // Mirrors brief::gather_snapshot: the enabled modules of the saved
+      // layout, in order, each keyed by id (null = nothing frozen).
+      var used = briefSettingsView().modules.filter(function (m) { return m.enabled })
+      var payloads = {
+        weather: function () { return mockWeatherPayload() },
+        schedule: function () { return { events: CALENDAR_EVENTS.slice(), tomorrow: [] } },
+        priorities: function () { return DAILY_STATE.priorities },
+        due_today: function () { return dueToday },
+        still_open: function (m) {
+          var count = typeof m.config.count === 'number' ? m.config.count : 5
+          return { total: stillOpen.length, oldest: stillOpen.slice(0, count).map(briefTaskRef) }
+        },
+        habits: function () {
+          return HABITS.filter(function (h) { return h.active }).map(function (h) {
+            return { id: h.id, name: h.name, icon: h.icon, color: h.color, done: habitDone(h.id, TODAY) }
+          })
+        },
+      }
+      var snapshot = {}
+      used.forEach(function (m) { snapshot[m.id] = payloads[m.id] ? payloads[m.id](m) : null })
+
       var brief = {
         date: date,
         version: 1,
         status: 'ready',
         source: 'nimble',
-        layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault'].map(function (id) { return { id: id, enabled: true, config: {} } }),
-        snapshot: {
-          schedule: { events: CALENDAR_EVENTS.slice(), tomorrow: [] },
-          priorities: DAILY_STATE.priorities,
-          due_today: dueToday,
-          still_open: { total: stillOpen.length, oldest: stillOpen.slice(0, 5).map(briefTaskRef) },
-        },
+        layout: used,
+        snapshot: snapshot,
         snapshot_schema: 1,
         notes: null,
         generated_at: iso(TODAY, '07:00:00').replace('T', ' '),
@@ -1381,8 +1404,11 @@
       var loc = briefSettingsView().location
       if (weatherScenario === 'none' || !loc) return { status: 'no_location', location: null, forecast: null, fetched_at: null }
       if (weatherScenario === 'unavailable') return { status: 'unavailable', location: loc, forecast: null, fetched_at: null }
-      var stale = weatherScenario === 'stale'
-      return { status: stale ? 'stale' : 'fresh', location: loc, forecast: mockForecast(), fetched_at: stale ? '2026-08-01T13:31:00Z' : '2026-08-01T14:00:00Z' }
+      var payload = mockWeatherPayload()
+      // Like brief::modules::weather::refresh: fill today's snapshot once.
+      var today = BRIEFS[TODAY]
+      if (today && today.snapshot && today.snapshot.weather === null) today.snapshot.weather = payload
+      return { status: weatherScenario === 'stale' ? 'stale' : 'fresh', location: loc, forecast: payload.forecast, fetched_at: payload.fetched_at }
     },
     weather_geocode: function (args) {
       var q = String((args && args.query) || '').trim().toLowerCase()
