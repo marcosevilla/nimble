@@ -200,7 +200,7 @@ test.describe('R1 sync notice never covers rail content', () => {
         for (const tab of TABS) {
           await tablist(page).getByRole('tab', { name: new RegExp(tab === 'focus' ? 'Focus' : tab, 'i') }).click()
           await page.waitForTimeout(300)
-          if (tab === 'focus') await expect(rail(page).getByText(/\d+ done/)).toBeVisible()
+          if (tab === 'focus') await expect(rail(page).getByText(/^\d+ done$/).first()).toBeVisible()
           for (const where of ['top', 'bottom'] as const) {
             await scrollRail(page, where)
             expect(await visibleHits(rail(page), nb), `${tab} scrolled to ${where}: content under the notice ${JSON.stringify(nb)}`).toEqual([])
