@@ -287,6 +287,13 @@ export interface LabelGroup {
   updated_at: string
 }
 
+export interface LabelGroupPatch {
+  name?: string
+  exclusive?: boolean
+  system?: boolean
+  position?: number
+}
+
 // ── Sections ──
 
 export interface Section {

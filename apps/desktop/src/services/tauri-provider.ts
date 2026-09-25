@@ -86,6 +86,18 @@ export function createTauriProvider(): DataProvider {
       update: tauri.updateLabel,
       delete: tauri.deleteLabel,
       setForTask: tauri.setTaskLabels,
+      reorder: tauri.reorderLabels,
+      setGroup: tauri.setLabelGroup,
+      archive: tauri.archiveLabels,
+      restore: tauri.restoreLabels,
+      unusedIds: tauri.unusedLabelIds,
+      groups: {
+        list: tauri.listLabelGroups,
+        create: tauri.createLabelGroup,
+        update: tauri.updateLabelGroup,
+        delete: tauri.deleteLabelGroup,
+        reorder: tauri.reorderLabelGroups,
+      },
     },
 
     sections: {

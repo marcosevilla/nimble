@@ -41,7 +41,7 @@ import type { DataProvider } from '@nimble/types'
 import { createTask, listTasks, setTaskStatus, updateReminderIntent } from '@/services/turso/tasks'
 import { listProjects } from '@/services/turso/projects'
 import { createCapture, listCaptures } from '@/services/turso/captures'
-import { listLabels } from '@/services/turso/labels'
+import { listLabels, listLabelGroups, unusedLabelIds } from '@/services/turso/labels'
 import { listSections } from '@/services/turso/sections'
 import { readFocusHistory, readFocusSnapshot } from '@/services/turso/focus'
 import { focusUnsupported } from '@/services/focus-events'
@@ -159,13 +159,26 @@ export function createTursoProvider(): DataProvider {
       delete: ni('projects.delete'),
     },
 
-    // v1 IN — labels.list in step 3, setForTask in step 5.
+    // Reads IN; label + group writes stay desktop-only (they need the full-row
+    // sync_log snapshots mutations.ts requires — see its header).
     labels: {
       list: listLabels,
       create: ni('labels.create'),
       update: ni('labels.update'),
       delete: ni('labels.delete'),
       setForTask: ni('labels.setForTask'),
+      reorder: ni('labels.reorder'),
+      setGroup: ni('labels.setGroup'),
+      archive: ni('labels.archive'),
+      restore: ni('labels.restore'),
+      unusedIds: unusedLabelIds,
+      groups: {
+        list: listLabelGroups,
+        create: ni('labels.groups.create'),
+        update: ni('labels.groups.update'),
+        delete: ni('labels.groups.delete'),
+        reorder: ni('labels.groups.reorder'),
+      },
     },
 
     // v1 IN — sections.list in step 3.

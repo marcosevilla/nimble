@@ -25,6 +25,8 @@ import type {
   Brief,
   Project,
   Label,
+  LabelGroup,
+  LabelGroupPatch,
   Section,
   LocalTask,
   TasksMdPreview,
@@ -156,6 +158,24 @@ export interface DataProvider {
     delete(id: string): Promise<void>
     /** Replaces the full label set on a task; returns the updated task. */
     setForTask(taskId: string, labelIds: string[]): Promise<LocalTask>
+    /** Persists label order: position = index in `labelIds`. */
+    reorder(labelIds: string[]): Promise<void>
+    /** Moves a label into a group, or out of every group with `null`. */
+    setGroup(labelId: string, groupId: string | null): Promise<Label>
+    /** Returns only the labels this call archived (for an exact Undo). */
+    archive(labelIds: string[]): Promise<Label[]>
+    /** Returns only the labels this call restored. */
+    restore(labelIds: string[]): Promise<Label[]>
+    /** "Archive unused" candidates: not archived, ungrouped (grouped and system labels are never listed), no open task. */
+    unusedIds(): Promise<string[]>
+    groups: {
+      list(): Promise<LabelGroup[]>
+      create(name: string, exclusive: boolean): Promise<LabelGroup>
+      update(id: string, patch: LabelGroupPatch): Promise<LabelGroup>
+      /** Deletes the group; returns the ids of its labels, now ungrouped. */
+      delete(id: string): Promise<string[]>
+      reorder(groupIds: string[]): Promise<void>
+    }
   }
 
   sections: {

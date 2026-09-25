@@ -32,6 +32,8 @@ export type {
   TasksMdPreview,
   TasksMdResult,
   Label,
+  LabelGroup,
+  LabelGroupPatch,
   Section,
   UpdateStatus,
   SaveResult,
@@ -85,6 +87,8 @@ import type {
   TasksMdPreview,
   TasksMdResult,
   Label,
+  LabelGroup,
+  LabelGroupPatch,
   Section,
   UpdateStatus,
   SaveResult,
@@ -452,6 +456,46 @@ export async function deleteLabel(id: string): Promise<void> {
 
 export async function setTaskLabels(taskId: string, labelIds: string[]): Promise<LocalTask> {
   return invoke<LocalTask>('set_task_labels', { taskId, labelIds })
+}
+
+export async function reorderLabels(ids: string[]): Promise<void> {
+  return invoke<void>('reorder_labels', { ids })
+}
+
+export async function setLabelGroup(labelId: string, groupId: string | null): Promise<Label> {
+  return invoke<Label>('set_label_group', { labelId, groupId })
+}
+
+export async function archiveLabels(ids: string[]): Promise<Label[]> {
+  return invoke<Label[]>('archive_labels', { ids })
+}
+
+export async function restoreLabels(ids: string[]): Promise<Label[]> {
+  return invoke<Label[]>('restore_labels', { ids })
+}
+
+export async function unusedLabelIds(): Promise<string[]> {
+  return invoke<string[]>('unused_label_ids')
+}
+
+export async function listLabelGroups(): Promise<LabelGroup[]> {
+  return invoke<LabelGroup[]>('list_label_groups')
+}
+
+export async function createLabelGroup(name: string, exclusive: boolean): Promise<LabelGroup> {
+  return invoke<LabelGroup>('create_label_group', { name, exclusive })
+}
+
+export async function updateLabelGroup(id: string, patch: LabelGroupPatch): Promise<LabelGroup> {
+  return invoke<LabelGroup>('update_label_group', { id, patch })
+}
+
+export async function deleteLabelGroup(id: string): Promise<string[]> {
+  return invoke<string[]>('delete_label_group', { id })
+}
+
+export async function reorderLabelGroups(ids: string[]): Promise<void> {
+  return invoke<void>('reorder_label_groups', { ids })
 }
 
 // ── Open URL ──

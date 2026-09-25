@@ -6,8 +6,8 @@
  * desktop for now; this module is reads only.
  */
 
-import type { Label } from '@nimble/types'
-import { query, str, strOrNull, num, TursoError, type Row } from './client'
+import type { Label, LabelGroup } from '@nimble/types'
+import { query, str, strOrNull, num, bool, TursoError, type Row } from './client'
 
 /**
  * The column list from `LABEL_COLS` in labels.rs, spelled out rather than
@@ -51,4 +51,48 @@ export async function listLabels(): Promise<Label[]> {
     const rows = await query(`SELECT ${LABEL_COLS_V23} FROM labels ORDER BY position, created_at`)
     return rows.map(toLabel)
   }
+}
+
+const GROUP_COLS = 'id, name, position, exclusive, system, created_at, updated_at'
+
+function toGroup(row: Row): LabelGroup {
+  return {
+    id: str(row, 'id'),
+    name: str(row, 'name'),
+    position: num(row, 'position'),
+    exclusive: bool(row, 'exclusive'),
+    system: bool(row, 'system'),
+    created_at: str(row, 'created_at'),
+    updated_at: str(row, 'updated_at'),
+  }
+}
+
+/** Groups in desktop order. A remote without the v24 table reads as "no groups". */
+export async function listLabelGroups(): Promise<LabelGroup[]> {
+  try {
+    const rows = await query(`SELECT ${GROUP_COLS} FROM label_groups ORDER BY position, created_at`)
+    return rows.map(toGroup)
+  } catch (e) {
+    if (e instanceof TursoError && /no such table/i.test(e.message)) return []
+    throw e
+  }
+}
+
+/**
+ * Mirrors `labels.rs::unused_label_ids`: ungrouped (no group row, which also
+ * covers a dangling id), not archived, no open task. Grouped and system labels
+ * are never auto-archived.
+ */
+export async function unusedLabelIds(): Promise<string[]> {
+  const rows = await query(
+    `SELECT l.id FROM labels l
+     LEFT JOIN label_groups g ON g.id = l."group"
+     WHERE l.archived_at IS NULL
+       AND g.id IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM task_labels tl JOIN local_tasks t ON t.id = tl.task_id
+         WHERE tl.label_id = l.id AND t.status != 'complete')
+     ORDER BY l.position, l.created_at`,
+  )
+  return rows.map((r) => str(r, 'id'))
 }

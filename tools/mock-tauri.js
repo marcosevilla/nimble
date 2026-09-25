@@ -1504,6 +1504,79 @@
       return Object.assign({}, t)
     },
 
+    // Label groups, archive, unused (C4) — mirror nimble-core/src/db/labels.rs.
+    list_label_groups: function () {
+      return LABEL_GROUPS.slice().sort(function (a, b) { return a.position - b.position })
+    },
+    create_label_group: function (args) {
+      var name = String((args && args.name) || '').trim()
+      if (!name) return Promise.reject(new Error('label group name must not be empty'))
+      if (LABEL_GROUPS.some(function (g) { return g.name.toLowerCase() === name.toLowerCase() })) {
+        return Promise.reject(new Error("a label group named '" + name + "' already exists"))
+      }
+      var group = {
+        id: newId('lg'), name: name, position: LABEL_GROUPS.length,
+        exclusive: !!(args && args.exclusive), system: false,
+        created_at: nowStamp(), updated_at: nowStamp(),
+      }
+      LABEL_GROUPS.push(group)
+      return group
+    },
+    update_label_group: function (args) {
+      var g = LABEL_GROUPS.find(function (x) { return x.id === (args && args.id) })
+      if (!g) return Promise.reject(new Error('no such label group'))
+      var p = (args && args.patch) || {}
+      if (p.name != null) g.name = String(p.name).trim()
+      if (p.exclusive != null) g.exclusive = !!p.exclusive
+      if (p.system != null) g.system = !!p.system
+      if (p.position != null) g.position = p.position
+      g.updated_at = nowStamp()
+      return Object.assign({}, g)
+    },
+    delete_label_group: function (args) {
+      var id = args && args.id
+      var ungrouped = LABELS.filter(function (l) { return l.group === id }).map(function (l) { l.group = null; return l.id })
+      for (var i = LABEL_GROUPS.length - 1; i >= 0; i--) if (LABEL_GROUPS[i].id === id) LABEL_GROUPS.splice(i, 1)
+      return ungrouped
+    },
+    reorder_label_groups: function (args) {
+      ((args && args.ids) || []).forEach(function (id, i) {
+        var g = LABEL_GROUPS.find(function (x) { return x.id === id })
+        if (g) g.position = i
+      })
+      return null
+    },
+    set_label_group: function (args) {
+      var l = LABELS.find(function (x) { return x.id === (args && args.labelId) })
+      if (!l) return Promise.reject(new Error('no such label'))
+      l.group = (args && args.groupId) || null
+      return Object.assign({}, l)
+    },
+    reorder_labels: function (args) {
+      ((args && args.ids) || []).forEach(function (id, i) {
+        var l = LABELS.find(function (x) { return x.id === id })
+        if (l) l.position = i
+      })
+      return null
+    },
+    archive_labels: function (args) {
+      return LABELS.filter(function (l) { return ((args && args.ids) || []).indexOf(l.id) !== -1 && !l.archived_at })
+        .map(function (l) { l.archived_at = nowStamp(); return Object.assign({}, l) })
+    },
+    restore_labels: function (args) {
+      return LABELS.filter(function (l) { return ((args && args.ids) || []).indexOf(l.id) !== -1 && l.archived_at })
+        .map(function (l) { l.archived_at = null; return Object.assign({}, l) })
+    },
+    // Ungrouped only (no group, or a dangling id): grouped and system labels
+    // are never auto-archived (Marco, 2026-09-25).
+    unused_label_ids: function () {
+      var groupIds = LABEL_GROUPS.map(function (g) { return g.id })
+      return LABELS.filter(function (l) {
+        if (l.archived_at || (l.group && groupIds.indexOf(l.group) !== -1)) return false
+        return !TASKS.some(function (t) { return t.status !== 'complete' && (t.labels || []).indexOf(l.id) !== -1 })
+      }).sort(function (a, b) { return a.position - b.position }).map(function (l) { return l.id })
+    },
+
     // Sections (R1)
     list_sections: function (args) {
       return SECTIONS.filter(function (s) { return s.project_id === (args && args.projectId) })

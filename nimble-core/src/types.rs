@@ -146,6 +146,15 @@ pub struct LabelGroup {
     pub updated_at: String,
 }
 
+/// Partial update for a label group; `None` leaves a field as it is.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct LabelGroupPatch {
+    pub name: Option<String>,
+    pub exclusive: Option<bool>,
+    pub system: Option<bool>,
+    pub position: Option<i64>,
+}
+
 // ── Sections ──
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
