@@ -5,6 +5,7 @@ pub mod due_today;
 pub mod habits;
 pub mod notes;
 pub mod priorities;
+pub mod quick_wins;
 pub mod schedule;
 pub mod still_open;
 pub mod vault;
