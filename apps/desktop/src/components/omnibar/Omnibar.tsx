@@ -27,7 +27,7 @@ import { matchActions, type OmnibarActionId } from '@/lib/omnibarActions'
 import { CREATE_NAME, createKinds, createdMessage, runCreate, type CreateKind } from '@/lib/omnibarCreate'
 import { planSearch, type DocHit, type GroupKey } from '@/lib/omnibarSearch'
 import {
-  buildSections, flattenRows, freshRow, isFetchedRow, moveSelection, OMNIBAR_LISTBOX_ID, optionId, selectedIndex, type OmnibarRow,
+  buildSections, flattenRows, freshRow, isFetchedRow, moveSelection, OMNIBAR_LISTBOX_ID, optionId, selectedIndex, type DefaultRowContext, type OmnibarRow,
 } from '@/lib/omnibarRows'
 import { DateChip, RouteIcon, RoutePill } from '@/components/capture/CaptureTokens'
 import { OmnibarField } from './OmnibarField'
@@ -114,7 +114,12 @@ export function Omnibar() {
   )
   const sections = useMemo(() => buildSections({ ...sectionBase, results }), [sectionBase, results])
   const rows = useMemo(() => flattenRows(sections), [sections])
-  const selected = selectedIndex(rows, picked)
+  // Enter's default row: "Tasks or create" (lib/omnibarRows.ts defaultIndex).
+  const defaultCtx = useMemo(
+    (): DefaultRowContext => ({ text, type: mode === 'doc' ? 'doc' : plan.filters.type }),
+    [text, mode, plan],
+  )
+  const selected = selectedIndex(rows, picked, defaultCtx)
   const selectedRow: OmnibarRow | null = selected >= 0 ? rows[selected] : null
   const selectedKey = selectedRow?.key ?? null
   const selectedTask = selectedRow?.kind === 'task' ? selectedRow.hit.task : null
@@ -398,10 +403,10 @@ export function Omnibar() {
     enterPendingRef.current = true
     void searchNow().then((fresh) => {
       enterPendingRef.current = false
-      const row = freshRow(flattenRows(buildSections({ ...sectionBase, results: fresh })), key)
+      const row = freshRow(flattenRows(buildSections({ ...sectionBase, results: fresh })), key, defaultCtx)
       if (row) act(row)
     })
-  }, [searchNow, sectionBase])
+  }, [searchNow, sectionBase, defaultCtx])
 
   /** Clicks go through the same guard as Enter. */
   const activateClicked = useCallback((row: OmnibarRow) => {

@@ -37,6 +37,7 @@ const field = (page: Page) => bar(page).getByRole('combobox', { name: 'Search or
 const group = (page: Page, name: string) => bar(page).getByRole('group', { name, exact: true })
 const rowsIn = (page: Page, name: string) => group(page, name).locator('[data-omnibar-row]')
 const pills = (page: Page) => bar(page).locator('[data-omnibar-pill]')
+const settledList = (page: Page) => bar(page).getByRole('listbox')
 const currentPage = (page: Page) => page.evaluate(() => (window as unknown as Win).__stores.useAppStore.getState().currentPage)
 const detailId = (page: Page) => page.evaluate(() => (window as unknown as Win).__stores.useDetailStore.getState().target?.id)
 const searchTasks = (page: Page, query: string) =>
@@ -141,6 +142,12 @@ test('a vault note shows in Docs with its marker and opens in Docs', async ({ ap
   const row = rowsIn(page, 'Docs').first()
   await expect(row).toContainText('Turnstile at the Warfield')
   await expect(row).toContainText('Vault')
+  // "Tasks or create": a doc never takes Enter's default — arrow up to it
+  // from Create task (Docs is the group just above Create here).
+  await expect(settledList(page)).not.toHaveAttribute('aria-busy', 'true')
+  await expect(group(page, 'Create').locator('[data-omnibar-row][data-selected="true"]')).toContainText('Create task')
+  await page.keyboard.press('ArrowUp')
+  await expect(row).toHaveAttribute('data-selected', 'true')
   await page.keyboard.press('Enter')
   await expect(bar(page)).toHaveCount(0)
   await expect.poll(() => currentPage(page)).toBe('docs')
@@ -160,6 +167,9 @@ test('an empty bar shows recent searches and actions; an action runs', async ({ 
   await expect(group(page, 'Actions')).toContainText('Go to Today')
   await page.keyboard.type('go sett')
   await expect(rowsIn(page, 'Actions')).toHaveCount(1)
+  await expect(settledList(page)).not.toHaveAttribute('aria-busy', 'true')
+  await page.keyboard.press('ArrowUp') // actions never take the default: Create task has it
+  await expect(rowsIn(page, 'Actions').first()).toHaveAttribute('data-selected', 'true')
   await page.keyboard.press('Enter')
   await expect.poll(() => currentPage(page)).toBe('settings')
 })
@@ -251,13 +261,53 @@ test('a double Enter on a toggle action toggles once', async ({ app, page }) => 
   await openBar(page)
   await page.keyboard.type('keyboard shortcuts')
   await expect(rowsIn(page, 'Actions')).toHaveCount(1)
-  await expect(bar(page).getByRole('listbox')).not.toHaveAttribute('aria-busy', 'true')
+  await expect(settledList(page)).not.toHaveAttribute('aria-busy', 'true')
+  await page.keyboard.press('ArrowUp') // actions never take the default: Create task has it
   await expect(rowsIn(page, 'Actions').first()).toHaveAttribute('data-selected', 'true')
   await page.keyboard.press('Enter')
   await page.keyboard.press('Enter') // lands during the fade-out
   await expect(bar(page)).toHaveCount(0)
   await page.waitForTimeout(300)
   await expect(help).toHaveAttribute('aria-expanded', 'true')
+})
+
+// ── Enter's default row: "Tasks or create" (Marco, 2026-09-25) ──
+
+test('an action verb + Enter creates a task even when a vault note matches', async ({ app, page }) => {
+  await app.open('tasks')
+  await openBar(page)
+  await page.keyboard.type('call the dentist')
+  await expect(rowsIn(page, 'Docs').first()).toContainText('Quick capture 2026-07-30') // the vault note says "Call the dentist"
+  await expect(settledList(page)).not.toHaveAttribute('aria-busy', 'true')
+  await page.keyboard.press('Enter')
+  await expect(bar(page)).toHaveCount(0)
+  await expect(page.getByText('Task created: "call the dentist"')).toBeVisible()
+  expect((await searchTasks(page, 'call the dentist')).map((h) => (h.task as unknown as { content: string }).content)).toContain('call the dentist')
+  expect(await currentPage(page)).toBe('tasks')
+})
+
+test('a matching open task takes Enter once results settle', async ({ app, page }) => {
+  await app.open('tasks')
+  const ids = await seedSearch(page)
+  await openBar(page)
+  await page.keyboard.type('zephyr deck')
+  await expect(rowsIn(page, 'Tasks').first()).toContainText('Zephyr deck review')
+  await expect(settledList(page)).not.toHaveAttribute('aria-busy', 'true')
+  await expect(rowsIn(page, 'Tasks').first()).toHaveAttribute('data-selected', 'true')
+  await page.keyboard.press('Enter')
+  await expect(bar(page)).toHaveCount(0)
+  await expect.poll(() => detailId(page)).toBe(ids.title)
+})
+
+test('Enter in an empty bar with no recent searches does nothing', async ({ app, page }) => {
+  await app.open('tasks')
+  await openBar(page)
+  await expect(group(page, 'Actions')).toContainText('Go to Today')
+  await expect(bar(page).locator('[data-omnibar-row][data-selected="true"]')).toHaveCount(0)
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(300)
+  await expect(bar(page)).toHaveCount(1)
+  expect(await currentPage(page)).toBe('tasks')
 })
 
 /** Axe over the bar alone, once its fade/slide-in animations have finished

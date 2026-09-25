@@ -5,7 +5,7 @@
 import type { Capture, Goal, TaskSearchHit } from '@nimble/types'
 import type { OmnibarAction } from './omnibarActions.ts'
 import type { CreateKind } from './omnibarCreate.ts'
-import type { FilterSuggestion } from './omnibarQuery.ts'
+import type { FilterSuggestion, TypeValue } from './omnibarQuery.ts'
 import type { DocHit, FetchedResults, GroupKey } from './omnibarSearch.ts'
 import { capGroup, GROUP_TITLE } from './omnibarSearch.ts'
 
@@ -89,25 +89,72 @@ export function flattenRows(sections: readonly RowSection[]): OmnibarRow[] {
   return sections.flatMap((s) => s.rows)
 }
 
-const RESULT_KINDS: ReadonlySet<OmnibarRow['kind']> = new Set(['task', 'note', 'doc', 'goal', 'action', 'recent'])
+/** A first word that makes the text a to-do: Enter creates a task even when
+ *  tasks match (the old ⌘K `inferDefaultIndex` list, plus "email"). */
+export const ACTION_VERBS: ReadonlySet<string> = new Set([
+  'buy', 'send', 'call', 'fix', 'do', 'make', 'write', 'schedule',
+  'check', 'review', 'update', 'finish', 'create', 'build', 'clean',
+  'read', 'watch', 'book', 'plan', 'prepare', 'set', 'get', 'move', 'email',
+])
 
-/** Where the highlight lands after the query changes: the first result, else
- *  the first create row, else the first row; -1 for an empty list. */
-export function defaultIndex(rows: readonly OmnibarRow[]): number {
-  const result = rows.findIndex((r) => RESULT_KINDS.has(r.kind))
-  if (result >= 0) return result
-  const create = rows.findIndex((r) => r.kind === 'create')
-  if (create >= 0) return create
-  return rows.length > 0 ? 0 : -1
+/** Text starting with one of these defaults to Create note (old ⌘K list). */
+export const NOTE_PREFIXES: readonly string[] = ['note:', 'idea:', 'remember']
+
+/** What Enter's default row depends on besides the rows themselves. */
+export interface DefaultRowContext {
+  /** The typed text (after any `/` prefix); '' for an empty or pill-only query. */
+  text: string
+  /** The effective type: a `type:` pill, or 'doc' in `/doc` mode. */
+  type: TypeValue | null
+}
+
+const TYPE_ROW: Record<TypeValue, OmnibarRow['kind']> = { task: 'task', note: 'note', doc: 'doc', goal: 'goal', action: 'action' }
+
+/** Where the highlight lands when the query changes — "Tasks or create"
+ *  (Marco, 2026-09-25). A non-task type (pill or /doc): its first row, else
+ *  its create row. An empty query: the first recent search, or tasks listed
+ *  by a pill-only query — never an action (-1: Enter does nothing). Else
+ *  "note:"/"idea:"/"remember" → Create note; an action verb first → Create
+ *  task; the first task; the first create row. Notes, docs, vault notes,
+ *  goals and actions never take it — the user arrows to them. -1 when no
+ *  row qualifies. */
+export function defaultIndex(rows: readonly OmnibarRow[], ctx: DefaultRowContext): number {
+  const first = (pred: (r: OmnibarRow) => boolean) => rows.findIndex(pred)
+  const createOf = (kind: CreateKind) => first((r) => r.kind === 'create' && r.create === kind)
+  const orElse = (...indexes: (() => number)[]) => {
+    for (const next of indexes) {
+      const i = next()
+      if (i >= 0) return i
+    }
+    return -1
+  }
+  const type = ctx.type
+  if (type && type !== 'task') {
+    return orElse(
+      () => first((r) => r.kind === TYPE_ROW[type]),
+      () => (type === 'action' ? -1 : createOf(type)),
+    )
+  }
+  const text = ctx.text.trim().toLowerCase()
+  if (text === '') return orElse(() => first((r) => r.kind === 'task'), () => first((r) => r.kind === 'recent'))
+  if (NOTE_PREFIXES.some((p) => text.startsWith(p))) {
+    const note = createOf('note')
+    if (note >= 0) return note
+  }
+  if (ACTION_VERBS.has(text.split(/\s+/)[0])) {
+    const task = createOf('task')
+    if (task >= 0) return task
+  }
+  return orElse(() => first((r) => r.kind === 'task'), () => first((r) => r.kind === 'create'))
 }
 
 /** The highlighted index: the row the user moved to while it still exists, else the default. */
-export function selectedIndex(rows: readonly OmnibarRow[], picked: string | null): number {
+export function selectedIndex(rows: readonly OmnibarRow[], picked: string | null, ctx: DefaultRowContext): number {
   if (picked) {
     const i = rows.findIndex((r) => r.key === picked)
     if (i >= 0) return i
   }
-  return defaultIndex(rows)
+  return defaultIndex(rows, ctx)
 }
 
 /** The key ↑/↓ moves to (wrapping), or null when there are no rows. */
@@ -136,8 +183,8 @@ export function isFetchedRow(row: OmnibarRow): boolean {
 
 /** After a fresh search: the row the user chose if it is still there, the
  *  default row when nothing was chosen, otherwise nothing (never a stand-in). */
-export function freshRow(rows: readonly OmnibarRow[], key: string | null): OmnibarRow | null {
+export function freshRow(rows: readonly OmnibarRow[], key: string | null, ctx: DefaultRowContext): OmnibarRow | null {
   if (key !== null) return rows.find((r) => r.key === key) ?? null
-  const i = defaultIndex(rows)
+  const i = defaultIndex(rows, ctx)
   return i >= 0 ? rows[i] : null
 }
