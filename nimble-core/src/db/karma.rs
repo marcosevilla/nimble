@@ -22,10 +22,13 @@
 //! Known limit: complete → reopen → complete inside one wall-clock second
 //! reuses the `completed_at` key, so the second completion isn't counted.
 
-use chrono::{Local, NaiveDate, NaiveDateTime};
+use std::collections::{BTreeMap, BTreeSet};
+
+use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, Weekday};
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 
+use crate::db::settings::{get_setting, set_setting};
 use crate::db::sync;
 
 /// Nimble stores Todoist's API priority scale verbatim: 1 Normal, 2 Medium,
@@ -228,6 +231,323 @@ pub async fn list_events(pool: &SqlitePool) -> crate::Result<Vec<KarmaEvent>> {
     Ok(sqlx::query_as(&format!("SELECT {COLS} FROM karma_events ORDER BY date, id")).fetch_all(pool).await?)
 }
 
+// ── Goals, days off, pause, parity (addendum §2, §6) ───────────────────────
+
+pub const DAY_GOAL_BONUS: i64 = 3;
+pub const WEEK_GOAL_BONUS: i64 = 10;
+/// Parity only: an open task earns its one -1 when it is this many days past due.
+pub const PENALTY_AFTER_DAYS: i64 = 5;
+/// How far back a read looks for goals earned but not yet persisted (the
+/// goal was hit late last night and Nimble wasn't opened since).
+pub const EVALUATE_DAYS: i64 = 14;
+
+pub const WEEKDAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+pub const LEVELS: [(&str, i64); 8] = [
+    ("Beginner", 0), ("Novice", 500), ("Intermediate", 2_500), ("Professional", 5_000),
+    ("Expert", 7_500), ("Master", 10_000), ("Grand Master", 20_000), ("Enlightened", 50_000),
+];
+
+const K_DAILY: &str = "goals.daily";
+const K_WEEKLY: &str = "goals.weekly";
+const K_DAYS_OFF: &str = "goals.days_off";
+const K_PAUSED: &str = "momentum.paused";
+const K_PAUSED_AT: &str = "momentum.paused_at";
+const K_KARMA: &str = "karma.enabled";
+/// UX checkpoint 3 (B): the local date parity was first switched on.
+const K_KARMA_AT: &str = "karma.enabled_at";
+
+/// Net completions per row set: repeats count, reversals subtract.
+const NET: &str = "COALESCE(SUM(CASE kind WHEN 'task' THEN 1 WHEN 'recur' THEN 1 WHEN 'untask' THEN -1 ELSE 0 END), 0)";
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MomentumSettings {
+    pub daily_goal: i64,
+    pub weekly_goal: i64,
+    /// Weekday keys ("mon".."sun") in week order.
+    pub days_off: Vec<String>,
+    pub paused: bool,
+    pub paused_at: Option<String>,
+    pub karma_enabled: bool,
+    pub karma_enabled_at: Option<String>,
+}
+
+impl Default for MomentumSettings {
+    fn default() -> Self {
+        Self {
+            daily_goal: 5, weekly_goal: 25, days_off: vec!["sat".into(), "sun".into()],
+            paused: false, paused_at: None, karma_enabled: false, karma_enabled_at: None,
+        }
+    }
+}
+
+impl MomentumSettings {
+    pub fn is_day_off(&self, d: NaiveDate) -> bool {
+        let key = WEEKDAYS[d.weekday().num_days_from_monday() as usize];
+        self.days_off.iter().any(|k| k == key)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GoalTargets {
+    pub daily: i64,
+    pub weekly: i64,
+    pub days_off: Vec<String>,
+    pub karma_enabled: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize)]
+pub struct EvaluateReport {
+    pub goal_days: u64,
+    pub goal_weeks: u64,
+    pub penalties: u64,
+}
+
+fn normalize_days(keys: &[String]) -> Vec<String> {
+    WEEKDAYS.iter()
+        .filter(|k| keys.iter().any(|x| x.trim().eq_ignore_ascii_case(k)))
+        .map(|k| k.to_string())
+        .collect()
+}
+
+async fn setting(pool: &SqlitePool, key: &str) -> crate::Result<Option<String>> {
+    Ok(get_setting(pool, key).await?.filter(|v| !v.trim().is_empty()))
+}
+
+fn positive_int(v: Option<String>, fallback: i64) -> i64 {
+    v.and_then(|s| s.trim().parse::<i64>().ok()).filter(|n| *n >= 1).unwrap_or(fallback)
+}
+
+/// Lenient read: Lane A's setup writes `goals.*` directly, so anything missing
+/// or unparseable falls back to its default instead of failing the read.
+pub async fn load_settings(pool: &SqlitePool) -> crate::Result<MomentumSettings> {
+    let d = MomentumSettings::default();
+    let days_off = match setting(pool, K_DAYS_OFF).await? {
+        None => d.days_off.clone(),
+        Some(json) => serde_json::from_str::<Vec<String>>(&json).map(|v| normalize_days(&v)).unwrap_or(d.days_off.clone()),
+    };
+    Ok(MomentumSettings {
+        daily_goal: positive_int(setting(pool, K_DAILY).await?, d.daily_goal),
+        weekly_goal: positive_int(setting(pool, K_WEEKLY).await?, d.weekly_goal),
+        days_off,
+        paused: setting(pool, K_PAUSED).await?.as_deref() == Some("1"),
+        paused_at: setting(pool, K_PAUSED_AT).await?,
+        karma_enabled: setting(pool, K_KARMA).await?.as_deref() == Some("1"),
+        karma_enabled_at: setting(pool, K_KARMA_AT).await?,
+    })
+}
+
+pub async fn save_goals(pool: &SqlitePool, t: GoalTargets) -> crate::Result<MomentumSettings> {
+    save_goals_on(pool, t, Local::now().date_naive()).await
+}
+
+/// Validate everything first; write only when all of it is valid.
+pub async fn save_goals_on(pool: &SqlitePool, t: GoalTargets, today: NaiveDate) -> crate::Result<MomentumSettings> {
+    let fail = |m: &str| Err(crate::Error::Other(m.into()));
+    if !(1..=100).contains(&t.daily) { return fail("Daily goal must be a whole number from 1 to 100."); }
+    if !(1..=700).contains(&t.weekly) { return fail("Weekly goal must be a whole number from 1 to 700."); }
+    if t.days_off.iter().any(|k| !WEEKDAYS.contains(&k.trim().to_ascii_lowercase().as_str())) {
+        return fail("Days off must be weekday names (mon to sun).");
+    }
+    let days = normalize_days(&t.days_off);
+    if days.len() > 6 { return fail("Leave at least one day that isn't a day off."); }
+    let before = load_settings(pool).await?;
+    set_setting(pool, K_DAILY, &t.daily.to_string()).await?;
+    set_setting(pool, K_WEEKLY, &t.weekly.to_string()).await?;
+    set_setting(pool, K_DAYS_OFF, &serde_json::to_string(&days).map_err(|e| crate::Error::Other(e.to_string()))?).await?;
+    set_setting(pool, K_KARMA, if t.karma_enabled { "1" } else { "0" }).await?;
+    // Off -> on (first time or again) stamps today, so turning parity on
+    // never penalizes backlog that crossed its mark while parity was off.
+    // Re-saving while it stays on keeps the stamp.
+    if t.karma_enabled && (!before.karma_enabled || before.karma_enabled_at.is_none()) {
+        set_setting(pool, K_KARMA_AT, &day(today)).await?;
+    }
+    load_settings(pool).await
+}
+
+pub async fn set_paused(pool: &SqlitePool, paused: bool) -> crate::Result<MomentumSettings> {
+    set_paused_at(pool, paused, Local::now().naive_local()).await
+}
+
+/// Pausing stamps `momentum.paused_at`. Resuming writes a 0-point
+/// `pause:<date>` row for every whole paused day (its first day through
+/// yesterday), so evaluation and streaks keep skipping them afterwards.
+/// No confirmation, and nothing ever comments on the gap.
+pub async fn set_paused_at(pool: &SqlitePool, paused: bool, now: NaiveDateTime) -> crate::Result<MomentumSettings> {
+    let s = load_settings(pool).await?;
+    let stamp = now.format(STAMP).to_string();
+    if paused && !s.paused {
+        set_setting(pool, K_PAUSED_AT, &stamp).await?;
+        set_setting(pool, K_PAUSED, "1").await?;
+    } else if !paused && s.paused {
+        if let Some((from, _)) = s.paused_at.as_deref().and_then(local_stamp) {
+            let mut tx = pool.begin().await?;
+            let mut d = from;
+            while d < now.date() {
+                record_tx(&mut tx, &KarmaEvent {
+                    id: format!("pause:{}", day(d)), date: day(d), kind: "pause".into(),
+                    points: 0, task_id: None, created_at: stamp.clone(),
+                }).await?;
+                d = match d.succ_opt() { Some(n) => n, None => break };
+            }
+            tx.commit().await?;
+        }
+        set_setting(pool, K_PAUSED, "0").await?;
+        set_setting(pool, K_PAUSED_AT, "").await?;
+    }
+    load_settings(pool).await
+}
+
+pub fn week_start(d: NaiveDate) -> NaiveDate {
+    d - Duration::days(d.weekday().num_days_from_monday() as i64)
+}
+
+pub fn iso_week(d: NaiveDate) -> String {
+    let w = d.iso_week();
+    format!("{:04}-W{:02}", w.year(), w.week())
+}
+
+/// Goal bonuses earned on days in `[from, to]`. `done` holds net completions
+/// per local day from the Monday of `from`'s week (weekly totals start there).
+/// Days off and paused days are never evaluated for the daily goal; their
+/// completions still count toward the week. A week's bonus is dated on the
+/// first evaluated day its running total reached the goal.
+pub fn goal_events(done: &BTreeMap<NaiveDate, i64>, s: &MomentumSettings, paused: &BTreeSet<NaiveDate>, from: NaiveDate, to: NaiveDate, at: &str) -> Vec<KarmaEvent> {
+    let mut out: Vec<KarmaEvent> = Vec::new();
+    let mut d = week_start(from);
+    let mut week_total = 0;
+    while d <= to {
+        if d.weekday() == Weekday::Mon { week_total = 0; }
+        let n = done.get(&d).copied().unwrap_or(0);
+        week_total += n;
+        let evaluated = d >= from && !paused.contains(&d);
+        if evaluated && !s.is_day_off(d) && n >= s.daily_goal {
+            out.push(KarmaEvent { id: format!("goal:day:{}", day(d)), date: day(d), kind: "goal_day".into(),
+                points: DAY_GOAL_BONUS, task_id: None, created_at: at.into() });
+        }
+        let week_id = format!("goal:week:{}", iso_week(d));
+        if evaluated && week_total >= s.weekly_goal && !out.iter().any(|e| e.id == week_id) {
+            out.push(KarmaEvent { id: week_id, date: day(d), kind: "goal_week".into(),
+                points: WEEK_GOAL_BONUS, task_id: None, created_at: at.into() });
+        }
+        d = match d.succ_opt() { Some(n) => n, None => break };
+    }
+    out
+}
+
+/// Parity only: -1 once per open task on the day it reaches
+/// `PENALTY_AFTER_DAYS` past due. Only marks on or after the day parity was
+/// switched on, never on a paused day, never in the future.
+pub fn penalty_events(open_due: &[(String, String)], s: &MomentumSettings, paused: &BTreeSet<NaiveDate>, today: NaiveDate, at: &str) -> Vec<KarmaEvent> {
+    if !s.karma_enabled { return Vec::new(); }
+    let enabled_from = s.karma_enabled_at.as_deref()
+        .and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok())
+        .unwrap_or(today);
+    open_due.iter().filter_map(|(id, due)| {
+        let mark = NaiveDate::parse_from_str(due, "%Y-%m-%d").ok()? + Duration::days(PENALTY_AFTER_DAYS);
+        (mark <= today && mark >= enabled_from && !paused.contains(&mark)).then(|| KarmaEvent {
+            id: format!("penalty:{id}:{due}"), date: day(mark), kind: "penalty".into(),
+            points: -1, task_id: Some(id.clone()), created_at: at.into(),
+        })
+    }).collect()
+}
+
+/// (level name, points where the next level starts). A negative total is Beginner.
+pub fn level_for(total: i64) -> (&'static str, Option<i64>) {
+    let i = LEVELS.iter().rposition(|(_, min)| total >= *min).unwrap_or(0);
+    (LEVELS[i].0, LEVELS.get(i + 1).map(|(_, min)| *min))
+}
+
+fn skipped(d: NaiveDate, s: &MomentumSettings, paused: &BTreeSet<NaiveDate>) -> bool {
+    s.is_day_off(d) || paused.contains(&d)
+}
+
+/// Parity mode: goal days in a row, ending today once today is earned (an
+/// unearned today never breaks the run). Days off and paused days are
+/// stepped over: they neither extend nor break it.
+pub fn daily_streak(earned: &BTreeSet<NaiveDate>, s: &MomentumSettings, paused: &BTreeSet<NaiveDate>, today: NaiveDate) -> i64 {
+    let Some(first) = earned.iter().next().copied() else { return 0 };
+    let mut d = if earned.contains(&today) { today } else {
+        match today.pred_opt() { Some(y) => y, None => return 0 }
+    };
+    let mut n = 0;
+    while d >= first {
+        if earned.contains(&d) { n += 1; } else if !skipped(d, s, paused) { break; }
+        d = match d.pred_opt() { Some(p) => p, None => break };
+    }
+    n
+}
+
+/// Parity mode: goal weeks in a row (keyed by their Monday), ending this week
+/// once it is earned. A week whose every day was off or paused is stepped over.
+pub fn weekly_streak(earned_mondays: &BTreeSet<NaiveDate>, s: &MomentumSettings, paused: &BTreeSet<NaiveDate>, today: NaiveDate) -> i64 {
+    let Some(first) = earned_mondays.iter().next().copied() else { return 0 };
+    let this = week_start(today);
+    let mut w = if earned_mondays.contains(&this) { this } else { this - Duration::days(7) };
+    let mut n = 0;
+    while w >= first {
+        if earned_mondays.contains(&w) {
+            n += 1;
+        } else if !(0..7).map(|i| w + Duration::days(i)).all(|d| skipped(d, s, paused)) {
+            break;
+        }
+        w = w - Duration::days(7);
+    }
+    n
+}
+
+/// Paused days: every recorded `pause:` row plus the live pause (its first day through today).
+pub(crate) async fn paused_days(pool: &SqlitePool, s: &MomentumSettings, today: NaiveDate) -> crate::Result<BTreeSet<NaiveDate>> {
+    let mut out: BTreeSet<NaiveDate> = sqlx::query_scalar::<_, String>("SELECT date FROM karma_events WHERE kind = 'pause'")
+        .fetch_all(pool).await?
+        .iter().filter_map(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).collect();
+    if s.paused {
+        let mut d = s.paused_at.as_deref().and_then(local_stamp).map(|(d, _)| d).unwrap_or(today);
+        while d <= today {
+            out.insert(d);
+            d = match d.succ_opt() { Some(n) => n, None => break };
+        }
+    }
+    Ok(out)
+}
+
+pub async fn done_by_day(pool: &SqlitePool, from: NaiveDate, to: NaiveDate) -> crate::Result<BTreeMap<NaiveDate, i64>> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(&format!(
+        "SELECT date, {NET} FROM karma_events WHERE date >= ? AND date <= ? GROUP BY date"))
+        .bind(day(from)).bind(day(to)).fetch_all(pool).await?;
+    Ok(rows.into_iter().filter_map(|(d, n)| Some((NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()?, n))).collect())
+}
+
+/// Persist what `[from, today]` has earned and, in parity mode, owes. While
+/// paused, nothing is evaluated. Idempotent (ids).
+pub async fn evaluate_at(pool: &SqlitePool, from: NaiveDate, today: NaiveDate) -> crate::Result<EvaluateReport> {
+    let s = load_settings(pool).await?;
+    let mut report = EvaluateReport::default();
+    if s.paused { return Ok(report); }
+    let paused = paused_days(pool, &s, today).await?;
+    let done = done_by_day(pool, week_start(from), today).await?;
+    let at = now_local();
+    let mut events = goal_events(&done, &s, &paused, from, today, &at);
+    if s.karma_enabled {
+        let open: Vec<(String, String)> = sqlx::query_as(
+            "SELECT id, due_date FROM local_tasks WHERE completed = 0 AND due_date IS NOT NULL AND due_date <= ?")
+            .bind(day(today - Duration::days(PENALTY_AFTER_DAYS))).fetch_all(pool).await?;
+        events.extend(penalty_events(&open, &s, &paused, today, &at));
+    }
+    let mut tx = pool.begin().await?;
+    for e in &events {
+        if record_tx(&mut tx, e).await? {
+            match e.kind.as_str() {
+                "goal_day" => report.goal_days += 1,
+                "goal_week" => report.goal_weeks += 1,
+                _ => report.penalties += 1,
+            }
+        }
+    }
+    tx.commit().await?;
+    Ok(report)
+}
+
 #[cfg(test)]
 mod ledger_tests {
     use super::*;
@@ -374,5 +694,149 @@ mod ledger_tests {
         assert!(!is_roll_forward(Some(r#"["status","completed","completed_at"]"#)));
         assert!(!is_roll_forward(None));
         assert!(!is_roll_forward(Some("not json")));
+    }
+}
+
+#[cfg(test)]
+mod goal_tests {
+    use super::*;
+    use crate::test_util::test_pool;
+
+    fn d(s: &str) -> NaiveDate { NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap() }
+    fn done(pairs: &[(&str, i64)]) -> BTreeMap<NaiveDate, i64> { pairs.iter().map(|(k, v)| (d(k), *v)).collect() }
+    fn ids(events: &[KarmaEvent]) -> Vec<&str> { events.iter().map(|e| e.id.as_str()).collect() }
+    const AT: &str = "2026-09-27 20:00:00";
+
+    // 2026-09-21 is a Monday (ISO week 2026-W39). Defaults: daily 5, weekly 25, Sat+Sun off.
+    #[test]
+    fn daily_goals_skip_days_off_and_paused_days() {
+        let s = MomentumSettings::default();
+        let counts = done(&[("2026-09-21", 5), ("2026-09-22", 4), ("2026-09-23", 6), ("2026-09-26", 7)]);
+        let paused: BTreeSet<NaiveDate> = [d("2026-09-23")].into();
+        let e = goal_events(&counts, &s, &paused, d("2026-09-21"), d("2026-09-27"), AT);
+        assert_eq!(ids(&e), ["goal:day:2026-09-21"], "Tue under goal, Wed paused, Sat a day off");
+        assert_eq!(e[0].points, DAY_GOAL_BONUS);
+    }
+
+    #[test]
+    fn a_week_is_earned_once_on_the_day_its_total_crosses_the_goal() {
+        let s = MomentumSettings { weekly_goal: 10, ..Default::default() };
+        // Saturday is a day off, but its completions still count toward the week.
+        let counts = done(&[("2026-09-21", 3), ("2026-09-22", 3), ("2026-09-26", 4), ("2026-09-27", 2)]);
+        let e = goal_events(&counts, &s, &BTreeSet::new(), d("2026-09-21"), d("2026-09-27"), AT);
+        let week: Vec<&KarmaEvent> = e.iter().filter(|x| x.kind == "goal_week").collect();
+        assert_eq!(week.len(), 1);
+        assert_eq!((week[0].id.as_str(), week[0].date.as_str(), week[0].points), ("goal:week:2026-W39", "2026-09-26", WEEK_GOAL_BONUS));
+    }
+
+    #[test]
+    fn levels_follow_todoist_thresholds() {
+        assert_eq!(level_for(-3), ("Beginner", Some(500)));
+        assert_eq!(level_for(499), ("Beginner", Some(500)));
+        assert_eq!(level_for(500), ("Novice", Some(2_500)));
+        assert_eq!(level_for(7_500), ("Expert", Some(10_000)));
+        assert_eq!(level_for(49_999), ("Grand Master", Some(50_000)));
+        assert_eq!(level_for(50_000), ("Enlightened", None));
+    }
+
+    #[test]
+    fn streaks_step_over_days_off_and_pauses_and_wait_for_today() {
+        let s = MomentumSettings::default();
+        // Thu 17 + Fri 18 earned; Sat/Sun off; Mon 21 paused; Tue 22 earned; today Wed 23 not yet.
+        let earned: BTreeSet<NaiveDate> = ["2026-09-17", "2026-09-18", "2026-09-22"].map(d).into();
+        let paused: BTreeSet<NaiveDate> = [d("2026-09-21")].into();
+        assert_eq!(daily_streak(&earned, &s, &paused, d("2026-09-23")), 3);
+        let mut with_today = earned.clone();
+        with_today.insert(d("2026-09-23"));
+        assert_eq!(daily_streak(&with_today, &s, &paused, d("2026-09-23")), 4);
+        assert_eq!(daily_streak(&earned, &s, &BTreeSet::new(), d("2026-09-23")), 1, "Mon 21 missed ends it");
+        assert_eq!(daily_streak(&BTreeSet::new(), &s, &paused, d("2026-09-23")), 0);
+        // Weeks (keyed by Monday): W37 + W38 earned, this week not yet.
+        let weeks: BTreeSet<NaiveDate> = ["2026-09-07", "2026-09-14"].map(d).into();
+        assert_eq!(weekly_streak(&weeks, &s, &BTreeSet::new(), d("2026-09-23")), 2);
+    }
+
+    #[test]
+    fn penalties_are_parity_only_once_per_due_date_and_start_at_enable() {
+        let open = vec![
+            ("a".to_string(), "2026-09-10".to_string()),
+            ("b".to_string(), "2026-09-18".to_string()),
+            ("c".to_string(), "2026-09-20".to_string()),
+        ];
+        assert!(penalty_events(&open, &MomentumSettings::default(), &BTreeSet::new(), d("2026-09-23"), AT).is_empty());
+        let on = MomentumSettings { karma_enabled: true, karma_enabled_at: Some("2026-09-20".into()), ..Default::default() };
+        let e = penalty_events(&open, &on, &BTreeSet::new(), d("2026-09-23"), AT);
+        // a: mark 09-15 predates parity; b: mark 09-23 is today; c: mark 09-25 not yet.
+        assert_eq!(ids(&e), ["penalty:b:2026-09-18"]);
+        assert_eq!((e[0].points, e[0].date.as_str()), (-1, "2026-09-23"));
+        let paused: BTreeSet<NaiveDate> = [d("2026-09-23")].into();
+        assert!(penalty_events(&open, &on, &paused, d("2026-09-23"), AT).is_empty());
+    }
+
+    #[tokio::test]
+    async fn settings_read_leniently_and_validate_before_writing() {
+        let pool = test_pool().await;
+        assert_eq!(load_settings(&pool).await.unwrap(), MomentumSettings::default());
+        // Lane A's setup writes raw values; junk falls back to the defaults.
+        crate::db::settings::set_setting(&pool, "goals.daily", "seven").await.unwrap();
+        crate::db::settings::set_setting(&pool, "goals.days_off", r#"["SUN","fri","someday"]"#).await.unwrap();
+        let s = load_settings(&pool).await.unwrap();
+        assert_eq!((s.daily_goal, s.days_off.clone()), (5, vec!["fri".to_string(), "sun".to_string()]));
+
+        let today = d("2026-09-23");
+        let bad = [
+            (GoalTargets { daily: 0, weekly: 25, days_off: vec![], karma_enabled: false }, "Daily goal must be a whole number from 1 to 100."),
+            (GoalTargets { daily: 5, weekly: 701, days_off: vec![], karma_enabled: false }, "Weekly goal must be a whole number from 1 to 700."),
+            (GoalTargets { daily: 5, weekly: 25, days_off: vec!["funday".into()], karma_enabled: false }, "Days off must be weekday names (mon to sun)."),
+            (GoalTargets { daily: 5, weekly: 25, days_off: WEEKDAYS.map(String::from).to_vec(), karma_enabled: false }, "Leave at least one day that isn't a day off."),
+        ];
+        for (targets, msg) in bad {
+            assert_eq!(save_goals_on(&pool, targets, today).await.unwrap_err().to_string(), msg);
+        }
+        assert_eq!(crate::db::settings::get_setting(&pool, "goals.weekly").await.unwrap(), None, "a bad save writes nothing");
+
+        let s = save_goals_on(&pool, GoalTargets { daily: 3, weekly: 15, days_off: vec!["sun".into(), "sat".into()], karma_enabled: true }, today).await.unwrap();
+        assert_eq!((s.daily_goal, s.weekly_goal, s.days_off.clone(), s.karma_enabled), (3, 15, vec!["sat".to_string(), "sun".to_string()], true));
+        assert_eq!(s.karma_enabled_at.as_deref(), Some("2026-09-23"));
+        let s = save_goals_on(&pool, GoalTargets { daily: 3, weekly: 15, days_off: vec![], karma_enabled: true }, d("2026-09-30")).await.unwrap();
+        assert_eq!(s.karma_enabled_at.as_deref(), Some("2026-09-23"), "re-saving keeps the first enable date");
+        // Off, then on again later: the backlog that crossed 5 days while it
+        // was off is never penalized, so the enable date moves to the re-enable.
+        save_goals_on(&pool, GoalTargets { daily: 3, weekly: 15, days_off: vec![], karma_enabled: false }, d("2026-10-01")).await.unwrap();
+        let s = save_goals_on(&pool, GoalTargets { daily: 3, weekly: 15, days_off: vec![], karma_enabled: true }, d("2026-10-20")).await.unwrap();
+        assert_eq!(s.karma_enabled_at.as_deref(), Some("2026-10-20"));
+    }
+
+    #[tokio::test]
+    async fn pause_records_whole_days_and_resume_is_quiet() {
+        let pool = test_pool().await;
+        let at = |s: &str| NaiveDateTime::parse_from_str(s, STAMP).unwrap();
+        let s = set_paused_at(&pool, true, at("2026-09-21 09:00:00")).await.unwrap();
+        assert!(s.paused);
+        assert_eq!(s.paused_at.as_deref(), Some("2026-09-21 09:00:00"));
+        let s = set_paused_at(&pool, false, at("2026-09-23 10:00:00")).await.unwrap();
+        assert!(!s.paused && s.paused_at.is_none());
+        let pauses: Vec<String> = list_events(&pool).await.unwrap().into_iter().filter(|e| e.kind == "pause").map(|e| e.id).collect();
+        assert_eq!(pauses, ["pause:2026-09-21", "pause:2026-09-22"]);
+        set_paused_at(&pool, true, at("2026-09-24 09:00:00")).await.unwrap();
+        set_paused_at(&pool, false, at("2026-09-24 17:00:00")).await.unwrap();
+        assert_eq!(list_events(&pool).await.unwrap().iter().filter(|e| e.kind == "pause").count(), 2, "same-day pause leaves no row");
+    }
+
+    #[tokio::test]
+    async fn evaluation_persists_once_and_does_nothing_while_paused() {
+        let pool = test_pool().await;
+        let mut tx = pool.begin().await.unwrap();
+        for i in 0..5 {
+            record_tx(&mut tx, &completion_event(&format!("t{i}"), 1, &format!("2026-09-23 1{i}:00:00")).unwrap()).await.unwrap();
+        }
+        tx.commit().await.unwrap();
+        let today = d("2026-09-23");
+        crate::db::settings::set_setting(&pool, "momentum.paused", "1").await.unwrap();
+        crate::db::settings::set_setting(&pool, "momentum.paused_at", "2026-09-23 08:00:00").await.unwrap();
+        assert_eq!(evaluate_at(&pool, today, today).await.unwrap(), EvaluateReport::default());
+        crate::db::settings::set_setting(&pool, "momentum.paused", "0").await.unwrap();
+        assert_eq!(evaluate_at(&pool, today, today).await.unwrap().goal_days, 1);
+        assert_eq!(evaluate_at(&pool, today, today).await.unwrap(), EvaluateReport::default(), "idempotent");
     }
 }
