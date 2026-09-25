@@ -337,6 +337,12 @@ pub fn run() {
                     .await
                     .expect("failed to run migrations");
                 drop(schema_lock);
+                // Device-local task search index: rebuild on count/version drift.
+                match nimble_core::db::task_search::ensure_task_index(&pool).await {
+                    Ok(true) => log::info!("Task search index rebuilt"),
+                    Ok(false) => {}
+                    Err(e) => log::warn!("Task search index check failed: {e}"),
+                }
 
                 if demo_mode {
                     log::info!("DEMO MODE — database initialized at {:?}", db_path);

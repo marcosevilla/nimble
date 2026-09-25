@@ -21,6 +21,7 @@ pub mod settings;
 pub mod sync;
 pub mod tasks;
 pub mod task_tx;
+pub mod task_search;
 pub mod backup;
 pub mod backup_storage;
 

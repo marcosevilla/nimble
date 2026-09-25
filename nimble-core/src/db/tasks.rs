@@ -531,6 +531,7 @@ pub async fn migrate_tasks_to_markdown(
             }
         }
     }
+    crate::db::task_search::rebuild_after_bulk_write(pool).await;
     Ok(TasksMdResult { converted, skipped_plain, backup_path: backup_path.to_string() })
 }
 

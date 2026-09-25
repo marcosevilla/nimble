@@ -982,6 +982,7 @@ async fn apply_migration(
     )
     .await;
 
+    crate::db::task_search::rebuild_after_bulk_write(pool).await;
     Ok(result)
 }
 
