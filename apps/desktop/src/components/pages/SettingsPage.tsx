@@ -53,6 +53,7 @@ import { LabelManager } from '@/components/settings/LabelManager'
 import { TodayBriefSettings } from '@/components/settings/TodayBriefSettings'
 import { BriefLocationSettings } from '@/components/settings/BriefLocationSettings'
 import { BriefBoxesSettings } from '@/components/settings/BriefBoxesSettings'
+import { useBriefSettingsStore } from '@/stores/briefSettingsStore'
 import { ActivityLog } from '@/components/activity/ActivityLog'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
 import {
@@ -1265,7 +1266,6 @@ const THEME_LABELS = { light: 'Light', dark: 'Dark', system: 'System' } as const
 export function SettingsPage() {
   const dp = useDataProvider()
   const { theme, setTheme, accent, setAccent, headingFont, setHeadingFont, bodyFont, setBodyFont } = useTheme()
-  const setSetupComplete = useAppStore((s) => s.setSetupComplete)
   const [fields, setFields] = useState<Record<string, FieldState>>(() => {
     const initial: Record<string, FieldState> = {}
     for (const f of ALL_FIELDS) {
@@ -1364,13 +1364,16 @@ export function SettingsPage() {
     setResetting(true)
     try {
       await dp.settings.clearAll()
-      setSetupComplete(false)
+      // Reset clears today.setup_completed_at too: reload the brief settings
+      // and land on Today, where the setup opens (addendum §3).
+      await useBriefSettingsStore.getState().load(true)
+      useAppStore.getState().setCurrentPage('today')
     } catch (e) {
       console.error('Failed to reset settings:', e)
     } finally {
       setResetting(false)
     }
-  }, [setSetupComplete, dp])
+  }, [dp])
 
   const handleCheckForUpdates = useCallback(async () => {
     setChecking(true)

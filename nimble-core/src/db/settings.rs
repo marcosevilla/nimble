@@ -2,13 +2,12 @@ use sqlx::SqlitePool;
 
 use crate::types::SettingRow;
 
-/// Required settings keys for the app to function. The calendar is optional
-/// (setup P1-4): Today and the brief work without it.
-const REQUIRED_SETTINGS: &[&str] = &[
-    "todoist_api_token",
-    "obsidian_vault_path",
-    "anthropic_api_key",
-];
+/// Settings the app needs before it runs: none since brief phase 2
+/// (addendum §3). Every integration is optional and degrades on its own —
+/// no Todoist token, no sync; no vault, no vault box; no AI key, a
+/// rule-based brief. The Today setup (`today.setup_completed_at`) is the
+/// onboarding now. Pinned to `lib/setupGate.ts` by tests/setupGate.test.mjs.
+const REQUIRED_SETTINGS: &[&str] = &[];
 
 /// Check if all required settings are configured
 pub async fn check_setup_complete(pool: &SqlitePool) -> crate::Result<bool> {
@@ -75,19 +74,8 @@ mod tests {
     use crate::test_util::test_pool;
 
     #[tokio::test]
-    async fn setup_completes_without_a_calendar_feed() {
+    async fn setup_is_complete_with_nothing_configured() {
         let pool = test_pool().await;
-        for key in ["todoist_api_token", "obsidian_vault_path", "anthropic_api_key"] {
-            super::set_setting(&pool, key, "x").await.unwrap();
-        }
-        assert!(super::check_setup_complete(&pool).await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn setup_still_requires_the_other_three() {
-        let pool = test_pool().await;
-        super::set_setting(&pool, "todoist_api_token", "x").await.unwrap();
-        super::set_setting(&pool, "obsidian_vault_path", "x").await.unwrap();
-        assert!(!super::check_setup_complete(&pool).await.unwrap());
+        assert!(super::check_setup_complete(&pool).await.unwrap(), "every integration is optional (addendum §3)");
     }
 }

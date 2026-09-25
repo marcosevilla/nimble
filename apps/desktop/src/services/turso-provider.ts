@@ -18,7 +18,8 @@
  *    no user-facing setup in the browser. Turso credentials live in Vercel
  *    environment variables behind `api/turso.ts` and are never reachable
  *    from client JS, so there is nothing for a setup dialog to collect.
- *    Rejecting here would park the web build permanently on SetupDialog.
+ *    (Nothing gates on it since brief phase 2 dropped the setup dialog;
+ *    it stays for compatibility.)
  *
  * When implementing a method, delete its `ni(...)` and write the real thing.
  * The object is checked structurally against the DataProvider interface in

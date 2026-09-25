@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { friendlyError, friendlyErrorOrNull, isMissingTodayNote, isWebNotImplemented } from '../src/lib/errors.ts'
+import { friendlyError, friendlyErrorOrNull, isMissingTodayNote, isVaultNotConfigured, isWebNotImplemented } from '../src/lib/errors.ts'
 
 test('a missing vault-root today.md is recognised', () => {
   assert.equal(isMissingTodayNote('Failed to read today.md: not found'), true)
@@ -57,4 +57,11 @@ test('friendlyErrorOrNull resolves a not-yet-implemented web method to null, not
 
 test('friendlyErrorOrNull falls back to friendlyError for a real error', () => {
   assert.equal(friendlyErrorOrNull('network request failed'), friendlyError('network request failed'))
+})
+
+test('a missing vault path is a normal state, not an error to toast', () => {
+  assert.equal(isVaultNotConfigured('Obsidian vault path not configured'), true)
+  assert.equal(isVaultNotConfigured(new Error('Obsidian vault path not configured')), true)
+  assert.equal(isVaultNotConfigured('Vault path not found'), false)
+  assert.equal(isVaultNotConfigured('Todoist API token not configured'), false)
 })

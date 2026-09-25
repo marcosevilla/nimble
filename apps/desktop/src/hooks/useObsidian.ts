@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '@/stores/appStore'
 import { useDataProvider } from '@/services/provider-context'
 import type { ParsedTodayMd } from '@nimble/types'
-import { friendlyError, isMissingTodayNote, isWebNotImplemented } from '@/lib/errors'
+import { friendlyError, isMissingTodayNote, isVaultNotConfigured, isWebNotImplemented } from '@/lib/errors'
 import { toast } from 'sonner'
 
 export function useObsidian() {
@@ -23,8 +23,9 @@ export function useObsidian() {
       ].join('\n')
       setObsidianToday(summary)
     } catch (e) {
-      // No vault-root today.md: show no daily note, not a vault-path toast.
-      if (isMissingTodayNote(e)) {
+      // No vault-root today.md, or no vault at all (optional since brief
+      // phase 2): show no daily note, not a vault-path toast.
+      if (isMissingTodayNote(e) || isVaultNotConfigured(e)) {
         setTodayData(null)
         setObsidianToday(null)
         return
