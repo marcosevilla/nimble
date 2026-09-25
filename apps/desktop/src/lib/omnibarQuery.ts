@@ -59,28 +59,38 @@ const TYPE_NAMES: { value: TypeValue; names: string[] }[] = [
   { value: 'action', names: ['action', 'actions'] },
 ]
 
-const EMOJI = /[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\u{200D}]/gu
+/** Pictographs, skin tones, ZWJ, regional indicators (flags) and tag
+ *  characters (subdivision flags). Variation selectors are marks (\p{M}). */
+const EMOJI = /[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\u{200D}\p{Regional_Indicator}\u{E0020}-\u{E007F}]/gu
 
 /** Case-, diacritic- and emoji-insensitive form used for every comparison. */
 export function fold(s: string): string {
   return s.normalize('NFD').replace(/\p{M}/gu, '').replace(EMOJI, '').toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
+/** Longest run of consecutive words tried as one multi-word name. */
+export const MAX_RUN_WORDS = 8
+
 interface Candidate {
   folded: string
   start: number
   end: number
+  /** Words in the run. */
+  words: number
 }
 
-/** Each whitespace-separated word, plus the whole text when it has several
- *  words (multi-word names such as "Portola 2026"). */
+/** Every run of consecutive whitespace-separated words (multi-word names such
+ *  as "Portola 2026" anywhere in the text), longest first, then each word. */
 function candidates(text: string): Candidate[] {
+  const words = [...text.matchAll(/\S+/g)].map((m) => ({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length }))
   const out: Candidate[] = []
-  for (const m of text.matchAll(/\S+/g)) {
-    const start = m.index ?? 0
-    out.push({ folded: fold(m[0]), start, end: start + m[0].length })
+  for (let len = Math.min(words.length, MAX_RUN_WORDS); len >= 1; len--) {
+    for (let i = 0; i + len <= words.length; i++) {
+      const start = words[i].start
+      const end = words[i + len - 1].end
+      out.push({ folded: fold(text.slice(start, end)), start, end, words: len })
+    }
   }
-  if (out.length > 1) out.push({ folded: fold(text), start: out[0].start, end: out[out.length - 1].end })
   return out.filter((c) => c.folded.length > 0)
 }
 
@@ -102,23 +112,30 @@ function entries(catalog: FilterCatalog): Entry[] {
   ]
 }
 
-function better(a: FilterSuggestion, b: FilterSuggestion): boolean {
-  if (a.exact !== b.exact) return a.exact
-  return a.end - a.start > b.end - b.start
+interface Ranked {
+  s: FilterSuggestion
+  words: number
 }
 
-function compare(a: FilterSuggestion, b: FilterSuggestion): number {
-  if (a.exact !== b.exact) return a.exact ? -1 : 1
-  return KIND_RANK[a.pill.kind] - KIND_RANK[b.pill.kind]
+function better(a: Ranked, b: Ranked): boolean {
+  if (a.s.exact !== b.s.exact) return a.s.exact
+  return a.words > b.words
+}
+
+function compare(a: Ranked, b: Ranked): number {
+  if (a.s.exact !== b.s.exact) return a.s.exact ? -1 : 1
+  if (a.words !== b.words) return b.words - a.words
+  return KIND_RANK[a.s.pill.kind] - KIND_RANK[b.s.pill.kind]
 }
 
 /** FILTERS group rows: best match per kind+value, exact before prefix, then
- *  status, type, label, project (catalog order within a kind), at most three.
- *  A kind+value already pilled is never offered. */
+ *  the longer matched run of words, then status, type, label, project
+ *  (catalog order within a kind), at most three. A kind+value already pilled
+ *  is never offered. */
 export function suggestFilters(text: string, pills: readonly Pill[], catalog: FilterCatalog): FilterSuggestion[] {
   const cands = candidates(text)
   if (cands.length === 0) return []
-  const best = new Map<string, FilterSuggestion>()
+  const best = new Map<string, Ranked>()
   for (const entry of entries(catalog)) {
     if (pills.some((p) => p.kind === entry.pill.kind && p.value === entry.pill.value)) continue
     const key = `${entry.pill.kind}:${entry.pill.value}`
@@ -126,12 +143,12 @@ export function suggestFilters(text: string, pills: readonly Pill[], catalog: Fi
       const exact = entry.names.includes(c.folded)
       const prefix = !exact && c.folded.length >= MIN_PREFIX && entry.names.some((n) => n.startsWith(c.folded))
       if (!exact && !prefix) continue
-      const next: FilterSuggestion = { pill: entry.pill, start: c.start, end: c.end, exact }
+      const next: Ranked = { s: { pill: entry.pill, start: c.start, end: c.end, exact }, words: c.words }
       const prev = best.get(key)
       if (!prev || better(next, prev)) best.set(key, next)
     }
   }
-  return [...best.values()].sort(compare).slice(0, MAX_SUGGESTIONS)
+  return [...best.values()].sort(compare).slice(0, MAX_SUGGESTIONS).map((r) => r.s)
 }
 
 /** One status, one type and one project (a new one replaces); labels stack. */

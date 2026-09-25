@@ -112,14 +112,15 @@ const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`)
 /**
  * Omnibar Notes group for the web build. Mirrors
  * `nimble_core::db::captures::search_captures`: every whitespace word must
- * appear (LIKE, ASCII case folding), converted captures excluded, newest first.
+ * appear (LIKE, ASCII case folding), converted and routed captures excluded
+ * (Inbox visibility), newest first.
  */
 export async function searchCaptures(input: string, limit = 20): Promise<Capture[]> {
   const words = input.trim().split(/\s+/).filter(Boolean)
   if (words.length === 0) return []
   const where = words.map(() => `content LIKE ? ESCAPE '\\'`).join(' AND ')
   const rows = await query(
-    `SELECT ${COLUMNS} FROM captures WHERE converted_to_task_id IS NULL AND ${where} ORDER BY created_at DESC LIMIT ?`,
+    `SELECT ${COLUMNS} FROM captures WHERE converted_to_task_id IS NULL AND source != 'route' AND ${where} ORDER BY created_at DESC LIMIT ?`,
     [...words.map((w) => text(`%${escapeLike(w)}%`)), integer(limit)],
   )
   return rows.map(toCapture)

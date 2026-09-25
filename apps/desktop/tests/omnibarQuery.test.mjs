@@ -117,3 +117,54 @@ test('copy: pill and suggestion text', () => {
   assert.equal(pillText({ kind: 'label', value: 'x', name: 'photography' }), 'label: photography')
   assert.equal(suggestionText(suggestFilters('completed', [], catalog)[0]), 'Filter by status: completed')
 })
+
+// ── Checkpoint-1 review follow-ups ──
+
+const review = {
+  labels: [
+    { id: 'l-notes', name: 'Notes', archived_at: null },
+    { id: 'l-parch', name: 'portola-archive', archived_at: null },
+    { id: 'l-travel', name: '🇺🇸 Travel', archived_at: null },
+  ],
+  projects: [
+    { id: 'p-notes-app', name: 'Notes app', archived_at: null },
+    { id: 'p-portola', name: 'Portola 2026', archived_at: null },
+  ],
+}
+
+test('among exact matches, the longer matched span beats kind order', () => {
+  assert.deepEqual(kinds(suggestFilters('notes app', [], review)).slice(0, 2), ['project:p-notes-app', 'type:note'])
+})
+
+test('among prefix matches, the longer span wins', () => {
+  const list = suggestFilters('portola 20', [], review)
+  assert.deepEqual(kinds(list), ['project:p-portola', 'label:l-parch'])
+  assert.deepEqual(acceptSuggestion({ pills: [], text: 'portola 20' }, list[0]).text, '')
+})
+
+test('a multi-word name matches any run of consecutive words, not only the whole text', () => {
+  const [s] = suggestFilters('recap portola 2026', [], review)
+  assert.equal(`${s.pill.kind}:${s.pill.value}`, 'project:p-portola')
+  assert.equal(s.exact, true)
+  assert.deepEqual(acceptSuggestion({ pills: [], text: 'recap portola 2026' }, s), {
+    pills: [{ kind: 'project', value: 'p-portola', name: 'Portola 2026' }],
+    text: 'recap ',
+  })
+  const [mid] = suggestFilters('send portola 2026 recap', [], review)
+  assert.deepEqual(acceptSuggestion({ pills: [], text: 'send portola 2026 recap' }, mid).text, 'send recap ')
+})
+
+test('flag emoji (regional indicators) are stripped', () => {
+  assert.equal(fold('🇺🇸 Travel'), 'travel')
+  assert.deepEqual(kinds(suggestFilters('travel', [], review)), ['label:l-travel'])
+})
+
+test('type beats label on an exact tie of the same span', () => {
+  assert.deepEqual(kinds(suggestFilters('notes', [], review)).slice(0, 2), ['type:note', 'label:l-notes'])
+})
+
+test('"complete" is an exact alias of completed', () => {
+  const [s] = suggestFilters('complete', [], catalog)
+  assert.equal(`${s.pill.kind}:${s.pill.value}`, 'status:completed')
+  assert.equal(s.exact, true)
+})

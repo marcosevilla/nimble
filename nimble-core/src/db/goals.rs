@@ -161,8 +161,8 @@ pub async fn get_goal(pool: &SqlitePool, id: &str) -> crate::Result<GoalWithProg
 }
 
 /// Omnibar Goals group: goals whose name or description holds every word of
-/// `query` (LIKE, ASCII case-insensitive). Active first, then not started,
-/// paused, and achieved/abandoned last; then by position. A blank query
+/// `query` (LIKE, ASCII case-insensitive), in Goals page order: active, not
+/// started, paused, achieved, abandoned; ties most recently updated first. A blank query
 /// returns nothing. `limit` is clamped to 1..=200.
 pub async fn search_goals(pool: &SqlitePool, query: &str, limit: i64) -> crate::Result<Vec<Goal>> {
     let patterns = like_patterns(query);
@@ -174,7 +174,7 @@ pub async fn search_goals(pool: &SqlitePool, query: &str, limit: i64) -> crate::
         sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR COALESCE(description, '') LIKE ? ESCAPE '\\')");
     }
     sql.push_str(
-        " ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'not_started' THEN 1 WHEN 'paused' THEN 2 ELSE 3 END, position, created_at LIMIT ?",
+        " ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'not_started' THEN 1 WHEN 'paused' THEN 2 WHEN 'achieved' THEN 3 WHEN 'abandoned' THEN 4 ELSE 5 END, updated_at DESC, created_at DESC LIMIT ?",
     );
     let mut q = sqlx::query_as::<
         _,
@@ -558,5 +558,26 @@ mod omnibar_search_tests {
         let pct = goal(&pool, "Save 10% of income", None, "active").await;
         goal(&pool, "Save 10 dollars", None, "active").await;
         assert_eq!(ids(&search_goals(&pool, "10%", 20).await.unwrap()), vec![pct.as_str()]);
+    }
+
+    #[tokio::test]
+    async fn search_goals_orders_like_the_goals_page() {
+        // Goals page: active, not started, paused, achieved, abandoned; ties by
+        // most recently updated.
+        let pool = test_pool().await;
+        let abandoned = goal(&pool, "Run abandoned", None, "abandoned").await;
+        let achieved = goal(&pool, "Run achieved", None, "achieved").await;
+        let active_old = goal(&pool, "Run old", None, "active").await;
+        let active_new = goal(&pool, "Run new", None, "active").await;
+        for (id, at) in [
+            (&abandoned, "2026-09-20 09:00:00"),
+            (&achieved, "2026-09-01 09:00:00"),
+            (&active_old, "2026-09-01 09:00:00"),
+            (&active_new, "2026-09-10 09:00:00"),
+        ] {
+            sqlx::query("UPDATE goals SET updated_at = ? WHERE id = ?").bind(at).bind(id).execute(&pool).await.unwrap();
+        }
+        let hits = search_goals(&pool, "run", 20).await.unwrap();
+        assert_eq!(ids(&hits), vec![active_new.as_str(), active_old.as_str(), achieved.as_str(), abandoned.as_str()]);
     }
 }

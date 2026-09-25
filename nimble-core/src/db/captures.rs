@@ -55,15 +55,15 @@ pub(crate) fn like_patterns(query: &str) -> Vec<String> {
 }
 
 /// Omnibar Notes group: captures holding every word of `query` (LIKE, ASCII
-/// case-insensitive), newest first. Converted captures stay out, like the
-/// Inbox. A blank query returns nothing. `limit` is clamped to 1..=200.
+/// case-insensitive), newest first. Converted and routed (`source = 'route'`)
+/// captures stay out, like the Inbox. A blank query returns nothing. `limit` is clamped to 1..=200.
 pub async fn search_captures(pool: &SqlitePool, query: &str, limit: i64) -> crate::Result<Vec<Capture>> {
     let patterns = like_patterns(query);
     if patterns.is_empty() {
         return Ok(Vec::new());
     }
     let mut sql = String::from(
-        "SELECT id, content, source, converted_to_task_id, routed_to, context, created_at FROM captures WHERE converted_to_task_id IS NULL",
+        "SELECT id, content, source, converted_to_task_id, routed_to, context, created_at FROM captures WHERE converted_to_task_id IS NULL AND source != 'route'",
     );
     for _ in &patterns {
         sql.push_str(" AND content LIKE ? ESCAPE '\\'");
@@ -334,5 +334,25 @@ mod omnibar_search_tests {
         insert(&pool, "snake", "snake_case name", "2026-09-03 09:00:00").await;
         assert_eq!(ids(&search_captures(&pool, "100%", 20).await.unwrap()), vec!["pct"]);
         assert_eq!(ids(&search_captures(&pool, "_", 20).await.unwrap()), vec!["snake"]);
+    }
+
+    #[tokio::test]
+    async fn search_captures_treats_a_backslash_as_text() {
+        let pool = test_pool().await;
+        insert(&pool, "slash", r"C:\temp notes", "2026-09-01 09:00:00").await;
+        insert(&pool, "plain", "C:temp notes", "2026-09-02 09:00:00").await;
+        assert_eq!(ids(&search_captures(&pool, r"C:\temp", 20).await.unwrap()), vec!["slash"]);
+        assert_eq!(ids(&search_captures(&pool, r"\", 20).await.unwrap()), vec!["slash"]);
+    }
+
+    #[tokio::test]
+    async fn search_captures_hides_routed_captures_like_the_inbox() {
+        let pool = test_pool().await;
+        insert(&pool, "kept", "portola shot list", "2026-09-01 09:00:00").await;
+        sqlx::query("INSERT INTO captures (id, content, source, created_at) VALUES ('routed', 'portola routed', 'route', '2026-09-02 09:00:00')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(ids(&search_captures(&pool, "portola", 20).await.unwrap()), vec!["kept"]);
     }
 }
