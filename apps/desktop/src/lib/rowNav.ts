@@ -5,6 +5,8 @@
 
    `-1` means "no row focused". */
 
+import { OVERLAY_SELECTOR } from './keyGuard.ts'
+
 /** Move focus by `direction` (+1 = j/↓, -1 = k/↑), clamped to the list.
  * From no focus, j lands on the first row and k on the last. */
 export function stepIndex(current: number, direction: 1 | -1, length: number): number {
@@ -64,9 +66,9 @@ export const INTERACTIVE_SELECTOR =
 /** Text entry — every key belongs to the field. */
 export const FIELD_SELECTOR = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])'
 
-/** Anything open on top of the list — keys typed there are not row keys. */
-export const OVERLAY_SELECTOR =
-  '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-slot="popover-content"]'
+/** Anything open on top of the list — keys typed there are not row keys.
+ * One definition, shared with the shell keys (lib/keyGuard). */
+export { OVERLAY_SELECTOR }
 
 /** A roving tree (the nav's Docs and project trees) owns every key typed
  * in it: its arrows move tree focus, its letters are not row actions

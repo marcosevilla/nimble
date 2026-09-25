@@ -127,3 +127,17 @@ test('Space leaves buttons, fields and overlays alone but not a list row', () =>
   assert.equal(spaceKeyBlocked(row, false), false, 'a task row (role=button) hands Space to the session')
   assert.equal(spaceKeyBlocked(el({ tag: 'BODY' }), false), false)
 })
+
+test('one overlay selector: real popups only — no tooltip triggers, no inline listboxes', async () => {
+  const rowNav = await import('../src/lib/rowNav.ts')
+  assert.equal(rowNav.OVERLAY_SELECTOR, OVERLAY_SELECTOR, 'rowNav uses the same selector')
+  assert.doesNotMatch(OVERLAY_SELECTOR, /data-popup-open|data-open/, 'a tooltip trigger/popup is not an overlay')
+  for (const part of ['[role="dialog"]', '[role="alertdialog"]', '[role="menu"]', '[data-slot="popover-content"]', '[data-slot="select-content"]'])
+    assert.ok(OVERLAY_SELECTOR.includes(part), part)
+  assert.match(OVERLAY_SELECTOR, /\[role="listbox"\]:not\(\[data-inline-listbox\]\)/, 'inline listboxes (Docs search) excluded')
+})
+
+test('a focused nav icon whose tooltip is showing keeps the shell keys', () => {
+  const icon = el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR, '[data-popup-open]'] })
+  assert.equal(shellKeyBlocked(icon, false), false)
+})

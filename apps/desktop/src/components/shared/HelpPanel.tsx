@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { hasOpenOverlay } from '@/lib/rowNav'
 import { cn } from '@/lib/utils'
 import { HelpCircle, X, Keyboard, Map, Circle, CheckCircle2 } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -54,10 +55,7 @@ export function HelpPanel() {
     if (!open) return
     function handleKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return
-      const overlayAbove = document.querySelector(
-        '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-slot="popover-content"]',
-      )
-      if (overlayAbove) return
+      if (hasOpenOverlay()) return
       e.preventDefault()
       e.stopPropagation()
       closePanel()

@@ -14,8 +14,14 @@
 export const INTERACTIVE_SELECTOR =
   'button, a[href], summary, [role="button"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], [role="tab"], [role="radio"]'
 
+/** Anything open on top of the page: dialogs, menus, popovers, a Select's
+ * popup. The one definition (rowNav, HelpPanel and the shell use it too).
+ * Deliberately NOT `[data-popup-open]` / `[data-open][data-side]`: Base UI
+ * sets those on a tooltip trigger/popup too, and nav tooltips open on
+ * keyboard focus. An inline results list (Docs search) carries
+ * `data-inline-listbox` — it stays rendered after blur and is not a popup. */
 export const OVERLAY_SELECTOR =
-  '[role="dialog"], [role="alertdialog"], [role="menu"], [data-popup-open], [data-open][data-side]'
+  '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]:not([data-inline-listbox]), [data-slot="popover-content"], [data-slot="select-content"]'
 
 export interface KeyTargetLike {
   tagName?: string
