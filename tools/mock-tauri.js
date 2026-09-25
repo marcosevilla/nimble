@@ -1713,6 +1713,52 @@
       return null
     },
 
+    // ⌘F search (C4): substring stand-in for FTS5 with the same ordering —
+    // open first, title-only matches next, then most recently updated.
+    search_tasks: function (args) {
+      var tokens = String((args && args.query) || '').replace(/["*:^()\-+]/g, ' ').split(/\s+/)
+        .filter(function (t) { return /[\p{L}\p{N}]/u.test(t) })
+        .map(function (t) { return t.toLowerCase() })
+      if (!tokens.length) return []
+      var f = (args && args.filters) || {}
+      var status = f.status || 'all'
+      var labelIds = f.label_ids || []
+      function snippet(text) {
+        var lower = text.toLowerCase()
+        var first = Math.min.apply(null, tokens.map(function (t) { var i = lower.indexOf(t); return i < 0 ? Infinity : i }))
+        if (!isFinite(first)) return null
+        var start = Math.max(0, first - 40)
+        var slice = text.slice(start, first + 80)
+        tokens.forEach(function (t) {
+          slice = slice.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), function (m) { return '\u0002' + m + '\u0003' })
+        })
+        return (start > 0 ? '…' : '') + slice + (first + 80 < text.length ? '…' : '')
+      }
+      var hits = TASKS.filter(function (t) {
+        var hay = (t.content + ' ' + (t.description || '')).toLowerCase()
+        if (!tokens.every(function (tok) { return hay.indexOf(tok) !== -1 })) return false
+        var done = t.status === 'complete'
+        if (status === 'open' && done) return false
+        if (status === 'completed' && !done) return false
+        if (f.project_id && t.project_id !== f.project_id) return false
+        if (labelIds.length && !labelIds.some(function (id) { return (t.labels || []).indexOf(id) !== -1 })) return false
+        return true
+      }).map(function (t) {
+        var inTitle = tokens.every(function (tok) { return t.content.toLowerCase().indexOf(tok) !== -1 })
+        return { task: Object.assign({}, t), matched_in: inTitle ? 'title' : 'description', snippet: inTitle ? null : snippet(t.description || '') }
+      })
+      hits.sort(function (a, b) {
+        var da = a.task.status === 'complete' ? 1 : 0
+        var db = b.task.status === 'complete' ? 1 : 0
+        if (da !== db) return da - db
+        var ta = a.matched_in === 'title' ? 0 : 1
+        var tb = b.matched_in === 'title' ? 0 : 1
+        if (ta !== tb) return ta - tb
+        return String(b.task.updated_at).localeCompare(String(a.task.updated_at))
+      })
+      return hits.slice(0, (args && args.limit) || 50)
+    },
+
     // Misc
     open_url: function () { return null },
     check_for_updates: function () {

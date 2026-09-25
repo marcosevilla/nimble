@@ -233,3 +233,21 @@ pub async fn migrate_tasks_to_markdown(
     .map_err(|e| e.to_string());
     after_commit(&app, result, TASKS, |_| Vec::new())
 }
+
+#[tauri::command]
+pub async fn search_tasks(
+    app: AppHandle,
+    query: String,
+    filters: Option<nimble_core::types::TaskSearchFilters>,
+    limit: Option<i64>,
+) -> Result<Vec<nimble_core::types::TaskSearchHit>, String> {
+    let pool = app.state::<SqlitePool>();
+    nimble_core::db::task_search::search_tasks(
+        pool.inner(),
+        &query,
+        &filters.unwrap_or_default(),
+        limit.unwrap_or(nimble_core::db::task_search::DEFAULT_LIMIT),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}

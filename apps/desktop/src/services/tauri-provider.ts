@@ -119,6 +119,7 @@ export function createTauriProvider(): DataProvider {
       reorder: tauri.reorderLocalTasks,
       previewMarkdownMigration: tauri.previewTasksMarkdownMigration,
       migrateToMarkdown: tauri.migrateTasksToMarkdown,
+      search: tauri.searchTasks,
     },
 
     docs: {

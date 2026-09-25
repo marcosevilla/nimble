@@ -34,6 +34,8 @@ export type {
   Label,
   LabelGroup,
   LabelGroupPatch,
+  TaskSearchFilters,
+  TaskSearchHit,
   Section,
   UpdateStatus,
   SaveResult,
@@ -89,6 +91,8 @@ import type {
   Label,
   LabelGroup,
   LabelGroupPatch,
+  TaskSearchFilters,
+  TaskSearchHit,
   Section,
   UpdateStatus,
   SaveResult,
@@ -431,6 +435,10 @@ export async function previewTasksMarkdownMigration(): Promise<TasksMdPreview> {
 
 export async function migrateTasksToMarkdown(): Promise<TasksMdResult> {
   return invoke<TasksMdResult>('migrate_tasks_to_markdown')
+}
+
+export async function searchTasks(query: string, filters?: TaskSearchFilters): Promise<TaskSearchHit[]> {
+  return invoke<TaskSearchHit[]>('search_tasks', { query, filters: filters ?? null, limit: 50 })
 }
 
 // ── Labels ──

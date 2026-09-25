@@ -27,6 +27,8 @@ import type {
   Label,
   LabelGroup,
   LabelGroupPatch,
+  TaskSearchFilters,
+  TaskSearchHit,
   Section,
   LocalTask,
   TasksMdPreview,
@@ -248,6 +250,8 @@ export interface DataProvider {
     reorder(taskIds: string[]): Promise<void>
     previewMarkdownMigration(): Promise<TasksMdPreview>
     migrateToMarkdown(): Promise<TasksMdResult>
+    /** Full-text search over every task, open first. Desktop: FTS5; web: LIKE (degraded). */
+    search(query: string, filters?: TaskSearchFilters): Promise<TaskSearchHit[]>
   }
 
   docs: {

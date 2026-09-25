@@ -574,6 +574,7 @@ pub fn run() {
             local_tasks::reorder_local_tasks,
             local_tasks::preview_tasks_markdown_migration,
             local_tasks::migrate_tasks_to_markdown,
+            local_tasks::search_tasks,
             labels::list_labels,
             labels::create_label,
             labels::update_label,

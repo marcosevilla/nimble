@@ -42,6 +42,7 @@ import { createTask, listTasks, setTaskStatus, updateReminderIntent } from '@/se
 import { listProjects } from '@/services/turso/projects'
 import { createCapture, listCaptures } from '@/services/turso/captures'
 import { listLabels, listLabelGroups, unusedLabelIds } from '@/services/turso/labels'
+import { searchTasksLike } from '@/services/turso/search'
 import { listSections } from '@/services/turso/sections'
 import { readFocusHistory, readFocusSnapshot } from '@/services/turso/focus'
 import { focusUnsupported } from '@/services/focus-events'
@@ -207,6 +208,7 @@ export function createTursoProvider(): DataProvider {
       reorder: ni('tasks.reorder'),
       previewMarkdownMigration: ni('tasks.previewMarkdownMigration'),
       migrateToMarkdown: ni('tasks.migrateToMarkdown'),
+      search: searchTasksLike,
     },
 
     // v1 IN, READ-ONLY — step 6. Editing is deliberately never coming to web.

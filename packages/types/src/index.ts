@@ -294,6 +294,22 @@ export interface LabelGroupPatch {
   position?: number
 }
 
+export type TaskSearchStatus = 'all' | 'open' | 'completed'
+
+export interface TaskSearchFilters {
+  status?: TaskSearchStatus
+  /** Any-of. */
+  label_ids?: string[]
+  project_id?: string | null
+}
+
+export interface TaskSearchHit {
+  task: LocalTask
+  /** Description excerpt with U+0002 … U+0003 around matches; null for title matches. */
+  snippet: string | null
+  matched_in: 'title' | 'description'
+}
+
 // ── Sections ──
 
 export interface Section {

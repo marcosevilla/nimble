@@ -155,6 +155,29 @@ pub struct LabelGroupPatch {
     pub position: Option<i64>,
 }
 
+/// Optional ⌘F / `dt task search` filters.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct TaskSearchFilters {
+    /// "all" (default), "open" or "completed".
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Any-of.
+    #[serde(default)]
+    pub label_ids: Vec<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskSearchHit {
+    pub task: LocalTask,
+    /// Description excerpt with U+0002 … U+0003 around matches. Only when the
+    /// title alone does not contain every query token.
+    pub snippet: Option<String>,
+    /// "title" | "description"
+    pub matched_in: String,
+}
+
 // ── Sections ──
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]

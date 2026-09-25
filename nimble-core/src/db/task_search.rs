@@ -5,9 +5,13 @@
 //! best-effort, like `activity::log_activity`: an index failure is logged and
 //! never fails the task mutation that caused it. `ensure_task_index` heals any
 //! drift on startup; `dt task search --reindex` forces a rebuild.
-use sqlx::{SqliteConnection, SqlitePool};
+use std::collections::HashSet;
+
+use sqlx::{FromRow, Row, SqliteConnection, SqlitePool};
 
 use crate::db::task_tx::TaskEffects;
+use crate::db::tasks::SELECT_COLS;
+use crate::types::{LocalTask, TaskSearchFilters, TaskSearchHit};
 
 /// Bump to make every device rebuild its index on next launch.
 pub const TASKS_FTS_VERSION: &str = "1";
@@ -158,13 +162,122 @@ pub async fn ensure_task_index(pool: &SqlitePool) -> crate::Result<bool> {
     Ok(true)
 }
 
+pub const DEFAULT_LIMIT: i64 = 50;
+
+/// User text → FTS5 query. Whitespace tokens; FTS syntax characters
+/// (`"*:^()-+`) become spaces inside the token (so "follow-up" stays a
+/// phrase); tokens without a letter or digit are dropped (so "portfolio &"
+/// still matches); each token is a quoted prefix match; all ANDed.
+/// `None` = nothing searchable, never an FTS syntax error.
+pub fn fts_query(input: &str) -> Option<String> {
+    let tokens: Vec<String> = input
+        .split_whitespace()
+        .map(|raw| {
+            raw.chars()
+                .map(|c| if matches!(c, '"' | '*' | ':' | '^' | '(' | ')' | '-' | '+') { ' ' } else { c })
+                .collect::<String>()
+                .trim()
+                .to_string()
+        })
+        .filter(|t| t.chars().any(char::is_alphanumeric))
+        .collect();
+    if tokens.is_empty() {
+        return None;
+    }
+    Some(tokens.iter().map(|t| format!("\"{t}\"*")).collect::<Vec<_>>().join(" AND "))
+}
+
+/// Ranked search: open before completed, then bm25 with title matches
+/// weighted 10× description, then most recently updated. Limit ≤ 200.
+pub async fn search_tasks(
+    pool: &SqlitePool,
+    query: &str,
+    filters: &TaskSearchFilters,
+    limit: i64,
+) -> crate::Result<Vec<TaskSearchHit>> {
+    let status_clause = match filters.status.as_deref().unwrap_or("all") {
+        "all" => "",
+        "open" => " AND t.status != 'complete'",
+        "completed" => " AND t.status = 'complete'",
+        other => return Err(crate::Error::Other(format!("unknown search status '{other}'"))),
+    };
+    let Some(fts) = fts_query(query) else { return Ok(Vec::new()) };
+
+    // Rows whose title alone holds every token get no description snippet.
+    let title_only: HashSet<String> = sqlx::query_scalar("SELECT task_id FROM tasks_fts WHERE tasks_fts MATCH ?")
+        .bind(format!("content : ({fts})"))
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .collect();
+
+    // Explicit aliases: SQLite leaves an un-aliased `t.col` result name unspecified.
+    let cols = SELECT_COLS.split(", ").map(|c| format!("t.{c} AS {c}")).collect::<Vec<_>>().join(", ");
+    let mut sql = format!(
+        "SELECT {cols}, snippet(tasks_fts, 2, char(2), char(3), '…', 12) AS search_snippet
+         FROM tasks_fts JOIN local_tasks t ON t.id = tasks_fts.task_id
+         WHERE tasks_fts MATCH ?{status_clause}"
+    );
+    if filters.project_id.is_some() {
+        sql.push_str(" AND t.project_id = ?");
+    }
+    if !filters.label_ids.is_empty() {
+        let marks = vec!["?"; filters.label_ids.len()].join(", ");
+        sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id IN ({marks}))"
+        ));
+    }
+    sql.push_str(" ORDER BY CASE WHEN t.status = 'complete' THEN 1 ELSE 0 END, bm25(tasks_fts, 0.0, 10.0, 1.0), t.updated_at DESC LIMIT ?");
+
+    let mut q = sqlx::query(&sql).bind(&fts);
+    if let Some(project) = &filters.project_id {
+        q = q.bind(project);
+    }
+    for id in &filters.label_ids {
+        q = q.bind(id);
+    }
+    let rows = q.bind(limit.clamp(1, 200)).fetch_all(pool).await?;
+
+    let mut hits = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let task = LocalTask::from_row(row)?;
+        let in_title = title_only.contains(&task.id);
+        let snippet: Option<String> = if in_title { None } else { row.try_get("search_snippet")? };
+        hits.push(TaskSearchHit {
+            snippet: snippet.filter(|s| !s.is_empty()),
+            matched_in: if in_title { "title" } else { "description" }.to_string(),
+            task,
+        });
+    }
+    attach_labels(pool, &mut hits).await?;
+    Ok(hits)
+}
+
+async fn attach_labels(pool: &SqlitePool, hits: &mut [TaskSearchHit]) -> crate::Result<()> {
+    if hits.is_empty() {
+        return Ok(());
+    }
+    let marks = vec!["?"; hits.len()].join(", ");
+    let sql = format!("SELECT task_id, label_id FROM task_labels WHERE task_id IN ({marks}) ORDER BY rowid");
+    let mut q = sqlx::query_as::<_, (String, String)>(&sql);
+    for hit in hits.iter() {
+        q = q.bind(hit.task.id.clone());
+    }
+    for (task_id, label_id) in q.fetch_all(pool).await? {
+        if let Some(hit) = hits.iter_mut().find(|h| h.task.id == task_id) {
+            hit.task.labels.push(label_id);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::sync::{self, RemoteRow};
     use crate::db::tasks::{create_local_task, delete_local_task, update_local_task, update_task_status};
     use crate::test_util::test_pool;
-    use crate::types::{CreateTaskInput, UpdateTaskInput};
+    use crate::types::{CreateTaskInput, TaskSearchFilters, UpdateTaskInput};
     use sqlx::SqlitePool;
 
     async fn hits(pool: &SqlitePool, token: &str) -> Vec<String> {
@@ -327,5 +440,115 @@ mod tests {
         sqlx::query("UPDATE settings SET value = '0' WHERE key = 'tasks_fts_version'").execute(&pool).await.unwrap();
         assert!(ensure_task_index(&pool).await.unwrap(), "a version bump forces a rebuild");
         assert_eq!(rebuild_task_index(&pool).await.unwrap(), 1);
+    }
+
+    async fn titles(pool: &SqlitePool, q: &str, filters: &TaskSearchFilters) -> Vec<String> {
+        search_tasks(pool, q, filters, DEFAULT_LIMIT).await.unwrap().into_iter().map(|h| h.task.content).collect()
+    }
+
+    /// (title match, description match, completed title match)
+    async fn seed(pool: &SqlitePool) -> (String, String, String) {
+        let title = create_local_task(pool, CreateTaskInput { content: "Portfolio review".into(), ..Default::default() }).await.unwrap();
+        let desc = create_local_task(pool, CreateTaskInput {
+            content: "Email Jo".into(), description: Some("Ask about the portfolio deck before Friday".into()), ..Default::default()
+        }).await.unwrap();
+        let done = create_local_task(pool, CreateTaskInput { content: "Old portfolio draft".into(), ..Default::default() }).await.unwrap();
+        update_task_status(pool, &done.id, "complete", None).await.unwrap();
+        (title.id, desc.id, done.id)
+    }
+
+    #[test]
+    fn fts_query_quotes_prefixes_and_strips_syntax() {
+        assert_eq!(fts_query("portfolio").as_deref(), Some("\"portfolio\"*"));
+        assert_eq!(fts_query("  Up   port ").as_deref(), Some("\"Up\"* AND \"port\"*"));
+        assert_eq!(fts_query("follow-up").as_deref(), Some("\"follow up\"*"));
+        assert_eq!(fts_query("say \"hi\"").as_deref(), Some("\"say\"* AND \"hi\"*"));
+        assert_eq!(fts_query("c++ café").as_deref(), Some("\"c\"* AND \"café\"*"));
+        assert_eq!(fts_query("portfolio &").as_deref(), Some("\"portfolio\"*"), "punctuation-only tokens are dropped");
+    }
+
+    #[test]
+    fn fts_query_empty_after_sanitizing_is_none() {
+        for input in ["", "   ", "\"", "*", "-", "()", "^:+", "&", "🎸", "— …"] {
+            assert_eq!(fts_query(input), None, "{input:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn open_before_completed_and_title_before_description() {
+        let pool = test_pool().await;
+        seed(&pool).await;
+        assert_eq!(titles(&pool, "portf", &Default::default()).await, ["Portfolio review", "Email Jo", "Old portfolio draft"]);
+    }
+
+    #[tokio::test]
+    async fn snippets_only_for_description_matches() {
+        let pool = test_pool().await;
+        seed(&pool).await;
+        let hits = search_tasks(&pool, "portfolio", &Default::default(), DEFAULT_LIMIT).await.unwrap();
+        let by_title = hits.iter().find(|h| h.task.content == "Portfolio review").unwrap();
+        assert_eq!((by_title.matched_in.as_str(), by_title.snippet.is_none()), ("title", true));
+        let by_desc = hits.iter().find(|h| h.task.content == "Email Jo").unwrap();
+        assert_eq!(by_desc.matched_in, "description");
+        assert!(by_desc.snippet.as_deref().unwrap().contains("\u{2}portfolio\u{3}"), "{:?}", by_desc.snippet);
+    }
+
+    #[tokio::test]
+    async fn a_title_and_description_split_counts_as_description() {
+        let pool = test_pool().await;
+        seed(&pool).await;
+        let hits = search_tasks(&pool, "email deck", &Default::default(), DEFAULT_LIMIT).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matched_in, "description");
+        assert!(hits[0].snippet.as_deref().unwrap().contains("\u{2}deck\u{3}"));
+    }
+
+    #[tokio::test]
+    async fn filters_status_label_and_project() {
+        let pool = test_pool().await;
+        let (title_id, desc_id, _) = seed(&pool).await;
+        let open = TaskSearchFilters { status: Some("open".into()), ..Default::default() };
+        assert_eq!(titles(&pool, "portfolio", &open).await, ["Portfolio review", "Email Jo"]);
+        let completed = TaskSearchFilters { status: Some("completed".into()), ..Default::default() };
+        assert_eq!(titles(&pool, "portfolio", &completed).await, ["Old portfolio draft"]);
+        let bad = TaskSearchFilters { status: Some("later".into()), ..Default::default() };
+        assert!(search_tasks(&pool, "portfolio", &bad, DEFAULT_LIMIT).await.is_err());
+
+        let deep = crate::db::labels::create_label(&pool, "deep", "gray").await.unwrap();
+        let quick = crate::db::labels::create_label(&pool, "quick", "gray").await.unwrap();
+        crate::db::labels::set_task_labels(&pool, &desc_id, &[deep.id.clone()]).await.unwrap();
+        let any_of = TaskSearchFilters { label_ids: vec![quick.id.clone(), deep.id.clone()], ..Default::default() };
+        let hits = search_tasks(&pool, "portfolio", &any_of, DEFAULT_LIMIT).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].task.labels, vec![deep.id.clone()], "hits carry their labels");
+
+        let project = crate::db::projects::create_project(&pool, "Site", "blue", None).await.unwrap();
+        update_local_task(&pool, &title_id, UpdateTaskInput { project_id: Some(project.id.clone()), ..Default::default() }).await.unwrap();
+        let in_project = TaskSearchFilters { project_id: Some(project.id.clone()), ..Default::default() };
+        assert_eq!(titles(&pool, "portfolio", &in_project).await, ["Portfolio review"]);
+    }
+
+    #[tokio::test]
+    async fn search_never_errors_on_hostile_input() {
+        let pool = test_pool().await;
+        seed(&pool).await;
+        for q in ["\"", "*", "-", "a:b", "NEAR(", "(", ")", "AND", "OR portfolio", "^x", "portfolio &", "🎸", "c++", "follow-up", "col:portfolio"] {
+            let result = search_tasks(&pool, q, &Default::default(), DEFAULT_LIMIT).await;
+            assert!(result.is_ok(), "{q:?}: {result:?}");
+        }
+        assert_eq!(titles(&pool, "portfolio &", &Default::default()).await.len(), 3);
+        assert!(titles(&pool, "\"*\"", &Default::default()).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn diacritics_prefix_and_limit() {
+        let pool = test_pool().await;
+        create_local_task(&pool, CreateTaskInput { content: "Résumé tweaks".into(), ..Default::default() }).await.unwrap();
+        assert_eq!(titles(&pool, "resu", &Default::default()).await, ["Résumé tweaks"]);
+        assert_eq!(titles(&pool, "RÉSUMÉ", &Default::default()).await, ["Résumé tweaks"]);
+        for i in 0..5 {
+            create_local_task(&pool, CreateTaskInput { content: format!("Batch item {i}"), ..Default::default() }).await.unwrap();
+        }
+        assert_eq!(search_tasks(&pool, "batch", &Default::default(), 3).await.unwrap().len(), 3);
     }
 }
