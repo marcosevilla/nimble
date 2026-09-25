@@ -124,9 +124,58 @@ pub struct Label {
     pub name: String,
     pub color: String,
     pub position: i64,
+    /// `label_groups.id`; a dangling id reads as ungrouped.
     #[serde(default)]
     pub group: Option<String>,
     pub created_at: String,
+    /// Hidden from pickers and the filter when set; still renders on tasks.
+    #[serde(default)]
+    pub archived_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, sqlx::FromRow)]
+pub struct LabelGroup {
+    pub id: String,
+    pub name: String,
+    pub position: i64,
+    /// "Pick one": the UI keeps at most one of this group's labels per task.
+    pub exclusive: bool,
+    /// Integration labels: hidden from pickers and row chips.
+    pub system: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Partial update for a label group; `None` leaves a field as it is.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct LabelGroupPatch {
+    pub name: Option<String>,
+    pub exclusive: Option<bool>,
+    pub system: Option<bool>,
+    pub position: Option<i64>,
+}
+
+/// Optional ⌘F / `dt task search` filters.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct TaskSearchFilters {
+    /// "all" (default), "open" or "completed".
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Any-of.
+    #[serde(default)]
+    pub label_ids: Vec<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskSearchHit {
+    pub task: LocalTask,
+    /// Description excerpt with U+0002 … U+0003 around matches. Only when the
+    /// title alone does not contain every query token.
+    pub snippet: Option<String>,
+    /// "title" | "description"
+    pub matched_in: String,
 }
 
 // ── Sections ──

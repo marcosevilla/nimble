@@ -373,6 +373,19 @@ const REMOTE_BRIEF_NOTES_DDL: &str = "CREATE TABLE IF NOT EXISTS brief_notes (
     updated_at TEXT NOT NULL
 )";
 
+/// Remote DDL for the C4 `label_groups` table. Mirrors `migrations.rs`
+/// exactly; single definition shared by `ensure_remote_v25_schema`.
+// schema-v25
+const REMOTE_LABEL_GROUPS_DDL: &str = "CREATE TABLE IF NOT EXISTS label_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    exclusive INTEGER NOT NULL DEFAULT 0,
+    system INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)";
+
 /// Create all synced tables on the remote Turso database.
 /// Only runs once — checks for `turso_initialized` setting.
 pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
@@ -408,6 +421,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
                 ensure_remote_v22_schema(pool, turso_url, turso_token).await?;
                 ensure_remote_v23_schema(pool, turso_url, turso_token).await?;
                 ensure_remote_v24_schema(pool, turso_url, turso_token).await?; // schema-v24
+                ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
                 return Ok(());
             },
         }
@@ -641,6 +655,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     ensure_remote_v21_schema(pool, turso_url, turso_token).await?;
     ensure_remote_v23_schema(pool, turso_url, turso_token).await?;
     ensure_remote_v24_schema(pool, turso_url, turso_token).await?; // schema-v24
+    ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
 
     Ok(())
 }
@@ -886,6 +901,24 @@ async fn ensure_remote_v24_schema(pool: &SqlitePool, turso_url: &str, turso_toke
     let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
     check_pipeline_statement_errors(&body, "Turso v24 schema upgrade", true)?;
     sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v24_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
+        .execute(pool).await?;
+    Ok(())
+}
+
+// schema-v25 — C4 (label groups, label archive); brief phase 2 took v24.
+async fn ensure_remote_v25_schema(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='turso_schema_v25_upgraded'")
+        .fetch_optional(pool).await?;
+    if done.is_some() { return Ok(()); }
+    let requests = [
+        turso_execute("ALTER TABLE labels ADD COLUMN archived_at TEXT", vec![]),
+        turso_execute(REMOTE_LABEL_GROUPS_DDL, vec![]),
+        serde_json::json!({"type":"close"}),
+    ];
+    let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
+    // "duplicate column name" = the ALTER landed on an earlier run; anything else must not latch the gate.
+    check_pipeline_statement_errors(&body, "Turso v25 schema upgrade", true)?;
+    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v25_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
         .execute(pool).await?;
     Ok(())
 }
@@ -1322,6 +1355,9 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     }
     if let Err(e) = ensure_remote_v24_schema(pool, turso_url, turso_token).await { // schema-v24
         log::warn!("Turso v24 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
+    if let Err(e) = ensure_remote_v25_schema(pool, turso_url, turso_token).await { // schema-v25
+        log::warn!("Turso v25 schema gate failed, pushing anyway (gate retries next push): {e}");
     }
 
     // Fetch all unsynced entries
@@ -1874,6 +1910,11 @@ pub async fn apply_remote_rows_with_focus(
         .filter(|t| !(t.completed || t.status == "complete") && was_complete.get(&t.id).copied().unwrap_or(false))
         .map(|t| t.id.clone())
         .collect();
+    // A remote project DELETE cascades (FK ON DELETE CASCADE) to its tasks
+    // without going through any task hook, so drop their search rows here.
+    if applied_rows.iter().any(|p| p.row.table_name == "projects" && p.row.operation == "DELETE") {
+        crate::db::task_search::prune_orphans_conn(write.conn()).await?;
+    }
     write.commit(&effects).await?;
 
     for plan in &applied_rows {
@@ -2024,6 +2065,7 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
         "focus_replica",
         "briefs",
         "brief_notes", // schema-v24
+        "label_groups",
     ];
 
     if ALLOWED.contains(&name) {
@@ -2098,7 +2140,7 @@ pub async fn seed_existing_data(pool: &SqlitePool) -> crate::Result<u64> {
         "habits", "habit_logs", "documents", "doc_folders", "doc_notes",
         "capture_routes", "life_areas", "calendar_feeds", "activity_log",
         "vault_notes", "vault_links", "vault_tags",
-        "labels", "sections",
+        "labels", "sections", "label_groups",
     ];
 
     let mut count: u64 = 0;
@@ -3276,6 +3318,50 @@ mod v19_sync_tests {
         super::apply_remote_change(&pool, "briefs", "2026-09-22", "INSERT", Some(&snap)).await.unwrap();
         let b = crate::db::briefs::get_brief(&pool, "2026-09-22").await.unwrap().unwrap();
         assert_eq!(b.layout, serde_json::json!(["schedule"]));
+    }
+
+    // schema-v25
+    #[test]
+    fn label_groups_sync_but_the_task_index_never_does() {
+        assert!(super::sanitize_table_name("label_groups").is_ok());
+        assert!(super::sanitize_table_name("tasks_fts").is_err(), "device-local only");
+    }
+
+    #[tokio::test]
+    async fn remote_label_groups_ddl_matches_the_local_v25_table() {
+        let local = crate::test_util::test_pool().await;
+        let remote = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(super::REMOTE_LABEL_GROUPS_DDL).execute(&remote).await.unwrap();
+        let sql = "SELECT name FROM pragma_table_info('label_groups') ORDER BY cid";
+        let a: Vec<String> = sqlx::query_scalar(sql).fetch_all(&local).await.unwrap();
+        let b: Vec<String> = sqlx::query_scalar(sql).fetch_all(&remote).await.unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[tokio::test]
+    async fn a_pulled_label_group_and_archive_state_land() {
+        let pool = crate::test_util::test_pool().await;
+        let group = serde_json::json!({"id":"g1","name":"EFFORT","position":0,"exclusive":true,"system":false,
+            "created_at":"2026-09-25 09:00:00","updated_at":"2026-09-25 09:00:00"}).to_string();
+        super::apply_remote_change(&pool, "label_groups", "g1", "INSERT", Some(&group)).await.unwrap();
+        let label = serde_json::json!({"id":"l1","name":"deep","color":"gray","position":0,
+            "created_at":"2026-09-25 09:00:00","group":"g1","archived_at":"2026-09-25 10:00:00"}).to_string();
+        super::apply_remote_change(&pool, "labels", "l1", "INSERT", Some(&label)).await.unwrap();
+        let row: (i64, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT g.exclusive, l.\"group\", l.archived_at FROM labels l JOIN label_groups g ON g.id = l.\"group\" WHERE l.id = 'l1'",
+        ).fetch_one(&pool).await.unwrap();
+        assert_eq!(row, (1, Some("g1".into()), Some("2026-09-25 10:00:00".into())));
+    }
+
+    #[tokio::test]
+    async fn seed_existing_data_covers_label_groups() {
+        let pool = crate::test_util::test_pool().await;
+        sqlx::query("INSERT INTO label_groups (id,name,position,exclusive,system,created_at,updated_at) VALUES ('g1','EFFORT',0,1,0,'x','x')")
+            .execute(&pool).await.unwrap();
+        super::seed_existing_data(&pool).await.unwrap();
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_log WHERE table_name = 'label_groups' AND row_id = 'g1'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(n, 1);
     }
 }
 

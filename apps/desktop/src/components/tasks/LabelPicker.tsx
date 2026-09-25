@@ -1,14 +1,16 @@
-import { useDataVersion } from '@/hooks/useDataVersion'
-import { useEffect, useMemo, useState } from 'react'
+import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { Check, Plus, RotateCcw } from 'lucide-react'
+import { toast } from 'sonner'
+import type { Label } from '@nimble/types'
 import { cn } from '@/lib/utils'
 import { labelColor, DEFAULT_LABEL_COLOR } from '@/lib/labelColors'
 import { useDataProvider } from '@/services/provider-context'
-import type { Label } from '@nimble/types'
+import { useLabelTaxonomy } from '@/hooks/useLabelTaxonomy'
+import { applyRestored, defaultHighlight, filterSections, isFlat, orderTaskLabels, pickerCreateAction, pickerSections, toggleLabel } from '@/lib/labelTaxonomy'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Plus } from 'lucide-react'
-import { toast } from 'sonner'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Caption } from '@/components/shared/typography'
 
 // `onClick` and `onRemove` are mutually exclusive by convention — the
 // display/remove chip (LabelPicker's selected-labels row) never passes
@@ -59,95 +61,218 @@ export function LabelChip({
   )
 }
 
+/** A row is a <label> (whole row clickable, and the existing e2e selectors
+ *  keep working) around a real role=checkbox / role=radio button, so Space
+ *  and Enter toggle natively. The explicit aria-label names the control for
+ *  every AT and axe (implicit <label> naming of a <button> is unreliable). */
+function LabelOption({ label, checked, radio, highlighted, onToggle }: { label: Label; checked: boolean; radio: boolean; highlighted: boolean; onToggle: () => void }) {
+  return (
+    <label
+      data-highlighted={highlighted ? '' : undefined}
+      className={cn(
+        'flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-hover has-[:focus-visible]:bg-hover',
+        highlighted && 'bg-hover',
+      )}
+    >
+      <button
+        type="button"
+        role={radio ? 'radio' : 'checkbox'}
+        aria-checked={checked}
+        aria-label={label.name}
+        data-label-control=""
+        // Explicit tabIndex: WebKit (and the app's WKWebView) skips plain
+        // <button>s on Tab, which would drop keyboard users out of the list.
+        tabIndex={0}
+        onClick={onToggle}
+        className={cn(
+          'flex size-3.5 shrink-0 items-center justify-center border border-border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+          radio ? 'rounded-full' : 'rounded-[4px]',
+          checked && 'border-transparent bg-primary text-primary-foreground',
+        )}
+      >
+        {checked && (radio
+          ? <span className="size-1.5 rounded-full bg-current" />
+          : <Check className="size-2.5" strokeWidth={3} aria-hidden />)}
+      </button>
+      <span className="size-2 shrink-0 rounded-full" style={{ background: labelColor(label.color) }} aria-hidden />
+      <span className={cn('min-w-0 flex-1 truncate text-body', label.archived_at && 'text-muted-foreground')}>{label.name}</span>
+      {label.archived_at && <Caption>archived</Caption>}
+    </label>
+  )
+}
+
+export type LabelPickerMode = 'edit' | 'filter'
+
+/** The searchable, grouped list. `edit` honours "Pick one" (radios) and can
+ *  create or restore; `filter` is plain any-of and lists system labels last. */
+export function LabelPickerList({ value, onChange, mode = 'edit' }: { value: string[]; onChange: (ids: string[]) => void; mode?: LabelPickerMode }) {
+  const dp = useDataProvider()
+  const { labels, groups, loading, reload } = useLabelTaxonomy()
+  const [query, setQuery] = useState('')
+  const [busy, setBusy] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const baseId = useId()
+
+  // Filter mode keeps a selected archived label listed so it stays removable.
+  const all = useMemo(
+    () => (mode === 'filter' ? filterSections(labels, groups, new Set(value)) : pickerSections(labels, groups)),
+    [mode, labels, groups, value],
+  )
+  const q = query.trim().toLowerCase()
+  const shown = useMemo(
+    () => (q ? all.map((s) => ({ ...s, labels: s.labels.filter((l) => l.name.toLowerCase().includes(q)) })).filter((s) => s.labels.length > 0) : all),
+    [all, q],
+  )
+  const action = mode === 'edit' ? pickerCreateAction(query, labels, groups) : ({ kind: 'none' } as const)
+  const flat = isFlat(shown)
+  // What Enter acts on while typing: shown on the row, focus stays in the field.
+  const highlighted = q ? defaultHighlight(shown.flatMap((s) => s.labels), action) : null
+
+  const toggle = (id: string) => {
+    if (mode === 'filter') onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id])
+    else onChange(toggleLabel(value, id, labels, groups))
+  }
+
+  const runAction = async () => {
+    if (busy || action.kind === 'none' || action.kind === 'system') return
+    if (action.kind === 'apply') {
+      if (!value.includes(action.label.id)) toggle(action.label.id)
+      setQuery('')
+      return
+    }
+    setBusy(true)
+    try {
+      if (action.kind === 'restore') {
+        await dp.labels.restore([action.label.id])
+        onChange(applyRestored(value, action.label.id, labels, groups))
+      } else {
+        const created = await dp.labels.create(action.name, DEFAULT_LABEL_COLOR)
+        onChange([...value, created.id])
+      }
+      reload()
+      setQuery('')
+    } catch (e) {
+      toast.error(`Couldn't save the label: ${e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // ↑/↓ move through every row across sections; ↑ from the first row returns to the field.
+  const moveFocus = (e: KeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    const controls = Array.from(listRef.current?.querySelectorAll<HTMLElement>('[data-label-control]') ?? [])
+    if (controls.length === 0) return
+    e.preventDefault()
+    const at = controls.indexOf(document.activeElement as HTMLElement)
+    if (e.key === 'ArrowDown') (controls[at + 1] ?? controls[controls.length - 1]).focus()
+    else if (at <= 0) inputRef.current?.focus()
+    else controls[at - 1].focus()
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5" onKeyDown={moveFocus}>
+      <Input
+        ref={inputRef}
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter') return
+          e.preventDefault()
+          if (highlighted === 'action') { void runAction(); return }
+          if (!highlighted) return
+          // Editing applies (never removes); the filter toggles.
+          if (mode === 'filter' || !value.includes(highlighted)) toggle(highlighted)
+          setQuery('')
+        }}
+        placeholder={mode === 'filter' ? 'Filter labels…' : 'Search or create…'}
+        aria-label={mode === 'filter' ? 'Filter labels' : 'Search or create a label'}
+        className="h-7 text-meta"
+        autoFocus
+      />
+      <div ref={listRef} className="max-h-64 space-y-1 overflow-y-auto">
+        {loading && labels.length === 0 && (
+          <div className="space-y-1.5 px-1.5 py-1" aria-hidden>
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-4 w-2/3" />
+          </div>
+        )}
+        {shown.map((section) => {
+          const headerId = `${baseId}-${section.group?.id ?? 'ungrouped'}`
+          const radio = mode === 'edit' && !!section.group?.exclusive
+          return (
+            <div
+              key={section.group?.id ?? 'ungrouped'}
+              role={radio ? 'radiogroup' : 'group'}
+              aria-labelledby={flat ? undefined : headerId}
+              aria-label={flat ? 'Labels' : undefined}
+            >
+              {!flat && (
+                <Caption as="div" id={headerId} className="px-1.5 pt-1 pb-0.5">
+                  {section.group?.name ?? 'Ungrouped'}
+                </Caption>
+              )}
+              {section.labels.map((label) => (
+                <LabelOption key={label.id} label={label} checked={value.includes(label.id)} radio={radio} highlighted={highlighted === label.id} onToggle={() => toggle(label.id)} />
+              ))}
+            </div>
+          )
+        })}
+        {!loading && all.length === 0 && !q && (
+          <p className="px-1.5 py-1 text-label text-muted-foreground">No labels yet.</p>
+        )}
+        {action.kind === 'system' && (
+          <p className="px-1.5 py-1 text-label text-muted-foreground">System label — applied automatically</p>
+        )}
+        {(action.kind === 'create' || action.kind === 'restore') && (
+          <button
+            type="button"
+            data-label-control=""
+            data-highlighted={highlighted === 'action' ? '' : undefined}
+            tabIndex={0}
+            onClick={() => void runAction()}
+            disabled={busy}
+            className={cn(
+              'flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-body text-muted-foreground outline-none transition-colors hover:bg-hover hover:text-foreground focus-visible:bg-hover disabled:opacity-50',
+              highlighted === 'action' && 'bg-hover text-foreground',
+            )}
+          >
+            {action.kind === 'restore' ? <RotateCcw className="size-3" aria-hidden /> : <Plus className="size-3" aria-hidden />}
+            {action.kind === 'restore' ? `Restore "${action.label.name}"` : `Create "${action.name}"`}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 interface LabelPickerProps {
   value: string[]
   onChange: (labelIds: string[]) => void
-  /** Controlled state of the "Add label" search list. Omit both to let the
-   * picker own it (every current caller). */
+  /** Controlled state of the "Add label" list. Omit both to let the picker own it. */
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }
 
 export function LabelPicker({ value, onChange, open: openProp, onOpenChange }: LabelPickerProps) {
-  const labelVersion = useDataVersion('labels')
-  const dp = useDataProvider()
+  const { labels, groups } = useLabelTaxonomy()
   const [openState, setOpenState] = useState(false)
   const open = openProp ?? openState
   const setOpen = (next: boolean) => {
     setOpenState(next)
     onOpenChange?.(next)
   }
-  const [labels, setLabels] = useState<Label[]>([])
-  const [loading, setLoading] = useState(true)
-  const [query, setQuery] = useState('')
-  const [creating, setCreating] = useState(false)
-
-  useEffect(() => {
-    dp.labels
-      .list()
-      .then(setLabels)
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [dp, labelVersion])
-
-  const selectedLabels = useMemo(
-    () => value.map((id) => labels.find((l) => l.id === id)).filter((l): l is Label => !!l),
-    [value, labels],
-  )
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return labels
-    return labels.filter((l) => l.name.toLowerCase().includes(q))
-  }, [labels, query])
-
-  const exactMatch = useMemo(
-    () => labels.find((l) => l.name.toLowerCase() === query.trim().toLowerCase()),
-    [labels, query],
-  )
-
-  const toggleLabel = (id: string) => {
-    if (value.includes(id)) {
-      onChange(value.filter((v) => v !== id))
-    } else {
-      onChange([...value, id])
-    }
-  }
-
-  const handleRemove = (id: string) => {
-    onChange(value.filter((v) => v !== id))
-  }
-
-  const handleEnter = async () => {
-    const trimmed = query.trim()
-    if (!trimmed || creating) return
-
-    if (exactMatch) {
-      if (!value.includes(exactMatch.id)) toggleLabel(exactMatch.id)
-      setQuery('')
-      return
-    }
-
-    setCreating(true)
-    try {
-      const label = await dp.labels.create(trimmed, DEFAULT_LABEL_COLOR)
-      setLabels((prev) => [...prev, label])
-      onChange([...value, label.id])
-      setQuery('')
-    } catch (e) {
-      toast.error(`Failed to create label: ${e}`)
-    } finally {
-      setCreating(false)
-    }
-  }
+  // Chips: taxonomy order; system labels stay hidden (they are kept in `value`).
+  const selectedLabels = useMemo(() => orderTaskLabels(value, labels, groups), [value, labels, groups])
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {selectedLabels.map((label) => (
-        <LabelChip key={label.id} label={label} onRemove={() => handleRemove(label.id)} />
+        <LabelChip key={label.id} label={label} onRemove={() => onChange(value.filter((v) => v !== label.id))} />
       ))}
-
-      <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setQuery('') }}>
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           className="inline-flex items-center gap-1 rounded-full border border-dashed border-border/60 px-2 py-0.5 text-meta text-muted-foreground hover:border-border hover:text-foreground transition-colors"
           aria-label="Add label"
@@ -155,55 +280,8 @@ export function LabelPicker({ value, onChange, open: openProp, onOpenChange }: L
           <Plus className="size-3" />
           Label
         </PopoverTrigger>
-        <PopoverContent side="bottom" align="start" sideOffset={4} className="w-56 gap-1.5 p-1.5">
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); handleEnter() }
-            }}
-            placeholder="Search or create..."
-            className="h-7 text-meta"
-            autoFocus
-          />
-
-          <div className="max-h-56 overflow-y-auto space-y-0.5">
-            {loading && (
-              <p className="px-1.5 py-1 text-label text-muted-foreground">Loading...</p>
-            )}
-
-            {!loading && filtered.map((label) => {
-              const checked = value.includes(label.id)
-              return (
-                <label
-                  key={label.id}
-                  className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-hover transition-colors cursor-pointer"
-                >
-                  <Checkbox
-                    checked={checked}
-                    onCheckedChange={() => toggleLabel(label.id)}
-                  />
-                  <span className="size-2 rounded-full shrink-0" style={{ background: labelColor(label.color) }} />
-                  <span className="flex-1 min-w-0 truncate text-body">{label.name}</span>
-                </label>
-              )
-            })}
-
-            {!loading && filtered.length === 0 && !query.trim() && (
-              <p className="px-1.5 py-1 text-label text-muted-foreground">No labels yet.</p>
-            )}
-
-            {!loading && query.trim() && !exactMatch && (
-              <button
-                onClick={handleEnter}
-                disabled={creating}
-                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-body text-muted-foreground hover:bg-hover hover:text-foreground transition-colors disabled:opacity-50"
-              >
-                <Plus className="size-3" />
-                {creating ? 'Creating...' : `Create "${query.trim()}"`}
-              </button>
-            )}
-          </div>
+        <PopoverContent side="bottom" align="start" sideOffset={4} className="w-60 gap-1.5 p-1.5">
+          <LabelPickerList value={value} onChange={onChange} />
         </PopoverContent>
       </Popover>
     </div>

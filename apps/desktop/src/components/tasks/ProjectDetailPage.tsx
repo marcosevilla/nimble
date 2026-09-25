@@ -10,7 +10,8 @@ import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { useTaskNavigation } from '@/hooks/useTaskNavigation'
 import { useTaskRowActions } from './useTaskRowActions'
 import { Plus } from 'lucide-react'
-import type { Project, LocalTask, Section, Label } from '@nimble/types'
+import type { Project, LocalTask, Section } from '@nimble/types'
+import { useLabelTaxonomy } from '@/hooks/useLabelTaxonomy'
 
 interface ProjectDetailPageProps {
   project: Project
@@ -31,11 +32,10 @@ export function ProjectDetailPage({
   onAddSubtask,
   onUpdated,
 }: ProjectDetailPageProps) {
-  const referenceVersion = useDataVersion('labels')
   const sectionVersion = useDataVersion('sections')
   const dp = useDataProvider()
   const [sections, setSections] = useState<Section[]>([])
-  const [labels, setLabels] = useState<Label[]>([])
+  const { labels } = useLabelTaxonomy()
 
   // Lazy-initialized from localStorage; the parent remounts this component
   // (key={project.id} in TasksPage) on project switch, so this only ever
@@ -63,10 +63,6 @@ export function ProjectDetailPage({
   useEffect(() => {
     refreshSections()
   }, [refreshSections, sectionVersion])
-
-  useEffect(() => {
-    dp.labels.list().then(setLabels).catch(() => {})
-  }, [dp, referenceVersion])
 
   // Sections can be created inline from the task editor (Task 11/13), so
   // refresh the lane list whenever a task mutation comes back, not just on

@@ -106,12 +106,15 @@
   // not hex values.
 
   var LABELS = [
-    { id: 'label-deep-work', name: 'deep-work', color: 'blue', position: 0, created_at: iso('2026-07-20') },
-    { id: 'label-design', name: 'design', color: 'grape', position: 1, created_at: iso('2026-07-20') },
-    { id: 'label-bug', name: 'bug', color: 'red', position: 2, created_at: iso('2026-07-21') },
-    { id: 'label-quick-win', name: 'quick-win', color: 'green', position: 3, created_at: iso('2026-07-22') },
-    { id: 'label-errand', name: 'errand', color: 'orange', position: 4, created_at: iso('2026-07-25') },
+    { id: 'label-deep-work', name: 'deep-work', color: 'blue', group: null, archived_at: null, position: 0, created_at: iso('2026-07-20') },
+    { id: 'label-design', name: 'design', color: 'grape', group: null, archived_at: null, position: 1, created_at: iso('2026-07-20') },
+    { id: 'label-bug', name: 'bug', color: 'red', group: null, archived_at: null, position: 2, created_at: iso('2026-07-21') },
+    { id: 'label-quick-win', name: 'quick-win', color: 'green', group: null, archived_at: null, position: 3, created_at: iso('2026-07-22') },
+    { id: 'label-errand', name: 'errand', color: 'orange', group: null, archived_at: null, position: 4, created_at: iso('2026-07-25') },
   ]
+
+  // ── Label groups (C4): empty by default; e2e specs seed their own via invoke ──
+  var LABEL_GROUPS = []
 
   // ── Sections (R1): per-project lanes ─────────────────────────────────────
 
@@ -1468,6 +1471,8 @@
         name: (args && args.name) || 'new label',
         color: (args && args.color) || 'gray',
         position: LABELS.length,
+        group: null,
+        archived_at: null,
         created_at: iso(TODAY, '11:20:00'),
       }
       LABELS.push(label)
@@ -1497,6 +1502,79 @@
       t.labels = (args && args.labelIds) || []
       t.updated_at = iso(TODAY, '11:25:00')
       return Object.assign({}, t)
+    },
+
+    // Label groups, archive, unused (C4) — mirror nimble-core/src/db/labels.rs.
+    list_label_groups: function () {
+      return LABEL_GROUPS.slice().sort(function (a, b) { return a.position - b.position })
+    },
+    create_label_group: function (args) {
+      var name = String((args && args.name) || '').trim()
+      if (!name) return Promise.reject(new Error('label group name must not be empty'))
+      if (LABEL_GROUPS.some(function (g) { return g.name.toLowerCase() === name.toLowerCase() })) {
+        return Promise.reject(new Error("a label group named '" + name + "' already exists"))
+      }
+      var group = {
+        id: newId('lg'), name: name, position: LABEL_GROUPS.length,
+        exclusive: !!(args && args.exclusive), system: false,
+        created_at: nowStamp(), updated_at: nowStamp(),
+      }
+      LABEL_GROUPS.push(group)
+      return group
+    },
+    update_label_group: function (args) {
+      var g = LABEL_GROUPS.find(function (x) { return x.id === (args && args.id) })
+      if (!g) return Promise.reject(new Error('no such label group'))
+      var p = (args && args.patch) || {}
+      if (p.name != null) g.name = String(p.name).trim()
+      if (p.exclusive != null) g.exclusive = !!p.exclusive
+      if (p.system != null) g.system = !!p.system
+      if (p.position != null) g.position = p.position
+      g.updated_at = nowStamp()
+      return Object.assign({}, g)
+    },
+    delete_label_group: function (args) {
+      var id = args && args.id
+      var ungrouped = LABELS.filter(function (l) { return l.group === id }).map(function (l) { l.group = null; return l.id })
+      for (var i = LABEL_GROUPS.length - 1; i >= 0; i--) if (LABEL_GROUPS[i].id === id) LABEL_GROUPS.splice(i, 1)
+      return ungrouped
+    },
+    reorder_label_groups: function (args) {
+      ((args && args.ids) || []).forEach(function (id, i) {
+        var g = LABEL_GROUPS.find(function (x) { return x.id === id })
+        if (g) g.position = i
+      })
+      return null
+    },
+    set_label_group: function (args) {
+      var l = LABELS.find(function (x) { return x.id === (args && args.labelId) })
+      if (!l) return Promise.reject(new Error('no such label'))
+      l.group = (args && args.groupId) || null
+      return Object.assign({}, l)
+    },
+    reorder_labels: function (args) {
+      ((args && args.ids) || []).forEach(function (id, i) {
+        var l = LABELS.find(function (x) { return x.id === id })
+        if (l) l.position = i
+      })
+      return null
+    },
+    archive_labels: function (args) {
+      return LABELS.filter(function (l) { return ((args && args.ids) || []).indexOf(l.id) !== -1 && !l.archived_at })
+        .map(function (l) { l.archived_at = nowStamp(); return Object.assign({}, l) })
+    },
+    restore_labels: function (args) {
+      return LABELS.filter(function (l) { return ((args && args.ids) || []).indexOf(l.id) !== -1 && l.archived_at })
+        .map(function (l) { l.archived_at = null; return Object.assign({}, l) })
+    },
+    // Ungrouped only (no group, or a dangling id): grouped and system labels
+    // are never auto-archived (Marco, 2026-09-25).
+    unused_label_ids: function () {
+      var groupIds = LABEL_GROUPS.map(function (g) { return g.id })
+      return LABELS.filter(function (l) {
+        if (l.archived_at || (l.group && groupIds.indexOf(l.group) !== -1)) return false
+        return !TASKS.some(function (t) { return t.status !== 'complete' && (t.labels || []).indexOf(l.id) !== -1 })
+      }).sort(function (a, b) { return a.position - b.position }).map(function (l) { return l.id })
     },
 
     // Sections (R1)
@@ -1633,6 +1711,54 @@
         if (t) t.position = i
       })
       return null
+    },
+
+    // ⌘F search (C4): substring stand-in for FTS5 with the same ordering —
+    // open first, title-only matches next, then most recently updated.
+    search_tasks: function (args) {
+      var tokens = String((args && args.query) || '').replace(/["*:^()\-+]/g, ' ').split(/\s+/)
+        .filter(function (t) { return /[\p{L}\p{N}]/u.test(t) })
+        .map(function (t) { return t.toLowerCase() })
+      if (!tokens.length) return []
+      var f = (args && args.filters) || {}
+      var status = f.status || 'all'
+      var labelIds = f.label_ids || []
+      function snippet(text) {
+        var lower = text.toLowerCase()
+        var first = Math.min.apply(null, tokens.map(function (t) { var i = lower.indexOf(t); return i < 0 ? Infinity : i }))
+        if (!isFinite(first)) return null
+        var start = Math.max(0, first - 40)
+        var slice = text.slice(start, first + 80)
+        // Like FTS5 snippet() on a prefix query: the whole word is marked.
+        slice = slice.replace(/[\p{L}\p{N}]+/gu, function (w) {
+          var lw = w.toLowerCase()
+          return tokens.some(function (t) { return lw.indexOf(t) === 0 }) ? '\u0002' + w + '\u0003' : w
+        })
+        return (start > 0 ? '…' : '') + slice + (first + 80 < text.length ? '…' : '')
+      }
+      var hits = TASKS.filter(function (t) {
+        var hay = (t.content + ' ' + (t.description || '')).toLowerCase()
+        if (!tokens.every(function (tok) { return hay.indexOf(tok) !== -1 })) return false
+        var done = t.status === 'complete'
+        if (status === 'open' && done) return false
+        if (status === 'completed' && !done) return false
+        if (f.project_id && t.project_id !== f.project_id) return false
+        if (labelIds.length && !labelIds.some(function (id) { return (t.labels || []).indexOf(id) !== -1 })) return false
+        return true
+      }).map(function (t) {
+        var inTitle = tokens.every(function (tok) { return t.content.toLowerCase().indexOf(tok) !== -1 })
+        return { task: Object.assign({}, t), matched_in: inTitle ? 'title' : 'description', snippet: inTitle ? null : snippet(t.description || '') }
+      })
+      hits.sort(function (a, b) {
+        var da = a.task.status === 'complete' ? 1 : 0
+        var db = b.task.status === 'complete' ? 1 : 0
+        if (da !== db) return da - db
+        var ta = a.matched_in === 'title' ? 0 : 1
+        var tb = b.matched_in === 'title' ? 0 : 1
+        if (ta !== tb) return ta - tb
+        return String(b.task.updated_at).localeCompare(String(a.task.updated_at))
+      })
+      return hits.slice(0, (args && args.limit) || 50)
     },
 
     // Misc

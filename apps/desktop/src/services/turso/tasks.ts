@@ -31,7 +31,7 @@ import { commit, newId, rowTimestamp, rowTimestampUtc, type SyncEntry } from './
 import { nextOccurrence, parseRule, type RecurrenceRule } from './recurrence'
 
 /** Exactly `SELECT_COLS` from nimble-core/src/db/tasks.rs — keep in sync. */
-const SELECT_COLS =
+export const SELECT_COLS =
   'id, parent_id, content, description, project_id, priority, due_date, due_time, ' +
   'duration_minutes, recurrence_rule, section_id, completed, completed_at, status, ' +
   'linked_doc_id, position, created_at, updated_at, external_id, external_source, ' +
@@ -78,7 +78,7 @@ function buildTaskQuery(opts: ListTasksOptions): { sql: string; args: TursoArg[]
 }
 
 /** Decode one `local_tasks` row. `labels` is filled in by the caller. */
-function toTask(row: Row, labels: string[]): LocalTask {
+export function toTask(row: Row, labels: string[]): LocalTask {
   return {
     sync_policy: str(row, 'sync_policy') as LocalTask['sync_policy'],
     reminder_offset_minutes: numOrNull(row, 'reminder_offset_minutes'),

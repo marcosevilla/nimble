@@ -26,6 +26,8 @@ export type ShortcutSection =
   | 'Session'
   | 'Today'
   | 'Capture'
+  | 'Labels'
+  | 'Search'
 
 export interface Shortcut {
   section: ShortcutSection
@@ -82,7 +84,7 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Command bar', keys: '/task', label: 'Force create mode' },
   { section: 'Command bar', keys: '/capture', label: 'Force note mode' },
   { section: 'Command bar', keys: '/doc', label: 'Search docs' },
-  { section: 'Command bar', keys: '/search', label: 'Force search mode' },
+  { section: 'Command bar', keys: '/search', label: 'Search every task (switches to ⌘F)' },
   { section: 'Command bar', keys: 'Escape', label: 'Close' },
 
   // ── Calendar rail (CalendarPanel.tsx, while focus is in the calendar) ──
@@ -163,6 +165,17 @@ export const SHORTCUTS: Shortcut[] = [
   { section: 'Today', keys: '⌥↑ / ⌥↓', label: 'Move a box up / down (Settings → Boxes, setup)' },
   { section: 'Today', keys: 'Enter (setup)', label: 'Continue to the next setup step' },
   { section: 'Today', keys: 'Escape (setup)', label: 'Finish setup later (keeps what you chose so far)' },
+  // ── C4: label picker (components/tasks/LabelPicker.tsx) ──
+  { section: 'Labels', keys: '↑ / ↓', label: 'Move through labels in the picker, across groups' },
+  { section: 'Labels', keys: 'Space / Enter', label: 'Toggle the focused label ("Pick one" groups swap)' },
+  { section: 'Labels', keys: '⌥↑ / ⌥↓', label: 'Move the focused label or group (Settings → Labels, from its grip)' },
+  // ── C4: task search (components/search/TaskSearch.tsx) ──
+  { section: 'Navigation', keys: '⌘F', label: 'Search tasks, open and done' },
+  { section: 'Search', keys: '↑ / ↓', label: 'Move through results' },
+  { section: 'Search', keys: 'Enter', label: 'Open the task' },
+  { section: 'Search', keys: '⌘Enter', label: 'Open the task in its project' },
+  { section: 'Search', keys: 'Tab', label: 'Move to the filters' },
+  { section: 'Search', keys: 'Escape', label: 'Close search; focus goes back' },
 ]
 
 export const SHORTCUT_SECTIONS: ShortcutSection[] = [
@@ -179,6 +192,8 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
   'Session',
   'Today',
   'Capture',
+  'Labels',
+  'Search',
 ]
 
 export function shortcutsBySection(): { title: ShortcutSection; rows: Shortcut[] }[] {

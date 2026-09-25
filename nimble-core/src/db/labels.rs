@@ -5,20 +5,240 @@ use uuid::Uuid;
 
 use crate::db::sync;
 use crate::db::tasks::SELECT_COLS;
-use crate::types::{Label, LocalTask};
+use crate::types::{Label, LabelGroup, LabelGroupPatch, LocalTask};
 
-const LABEL_COLS: &str = "id, name, color, position, created_at, \"group\"";
+pub(crate) const LABEL_COLS: &str = "id, name, color, position, created_at, \"group\", archived_at";
 
-/// Set the optional taxonomy group without affecting the existing name/color API.
+const GROUP_COLS: &str = "id, name, position, exclusive, system, created_at, updated_at";
+
+fn not_found(kind: &str, id: &str) -> crate::Error {
+    crate::Error::Other(format!("no such {kind} '{id}'"))
+}
+
+pub async fn get_label(pool: &SqlitePool, id: &str) -> crate::Result<Label> {
+    sqlx::query_as::<_, Label>(&format!("SELECT {LABEL_COLS} FROM labels WHERE id = ?"))
+        .bind(id).fetch_optional(pool).await?
+        .ok_or_else(|| not_found("label", id))
+}
+
+async fn get_group(pool: &SqlitePool, id: &str) -> crate::Result<LabelGroup> {
+    sqlx::query_as::<_, LabelGroup>(&format!("SELECT {GROUP_COLS} FROM label_groups WHERE id = ?"))
+        .bind(id).fetch_optional(pool).await?
+        .ok_or_else(|| not_found("label group", id))
+}
+
+/// Best-effort like every other sync_log append: the row is already written.
+async fn log_group(pool: &SqlitePool, group: &LabelGroup, operation: &str, changed: Option<&[&str]>) {
+    let snapshot = serde_json::to_string(group).unwrap_or_default();
+    let changed = changed.map(|c| serde_json::json!(c).to_string());
+    if let Err(e) = sync::append_sync_log(pool, "label_groups", &group.id, operation, changed.as_deref(), Some(&snapshot)).await {
+        log::warn!("label_groups sync_log append failed for {}: {e}", group.id);
+    }
+}
+
+async fn log_label(pool: &SqlitePool, label: &Label, changed: &[&str]) {
+    let snapshot = serde_json::to_string(label).unwrap_or_default();
+    let changed = serde_json::json!(changed).to_string();
+    if let Err(e) = sync::append_sync_log(pool, "labels", &label.id, "UPDATE", Some(&changed), Some(&snapshot)).await {
+        log::warn!("labels sync_log append failed for {}: {e}", label.id);
+    }
+}
+
+fn clean_group_name(name: &str) -> crate::Result<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(crate::Error::Other("label group name must not be empty".into()));
+    }
+    Ok(trimmed.to_string())
+}
+
+async fn group_name_taken(pool: &SqlitePool, name: &str, except: Option<&str>) -> crate::Result<bool> {
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM label_groups WHERE name = ? COLLATE NOCASE AND id != COALESCE(?, '')")
+        .bind(name).bind(except).fetch_one(pool).await?;
+    Ok(n > 0)
+}
+
+pub async fn list_label_groups(pool: &SqlitePool) -> crate::Result<Vec<LabelGroup>> {
+    Ok(sqlx::query_as::<_, LabelGroup>(&format!("SELECT {GROUP_COLS} FROM label_groups ORDER BY position, created_at"))
+        .fetch_all(pool).await?)
+}
+
+pub async fn create_label_group(pool: &SqlitePool, name: &str, exclusive: bool) -> crate::Result<LabelGroup> {
+    let name = clean_group_name(name)?;
+    if group_name_taken(pool, &name, None).await? {
+        return Err(crate::Error::Other(format!("a label group named '{name}' already exists")));
+    }
+    let id = Uuid::new_v4().to_string();
+    let position: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(position), -1) + 1 FROM label_groups")
+        .fetch_one(pool).await?;
+    sqlx::query("INSERT INTO label_groups (id, name, position, exclusive, system, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, 0, datetime('now','localtime'), datetime('now','localtime'))")
+        .bind(&id).bind(&name).bind(position).bind(exclusive).execute(pool).await?;
+    let group = get_group(pool, &id).await?;
+    log_group(pool, &group, "INSERT", None).await;
+    Ok(group)
+}
+
+pub async fn update_label_group(pool: &SqlitePool, id: &str, patch: LabelGroupPatch) -> crate::Result<LabelGroup> {
+    let current = get_group(pool, id).await?;
+    let mut changed: Vec<&str> = Vec::new();
+    let name = match patch.name {
+        Some(raw) => {
+            let name = clean_group_name(&raw)?;
+            if name != current.name {
+                if group_name_taken(pool, &name, Some(id)).await? {
+                    return Err(crate::Error::Other(format!("a label group named '{name}' already exists")));
+                }
+                changed.push("name");
+            }
+            name
+        }
+        None => current.name.clone(),
+    };
+    let exclusive = patch.exclusive.unwrap_or(current.exclusive);
+    if exclusive != current.exclusive { changed.push("exclusive"); }
+    let system = patch.system.unwrap_or(current.system);
+    if system != current.system { changed.push("system"); }
+    let position = patch.position.unwrap_or(current.position);
+    if position != current.position { changed.push("position"); }
+    if changed.is_empty() {
+        return Ok(current);
+    }
+    sqlx::query("UPDATE label_groups SET name = ?, exclusive = ?, system = ?, position = ?, updated_at = datetime('now','localtime') WHERE id = ?")
+        .bind(&name).bind(exclusive).bind(system).bind(position).bind(id).execute(pool).await?;
+    changed.push("updated_at");
+    let group = get_group(pool, id).await?;
+    log_group(pool, &group, "UPDATE", Some(changed.as_slice())).await;
+    Ok(group)
+}
+
+/// Deletes the group and ungroups its labels in one transaction. Returns the
+/// ungrouped label ids (their `labels` UPDATEs replicate after commit).
+pub async fn delete_label_group(pool: &SqlitePool, id: &str) -> crate::Result<Vec<String>> {
+    get_group(pool, id).await?;
+    let mut tx = pool.begin().await?;
+    let members: Vec<String> = sqlx::query_scalar("SELECT id FROM labels WHERE \"group\" = ? ORDER BY position, created_at")
+        .bind(id).fetch_all(&mut *tx).await?;
+    sqlx::query("UPDATE labels SET \"group\" = NULL WHERE \"group\" = ?").bind(id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM label_groups WHERE id = ?").bind(id).execute(&mut *tx).await?;
+    tx.commit().await?;
+    for member in &members {
+        if let Ok(label) = get_label(pool, member).await {
+            log_label(pool, &label, &["group"]).await;
+        }
+    }
+    if let Err(e) = sync::append_sync_log(pool, "label_groups", id, "DELETE", None, None).await {
+        log::warn!("label_groups sync_log DELETE failed for {id}: {e}");
+    }
+    Ok(members)
+}
+
+pub async fn reorder_label_groups(pool: &SqlitePool, ids: &[String]) -> crate::Result<()> {
+    let mut tx = pool.begin().await?;
+    for (index, id) in ids.iter().enumerate() {
+        let done = sqlx::query("UPDATE label_groups SET position = ?, updated_at = datetime('now','localtime') WHERE id = ?")
+            .bind(index as i64).bind(id).execute(&mut *tx).await?;
+        if done.rows_affected() == 0 {
+            return Err(not_found("label group", id));
+        }
+    }
+    tx.commit().await?;
+    for id in ids {
+        if let Ok(group) = get_group(pool, id).await {
+            log_group(pool, &group, "UPDATE", Some(&["position", "updated_at"][..])).await;
+        }
+    }
+    Ok(())
+}
+
+/// Move a label into a group (or out of every group with `None`).
 pub async fn set_label_group(pool: &SqlitePool, id: &str, group: Option<&str>) -> crate::Result<Label> {
-    sqlx::query("UPDATE labels SET \"group\" = ? WHERE id = ?")
-        .bind(group).bind(id).execute(pool).await?;
-    let label: Label = sqlx::query_as(&format!("SELECT {LABEL_COLS} FROM labels WHERE id = ?"))
-        .bind(id).fetch_one(pool).await?;
-    let changed = serde_json::json!(["group"]).to_string();
-    let snapshot = serde_json::to_string(&label).map_err(|e| crate::Error::Other(e.to_string()))?;
-    sync::append_sync_log(pool, "labels", id, "UPDATE", Some(&changed), Some(&snapshot)).await?;
+    let current = get_label(pool, id).await?;
+    if let Some(group_id) = group {
+        get_group(pool, group_id).await?;
+    }
+    // Unchanged: no write, no sync_log row (keeps seed re-runs quiet).
+    if current.group.as_deref() == group {
+        return Ok(current);
+    }
+    sqlx::query("UPDATE labels SET \"group\" = ? WHERE id = ?").bind(group).bind(id).execute(pool).await?;
+    let label = get_label(pool, id).await?;
+    log_label(pool, &label, &["group"]).await;
     Ok(label)
+}
+
+pub async fn reorder_labels(pool: &SqlitePool, ids: &[String]) -> crate::Result<()> {
+    let mut tx = pool.begin().await?;
+    for (index, id) in ids.iter().enumerate() {
+        let done = sqlx::query("UPDATE labels SET position = ? WHERE id = ?")
+            .bind(index as i64).bind(id).execute(&mut *tx).await?;
+        if done.rows_affected() == 0 {
+            return Err(not_found("label", id));
+        }
+    }
+    tx.commit().await?;
+    for id in ids {
+        if let Ok(label) = get_label(pool, id).await {
+            log_label(pool, &label, &["position"]).await;
+        }
+    }
+    Ok(())
+}
+
+/// `archived = true` archives, `false` restores. Validates every id first;
+/// returns only the labels whose state this call changed, so an Undo can
+/// reverse exactly this call.
+async fn set_archived(pool: &SqlitePool, ids: &[String], archived: bool) -> crate::Result<Vec<Label>> {
+    for id in ids {
+        get_label(pool, id).await?;
+    }
+    let sql = if archived {
+        "UPDATE labels SET archived_at = datetime('now','localtime') WHERE id = ? AND archived_at IS NULL"
+    } else {
+        "UPDATE labels SET archived_at = NULL WHERE id = ? AND archived_at IS NOT NULL"
+    };
+    let mut tx = pool.begin().await?;
+    let mut changed_ids = Vec::new();
+    for id in ids {
+        if sqlx::query(sql).bind(id).execute(&mut *tx).await?.rows_affected() == 1 {
+            changed_ids.push(id.clone());
+        }
+    }
+    tx.commit().await?;
+    let mut changed = Vec::with_capacity(changed_ids.len());
+    for id in &changed_ids {
+        let label = get_label(pool, id).await?;
+        log_label(pool, &label, &["archived_at"]).await;
+        changed.push(label);
+    }
+    Ok(changed)
+}
+
+pub async fn archive_labels(pool: &SqlitePool, ids: &[String]) -> crate::Result<Vec<Label>> {
+    set_archived(pool, ids, true).await
+}
+
+pub async fn restore_labels(pool: &SqlitePool, ids: &[String]) -> crate::Result<Vec<Label>> {
+    set_archived(pool, ids, false).await
+}
+
+/// Candidates for "Archive unused": not archived, **ungrouped** (no group, or
+/// a dangling group id — which reads as ungrouped), and on no task whose
+/// status is not `complete`. Grouped labels are never auto-archived, and a
+/// system label is always grouped, so it is never listed (Marco, 2026-09-25).
+pub async fn unused_label_ids(pool: &SqlitePool) -> crate::Result<Vec<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT l.id FROM labels l
+         LEFT JOIN label_groups g ON g.id = l.\"group\"
+         WHERE l.archived_at IS NULL
+           AND g.id IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM task_labels tl JOIN local_tasks t ON t.id = tl.task_id
+             WHERE tl.label_id = l.id AND t.status != 'complete')
+         ORDER BY l.position, l.created_at",
+    )
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn list_labels(pool: &SqlitePool) -> crate::Result<Vec<Label>> {
@@ -549,5 +769,168 @@ mod tests {
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);
+    }
+
+    use crate::types::{LabelGroupPatch, UpdateTaskInput};
+
+    #[tokio::test]
+    async fn group_crud_orders_and_rejects_duplicate_names() {
+        let pool = test_pool().await;
+        let effort = create_label_group(&pool, "  EFFORT ", true).await.unwrap();
+        assert_eq!((effort.name.as_str(), effort.exclusive, effort.system, effort.position), ("EFFORT", true, false, 0));
+        let ty = create_label_group(&pool, "TYPE", false).await.unwrap();
+        assert!(create_label_group(&pool, "effort", false).await.is_err(), "case-insensitive duplicate");
+        assert!(create_label_group(&pool, "   ", false).await.is_err(), "empty name");
+
+        let ty = update_label_group(&pool, &ty.id, LabelGroupPatch { name: Some("Kind".into()), system: Some(true), ..Default::default() })
+            .await.unwrap();
+        assert_eq!((ty.name.as_str(), ty.system), ("Kind", true));
+        assert!(update_label_group(&pool, &ty.id, LabelGroupPatch { name: Some("EFFORT".into()), ..Default::default() }).await.is_err());
+
+        reorder_label_groups(&pool, &[ty.id.clone(), effort.id.clone()]).await.unwrap();
+        let names: Vec<String> = list_label_groups(&pool).await.unwrap().into_iter().map(|g| g.name).collect();
+        assert_eq!(names, ["Kind", "EFFORT"]);
+        assert!(reorder_label_groups(&pool, &["nope".to_string()]).await.is_err());
+
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_log WHERE table_name = 'label_groups'")
+            .fetch_one(&pool).await.unwrap();
+        assert!(n >= 5, "create×2, update, reorder×2 all replicate (got {n})");
+    }
+
+    #[tokio::test]
+    async fn delete_group_ungroups_members_in_one_step() {
+        let pool = test_pool().await;
+        let g = create_label_group(&pool, "EFFORT", true).await.unwrap();
+        let deep = create_label(&pool, "deep", "gray").await.unwrap();
+        let quick = create_label(&pool, "quick", "gray").await.unwrap();
+        set_label_group(&pool, &deep.id, Some(&g.id)).await.unwrap();
+        set_label_group(&pool, &quick.id, Some(&g.id)).await.unwrap();
+        assert!(set_label_group(&pool, &deep.id, Some("missing-group")).await.is_err());
+        assert!(set_label_group(&pool, "missing-label", Some(&g.id)).await.is_err());
+
+        let mut ungrouped = delete_label_group(&pool, &g.id).await.unwrap();
+        ungrouped.sort();
+        let mut expected = vec![deep.id.clone(), quick.id.clone()];
+        expected.sort();
+        assert_eq!(ungrouped, expected);
+        assert!(list_label_groups(&pool).await.unwrap().is_empty());
+        assert!(list_labels(&pool).await.unwrap().iter().all(|l| l.group.is_none()));
+        let deletes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_log WHERE table_name='label_groups' AND operation='DELETE'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(deletes, 1);
+    }
+
+    #[tokio::test]
+    async fn archive_restore_and_unused() {
+        let pool = test_pool().await;
+        let used = create_label(&pool, "deep", "gray").await.unwrap();
+        let idle = create_label(&pool, "old", "gray").await.unwrap();
+        let done_only = create_label(&pool, "shipped", "gray").await.unwrap();
+        let sys = create_label(&pool, "from-instinct", "gray").await.unwrap();
+        let system = create_label_group(&pool, "SYSTEM", false).await.unwrap();
+        update_label_group(&pool, &system.id, LabelGroupPatch { system: Some(true), ..Default::default() }).await.unwrap();
+        set_label_group(&pool, &sys.id, Some(&system.id)).await.unwrap();
+        // Marco 2026-09-25: grouped labels are never "unused", even with no open task.
+        let ty = create_label_group(&pool, "TYPE", false).await.unwrap();
+        let grouped_idle = create_label(&pool, "health", "gray").await.unwrap();
+        set_label_group(&pool, &grouped_idle.id, Some(&ty.id)).await.unwrap();
+        // A dangling group id reads as ungrouped.
+        let dangling = create_label(&pool, "orphan", "gray").await.unwrap();
+        sqlx::query("UPDATE labels SET \"group\" = 'deleted-elsewhere' WHERE id = ?")
+            .bind(&dangling.id).execute(&pool).await.unwrap();
+
+        let open = create_local_task(&pool, CreateTaskInput { content: "open".into(), ..Default::default() }).await.unwrap();
+        set_task_labels(&pool, &open.id, &[used.id.clone()]).await.unwrap();
+        let done = create_local_task(&pool, CreateTaskInput { content: "done".into(), ..Default::default() }).await.unwrap();
+        set_task_labels(&pool, &done.id, &[done_only.id.clone()]).await.unwrap();
+        crate::db::tasks::update_task_status(&pool, &done.id, "complete", None).await.unwrap();
+
+        let mut unused = unused_label_ids(&pool).await.unwrap();
+        unused.sort();
+        let mut expected = vec![idle.id.clone(), done_only.id.clone(), dangling.id.clone()];
+        expected.sort();
+        assert_eq!(unused, expected, "grouped/system labels and labels on open tasks are never 'unused'");
+
+        let first = archive_labels(&pool, &[idle.id.clone()]).await.unwrap();
+        assert_eq!(first.len(), 1);
+        // Undo of a later "archive unused" must restore only what THAT call archived.
+        let second = archive_labels(&pool, &[idle.id.clone(), done_only.id.clone(), dangling.id.clone()]).await.unwrap();
+        assert_eq!(second.iter().map(|l| l.id.clone()).collect::<Vec<_>>(), vec![done_only.id.clone(), dangling.id.clone()]);
+        assert!(second[0].archived_at.is_some());
+        assert!(unused_label_ids(&pool).await.unwrap().is_empty(), "archived labels are not listed as unused");
+        assert!(archive_labels(&pool, &["ghost".to_string()]).await.is_err());
+
+        // Archived labels still render on the tasks that have them.
+        assert_eq!(labels_for_task(&pool, &done.id).await.unwrap(), vec![done_only.id.clone()]);
+
+        let restored = restore_labels(&pool, &[done_only.id.clone(), used.id.clone()]).await.unwrap();
+        assert_eq!(restored.iter().map(|l| l.id.clone()).collect::<Vec<_>>(), vec![done_only.id.clone()]);
+        assert!(get_label(&pool, &done_only.id).await.unwrap().archived_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn todoist_name_match_never_unarchives_or_regroups() {
+        let pool = test_pool().await;
+        let g = create_label_group(&pool, "EFFORT", true).await.unwrap();
+        let deep = create_label(&pool, "deep", "gray").await.unwrap();
+        set_label_group(&pool, &deep.id, Some(&g.id)).await.unwrap();
+        archive_labels(&pool, &[deep.id.clone()]).await.unwrap();
+        let pulled = get_or_create_label_by_name(&pool, "Deep").await.unwrap();
+        assert_eq!(pulled.id, deep.id);
+        assert!(pulled.archived_at.is_some());
+        assert_eq!(pulled.group.as_deref(), Some(g.id.as_str()));
+        let fresh = get_or_create_label_by_name(&pool, "brand-new").await.unwrap();
+        assert!(fresh.group.is_none() && fresh.archived_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn creating_an_archived_name_is_refused_so_the_ui_must_restore() {
+        let pool = test_pool().await;
+        let old = create_label(&pool, "old", "gray").await.unwrap();
+        archive_labels(&pool, &[old.id.clone()]).await.unwrap();
+        assert!(create_label(&pool, "old", "gray").await.is_err(), "labels.name is UNIQUE");
+    }
+
+    #[tokio::test]
+    async fn set_task_labels_never_enforces_pick_one() {
+        let pool = test_pool().await;
+        let g = create_label_group(&pool, "EFFORT", true).await.unwrap();
+        let deep = create_label(&pool, "deep", "gray").await.unwrap();
+        let quick = create_label(&pool, "quick", "gray").await.unwrap();
+        set_label_group(&pool, &deep.id, Some(&g.id)).await.unwrap();
+        set_label_group(&pool, &quick.id, Some(&g.id)).await.unwrap();
+        let t = create_local_task(&pool, CreateTaskInput { content: "x".into(), ..Default::default() }).await.unwrap();
+        let t = set_task_labels(&pool, &t.id, &[deep.id.clone(), quick.id.clone()]).await.unwrap();
+        assert_eq!(t.labels.len(), 2, "sync may deliver two; Rust keeps both");
+        let t = crate::db::tasks::update_local_task(&pool, &t.id, UpdateTaskInput { label_ids: Some(vec![deep.id.clone(), quick.id.clone()]), ..Default::default() }).await.unwrap();
+        assert_eq!(t.labels.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn set_label_group_is_a_no_op_when_unchanged() {
+        let pool = test_pool().await;
+        let g = create_label_group(&pool, "EFFORT", true).await.unwrap();
+        let deep = create_label(&pool, "deep", "gray").await.unwrap();
+        let count = || async {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_log WHERE table_name = 'labels' AND row_id = ?")
+                .bind(&deep.id).fetch_one(&pool).await.unwrap()
+        };
+        set_label_group(&pool, &deep.id, Some(&g.id)).await.unwrap();
+        let after_first = count().await;
+        let again = set_label_group(&pool, &deep.id, Some(&g.id)).await.unwrap();
+        assert_eq!(again.group.as_deref(), Some(g.id.as_str()));
+        assert_eq!(count().await, after_first, "re-assigning the same group writes nothing");
+        assert!(set_label_group(&pool, &deep.id, Some("missing")).await.is_err(), "still validates");
+    }
+
+    #[tokio::test]
+    async fn reorder_labels_sets_positions() {
+        let pool = test_pool().await;
+        let a = create_label(&pool, "a", "gray").await.unwrap();
+        let b = create_label(&pool, "b", "gray").await.unwrap();
+        reorder_labels(&pool, &[b.id.clone(), a.id.clone()]).await.unwrap();
+        let names: Vec<String> = list_labels(&pool).await.unwrap().into_iter().map(|l| l.name).collect();
+        assert_eq!(names, ["b", "a"]);
+        assert!(reorder_labels(&pool, &["ghost".to_string()]).await.is_err());
     }
 }

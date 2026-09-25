@@ -692,9 +692,25 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             updated_at TEXT NOT NULL
         )",
     },
+    // schema-v25 — C4 (brief phase 2 took v24)
+    Migration {
+        version: 25,
+        description: "Label groups, label archive, device-local task search index",
+        sql: "CREATE TABLE label_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                exclusive INTEGER NOT NULL DEFAULT 0,
+                system INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            ALTER TABLE labels ADD COLUMN archived_at TEXT;
+            CREATE VIRTUAL TABLE tasks_fts USING fts5(task_id UNINDEXED, content, description, tokenize = 'unicode61 remove_diacritics 2')",
+    },
 ];
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 24; // schema-v24
+pub const CURRENT_SCHEMA_VERSION: i64 = 25; // schema-v25
 
 pub async fn current_schema_version(pool: &SqlitePool) -> crate::Result<i64> {
     let version = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM schema_version")
@@ -884,7 +900,6 @@ mod v24_tests {
             ("module_id".to_string(), 1), ("cache_key".to_string(), 2),
             ("payload_json".to_string(), 0), ("fetched_at".to_string(), 0),
         ]);
-        assert_eq!(super::CURRENT_SCHEMA_VERSION, 24); // schema-v24
     }
 
     #[tokio::test]
@@ -895,5 +910,27 @@ mod v24_tests {
         assert_eq!(cols, vec![
             ("date".to_string(), 1, 0), ("notes".to_string(), 0, 1), ("updated_at".to_string(), 0, 1),
         ]);
+    }
+}
+
+#[cfg(test)]
+mod v25_tests {
+    use crate::test_util::test_pool;
+
+    #[tokio::test]
+    async fn v25_adds_label_groups_archive_and_the_task_index() {
+        let pool = test_pool().await;
+        let cols: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('label_groups') ORDER BY cid")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(cols, ["id", "name", "position", "exclusive", "system", "created_at", "updated_at"]);
+        let label_cols: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('labels') ORDER BY cid")
+            .fetch_all(&pool).await.unwrap();
+        assert!(label_cols.iter().any(|c| c == "archived_at"), "{label_cols:?}");
+        sqlx::query("INSERT INTO tasks_fts (task_id, content, description) VALUES ('t1', 'Résumé tweaks', '')")
+            .execute(&pool).await.unwrap();
+        let hit: Option<String> = sqlx::query_scalar("SELECT task_id FROM tasks_fts WHERE tasks_fts MATCH '\"resume\"*'")
+            .fetch_optional(&pool).await.unwrap();
+        assert_eq!(hit.as_deref(), Some("t1"), "remove_diacritics folds é");
+        assert_eq!(super::CURRENT_SCHEMA_VERSION, 25); // schema-v25
     }
 }

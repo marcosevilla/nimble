@@ -45,6 +45,11 @@ export interface RowNavigationOptions {
 // enough: it only needs to outlive the list's unmount while detail is open.
 const rememberedFocus = new Map<string, RowFocus>()
 
+/** Pre-select a row for the next mount of a list (⌘F ⌘↵ "open in its project"). */
+export function rememberRowFocus(memoryKey: string, id: string) {
+  rememberedFocus.set(memoryKey, { id, index: 0 })
+}
+
 function focusRowElement(id: string) {
   const el = document.querySelector<HTMLElement>(`[data-nav-row="${CSS.escape(id)}"]`)
   if (!el) return

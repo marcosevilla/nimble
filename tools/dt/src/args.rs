@@ -142,6 +142,24 @@ pub enum Task {
         #[arg(long)]
         clear: bool,
     },
+    /// Full-text search over titles and descriptions: open tasks first,
+    /// completed included. Reads this Mac's device-local index.
+    Search {
+        query: Option<String>,
+        #[arg(long, value_parser = ["all", "open", "completed"], default_value = "all")]
+        status: String,
+        /// Label name or id; repeat for any-of.
+        #[arg(long)]
+        label: Vec<String>,
+        /// Project name or id.
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(i64).range(1..=200))]
+        limit: i64,
+        /// Rebuild the search index first (alone, when no query is given).
+        #[arg(long)]
+        reindex: bool,
+    },
 }
 #[derive(Subcommand, Debug, Clone)]
 pub enum Project {
@@ -209,6 +227,39 @@ pub enum Label {
     Delete {
         id: String,
     },
+    /// Ungrouped, visible labels with no open task (what `archive --unused`
+    /// archives). Grouped and system labels are never listed.
+    Unused,
+    #[command(subcommand)]
+    Group(LabelGroupCommand),
+    /// Archive labels (name or id), or every unused label.
+    Archive {
+        #[arg(required_unless_present = "unused", conflicts_with = "unused")]
+        labels: Vec<String>,
+        #[arg(long)]
+        unused: bool,
+    },
+    /// Restore archived labels (name or id).
+    Restore {
+        #[arg(required = true)]
+        labels: Vec<String>,
+    },
+}
+#[derive(Subcommand, Debug, Clone)]
+pub enum LabelGroupCommand {
+    List,
+    /// Create a group, or reuse the one with this name (case-insensitive).
+    Create {
+        name: String,
+        /// "Pick one": at most one of this group's labels per task (UI-enforced).
+        #[arg(long)]
+        pick_one: bool,
+        /// Integration group: its labels are hidden from pickers and row chips.
+        #[arg(long)]
+        system: bool,
+    },
+    /// Put a label (name or id) into a group (name or id).
+    Assign { label: String, group: String },
 }
 #[derive(Subcommand, Debug, Clone)]
 pub enum Capture {

@@ -337,6 +337,12 @@ pub fn run() {
                     .await
                     .expect("failed to run migrations");
                 drop(schema_lock);
+                // Device-local task search index: rebuild on count/version drift.
+                match nimble_core::db::task_search::ensure_task_index(&pool).await {
+                    Ok(true) => log::info!("Task search index rebuilt"),
+                    Ok(false) => {}
+                    Err(e) => log::warn!("Task search index check failed: {e}"),
+                }
 
                 if demo_mode {
                     log::info!("DEMO MODE — database initialized at {:?}", db_path);
@@ -568,11 +574,22 @@ pub fn run() {
             local_tasks::reorder_local_tasks,
             local_tasks::preview_tasks_markdown_migration,
             local_tasks::migrate_tasks_to_markdown,
+            local_tasks::search_tasks,
             labels::list_labels,
             labels::create_label,
             labels::update_label,
             labels::delete_label,
             labels::set_task_labels,
+            labels::list_label_groups,
+            labels::create_label_group,
+            labels::update_label_group,
+            labels::delete_label_group,
+            labels::reorder_label_groups,
+            labels::set_label_group,
+            labels::reorder_labels,
+            labels::archive_labels,
+            labels::restore_labels,
+            labels::unused_label_ids,
             activity::log_activity,
             activity::get_activity_log,
             activity::get_activity_summary,

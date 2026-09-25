@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Number, Value};
 use sqlx::{Column, Row, Sqlite, SqlitePool, Transaction, TypeInfo, ValueRef};
 
-use super::export_policy::{tables_for_version, TablePolicy, FTS_TABLES};
+use super::export_policy::{fts_tables_for_version, tables_for_version, TablePolicy};
 
 pub struct PortableExport {
     pub data: Vec<u8>,
@@ -57,7 +57,7 @@ async fn validate(tx: &mut Transaction<'_, Sqlite>) -> crate::Result<i64> {
     let expected: BTreeSet<String> = tables
         .iter()
         .map(|p| p.name.to_owned())
-        .chain(FTS_TABLES.iter().map(|(name, _)| (*name).to_owned()))
+        .chain(fts_tables_for_version(version).into_iter().map(|(name, _)| name.to_owned()))
         .collect();
     if actual != expected {
         return Err(invalid("table_drift"));
@@ -88,7 +88,7 @@ async fn validate(tx: &mut Transaction<'_, Sqlite>) -> crate::Result<i64> {
         }
     }
     // FTS is excluded, but its virtual and shadow schemas must still match v19.
-    for (name, reviewed) in FTS_TABLES {
+    for (name, reviewed) in fts_tables_for_version(version) {
         let found: BTreeSet<String> = columns(tx, name)
             .await?
             .into_iter()
@@ -214,10 +214,10 @@ pub async fn export_portable(pool: &SqlitePool) -> crate::Result<PortableExport>
             }
         }
     }
-    for (name, columns) in FTS_TABLES {
+    for (name, columns) in fts_tables_for_version(version) {
         let mut names = columns.to_vec();
         names.sort_unstable();
-        excluded.insert((*name).to_owned(), names);
+        excluded.insert(name.to_owned(), names);
     }
     let format = serde_json::json!({
         "export_version": 1,

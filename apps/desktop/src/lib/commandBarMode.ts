@@ -31,3 +31,10 @@ export function parseMode(raw: string, routes: readonly CaptureRoute[]): ParsedB
   if (route && content) return { mode: 'route', query: content, route }
   return { mode: 'search', query: trimmed, route: null }
 }
+
+/** ⌘K `/search ` hands its text to the ⌘F overlay (C4). Returns the text to
+ *  hand over (possibly empty), or null when the input is not a search handoff. */
+export function searchHandoff(raw: string): string | null {
+  const trimmed = raw.trimStart()
+  return trimmed.startsWith('/search ') ? trimmed.slice('/search '.length) : null
+}

@@ -264,12 +264,50 @@ export interface TasksMdResult {
 // ── Labels ──
 
 export interface Label {
+  /** `label_groups.id`; a dangling id reads as ungrouped. */
   group: string | null
+  /** Set = archived: hidden from pickers and the filter, still shown on tasks. */
+  archived_at: string | null
   id: string
   name: string
   color: string
   position: number
   created_at: string
+}
+
+export interface LabelGroup {
+  id: string
+  name: string
+  position: number
+  /** "Pick one": the UI keeps at most one of this group's labels per task. */
+  exclusive: boolean
+  /** Integration labels: hidden from pickers and row chips. */
+  system: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface LabelGroupPatch {
+  name?: string
+  exclusive?: boolean
+  system?: boolean
+  position?: number
+}
+
+export type TaskSearchStatus = 'all' | 'open' | 'completed'
+
+export interface TaskSearchFilters {
+  status?: TaskSearchStatus
+  /** Any-of. */
+  label_ids?: string[]
+  project_id?: string | null
+}
+
+export interface TaskSearchHit {
+  task: LocalTask
+  /** Description excerpt with U+0002 … U+0003 around matches; null for title matches. */
+  snippet: string | null
+  matched_in: 'title' | 'description'
 }
 
 // ── Sections ──

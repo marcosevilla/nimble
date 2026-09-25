@@ -80,3 +80,13 @@ test('query is always a suffix of the raw input, including leading spaces', () =
     assertSuffix(raw, query)
   }
 })
+
+import { searchHandoff } from '../src/lib/commandBarMode.ts'
+
+test('/search hands its text to ⌘F; other input stays in ⌘K', () => {
+  assert.equal(searchHandoff('/search '), '')
+  assert.equal(searchHandoff('  /search portfolio deck'), 'portfolio deck')
+  assert.equal(searchHandoff('/search'), null, 'not until the space')
+  assert.equal(searchHandoff('portfolio'), null)
+  assert.equal(searchHandoff('/searching'), null)
+})

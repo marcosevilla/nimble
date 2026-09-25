@@ -2,7 +2,7 @@ use crate::{args::*, output::CliError};
 use nimble_core::{
     agent_protocol::{AgentOperation, Domain},
     db::{self, focus::engine::NativeTaskAction},
-    types::{CreateTaskInput, UpdateTaskInput},
+    types::{CreateTaskInput, Label as LabelRow, LabelGroup, LabelGroupPatch, TaskSearchFilters, UpdateTaskInput},
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -119,6 +119,49 @@ async fn section_exists(pool: &SqlitePool, id: &str) -> Result<(), CliError> {
         }
     }
     Err(CliError::not_found())
+}
+fn same_name(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
+/// Exact id first, then exact (case-sensitive) name, then case-insensitive
+/// name; ambiguity is only among case-insensitive matches.
+fn pick<'a, T>(items: &'a [T], key: &str, id: impl Fn(&T) -> &str, name: impl Fn(&T) -> &str, what: &str) -> Result<&'a T, CliError> {
+    if let Some(found) = items.iter().find(|i| id(i) == key) {
+        return Ok(found);
+    }
+    if let Some(found) = items.iter().find(|i| name(i).trim() == key.trim()) {
+        return Ok(found);
+    }
+    let matches: Vec<&T> = items.iter().filter(|i| same_name(name(i), key)).collect();
+    match matches.len() {
+        0 => Err(CliError::new("not_found", format!("No {what} named \"{key}\"."))),
+        1 => Ok(matches[0]),
+        n => Err(CliError::validation(format!("{n} {what}s are named \"{key}\" (ignoring case). Use its id."))),
+    }
+}
+
+async fn resolve_label(pool: &SqlitePool, key: &str) -> Result<LabelRow, CliError> {
+    let labels = db::labels::list_labels(pool).await?;
+    pick(&labels, key, |l| l.id.as_str(), |l| l.name.as_str(), "label").cloned()
+}
+
+async fn resolve_labels(pool: &SqlitePool, keys: &[String]) -> Result<Vec<String>, CliError> {
+    let mut ids = Vec::with_capacity(keys.len());
+    for key in keys {
+        ids.push(resolve_label(pool, key).await?.id);
+    }
+    Ok(ids)
+}
+
+async fn resolve_group(pool: &SqlitePool, key: &str) -> Result<LabelGroup, CliError> {
+    let groups = db::labels::list_label_groups(pool).await?;
+    pick(&groups, key, |g| g.id.as_str(), |g| g.name.as_str(), "label group").cloned()
+}
+
+async fn resolve_project(pool: &SqlitePool, key: &str) -> Result<String, CliError> {
+    let projects = db::projects::get_projects(pool).await?;
+    Ok(pick(&projects, key, |p| p.id.as_str(), |p| p.name.as_str(), "project")?.id.clone())
 }
 fn task_domains() -> Vec<Domain> {
     vec![Domain::Tasks, Domain::Activity]
@@ -404,6 +447,22 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
                 db::labels::set_task_labels(pool, &id, &ids).await?,
                 vec![Domain::Tasks, Domain::Labels],
             ),
+            Task::Search { query, status, label, project, limit, reindex } => {
+                let query = query.unwrap_or_default();
+                if query.trim().is_empty() && !reindex {
+                    return Err(CliError::validation("Give a search query, or --reindex."));
+                }
+                let reindexed = if reindex { Some(db::task_search::rebuild_task_index(pool).await?) } else { None };
+                if query.trim().is_empty() {
+                    return result(json!({ "reindexed": reindexed }), vec![]);
+                }
+                let filters = TaskSearchFilters {
+                    status: Some(status),
+                    label_ids: resolve_labels(pool, &label).await?,
+                    project_id: match &project { Some(key) => Some(resolve_project(pool, key).await?), None => None },
+                };
+                result(db::task_search::search_tasks(pool, &query, &filters, limit).await?, vec![])
+            }
         },
         Command::Project(command) => match command {
             Project::List => result(db::projects::get_projects(pool).await?, vec![]),
@@ -501,6 +560,43 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
                 label_exists(pool, &id).await?;
                 db::labels::delete_label(pool, &id).await?;
                 changed(&id, vec![Domain::Labels, Domain::Tasks])
+            }
+            Label::Unused => {
+                let ids = db::labels::unused_label_ids(pool).await?;
+                let labels: Vec<LabelRow> = db::labels::list_labels(pool).await?.into_iter().filter(|l| ids.contains(&l.id)).collect();
+                result(labels, vec![])
+            }
+            Label::Group(command) => match command {
+                LabelGroupCommand::List => result(db::labels::list_label_groups(pool).await?, vec![]),
+                LabelGroupCommand::Create { name, pick_one, system } => {
+                    nonempty(&name)?;
+                    let existing = db::labels::list_label_groups(pool).await?.into_iter().find(|g| same_name(&g.name, &name));
+                    let group = match existing {
+                        Some(g) => g,
+                        None => db::labels::create_label_group(pool, &name, pick_one).await?,
+                    };
+                    // Flags only ever switch on, so re-running the seed never undoes a manual change.
+                    let patch = LabelGroupPatch {
+                        exclusive: (pick_one && !group.exclusive).then_some(true),
+                        system: (system && !group.system).then_some(true),
+                        ..Default::default()
+                    };
+                    result(db::labels::update_label_group(pool, &group.id, patch).await?, vec![Domain::Labels])
+                }
+                LabelGroupCommand::Assign { label, group } => {
+                    let label = resolve_label(pool, &label).await?;
+                    let group = resolve_group(pool, &group).await?;
+                    result(db::labels::set_label_group(pool, &label.id, Some(&group.id)).await?, vec![Domain::Labels])
+                }
+            },
+            Label::Archive { labels, unused } => {
+                // Every name resolves before anything is written.
+                let ids = if unused { db::labels::unused_label_ids(pool).await? } else { resolve_labels(pool, &labels).await? };
+                result(db::labels::archive_labels(pool, &ids).await?, vec![Domain::Labels])
+            }
+            Label::Restore { labels } => {
+                let ids = resolve_labels(pool, &labels).await?;
+                result(db::labels::restore_labels(pool, &ids).await?, vec![Domain::Labels])
             }
         },
         Command::Capture(command) => match command {

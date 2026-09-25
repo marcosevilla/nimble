@@ -588,3 +588,164 @@ async fn reconcile_without_a_token_fails_before_any_fetch_or_write() {
     assert_eq!(reports, 0, "no report without a fetch");
     std::fs::remove_dir_all(&root).ok();
 }
+
+fn data_id(v: &Value) -> String {
+    v["data"]["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn label_groups_archive_restore_and_search_round_trip() {
+    let root = fixture().await;
+    let (_, deep) = run(&root, &["label", "create", "deep"]);
+    run(&root, &["label", "create", "quick"]);
+    run(&root, &["label", "create", "Comms"]);
+    run(&root, &["label", "create", "comms"]); // UNIQUE is case-sensitive, so this is allowed
+
+    let (code, effort) = run(&root, &["label", "group", "create", "EFFORT", "--pick-one"]);
+    assert_eq!(code, 0, "{effort}");
+    assert_eq!(effort["data"]["exclusive"], true);
+    let (_, again) = run(&root, &["label", "group", "create", "effort"]);
+    assert_eq!(data_id(&again), data_id(&effort), "create reuses a group by name");
+    assert_eq!(again["data"]["exclusive"], true, "a re-run never switches a flag off");
+    let (_, system) = run(&root, &["label", "group", "create", "SYSTEM", "--system"]);
+    assert_eq!(system["data"]["system"], true);
+    let (_, groups) = run(&root, &["label", "group", "list"]);
+    assert_eq!(groups["data"].as_array().unwrap().len(), 2);
+
+    let (code, assigned) = run(&root, &["label", "group", "assign", "DEEP", "Effort"]);
+    assert_eq!(code, 0, "{assigned}");
+    assert_eq!(assigned["data"]["group"], data_id(&effort).as_str());
+    let (code, ambiguous) = run(&root, &["label", "group", "assign", "COMMS", "effort"]);
+    assert_eq!((code, ambiguous["error"]["code"].as_str()), (2, Some("validation")), "{ambiguous}");
+    let (code, exact) = run(&root, &["label", "group", "assign", "comms", "effort"]);
+    assert_eq!(code, 0, "an exact-case name wins over its case-insensitive twin: {exact}");
+    assert_eq!(exact["data"]["name"], "comms");
+    let (code, missing) = run(&root, &["label", "archive", "nope"]);
+    assert_eq!((code, missing["error"]["code"].as_str()), (1, Some("not_found")), "{missing}");
+
+    let (_, task) = run(&root, &["task", "create", "Update portfolio", "--labels", &data_id(&deep)]);
+    let (_, unused) = run(&root, &["label", "unused"]);
+    let names: Vec<&str> = unused["data"].as_array().unwrap().iter().map(|l| l["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"quick") && !names.contains(&"deep"), "{names:?}");
+
+    let (code, archived) = run(&root, &["label", "archive", "--unused"]);
+    assert_eq!(code, 0, "{archived}");
+    assert_eq!(archived["data"].as_array().unwrap().len(), 2, "quick, Comms (comms is grouped now, so never archived)");
+    let (code, restored) = run(&root, &["label", "restore", "quick"]);
+    assert_eq!(code, 0, "{restored}");
+    assert!(restored["data"][0]["archived_at"].is_null());
+
+    let (_, done) = run(&root, &["task", "create", "Old portfolio draft"]);
+    let (code, c) = run(&root, &["task", "complete", &data_id(&done)]);
+    assert_eq!(code, 0, "{c}");
+    let (code, hits) = run(&root, &["task", "search", "portf"]);
+    assert_eq!(code, 0, "{hits}");
+    let titles: Vec<&str> = hits["data"].as_array().unwrap().iter().map(|h| h["task"]["content"].as_str().unwrap()).collect();
+    assert_eq!(titles, ["Update portfolio", "Old portfolio draft"], "open first, completed included");
+    let (_, completed) = run(&root, &["task", "search", "portfolio", "--status", "completed"]);
+    assert_eq!(completed["data"].as_array().unwrap().len(), 1);
+    let (_, by_label) = run(&root, &["task", "search", "portfolio", "--label", "DEEP"]);
+    assert_eq!(by_label["data"][0]["task"]["id"], data_id(&task).as_str());
+    let (code, reindexed) = run(&root, &["task", "search", "--reindex"]);
+    assert_eq!(code, 0, "{reindexed}");
+    assert_eq!(reindexed["data"]["reindexed"], 2);
+    let (code, bad) = run(&root, &["task", "search"]);
+    assert_eq!((code, bad["error"]["code"].as_str()), (2, Some("validation")));
+}
+
+#[tokio::test]
+async fn seed_script_is_idempotent_and_keeps_taxonomy_labels_visible() {
+    let root = fixture().await;
+    // Marco 2026-09-25: the seed matches exact (plain) names only; emoji
+    // near-duplicates stay ungrouped and, with no open task, get archived.
+    for name in ["deep", "quick", "comms", "admin", "🛟 admin", "📸 photography", "🚗 errands", "from-instinct", "stale-idea"] {
+        run(&root, &["label", "create", name]);
+    }
+    let (_, deep) = run(&root, &["label", "list"]);
+    let deep_id = deep["data"].as_array().unwrap().iter().find(|l| l["name"] == "deep").unwrap()["id"].as_str().unwrap().to_string();
+    run(&root, &["task", "create", "Focus block", "--labels", &deep_id]);
+
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/seed-label-groups.sh");
+    for pass in 0..2 {
+        let out = Command::new("bash")
+            .arg(script)
+            .args(["--profile", root.to_str().unwrap()])
+            .env("DT", env!("CARGO_BIN_EXE_dt"))
+            .env("SKIP_BACKUP", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "pass {pass}: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    }
+    let (_, groups) = run(&root, &["label", "group", "list"]);
+    let groups = groups["data"].as_array().unwrap();
+    let names: Vec<&str> = groups.iter().map(|g| g["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["EFFORT", "TYPE", "STATE", "ASSIST", "SYSTEM"]);
+    assert_eq!(groups[0]["exclusive"], true);
+    assert_eq!(groups[4]["system"], true);
+    let (_, labels) = run(&root, &["label", "list"]);
+    let labels = labels["data"].as_array().unwrap();
+    let mut archived: Vec<&str> = labels.iter()
+        .filter(|l| !l["archived_at"].is_null()).map(|l| l["name"].as_str().unwrap()).collect();
+    archived.sort();
+    assert_eq!(archived, ["stale-idea", "🛟 admin"], "grouped labels stay visible even with no open tasks");
+    let group_of = |name: &str| labels.iter().find(|l| l["name"] == name).unwrap()["group"].clone();
+    let type_id = groups[1]["id"].clone();
+    assert_eq!(group_of("admin"), type_id, "the plain name is grouped");
+    assert!(group_of("🛟 admin").is_null(), "the emoji variant is left ungrouped");
+    assert_eq!(group_of("📸 photography"), type_id, "emoji names in the list are grouped exactly");
+    assert_eq!(group_of("🚗 errands"), type_id);
+}
+
+fn seed_script(root: &std::path::Path, dt: &str, extra: &[&str]) -> std::process::Output {
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/seed-label-groups.sh");
+    Command::new("bash")
+        .arg(script)
+        .args(["--profile", root.to_str().unwrap()])
+        .args(extra)
+        .env("DT", dt)
+        .env("SKIP_BACKUP", "1")
+        .output()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn seed_script_dry_run_prints_the_plan_and_writes_nothing() {
+    let root = fixture().await;
+    for name in ["deep", "quick", "stale-idea", "🛟 admin", "🚗 errands", "📸 photography"] {
+        run(&root, &["label", "create", name]);
+    }
+    let out = seed_script(&root, env!("CARGO_BIN_EXE_dt"), &["--dry-run"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
+    assert!(stdout.contains("would create group EFFORT --pick-one"), "{stdout}");
+    assert!(stdout.contains("would put deep → EFFORT"), "{stdout}");
+    assert!(stdout.contains("warning: skipped comms"), "{stdout}");
+    assert!(stdout.contains("would put 🚗 errands → TYPE") && stdout.contains("would put 📸 photography → TYPE"), "{stdout}");
+    assert!(!stdout.contains("skipped 🚗") && !stdout.contains("skipped 📸"), "{stdout}");
+    assert!(stdout.contains("would archive 2: stale-idea, 🛟 admin") || stdout.contains("would archive 2: 🛟 admin, stale-idea"), "{stdout}");
+    let (_, groups) = run(&root, &["label", "group", "list"]);
+    assert!(groups["data"].as_array().unwrap().is_empty(), "dry run created no group");
+    let (_, labels) = run(&root, &["label", "list"]);
+    assert!(labels["data"].as_array().unwrap().iter().all(|l| l["archived_at"].is_null() && l["group"].is_null()));
+}
+
+#[tokio::test]
+async fn seed_script_stops_before_archiving_when_an_assignment_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = fixture().await;
+    for name in ["deep", "stale-idea"] {
+        run(&root, &["label", "create", name]);
+    }
+    // A dt that fails every `label group assign` and passes everything else through.
+    let fake = root.join("fake-dt.sh");
+    std::fs::write(&fake, format!(
+        "#!/usr/bin/env bash\nfor a in \"$@\"; do if [ \"$a\" = assign ]; then echo '{{\"version\":1,\"ok\":false,\"error\":{{\"code\":\"internal\",\"message\":\"injected\"}}}}'; exit 1; fi; done\nexec \"{}\" \"$@\"\n",
+        env!("CARGO_BIN_EXE_dt")
+    )).unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = seed_script(&root, fake.to_str().unwrap(), &[]);
+    assert_eq!(out.status.code(), Some(1), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Stopping before archiving"));
+    let (_, labels) = run(&root, &["label", "list"]);
+    assert!(labels["data"].as_array().unwrap().iter().all(|l| l["archived_at"].is_null()), "nothing archived");
+}

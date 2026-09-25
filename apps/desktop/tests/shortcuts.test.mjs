@@ -60,7 +60,7 @@ test('Inbox section lists capture and row keys', () => {
 })
 
 test('Inbox is appended after General (then B3b sections), existing order untouched', () => {
-  assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox', 'Docs', 'Goals', 'Session', 'Today', 'Capture'])
+  assert.deepEqual(SHORTCUT_SECTIONS, ['Navigation', 'Tasks', 'Focus', 'Command bar', 'Calendar', 'Selection', 'General', 'Inbox', 'Docs', 'Goals', 'Session', 'Today', 'Capture', 'Labels', 'Search'])
 })
 
 test('Space is not a Tasks row key — it stays Focus pause/resume (review I2)', () => {
@@ -116,8 +116,8 @@ test('Today rows use plain lowercase keys, matching todayKey (which rejects Shif
 
 // ── Loop 2 chunk 2: Capture section ──
 
-test('Capture section is appended last with routes, ⌫ and ⌘Z', () => {
-  assert.equal(SHORTCUT_SECTIONS[SHORTCUT_SECTIONS.length - 1], 'Capture')
+test('Capture section lists routes, ⌫ and ⌘Z', () => {
+  assert.ok(SHORTCUT_SECTIONS.indexOf('Capture') > SHORTCUT_SECTIONS.indexOf('Today'), 'Capture follows Today')
   const keys = SHORTCUTS.filter((s) => s.section === 'Capture').map((s) => s.keys)
   assert.deepEqual(keys, ['/i /q /t', '⌫', '⌘Z'])
 })
@@ -136,4 +136,15 @@ test('g s is labelled as Activity in Settings, and number keys match the five-pa
 test('Today lists the brief setup and Boxes keys', () => {
   const keys = keysIn('Today')
   for (const k of ['⌥↑ / ⌥↓', 'Enter (setup)', 'Escape (setup)']) assert.ok(keys.includes(k), `Today missing ${k}`)
+})
+
+test('Labels section (C4) lists the picker keys', () => {
+  const keys = SHORTCUTS.filter((s) => s.section === 'Labels').map((s) => s.keys)
+  for (const k of ['↑ / ↓', 'Space / Enter', '⌥↑ / ⌥↓']) assert.ok(keys.includes(k), `missing Labels ${k}`)
+})
+
+test('⌘F and the Search section (C4)', () => {
+  assert.ok(SHORTCUTS.some((s) => s.section === 'Navigation' && s.keys === '⌘F'))
+  const keys = SHORTCUTS.filter((s) => s.section === 'Search').map((s) => s.keys)
+  for (const k of ['↑ / ↓', 'Enter', '⌘Enter', 'Tab', 'Escape']) assert.ok(keys.includes(k), `missing Search ${k}`)
 })

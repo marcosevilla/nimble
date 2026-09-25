@@ -50,7 +50,12 @@ impl<'a> TaskWrite<'a> {
     }
 
     /// Reconcile queue/ledger effects and commit in the same transaction.
-    pub async fn commit(self, effects: &TaskEffects) -> crate::Result<()> {
+    /// The device-local search index mirrors the applied rows first. It is
+    /// best-effort: only an error that may have killed the transaction
+    /// (see `task_search::best_effort`) fails the apply, which then rolls
+    /// back with the dropped write.
+    pub async fn commit(mut self, effects: &TaskEffects) -> crate::Result<()> {
+        crate::db::task_search::apply_effects_conn(self.conn(), effects).await?;
         match self {
             Self::Owned(guard) => {
                 guard.commit(effects).await?;

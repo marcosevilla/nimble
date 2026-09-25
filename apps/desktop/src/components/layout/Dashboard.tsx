@@ -12,6 +12,7 @@ import { useLayoutStore } from '@/stores/layoutStore'
 import { NavSidebar } from './NavSidebar'
 import { RightRailSpacer, RightSidebar } from './RightSidebar'
 import { CommandBar } from '@/components/shared/CommandBar'
+import { TaskSearch } from '@/components/search/TaskSearch'
 import { HelpPanel } from '@/components/shared/HelpPanel'
 import { useHelpPanelStore } from '@/stores/helpPanelStore'
 import { G_PREFIX_PAGES, G_PREFIX_TIMEOUT_MS, isHabitsShortcut, isModifierOnlyKey } from '@/lib/shortcuts'
@@ -380,6 +381,7 @@ export function Dashboard() {
 
       {/* Command bar overlay */}
       <CommandBar />
+      <TaskSearch />
 
       {/* Focus recovery notice (shows a paused total; never starts) */}
       <FocusResumeDialog />

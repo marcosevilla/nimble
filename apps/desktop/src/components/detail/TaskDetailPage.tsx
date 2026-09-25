@@ -24,6 +24,8 @@ import { TaskItem, type TaskItemData } from '@/components/tasks/TaskItem'
 import { SortableRows, SortableRow } from '@/components/tasks/SortableTaskList'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { labelColor } from '@/lib/labelColors'
+import { useLabelTaxonomy } from '@/hooks/useLabelTaxonomy'
+import { orderTaskLabels } from '@/lib/labelTaxonomy'
 import { DetailBreadcrumbs } from './DetailBreadcrumbs'
 import { TaskActivityLog } from './TaskActivityLog'
 import { FocusTaskHistory } from '@/components/focus/FocusTaskHistory'
@@ -86,7 +88,8 @@ export function TaskDetailPage() {
     dp.sections.list(task.project_id).then(setSections).catch(() => setSections([]))
   }, [dp, task?.project_id, sectionVersion])
 
-  const labelsMap = useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels])
+  // Subtask rows: taxonomy order, system labels hidden (same as list rows).
+  const { groups: labelGroups } = useLabelTaxonomy()
 
   const handleSaveTitle = useCallback(async (content: string) => {
     if (!task) return
@@ -355,10 +358,7 @@ export function TaskDetailPage() {
     dueDate: sub.due_date,
     description: sub.description,
     source: 'local',
-    labels: sub.labels
-      .map((id) => labelsMap.get(id))
-      .filter((l): l is Label => !!l)
-      .map((l) => ({ name: l.name, color: labelColor(l.color) })),
+    labels: orderTaskLabels(sub.labels, labels, labelGroups).map((l) => ({ name: l.name, color: labelColor(l.color) })),
   }))
   const subtaskById = new Map(subtaskItems.map((item) => [item.id, item]))
 

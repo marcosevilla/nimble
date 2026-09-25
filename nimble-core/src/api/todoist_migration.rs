@@ -982,6 +982,7 @@ async fn apply_migration(
     )
     .await;
 
+    crate::db::task_search::rebuild_after_bulk_write(pool).await;
     Ok(result)
 }
 
@@ -1035,6 +1036,35 @@ mod tests {
             "snapshot must be read after pass 2 so it carries the resolved parent_id"
         );
         assert_eq!(v["name"], "Client A");
+    }
+
+    /// C4: the importer writes raw SQL (bypassing task_tx), so the search
+    /// index must be rebuilt at the end of it — a re-import that only renames
+    /// a task is searchable by the new title without a restart.
+    #[tokio::test]
+    async fn reimport_rename_is_searchable_by_its_new_title() {
+        let pool = test_pool().await;
+        let project = TdProject {
+            id: "td-p".into(), name: "Work".into(), color: None, parent_id: None, is_inbox_project: Some(false),
+        };
+        let mut task = TdTask {
+            id: "td-t".into(), content: "Original wording".into(), description: None,
+            project_id: Some("td-p".into()), section_id: None, parent_id: None, priority: 1, due: None,
+            labels: None, order: 1, checked: Some(false), duration: None,
+        };
+        let hits = |token: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, String>("SELECT task_id FROM tasks_fts WHERE tasks_fts MATCH ?")
+                    .bind(format!("\"{token}\"*")).fetch_all(&pool).await.unwrap()
+            }
+        };
+        apply_migration(&pool, &[project.clone()], &[], &[task.clone()]).await.unwrap();
+        assert_eq!(hits("original").await.len(), 1);
+        task.content = "Zanzibar rewrite".into();
+        apply_migration(&pool, &[project], &[], &[task]).await.unwrap();
+        assert_eq!(hits("zanzibar").await.len(), 1);
+        assert!(hits("original").await.is_empty());
     }
 
     /// A no-op re-import must log NOTHING: an unconditional UPDATE would

@@ -5,13 +5,12 @@
 use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
+use crate::db::labels::LABEL_COLS;
 use crate::db::sync;
 use crate::types::Label;
 
 pub const ORIGIN_LABEL: &str = "nimble";
 const ORIGIN_LABEL_COLOR: &str = "#8b8b8b";
-
-const LABEL_COLS: &str = "id, name, color, position, created_at, \"group\"";
 
 pub(crate) async fn todoist_sync_on_tx(conn: &mut SqliteConnection) -> crate::Result<bool> {
     let enabled: Option<i64> = sqlx::query_scalar(
