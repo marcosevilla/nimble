@@ -88,6 +88,7 @@ export interface DataProvider {
   briefSettings: import('./index').BriefSettingsCapability
   weather: import('./index').WeatherCapability
   momentum: import('./index').MomentumCapability
+  omnibar: import('./index').OmnibarCapability
   settings: {
     checkSetupComplete(): Promise<boolean>
     get(key: string): Promise<string | null>
@@ -119,6 +120,8 @@ export interface DataProvider {
   captures: {
     list(limit?: number, includeConverted?: boolean): Promise<Capture[]>
     create(content: string, source?: string, context?: string): Promise<Capture>
+    /** Omnibar Notes group: every word must appear (LIKE), newest first; converted captures excluded. */
+    search(query: string, limit?: number): Promise<Capture[]>
     convertToTask(captureId: string, projectId?: string): Promise<LocalTask>
     delete(id: string): Promise<void>
     // Legacy quick captures (Obsidian)
@@ -383,6 +386,8 @@ export interface DataProvider {
   goals: {
     list(): Promise<GoalWithProgress[]>
     get(id: string): Promise<GoalWithProgress>
+    /** Omnibar Goals group: LIKE over name + description, active goals first. */
+    search(query: string, limit?: number): Promise<Goal[]>
     create(opts: {
       name: string
       description?: string

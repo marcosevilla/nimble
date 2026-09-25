@@ -2006,6 +2006,18 @@
         created_at: iso(TODAY, '09:45:00'),
       }
     },
+    // Omnibar Notes: every word must appear, converted excluded, newest first.
+    search_captures: function (args) {
+      var words = String((args && args.query) || '').toLowerCase().split(/\s+/).filter(Boolean)
+      if (!words.length) return []
+      return CAPTURES.filter(function (c) {
+        if (c.converted_to_task_id) return false
+        var hay = c.content.toLowerCase()
+        return words.every(function (w) { return hay.indexOf(w) !== -1 })
+      })
+        .sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)) })
+        .slice(0, (args && args.limit) || 20)
+    },
     convert_capture_to_task: function (args) {
       var cap = CAPTURES.find(function (c) { return c.id === (args && args.captureId) })
       var t = task({
@@ -2148,6 +2160,19 @@
 
     // Goals
     get_goals: function () { return GOALS },
+    // Omnibar Goals: name or description, active → not started → paused → rest.
+    search_goals: function (args) {
+      var words = String((args && args.query) || '').toLowerCase().split(/\s+/).filter(Boolean)
+      if (!words.length) return []
+      var rank = { active: 0, not_started: 1, paused: 2 }
+      function r(g) { return Object.prototype.hasOwnProperty.call(rank, g.status) ? rank[g.status] : 3 }
+      return GOALS.filter(function (g) {
+        var hay = (g.name + ' ' + (g.description || '')).toLowerCase()
+        return words.every(function (w) { return hay.indexOf(w) !== -1 })
+      })
+        .sort(function (a, b) { return r(a) - r(b) || a.position - b.position })
+        .slice(0, (args && args.limit) || 20)
+    },
     get_goal: function (args) {
       return GOALS.find(function (g) { return g.id === (args && args.id) }) || GOALS[0]
     },

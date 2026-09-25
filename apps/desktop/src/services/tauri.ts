@@ -599,6 +599,10 @@ export async function createCapture(content: string, source?: string, context?: 
   return invoke<Capture>('create_capture', { content, source, context })
 }
 
+export async function searchCaptures(query: string, limit?: number): Promise<Capture[]> {
+  return invoke<Capture[]>('search_captures', { query, limit })
+}
+
 export async function convertCaptureToTask(captureId: string, projectId?: string): Promise<LocalTask> {
   return invoke<LocalTask>('convert_capture_to_task', { captureId, projectId })
 }
@@ -845,6 +849,10 @@ export async function getGoals(): Promise<GoalWithProgress[]> {
 
 export async function getGoal(id: string): Promise<GoalWithProgress> {
   return invoke<GoalWithProgress>('get_goal', { id })
+}
+
+export async function searchGoals(query: string, limit?: number): Promise<Goal[]> {
+  return invoke<Goal[]>('search_goals', { query, limit })
 }
 
 export async function createGoal(opts: {

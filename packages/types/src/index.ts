@@ -249,6 +249,18 @@ export interface BriefSettingsCapability {
   save(patch: BriefSettingsPatch): Promise<BriefSettings>
 }
 
+/** What the Omnibar (⌘K / ⌘F) may offer on this platform. Desktop: all true. */
+export interface OmnibarCapability {
+  /** Docs group (native docs + vault notes) and "Create doc". */
+  docs: boolean
+  /** Goals group and "Create goal". */
+  goals: boolean
+  createProject: boolean
+  createLabel: boolean
+  /** Label pills carry onto a new task. */
+  taskLabelsOnCreate: boolean
+}
+
 // ── Projects ──
 
 export interface Project {
