@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { Brief, CalendarEvent, LocalTask, Priority, WeatherView } from '@nimble/types'
+import type { Brief, CalendarEvent, LocalTask, WeatherView } from '@nimble/types'
 
 /** Today's live data, loaded once by TodayPage and read by every module
  *  Box in `live` and `preview` mode (a .ts file: react-refresh wants
@@ -15,7 +15,6 @@ export interface BriefLive {
   stillOpen: LocalTask[]
   tasksReady: boolean
   ready: boolean
-  priorities: { list: Priority[] | null | undefined; generating: boolean; noKey: boolean; error: string | null; regenerate: () => void }
   weather: { view: WeatherView | null; loading: boolean }
   projectMap: Record<string, { name: string; color: string }>
   subtaskMap: Record<string, LocalTask[]>

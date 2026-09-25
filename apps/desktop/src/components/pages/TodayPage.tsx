@@ -17,7 +17,9 @@ import { useObsidian } from '@/hooks/useObsidian'
 import { useCalendar } from '@/hooks/useCalendar'
 import { useLocalToday } from '@/hooks/useLocalToday'
 import { useGreeting } from '@/hooks/useGreeting'
-import { useDailyPriorities } from '@/hooks/useDailyPriorities'
+import { useBriefComposition } from '@/hooks/useBriefComposition'
+import { BriefItemsContext } from '@/components/today/briefContext'
+import { BriefSummary } from '@/components/today/BriefSummary'
 import { useDataProvider } from '@/services/provider-context'
 import { pickBriefDate, resolveBriefDate, shiftIsoDate } from '@/lib/briefDate'
 import { todayKey } from '@/lib/keyGuard'
@@ -140,8 +142,9 @@ export function TodayPage() {
   const setupPending =
     setupOpen || settingsStatus === 'idle' || settingsStatus === 'loading' || settings?.setup_completed_at === null
 
-  // Priorities generate only while their box is on (no AI call for a hidden box).
-  const daily = useDailyPriorities({ today, ready: ready && !setupPending && isOn('priorities'), events, calendarUnavailable: calendarOffline, tasks, projects: allProjects })
+  // Rust composes the AI slots (phase 3): once the day's data landed and the
+  // setup (which decides the layout) is done, ask once for today if it's due.
+  const composition = useBriefComposition({ date: today, today, ready: ready && !setupPending })
   const location = settings?.location
   const weather = useWeather(isOn('weather'), `${today}|${location ? `${location.lat},${location.lon}` : ''}`)
 
@@ -222,13 +225,13 @@ export function TodayPage() {
   const live: BriefLive = {
     today, events, tomorrow, calReady, calError, calendarOffline,
     dueToday, stillOpen, tasksReady, ready,
-    priorities: { list: daily.priorities, generating: daily.generating, noKey: daily.noKey, error: daily.error, regenerate: daily.regenerate },
     weather, projectMap, subtaskMap, removeTask: remove, addSubtask: handleAddSubtask, brief: rowToday,
   }
   const arranged = layout ? arrangeBrief(layout, briefModuleInfo, compact) : null
 
   return (
     <BriefLiveContext.Provider value={live}>
+      <BriefItemsContext.Provider value={composition}>
       <PageFrame
         title="Today"
         meta={greetingMeta(greeting, total > 0 ? remaining : null)}
@@ -246,7 +249,13 @@ export function TodayPage() {
                     <ChevronDown className={cn('size-3.5 transition-transform duration-(--transition-fast)', !compact && 'rotate-180')} />
                   </IconButton>
                 )}
-                {selected === today && dp.briefSettings.supported && <BriefMenu />}
+                {selected === today && dp.briefSettings.supported && (
+                  <BriefMenu
+                    onRegenerate={composition.readOnly ? undefined : composition.regenerate}
+                    regenerating={composition.regenerating}
+                    justRegenerated={composition.justRegenerated}
+                  />
+                )}
               </>
             )}
           </div>
@@ -262,13 +271,14 @@ export function TodayPage() {
           <BriefSkeleton />
         ) : (
           <div data-brief-body role="region" aria-label="Today's brief" tabIndex={-1} className="space-y-4 outline-none">
-            {compact && <BriefStrip entries={arranged.strip} onExpand={toggleCompact} />}
+            {compact ? <BriefStrip entries={arranged.strip} onExpand={toggleCompact} /> : <BriefSummary />}
             {arranged.body.map((e) => (
               <ModuleBox key={e.id} id={e.id} mode="live" date={today} config={e.config} />
             ))}
           </div>
         )}
       </PageFrame>
+      </BriefItemsContext.Provider>
     </BriefLiveContext.Provider>
   )
 }

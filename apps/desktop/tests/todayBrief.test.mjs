@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { hhmm, splitDueTasks, ageLabel, largestFreeBlock, formatFreeBlock, nextEvent, greetingFor, shouldAutoGenerate, nowHHMM, briefReady, pastBriefView, hasValidSnapshot, outcomeFor, buildCalendarSummary } from '../src/lib/todayBrief.ts'
+import { hhmm, splitDueTasks, ageLabel, largestFreeBlock, formatFreeBlock, nextEvent, greetingFor, nowHHMM, briefReady, pastBriefView, hasValidSnapshot } from '../src/lib/todayBrief.ts'
 
 test('hhmm reads both the real "HH:MM" and the mock ISO shape', () => {
   assert.equal(hhmm('10:05'), '10:05')
@@ -45,13 +45,6 @@ test('greetingFor splits the day at 12 and 17', () => {
   assert.equal(greetingFor(17), 'Good evening')
 })
 
-test('auto-generate at most once a day, never without a key', () => {
-  assert.equal(shouldAutoGenerate({ cached: false, tried: false, noKey: false }), true)
-  assert.equal(shouldAutoGenerate({ cached: true, tried: false, noKey: false }), false)
-  assert.equal(shouldAutoGenerate({ cached: false, tried: true, noKey: false }), false)
-  assert.equal(shouldAutoGenerate({ cached: false, tried: false, noKey: true }), false)
-})
-
 test('nowHHMM is the local clock as zero-padded "HH:MM"', () => {
   assert.equal(nowHHMM(new Date(2026, 8, 23, 7, 5)), '07:05')
   assert.equal(nowHHMM(new Date(2026, 8, 23, 18, 30)), '18:30')
@@ -93,22 +86,4 @@ test('hasValidSnapshot: a malformed stored snapshot falls through, it never cras
   assert.equal(hasValidSnapshot({ date: 'x' }), false)
   assert.equal(hasValidSnapshot({ date: 'x', snapshot: {} }), true)
   assert.equal(hasValidSnapshot({ date: 'x', snapshot: { due_today: [] } }), true)
-})
-
-test('outcomeFor: a remount the same day keeps the auto attempt, its error and no-key state; a new day starts fresh', () => {
-  const failed = { date: '2026-09-24', noKey: false, error: 'Couldn’t reach the AI just now.' }
-  assert.deepEqual(outcomeFor(failed, '2026-09-24'), { tried: true, noKey: false, error: 'Couldn’t reach the AI just now.' })
-  assert.deepEqual(outcomeFor({ date: '2026-09-24', noKey: true, error: null }, '2026-09-24'), { tried: true, noKey: true, error: null })
-  assert.deepEqual(outcomeFor(failed, '2026-09-25'), { tried: false, noKey: false, error: null })
-  assert.deepEqual(outcomeFor(null, '2026-09-25'), { tried: false, noKey: false, error: null })
-})
-
-test('buildCalendarSummary: an unreachable calendar is never reported to the AI as a free day', () => {
-  assert.equal(buildCalendarSummary([]), 'No meetings or events today.')
-  const unknown = buildCalendarSummary([], { unavailable: true })
-  assert.notEqual(unknown, 'No meetings or events today.')
-  assert.match(unknown, /unavailable/i)
-  assert.equal(
-    buildCalendarSummary([{ summary: 'Standup', start_time: '09:00', end_time: '09:15', all_day: false }, { summary: 'Offsite', start_time: '', end_time: '', all_day: true }]),
-    '09:00–09:15: Standup\nAll day: Offsite')
 })

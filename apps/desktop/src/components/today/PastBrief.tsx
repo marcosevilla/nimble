@@ -10,6 +10,9 @@ import { BriefBox } from './BriefBox'
 import { PrioritiesSkeleton } from './PrioritiesBox'
 import { ModuleBox } from './ModuleBox'
 import { briefModuleInfo } from './briefModules'
+import { BriefItemsContext } from './briefContext'
+import { BriefSummary } from './BriefSummary'
+import { useBriefComposition } from '@/hooks/useBriefComposition'
 
 /** Skeletons shaped like the brief's first boxes (spec §3.7), shown while a
  *  past date's stored brief is in flight, or today's layout is loading. */
@@ -37,6 +40,8 @@ export function BriefSkeleton() {
  *  the selected date isn't `today`. */
 export function PastBrief({ date, today }: { date: string; today: string }) {
   const dp = useDataProvider()
+  // That day's composed rows and summary, read-only (any date that isn't today).
+  const composition = useBriefComposition({ date, today, ready: false })
   const [loaded, setLoaded] = useState<{ date: string; brief: Brief | null; vault: string | null } | null>(null)
 
   // Defensive only: `TodayPage` mounts this exclusively for `selected !== today`
@@ -89,7 +94,8 @@ export function PastBrief({ date, today }: { date: string; today: string }) {
   const snapshot = stored.snapshot as Record<string, unknown>
   const { header, body } = arrangeBrief(normalizeLayout(stored.layout), briefModuleInfo, false)
   return (
-    <>
+    <BriefItemsContext.Provider value={composition}>
+      <BriefSummary />
       {header.length > 0 && (
         <div className="flex items-center gap-2">
           {header.map((e) => (
@@ -100,6 +106,6 @@ export function PastBrief({ date, today }: { date: string; today: string }) {
       {body.map((e) => (
         <ModuleBox key={e.id} id={e.id} mode="snapshot" date={date} config={e.config} payload={snapshot[e.id]} brief={stored} />
       ))}
-    </>
+    </BriefItemsContext.Provider>
   )
 }
