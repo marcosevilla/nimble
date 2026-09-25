@@ -65,6 +65,9 @@ const EXTRA_FIELD_LABELS: Record<ExtraField, string> = {
 
 const EMPTY_DUE: DueValue = { dueDate: null, dueTime: null, durationMinutes: null, recurrenceRule: null }
 
+// Chip <button>s carry an explicit tabIndex={0}: WebKit (and the app's
+// WKWebView) leaves a plain <button> out of the Tab order, which silently
+// skipped the Due and Labels chips in the create modal (loop 3).
 const CHIP_EMPTY =
   'h-6 rounded-md border border-border px-2.5 text-body text-muted-foreground hover:bg-accent transition-colors inline-flex items-center'
 const CHIP_FILLED = 'h-6 rounded-md bg-secondary border border-input pl-2.5 pr-1 text-body text-foreground flex items-center gap-[5px]'
@@ -167,7 +170,7 @@ function DueChip({ value, onChange }: { value: DueValue; onChange: (v: DueValue)
             wrapper's <div> is valid HTML (only <button> inside <button> is
             the anti-pattern), and its native Enter/Space click bubbles up to
             the wrapper, which is what Base UI listens on to open the popover. */}
-        <button type="button" className={CHIP_EMPTY}>
+        <button type="button" tabIndex={0} className={CHIP_EMPTY}>
           Due
         </button>
       </DueDatePopover>
@@ -177,7 +180,7 @@ function DueChip({ value, onChange }: { value: DueValue; onChange: (v: DueValue)
   return (
     <div className={cn(CHIP_FILLED, 'group/chip')}>
       <DueDatePopover value={value} onChange={onChange}>
-        <button type="button" className="flex items-center gap-[5px]">
+        <button type="button" tabIndex={0} className="flex items-center gap-[5px]">
           <Calendar className="size-3" />
           Due {dueBadgeLabel(value.dueDate)}
         </button>
@@ -334,13 +337,13 @@ function LabelsChips({
           display:contents trigger wrappers drop non-button children from
           the tab order entirely. */}
       {selected.length === 0 ? (
-        <button type="button" className={CHIP_EMPTY}>
+        <button type="button" tabIndex={0} className={CHIP_EMPTY}>
           Labels
         </button>
       ) : (
         selected.map((label) => (
           <div key={label.id} className={cn(CHIP_FILLED, 'group/chip')}>
-            <button type="button" className="flex items-center gap-[5px]">
+            <button type="button" tabIndex={0} className="flex items-center gap-[5px]">
               <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: labelColor(label.color) }} />
               {label.name}
             </button>
@@ -500,11 +503,11 @@ function LinkedDocChip({
   // Real <button>s, not <div>s — see the Due chip's comment: display:contents
   // trigger wrappers drop non-button children from the tab order entirely.
   const trigger = linkedDocId ? (
-    <button type="button" className="flex items-center gap-[5px]">
+    <button type="button" tabIndex={0} className="flex items-center gap-[5px]">
       {title ?? 'Untitled'}
     </button>
   ) : (
-    <button type="button" className={CHIP_EMPTY}>
+    <button type="button" tabIndex={0} className={CHIP_EMPTY}>
       Linked doc
     </button>
   )
