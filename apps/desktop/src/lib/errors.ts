@@ -37,6 +37,16 @@ export function isWebNotImplemented(raw: unknown): boolean {
   return raw instanceof Error && raw.name === 'WebNotImplementedError'
 }
 
+/** `friendlyError()`, but a not-yet-implemented web method resolves to
+ * `null` instead of a message — callers show their calm empty/unavailable
+ * state for that case rather than an error banner (e.g. the web calendar
+ * panel showing no events instead of a permanent "Calendar offline. Retry"
+ * that can never succeed). */
+export function friendlyErrorOrNull(raw: unknown): string | null {
+  if (isWebNotImplemented(raw)) return null
+  return friendlyError(raw)
+}
+
 /** Rust's `read_today_md` rejects with "Failed to read today.md: not found"
  * when the vault has no root `today.md`. That's the normal state now (the
  * legacy daily note is gone), so callers treat it as "no daily note". */

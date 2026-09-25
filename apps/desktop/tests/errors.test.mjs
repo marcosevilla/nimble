@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { friendlyError, isMissingTodayNote, isWebNotImplemented } from '../src/lib/errors.ts'
+import { friendlyError, friendlyErrorOrNull, isMissingTodayNote, isWebNotImplemented } from '../src/lib/errors.ts'
 
 test('a missing vault-root today.md is recognised', () => {
   assert.equal(isMissingTodayNote('Failed to read today.md: not found'), true)
@@ -44,4 +44,17 @@ test('an ordinary error or non-error value is not mistaken for WebNotImplemented
   assert.equal(isWebNotImplemented(new Error('boom')), false)
   assert.equal(isWebNotImplemented('plain string'), false)
   assert.equal(isWebNotImplemented(undefined), false)
+})
+
+test('friendlyErrorOrNull resolves a not-yet-implemented web method to null, not a message', () => {
+  // e.g. useCalendar on web, where calendar.getCachedEvents/fetchEvents are
+  // both ni() -- this should let the panel show a calm empty state instead
+  // of a permanent "Calendar offline. Retry" that can never succeed.
+  const err = new Error('calendar.getCachedEvents() is not implemented in the web client yet.')
+  err.name = 'WebNotImplementedError'
+  assert.equal(friendlyErrorOrNull(err), null)
+})
+
+test('friendlyErrorOrNull falls back to friendlyError for a real error', () => {
+  assert.equal(friendlyErrorOrNull('network request failed'), friendlyError('network request failed'))
 })

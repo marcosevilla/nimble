@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/stores/appStore'
 import { useDataProvider } from '@/services/provider-context'
 import type { CalendarEvent } from '@nimble/types'
-import { friendlyError } from '@/lib/errors'
+import { friendlyErrorOrNull } from '@/lib/errors'
 import { loadCalendarDay } from '@/lib/calendarLoad'
 
 function todayString(): string {
@@ -56,7 +56,11 @@ export function useCalendar() {
       // Inline "Calendar offline. / Retry" in the panel is the one channel;
       // a toast here fired on every day change (shell P2-6, §3.2).
       if (latestDate.current === date) {
-        setError(friendlyError(e))
+        // Calendar reads aren't implemented on web yet (TursoProvider
+        // ni()), so every load would otherwise permanently show "Calendar
+        // offline" with a Retry that can never succeed. Show the plain
+        // empty state there instead of an error.
+        setError(friendlyErrorOrNull(e))
         // Nothing for this day could be shown: don't leave the previous
         // day's events standing under the new date.
         if (shownDate.current !== date) {
