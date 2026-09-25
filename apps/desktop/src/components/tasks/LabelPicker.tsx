@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { labelColor, DEFAULT_LABEL_COLOR } from '@/lib/labelColors'
 import { useDataProvider } from '@/services/provider-context'
 import { useLabelTaxonomy } from '@/hooks/useLabelTaxonomy'
-import { filterSections, isFlat, orderTaskLabels, pickerCreateAction, pickerSections, toggleLabel } from '@/lib/labelTaxonomy'
+import { applyRestored, defaultHighlight, filterSections, isFlat, orderTaskLabels, pickerCreateAction, pickerSections, toggleLabel } from '@/lib/labelTaxonomy'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -65,9 +65,15 @@ export function LabelChip({
  *  keep working) around a real role=checkbox / role=radio button, so Space
  *  and Enter toggle natively. The explicit aria-label names the control for
  *  every AT and axe (implicit <label> naming of a <button> is unreliable). */
-function LabelOption({ label, checked, radio, onToggle }: { label: Label; checked: boolean; radio: boolean; onToggle: () => void }) {
+function LabelOption({ label, checked, radio, highlighted, onToggle }: { label: Label; checked: boolean; radio: boolean; highlighted: boolean; onToggle: () => void }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-hover has-[:focus-visible]:bg-hover">
+    <label
+      data-highlighted={highlighted ? '' : undefined}
+      className={cn(
+        'flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-hover has-[:focus-visible]:bg-hover',
+        highlighted && 'bg-hover',
+      )}
+    >
       <button
         type="button"
         role={radio ? 'radio' : 'checkbox'}
@@ -89,7 +95,8 @@ function LabelOption({ label, checked, radio, onToggle }: { label: Label; checke
           : <Check className="size-2.5" strokeWidth={3} aria-hidden />)}
       </button>
       <span className="size-2 shrink-0 rounded-full" style={{ background: labelColor(label.color) }} aria-hidden />
-      <span className="min-w-0 flex-1 truncate text-body">{label.name}</span>
+      <span className={cn('min-w-0 flex-1 truncate text-body', label.archived_at && 'text-muted-foreground')}>{label.name}</span>
+      {label.archived_at && <Caption>archived</Caption>}
     </label>
   )
 }
@@ -107,7 +114,11 @@ export function LabelPickerList({ value, onChange, mode = 'edit' }: { value: str
   const listRef = useRef<HTMLDivElement>(null)
   const baseId = useId()
 
-  const all = useMemo(() => (mode === 'filter' ? filterSections(labels, groups) : pickerSections(labels, groups)), [mode, labels, groups])
+  // Filter mode keeps a selected archived label listed so it stays removable.
+  const all = useMemo(
+    () => (mode === 'filter' ? filterSections(labels, groups, new Set(value)) : pickerSections(labels, groups)),
+    [mode, labels, groups, value],
+  )
   const q = query.trim().toLowerCase()
   const shown = useMemo(
     () => (q ? all.map((s) => ({ ...s, labels: s.labels.filter((l) => l.name.toLowerCase().includes(q)) })).filter((s) => s.labels.length > 0) : all),
@@ -115,6 +126,8 @@ export function LabelPickerList({ value, onChange, mode = 'edit' }: { value: str
   )
   const action = mode === 'edit' ? pickerCreateAction(query, labels, groups) : ({ kind: 'none' } as const)
   const flat = isFlat(shown)
+  // What Enter acts on while typing: shown on the row, focus stays in the field.
+  const highlighted = q ? defaultHighlight(shown.flatMap((s) => s.labels), action) : null
 
   const toggle = (id: string) => {
     if (mode === 'filter') onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id])
@@ -122,7 +135,7 @@ export function LabelPickerList({ value, onChange, mode = 'edit' }: { value: str
   }
 
   const runAction = async () => {
-    if (busy || action.kind === 'none') return
+    if (busy || action.kind === 'none' || action.kind === 'system') return
     if (action.kind === 'apply') {
       if (!value.includes(action.label.id)) toggle(action.label.id)
       setQuery('')
@@ -132,7 +145,7 @@ export function LabelPickerList({ value, onChange, mode = 'edit' }: { value: str
     try {
       if (action.kind === 'restore') {
         await dp.labels.restore([action.label.id])
-        onChange(toggleLabel(value, action.label.id, labels, groups))
+        onChange(applyRestored(value, action.label.id, labels, groups))
       } else {
         const created = await dp.labels.create(action.name, DEFAULT_LABEL_COLOR)
         onChange([...value, created.id])
@@ -167,9 +180,11 @@ export function LabelPickerList({ value, onChange, mode = 'edit' }: { value: str
         onKeyDown={(e) => {
           if (e.key !== 'Enter') return
           e.preventDefault()
-          if (action.kind !== 'none') { void runAction(); return }
-          const only = shown.flatMap((s) => s.labels)
-          if (only.length === 1) toggle(only[0].id)
+          if (highlighted === 'action') { void runAction(); return }
+          if (!highlighted) return
+          // Editing applies (never removes); the filter toggles.
+          if (mode === 'filter' || !value.includes(highlighted)) toggle(highlighted)
+          setQuery('')
         }}
         placeholder={mode === 'filter' ? 'Filter labels…' : 'Search or create…'}
         aria-label={mode === 'filter' ? 'Filter labels' : 'Search or create a label'}
@@ -200,7 +215,7 @@ export function LabelPickerList({ value, onChange, mode = 'edit' }: { value: str
                 </Caption>
               )}
               {section.labels.map((label) => (
-                <LabelOption key={label.id} label={label} checked={value.includes(label.id)} radio={radio} onToggle={() => toggle(label.id)} />
+                <LabelOption key={label.id} label={label} checked={value.includes(label.id)} radio={radio} highlighted={highlighted === label.id} onToggle={() => toggle(label.id)} />
               ))}
             </div>
           )
@@ -208,14 +223,21 @@ export function LabelPickerList({ value, onChange, mode = 'edit' }: { value: str
         {!loading && all.length === 0 && !q && (
           <p className="px-1.5 py-1 text-label text-muted-foreground">No labels yet.</p>
         )}
+        {action.kind === 'system' && (
+          <p className="px-1.5 py-1 text-label text-muted-foreground">System label — applied automatically</p>
+        )}
         {(action.kind === 'create' || action.kind === 'restore') && (
           <button
             type="button"
             data-label-control=""
+            data-highlighted={highlighted === 'action' ? '' : undefined}
             tabIndex={0}
             onClick={() => void runAction()}
             disabled={busy}
-            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-body text-muted-foreground outline-none transition-colors hover:bg-hover hover:text-foreground focus-visible:bg-hover disabled:opacity-50"
+            className={cn(
+              'flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-body text-muted-foreground outline-none transition-colors hover:bg-hover hover:text-foreground focus-visible:bg-hover disabled:opacity-50',
+              highlighted === 'action' && 'bg-hover text-foreground',
+            )}
           >
             {action.kind === 'restore' ? <RotateCcw className="size-3" aria-hidden /> : <Plus className="size-3" aria-hidden />}
             {action.kind === 'restore' ? `Restore "${action.label.name}"` : `Create "${action.name}"`}

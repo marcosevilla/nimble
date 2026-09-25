@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   pickerSections, filterSections, managerSections, orderTaskLabels, systemTaskLabels,
-  toggleLabel, pickerCreateAction, isFlat,
+  toggleLabel, pickerCreateAction, isFlat, defaultHighlight, applyRestored,
 } from '../src/lib/labelTaxonomy.ts'
 
 const g = (id, name, position, extra = {}) => ({
@@ -60,10 +60,31 @@ test('Pick one: applying swaps the group sibling; multi groups add; hidden label
   assert.deepEqual(toggleLabel(['deep', 'quick'], 'deep', labels, groups), ['quick'], 'toggling off leaves a sync-delivered sibling alone')
 })
 
-test('create action: apply a visible match, restore an archived one, create new, never a system name', () => {
+test('create action: apply a visible match, restore an archived one, create new, hint for a system name', () => {
   assert.equal(pickerCreateAction('  ', labels, groups).kind, 'none')
   assert.deepEqual(pickerCreateAction('DEEP', labels, groups), { kind: 'apply', label: labels[2] })
   assert.deepEqual(pickerCreateAction('Old', labels, groups), { kind: 'restore', label: labels[4] })
   assert.deepEqual(pickerCreateAction('brand new', labels, groups), { kind: 'create', name: 'brand new' })
-  assert.equal(pickerCreateAction('nimble', labels, groups).kind, 'none')
+  assert.deepEqual(pickerCreateAction('nimble', labels, groups), { kind: 'system', label: labels[5] })
+})
+
+test('Enter target: exact match, then Restore, then first match, then Create', () => {
+  const deep = labels[2], quick = labels[1]
+  assert.equal(defaultHighlight([quick, deep], { kind: 'apply', label: deep }), 'deep', 'exact beats first')
+  assert.equal(defaultHighlight([], { kind: 'restore', label: labels[4] }), 'action')
+  assert.equal(defaultHighlight([quick], { kind: 'create', name: 'qu' }), 'quick', 'a partial match beats Create')
+  assert.equal(defaultHighlight([], { kind: 'create', name: 'brand new' }), 'action')
+  assert.equal(defaultHighlight([], { kind: 'system', label: labels[5] }), null)
+  assert.equal(defaultHighlight([], { kind: 'none' }), null)
+})
+
+test('restore from the picker never removes a label the task already carries', () => {
+  assert.deepEqual(applyRestored(['old', 'deep'], 'old', labels, groups), ['old', 'deep'])
+  assert.deepEqual(applyRestored(['deep'], 'old', labels, groups), ['deep', 'old'])
+})
+
+test('filter keeps a selected archived label listed so it can be removed', () => {
+  const ids = filterSections(labels, groups, new Set(['old'])).flatMap((s) => s.labels).map((x) => x.id)
+  assert.ok(ids.includes('old'))
+  assert.ok(!filterSections(labels, groups).flatMap((s) => s.labels).some((x) => x.id === 'old'))
 })

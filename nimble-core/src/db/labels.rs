@@ -153,9 +153,13 @@ pub async fn reorder_label_groups(pool: &SqlitePool, ids: &[String]) -> crate::R
 
 /// Move a label into a group (or out of every group with `None`).
 pub async fn set_label_group(pool: &SqlitePool, id: &str, group: Option<&str>) -> crate::Result<Label> {
-    get_label(pool, id).await?;
+    let current = get_label(pool, id).await?;
     if let Some(group_id) = group {
         get_group(pool, group_id).await?;
+    }
+    // Unchanged: no write, no sync_log row (keeps seed re-runs quiet).
+    if current.group.as_deref() == group {
+        return Ok(current);
     }
     sqlx::query("UPDATE labels SET \"group\" = ? WHERE id = ?").bind(group).bind(id).execute(pool).await?;
     let label = get_label(pool, id).await?;
@@ -900,6 +904,23 @@ mod tests {
         assert_eq!(t.labels.len(), 2, "sync may deliver two; Rust keeps both");
         let t = crate::db::tasks::update_local_task(&pool, &t.id, UpdateTaskInput { label_ids: Some(vec![deep.id.clone(), quick.id.clone()]), ..Default::default() }).await.unwrap();
         assert_eq!(t.labels.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn set_label_group_is_a_no_op_when_unchanged() {
+        let pool = test_pool().await;
+        let g = create_label_group(&pool, "EFFORT", true).await.unwrap();
+        let deep = create_label(&pool, "deep", "gray").await.unwrap();
+        let count = || async {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_log WHERE table_name = 'labels' AND row_id = ?")
+                .bind(&deep.id).fetch_one(&pool).await.unwrap()
+        };
+        set_label_group(&pool, &deep.id, Some(&g.id)).await.unwrap();
+        let after_first = count().await;
+        let again = set_label_group(&pool, &deep.id, Some(&g.id)).await.unwrap();
+        assert_eq!(again.group.as_deref(), Some(g.id.as_str()));
+        assert_eq!(count().await, after_first, "re-assigning the same group writes nothing");
+        assert!(set_label_group(&pool, &deep.id, Some("missing")).await.is_err(), "still validates");
     }
 
     #[tokio::test]

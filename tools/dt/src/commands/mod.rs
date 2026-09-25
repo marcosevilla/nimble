@@ -124,9 +124,13 @@ fn same_name(a: &str, b: &str) -> bool {
     a.trim().to_lowercase() == b.trim().to_lowercase()
 }
 
-/// Exact id first, then case-insensitive name; two name matches is an error.
+/// Exact id first, then exact (case-sensitive) name, then case-insensitive
+/// name; ambiguity is only among case-insensitive matches.
 fn pick<'a, T>(items: &'a [T], key: &str, id: impl Fn(&T) -> &str, name: impl Fn(&T) -> &str, what: &str) -> Result<&'a T, CliError> {
     if let Some(found) = items.iter().find(|i| id(i) == key) {
+        return Ok(found);
+    }
+    if let Some(found) = items.iter().find(|i| name(i).trim() == key.trim()) {
         return Ok(found);
     }
     let matches: Vec<&T> = items.iter().filter(|i| same_name(name(i), key)).collect();

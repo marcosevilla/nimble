@@ -30,9 +30,9 @@ export function groupOf(label: Label, groupsById: ReadonlyMap<string, LabelGroup
   return label.group ? groupsById.get(label.group) ?? null : null
 }
 
-function sections(labels: Label[], groups: LabelGroup[], includeSystem: boolean): LabelSection[] {
+function sections(labels: Label[], groups: LabelGroup[], includeSystem: boolean, keep: ReadonlySet<string> = new Set()): LabelSection[] {
   const byId = indexGroups(groups)
-  const visible = labels.filter((l) => !l.archived_at).sort(byPosition)
+  const visible = labels.filter((l) => !l.archived_at || keep.has(l.id)).sort(byPosition)
   const ordered = [...byId.values()].sort(byPosition)
   const of = (group: LabelGroup): LabelSection => ({ group, labels: visible.filter((l) => l.group === group.id) })
   return [
@@ -47,9 +47,10 @@ export function pickerSections(labels: Label[], groups: LabelGroup[]): LabelSect
   return sections(labels, groups, false)
 }
 
-/** Label filter: like the picker, plus system groups last. */
-export function filterSections(labels: Label[], groups: LabelGroup[]): LabelSection[] {
-  return sections(labels, groups, true)
+/** Label filter: like the picker, plus system groups last. Archived labels
+ *  are hidden unless in `selected` (an active filter must stay removable). */
+export function filterSections(labels: Label[], groups: LabelGroup[], selected: ReadonlySet<string> = new Set()): LabelSection[] {
+  return sections(labels, groups, true, selected)
 }
 
 /** Only the Ungrouped bucket (e.g. a profile with no groups): render without headers. */
@@ -109,16 +110,34 @@ export type CreateAction =
   | { kind: 'apply'; label: Label }
   | { kind: 'restore'; label: Label }
   | { kind: 'create'; name: string }
+  /** The name belongs to a system label: the picker shows a neutral hint. */
+  | { kind: 'system'; label: Label }
 
 /** What Enter (and the list's last row) does with the typed text: apply an
  *  exact, case-insensitive visible match; restore an archived match (creating
  *  it would hit labels.name UNIQUE); create a new ungrouped label. A system
- *  label's name offers nothing — system labels stay out of the picker. */
+ *  label's name only earns a hint — system labels stay out of the picker. */
 export function pickerCreateAction(query: string, labels: Label[], groups: LabelGroup[]): CreateAction {
   const name = query.trim()
   if (!name) return { kind: 'none' }
   const match = labels.find((l) => l.name.toLowerCase() === name.toLowerCase())
   if (!match) return { kind: 'create', name }
-  if (groupOf(match, indexGroups(groups))?.system) return { kind: 'none' }
+  if (groupOf(match, indexGroups(groups))?.system) return { kind: 'system', label: match }
   return match.archived_at ? { kind: 'restore', label: match } : { kind: 'apply', label: match }
+}
+
+/** The row Enter acts on while typing (Linear / Raycast): an exact visible
+ *  match, else an exact archived match's Restore row, else the first match,
+ *  else the Create row. `'action'` = the Restore/Create row; null = nothing. */
+export function defaultHighlight(matches: readonly Label[], action: CreateAction): string | 'action' | null {
+  if (action.kind === 'apply' && matches.some((l) => l.id === action.label.id)) return action.label.id
+  if (action.kind === 'restore') return 'action'
+  if (matches.length > 0) return matches[0].id
+  return action.kind === 'create' ? 'action' : null
+}
+
+/** After restoring an archived label from the picker: apply it, but never
+ *  toggle it off when the task already carries it (its chip was showing). */
+export function applyRestored(selected: readonly string[], labelId: string, labels: Label[], groups: LabelGroup[]): string[] {
+  return selected.includes(labelId) ? [...selected] : toggleLabel(selected, labelId, labels, groups)
 }

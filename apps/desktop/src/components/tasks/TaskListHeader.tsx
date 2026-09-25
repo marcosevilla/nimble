@@ -21,6 +21,7 @@ import { cycleLabelInFilter } from '@/lib/labelFilter'
 import type { Label } from '@nimble/types'
 import { useLabelTaxonomy } from '@/hooks/useLabelTaxonomy'
 import { filterSections, isFlat } from '@/lib/labelTaxonomy'
+import { Caption } from '@/components/shared/typography'
 
 const GROUP_BY_LABELS: Record<GroupBy, string> = {
   section: 'Section',
@@ -73,8 +74,9 @@ export function TaskListHeader({
   const groupByLabel = GROUP_BY_LABELS[groupBy] ?? groupBy
   const nimbleLabel = labels.find((l) => l.name === 'nimble')
   const { groups } = useLabelTaxonomy()
-  // Callers pass the labels used in this list; archived ones drop out here.
-  const labelSections = filterSections(labels, groups)
+  // Callers pass the labels used in this list; archived ones drop out here,
+  // unless the active filter uses one (it must stay removable).
+  const labelSections = filterSections(labels, groups, new Set([...filter.labelFilter.include, ...filter.labelFilter.exclude]))
   const flatLabels = isFlat(labelSections)
 
   const toggleStatus = (s: (typeof STATUSES)[number]['value']) => {
@@ -210,7 +212,9 @@ export function TaskListHeader({
                   {labelSections.map((section) => (
                     <DropdownMenuGroup key={section.group?.id ?? 'ungrouped'}>
                       {!flatLabels && (
-                        <DropdownMenuLabel className="text-label">{section.group?.name ?? 'Ungrouped'}</DropdownMenuLabel>
+                        <DropdownMenuLabel className="pt-1 pb-0.5">
+                          <Caption>{section.group?.name ?? 'Ungrouped'}</Caption>
+                        </DropdownMenuLabel>
                       )}
                       {section.labels.map((l) => {
                         const included = filter.labelFilter.include.includes(l.id)
@@ -223,7 +227,8 @@ export function TaskListHeader({
                             className={cn(excluded && 'opacity-50')}
                           >
                             <span className="size-2 shrink-0 rounded-full" style={{ background: labelColor(l.color) }} />
-                            <span className="flex-1 min-w-0 truncate">{l.name}</span>
+                            <span className={cn('flex-1 min-w-0 truncate', l.archived_at && 'text-muted-foreground')}>{l.name}</span>
+                            {l.archived_at && <Caption>archived</Caption>}
                             {(included || excluded) && (
                               <DropdownMenuShortcut>{included ? 'Only' : 'Hide'}</DropdownMenuShortcut>
                             )}

@@ -617,6 +617,9 @@ async fn label_groups_archive_restore_and_search_round_trip() {
     assert_eq!(assigned["data"]["group"], data_id(&effort).as_str());
     let (code, ambiguous) = run(&root, &["label", "group", "assign", "COMMS", "effort"]);
     assert_eq!((code, ambiguous["error"]["code"].as_str()), (2, Some("validation")), "{ambiguous}");
+    let (code, exact) = run(&root, &["label", "group", "assign", "comms", "effort"]);
+    assert_eq!(code, 0, "an exact-case name wins over its case-insensitive twin: {exact}");
+    assert_eq!(exact["data"]["name"], "comms");
     let (code, missing) = run(&root, &["label", "archive", "nope"]);
     assert_eq!((code, missing["error"]["code"].as_str()), (1, Some("not_found")), "{missing}");
 
@@ -627,7 +630,7 @@ async fn label_groups_archive_restore_and_search_round_trip() {
 
     let (code, archived) = run(&root, &["label", "archive", "--unused"]);
     assert_eq!(code, 0, "{archived}");
-    assert_eq!(archived["data"].as_array().unwrap().len(), 3, "quick, Comms, comms");
+    assert_eq!(archived["data"].as_array().unwrap().len(), 2, "quick, Comms (comms is grouped now, so never archived)");
     let (code, restored) = run(&root, &["label", "restore", "quick"]);
     assert_eq!(code, 0, "{restored}");
     assert!(restored["data"][0]["archived_at"].is_null());
@@ -689,4 +692,56 @@ async fn seed_script_is_idempotent_and_keeps_taxonomy_labels_visible() {
     let type_id = groups[1]["id"].clone();
     assert_eq!(group_of("admin"), type_id, "the plain name is grouped");
     assert!(group_of("🛟 admin").is_null(), "the emoji variant is left ungrouped");
+}
+
+fn seed_script(root: &std::path::Path, dt: &str, extra: &[&str]) -> std::process::Output {
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/seed-label-groups.sh");
+    Command::new("bash")
+        .arg(script)
+        .args(["--profile", root.to_str().unwrap()])
+        .args(extra)
+        .env("DT", dt)
+        .env("SKIP_BACKUP", "1")
+        .output()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn seed_script_dry_run_prints_the_plan_and_writes_nothing() {
+    let root = fixture().await;
+    for name in ["deep", "quick", "stale-idea", "🛟 admin"] {
+        run(&root, &["label", "create", name]);
+    }
+    let out = seed_script(&root, env!("CARGO_BIN_EXE_dt"), &["--dry-run"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
+    assert!(stdout.contains("would create group EFFORT --pick-one"), "{stdout}");
+    assert!(stdout.contains("would put deep → EFFORT"), "{stdout}");
+    assert!(stdout.contains("warning: skipped comms"), "{stdout}");
+    assert!(stdout.contains("would archive 2: stale-idea, 🛟 admin") || stdout.contains("would archive 2: 🛟 admin, stale-idea"), "{stdout}");
+    let (_, groups) = run(&root, &["label", "group", "list"]);
+    assert!(groups["data"].as_array().unwrap().is_empty(), "dry run created no group");
+    let (_, labels) = run(&root, &["label", "list"]);
+    assert!(labels["data"].as_array().unwrap().iter().all(|l| l["archived_at"].is_null() && l["group"].is_null()));
+}
+
+#[tokio::test]
+async fn seed_script_stops_before_archiving_when_an_assignment_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = fixture().await;
+    for name in ["deep", "stale-idea"] {
+        run(&root, &["label", "create", name]);
+    }
+    // A dt that fails every `label group assign` and passes everything else through.
+    let fake = root.join("fake-dt.sh");
+    std::fs::write(&fake, format!(
+        "#!/usr/bin/env bash\nfor a in \"$@\"; do if [ \"$a\" = assign ]; then echo '{{\"version\":1,\"ok\":false,\"error\":{{\"code\":\"internal\",\"message\":\"injected\"}}}}'; exit 1; fi; done\nexec \"{}\" \"$@\"\n",
+        env!("CARGO_BIN_EXE_dt")
+    )).unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = seed_script(&root, fake.to_str().unwrap(), &[]);
+    assert_eq!(out.status.code(), Some(1), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Stopping before archiving"));
+    let (_, labels) = run(&root, &["label", "list"]);
+    assert!(labels["data"].as_array().unwrap().iter().all(|l| l["archived_at"].is_null()), "nothing archived");
 }
