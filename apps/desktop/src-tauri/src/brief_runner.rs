@@ -194,6 +194,9 @@ mod tests {
         let pool = pool().await;
         nimble_core::db::settings::set_setting(&pool, "anthropic_api_key", "sk-would-be-used").await.unwrap();
         let second = BriefRuntime::new(false, false, false);
+        let (_, composed) = run_on(&pool, &second, "2026-09-25", "2026-09-25", noon(), Mode::IfDue).await.unwrap();
+        assert!(!composed, "before Today's setup is done nothing is composed");
+        nimble_core::db::settings::set_setting(&pool, nimble_core::brief::settings::KEY_SETUP_COMPLETED_AT, "2026-09-01 07:00:00").await.unwrap();
         let (brief, composed) = run_on(&pool, &second, "2026-09-25", "2026-09-25", noon(), Mode::IfDue).await.unwrap();
         let brief = brief.unwrap();
         assert!(composed);

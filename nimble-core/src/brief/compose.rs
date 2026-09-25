@@ -35,6 +35,17 @@ pub fn retry_spacing(attempts_so_far: i64) -> chrono::Duration {
     }
 }
 
+/// Automatic composition only runs once Today's setup is done and a box
+/// that shows its picks (Top priorities or Quick wins) is on. Regenerate is
+/// the user's and skips this.
+pub async fn automatic_compose_wanted(pool: &SqlitePool) -> crate::Result<bool> {
+    if crate::db::settings::get_setting(pool, crate::brief::settings::KEY_SETUP_COMPLETED_AT).await?.is_none() {
+        return Ok(false);
+    }
+    let layout = crate::brief::settings::load_layout(pool).await?;
+    Ok(layout.iter().any(|e| e.enabled && (e.id == "priorities" || e.id == "quick_wins")))
+}
+
 /// Whether an automatic retry may start at `now`, measured from the last
 /// attempt's start. A missing or unreadable stamp never blocks.
 async fn retry_spaced_out(pool: &SqlitePool, brief: &Brief, now: chrono::NaiveDateTime) -> crate::Result<bool> {
@@ -184,7 +195,7 @@ pub enum ComposeOutcome {
 
 pub async fn compose<L: LlmClient>(pool: &SqlitePool, llm: Option<&L>, run: ComposeRun<'_>) -> crate::Result<ComposeOutcome> {
     let brief = briefs::get_brief(pool, run.date).await?.ok_or_else(|| crate::Error::Other("brief_missing".into()))?;
-    if !run.force && !compose_due(&brief) {
+    if !run.force && (!compose_due(&brief) || !automatic_compose_wanted(pool).await?) {
         return Ok(ComposeOutcome::NotDue);
     }
     // No client (no key, or a process that doesn't own the profile): the
@@ -331,6 +342,7 @@ mod tests {
         let quick = crate::db::labels::create_label(&pool, "quick", "green").await.unwrap();
         crate::db::labels::set_task_labels(&pool, &help, &[claude.id]).await.unwrap();
         crate::db::labels::set_task_labels(&pool, &errand, &[quick.id]).await.unwrap();
+        crate::db::settings::set_setting(&pool, crate::brief::settings::KEY_SETUP_COMPLETED_AT, "2026-09-01 07:00:00").await.unwrap();
         crate::db::briefs::ensure_snapshot(&pool, D, D).await.unwrap();
         Day { pool, due, help, errand }
     }
@@ -584,6 +596,37 @@ mod tests {
         let third = offline();
         compose(&d.pool, Some(&third), at_run(7, 30)).await.unwrap();
         assert_eq!((third.calls(), brief(&d.pool).await.compose_attempts), (1, 3));
+    }
+
+    #[tokio::test]
+    async fn no_automatic_call_before_setup_or_with_both_ai_boxes_hidden() {
+        let d = day().await;
+        let untouched = || FakeLlm::json(json!({"summary": "", "priorities": [], "quick_help": [], "quick_self": [], "wins": []}));
+        sqlx::query("DELETE FROM settings WHERE key = ?").bind(crate::brief::settings::KEY_SETUP_COMPLETED_AT).execute(&d.pool).await.unwrap();
+        let fake = untouched();
+        assert_eq!(compose(&d.pool, Some(&fake), run(false)).await.unwrap(), ComposeOutcome::NotDue);
+        assert_eq!(compose::<FakeLlm>(&d.pool, None, run(false)).await.unwrap(), ComposeOutcome::NotDue);
+        let b = brief(&d.pool).await;
+        assert_eq!((fake.calls(), b.compose_attempts, b.composed_at.is_none()), (0, 0, true), "setup not done: nothing called or written");
+
+        crate::db::settings::set_setting(&d.pool, crate::brief::settings::KEY_SETUP_COMPLETED_AT, "2026-09-25 06:00:00").await.unwrap();
+        crate::db::settings::set_setting(&d.pool, "brief.modules",
+            r#"[{"id":"priorities","enabled":false,"config":{}},{"id":"quick_wins","enabled":false,"config":{}}]"#).await.unwrap();
+        let fake = untouched();
+        assert_eq!(compose(&d.pool, Some(&fake), run(false)).await.unwrap(), ComposeOutcome::NotDue);
+        assert_eq!((fake.calls(), brief(&d.pool).await.compose_attempts), (0, 0), "no box shows the picks");
+        // Regenerate is the user's choice and still runs.
+        let manual = untouched();
+        regenerate(&d.pool, Some(&manual), D, at(9, 0)).await.unwrap();
+        assert_eq!(manual.calls(), 1);
+
+        // One AI box back on: the next automatic run composes.
+        crate::db::settings::set_setting(&d.pool, "brief.modules",
+            r#"[{"id":"priorities","enabled":false,"config":{}},{"id":"quick_wins","enabled":true,"config":{}}]"#).await.unwrap();
+        sqlx::query("UPDATE briefs SET composed_at = NULL, status = 'ready' WHERE date = ?").bind(D).execute(&d.pool).await.unwrap();
+        let fake = untouched();
+        compose(&d.pool, Some(&fake), run(false)).await.unwrap();
+        assert_eq!(fake.calls(), 1);
     }
 
     /// A call that never answers: the run is abandoned mid-flight (app quit,
