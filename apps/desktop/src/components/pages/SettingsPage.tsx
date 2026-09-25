@@ -1568,7 +1568,7 @@ export function SettingsPage() {
       <section id="labels" className={SECTION_CLASS}>
         <SectionHeader
           title="Labels"
-          description="Reusable tags for tasks. Colors are for your own visual sorting."
+          description="Reusable tags for tasks, sorted into groups. Turn on Pick one for a group whose labels exclude each other. Archive labels you no longer use; they stay on past tasks and can be restored."
         />
         <LabelManager />
       </section>

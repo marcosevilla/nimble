@@ -180,6 +180,7 @@ test('Label Manager: ⌥↑ moves a label into the group above, Pick one, archiv
   await expect(grip).toBeFocused()
   await page.keyboard.press('Alt+ArrowUp')
   await expect.poll(async () => (await calls(page, 'set_label_group')).at(-1)).toEqual({ labelId: 'label-bug', groupId: ids.effort })
+  await expect(section.locator('p[role=status]')).toHaveText('Moved bug to Effort, position 3 of 3')
   expect((await calls(page, 'reorder_labels')).length).toBeGreaterThan(0)
 
   await section.getByRole('switch', { name: 'Pick one in Type' }).click()
@@ -201,6 +202,8 @@ test('Label Manager: ⌥↑ moves a label into the group above, Pick one, archiv
   await section.getByRole('button', { name: 'More for group Type' }).click()
   await page.getByRole('menuitem', { name: 'Delete group' }).click()
   await expect(section.getByRole('textbox', { name: 'Group name Type' })).toHaveCount(0)
+  // Focus lands on the next row's grip (design, now under Ungrouped), not the body.
+  await expect(section.locator('[data-manager-grip="label:label-design"]')).toBeFocused()
   await expect(section.getByRole('textbox', { name: 'Rename design' })).toBeVisible() // now under Ungrouped
   await page.locator('[data-sonner-toast]').filter({ hasText: /Group "Type" deleted/ }).getByRole('button', { name: 'Undo' }).click()
   await expect(section.getByRole('textbox', { name: 'Group name Type' })).toBeVisible()

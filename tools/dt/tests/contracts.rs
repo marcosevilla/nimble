@@ -658,7 +658,7 @@ async fn seed_script_is_idempotent_and_keeps_taxonomy_labels_visible() {
     let root = fixture().await;
     // Marco 2026-09-25: the seed matches exact (plain) names only; emoji
     // near-duplicates stay ungrouped and, with no open task, get archived.
-    for name in ["deep", "quick", "comms", "admin", "🛟 admin", "📸 photography", "from-instinct", "stale-idea"] {
+    for name in ["deep", "quick", "comms", "admin", "🛟 admin", "📸 photography", "🚗 errands", "from-instinct", "stale-idea"] {
         run(&root, &["label", "create", name]);
     }
     let (_, deep) = run(&root, &["label", "list"]);
@@ -687,11 +687,13 @@ async fn seed_script_is_idempotent_and_keeps_taxonomy_labels_visible() {
     let mut archived: Vec<&str> = labels.iter()
         .filter(|l| !l["archived_at"].is_null()).map(|l| l["name"].as_str().unwrap()).collect();
     archived.sort();
-    assert_eq!(archived, ["stale-idea", "📸 photography", "🛟 admin"], "grouped labels stay visible even with no open tasks");
+    assert_eq!(archived, ["stale-idea", "🛟 admin"], "grouped labels stay visible even with no open tasks");
     let group_of = |name: &str| labels.iter().find(|l| l["name"] == name).unwrap()["group"].clone();
     let type_id = groups[1]["id"].clone();
     assert_eq!(group_of("admin"), type_id, "the plain name is grouped");
     assert!(group_of("🛟 admin").is_null(), "the emoji variant is left ungrouped");
+    assert_eq!(group_of("📸 photography"), type_id, "emoji names in the list are grouped exactly");
+    assert_eq!(group_of("🚗 errands"), type_id);
 }
 
 fn seed_script(root: &std::path::Path, dt: &str, extra: &[&str]) -> std::process::Output {
@@ -709,7 +711,7 @@ fn seed_script(root: &std::path::Path, dt: &str, extra: &[&str]) -> std::process
 #[tokio::test]
 async fn seed_script_dry_run_prints_the_plan_and_writes_nothing() {
     let root = fixture().await;
-    for name in ["deep", "quick", "stale-idea", "🛟 admin"] {
+    for name in ["deep", "quick", "stale-idea", "🛟 admin", "🚗 errands", "📸 photography"] {
         run(&root, &["label", "create", name]);
     }
     let out = seed_script(&root, env!("CARGO_BIN_EXE_dt"), &["--dry-run"]);
@@ -718,6 +720,8 @@ async fn seed_script_dry_run_prints_the_plan_and_writes_nothing() {
     assert!(stdout.contains("would create group EFFORT --pick-one"), "{stdout}");
     assert!(stdout.contains("would put deep → EFFORT"), "{stdout}");
     assert!(stdout.contains("warning: skipped comms"), "{stdout}");
+    assert!(stdout.contains("would put 🚗 errands → TYPE") && stdout.contains("would put 📸 photography → TYPE"), "{stdout}");
+    assert!(!stdout.contains("skipped 🚗") && !stdout.contains("skipped 📸"), "{stdout}");
     assert!(stdout.contains("would archive 2: stale-idea, 🛟 admin") || stdout.contains("would archive 2: 🛟 admin, stale-idea"), "{stdout}");
     let (_, groups) = run(&root, &["label", "group", "list"]);
     assert!(groups["data"].as_array().unwrap().is_empty(), "dry run created no group");

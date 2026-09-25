@@ -120,6 +120,20 @@ test('⌘K "/search " hands over to ⌘F; ⌘F stays shut while another overlay 
   await expect(search(page).getByRole('option').first()).toContainText('Zephyr deck review')
 })
 
+test('⌘K while ⌘F is open closes search and opens ⌘K (never stacked)', async ({ app, page }) => {
+  await app.open('tasks')
+  await seedSearch(page)
+  const row = page.locator('main [data-nav-row="task-01"]')
+  await row.focus()
+  await openAndType(page, 'zeph')
+  await page.keyboard.press('Meta+k')
+  const bar = page.getByRole('dialog', { name: 'Command bar' })
+  await expect(bar).toBeVisible()
+  await expect(search(page)).toHaveCount(0)
+  await expect(bar.getByRole('textbox')).toBeFocused()
+  await expect(bar.getByRole('textbox')).toHaveValue('') // carries nothing over
+})
+
 test('recent searches show on an empty query', async ({ app, page }) => {
   await app.open('tasks')
   await seedSearch(page)

@@ -155,3 +155,23 @@ export function nextGroupName(groups: readonly LabelGroup[]): string {
   if (!taken.has('new group')) return 'New group'
   for (let n = 2; ; n++) if (!taken.has(`new group ${n}`)) return `New group ${n}`
 }
+
+/** Screen-reader text for where `key` ended up, e.g. "Moved deep to EFFORT,
+ *  position 1 of 2" or "Moved group TYPE to position 1 of 2". `name` gives a
+ *  label's or group's display name (the Ungrouped header is "Ungrouped"). */
+export function describeMove(items: readonly ManagerItem[], key: string, name: (item: ManagerItem) => string): string | null {
+  const at = items.findIndex((i) => i.key === key)
+  if (at < 0) return null
+  const item = items[at]
+  if (item.kind === 'group') {
+    const groups = items.filter((i) => i.kind === 'group')
+    return `Moved group ${name(item)} to position ${groups.findIndex((g) => g.key === key) + 1} of ${groups.length}`
+  }
+  if (item.kind !== 'label') return null
+  let start = at
+  while (start > 0 && items[start - 1].kind === 'label') start--
+  let end = at
+  while (end < items.length - 1 && items[end + 1].kind === 'label') end++
+  const header = start > 0 ? items[start - 1] : null
+  return `Moved ${name(item)} to ${header ? name(header) : 'Ungrouped'}, position ${at - start + 1} of ${end - start + 1}`
+}

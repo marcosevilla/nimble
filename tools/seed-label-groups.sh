@@ -11,7 +11,7 @@
 # warning), the script stops with exit 1 BEFORE archiving anything.
 #
 # Labels are matched by EXACT name only (Marco, 2026-09-25): the live DB has
-# near-duplicates such as "admin" / "🛟 admin", and only the plain name is
+# near-duplicates such as "admin" / "🛟 admin", and only the listed name is
 # grouped. The emoji variants stay ungrouped, so with no open task they are
 # archived by the final "unused" step like any other ungrouped label.
 # Grouped labels are never archived (`dt label unused` never lists them).
@@ -29,7 +29,9 @@ done
 dtj() { "$DT" --json ${EXTRA[@]+"${EXTRA[@]}"} "$@"; }
 
 EFFORT=(deep quick)
-TYPE=(comms admin errands photography health)
+# Exact live names (2026-09-25): errands and photography exist only with their
+# emoji prefix; plain "admin" is kept and "🛟 admin" stays ungrouped (archived).
+TYPE=(comms admin "🚗 errands" "📸 photography" health)
 STATE=(waiting avoidance)
 ASSIST=(needs-claude)
 SYSTEM=(from-instinct nimble)

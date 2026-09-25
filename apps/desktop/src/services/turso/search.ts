@@ -8,7 +8,7 @@
  */
 import type { TaskSearchFilters, TaskSearchHit } from '@nimble/types'
 import { likeSnippet, searchTokens } from '@/lib/taskSearch'
-import { integer, pipeline, str, text, type TursoArg } from './client'
+import { integer, query, str, text, type TursoArg } from './client'
 import { SELECT_COLS, toTask } from './tasks'
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`)
@@ -39,17 +39,20 @@ export async function searchTasksLike(input: string, filters: TaskSearchFilters 
   for (const token of tokens) args.push(text(`%${escapeLike(token)}%`))
   args.push(integer(limit))
 
-  const [rows, labelRows] = await pipeline([
-    {
-      sql: `SELECT ${SELECT_COLS} FROM local_tasks WHERE ${where.join(' AND ')}
-            ORDER BY CASE WHEN status = 'complete' THEN 1 ELSE 0 END,
-                     CASE WHEN ${titleHasAll} THEN 0 ELSE 1 END,
-                     updated_at DESC
-            LIMIT ?`,
-      args,
-    },
-    { sql: 'SELECT task_id, label_id FROM task_labels ORDER BY rowid', args: [] },
-  ])
+  const rows = await query(
+    `SELECT ${SELECT_COLS} FROM local_tasks WHERE ${where.join(' AND ')}
+     ORDER BY CASE WHEN status = 'complete' THEN 1 ELSE 0 END,
+              CASE WHEN ${titleHasAll} THEN 0 ELSE 1 END,
+              updated_at DESC
+     LIMIT ?`,
+    args,
+  )
+  // Labels for the hits only (≤ limit ids), never the whole join table.
+  const ids = rows.map((r) => str(r, 'id'))
+  const labelRows = ids.length === 0 ? [] : await query(
+    `SELECT task_id, label_id FROM task_labels WHERE task_id IN (${ids.map(() => '?').join(', ')}) ORDER BY rowid`,
+    ids.map((id) => text(id)),
+  )
   const labelsByTask = new Map<string, string[]>()
   for (const row of labelRows) {
     const id = str(row, 'task_id')

@@ -66,3 +66,15 @@ test('nextGroupName avoids taken names, ignoring case', () => {
   assert.equal(nextGroupName([]), 'New group')
   assert.equal(nextGroupName([g('a', 0, { name: 'New group' }), g('b', 1, { name: 'new group 2' })]), 'New group 3')
 })
+
+import { describeMove } from '../src/lib/labelManagerModel.ts'
+
+test('describeMove: announces the group and position after a move', () => {
+  const name = (i) => (i.kind === 'group' ? i.groupId.toUpperCase() : i.kind === 'ungrouped' ? 'Ungrouped' : i.labelId)
+  const up = moveByKey(items, 'label:comms', 'up')
+  assert.equal(describeMove(up.items, 'label:comms', name), 'Moved comms to EFFORT, position 3 of 3')
+  const out = applyDrop(items, 'label:deep', UNGROUPED_KEY)
+  assert.equal(describeMove(out.items, 'label:deep', name), 'Moved deep to Ungrouped, position 1 of 2')
+  const g = moveByKey(items, 'group:effort', 'down')
+  assert.equal(describeMove(g.items, 'group:effort', name), 'Moved group EFFORT to position 2 of 2')
+})

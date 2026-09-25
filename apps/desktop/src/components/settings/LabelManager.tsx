@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type Announcements, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Archive, GripVertical, MoreHorizontal, Plus, Trash2 } from 'lucide-react'
@@ -11,13 +11,13 @@ import { useDataProvider } from '@/services/provider-context'
 import { useLabelTaxonomy } from '@/hooks/useLabelTaxonomy'
 import { useDeferredDeletes } from '@/hooks/useDeferredDeletes'
 import { managerSections } from '@/lib/labelTaxonomy'
-import { applyDrop, applyToTaxonomy, flattenManager, fullLabelOrder, moveByKey, nextGroupName, type DropResult } from '@/lib/labelManagerModel'
+import { applyDrop, applyToTaxonomy, describeMove, flattenManager, fullLabelOrder, moveByKey, nextGroupName, type DropResult, type ManagerItem } from '@/lib/labelManagerModel'
 import { createUndoable } from '@/lib/undoable'
 import { DEFERRED_DELETE_MS } from '@/lib/deferredDelete'
 import { showUndoToast } from '@/components/shared/undoToast'
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection'
 import { IconButton } from '@/components/shared/IconButton'
-import { Caption } from '@/components/shared/typography'
+import { Caption, FieldLabel } from '@/components/shared/typography'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -102,6 +102,29 @@ export function LabelManager() {
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     if (over && active.id !== over.id) void persist(applyDrop(items, String(active.id), String(over.id)))
   }
+
+  // Screen-reader wording: real names, and where a move landed.
+  const itemName = useCallback((item: ManagerItem) => {
+    if (item.kind === 'ungrouped') return 'Ungrouped'
+    if (item.kind === 'group') return view.groups.find((g) => g.id === item.groupId)?.name ?? 'group'
+    return view.labels.find((l) => l.id === item.labelId)?.name ?? 'label'
+  }, [view])
+  const keyName = useCallback((key: string | number) => {
+    const item = items.find((i) => i.key === String(key))
+    if (!item) return 'item'
+    return item.kind === 'group' ? `group ${itemName(item)}` : itemName(item)
+  }, [items, itemName])
+  const announcements: Announcements = useMemo(() => ({
+    onDragStart: ({ active }) => `Picked up ${keyName(active.id)}. Use the arrow keys to move, Space to drop, Escape to cancel.`,
+    onDragOver: ({ active, over }) => (over ? `${keyName(active.id)} is over ${keyName(over.id)}.` : `${keyName(active.id)} is no longer over a row.`),
+    onDragEnd: ({ active, over }) => {
+      const result = over && active.id !== over.id ? applyDrop(items, String(active.id), String(over.id)) : null
+      return (result && describeMove(result.items, String(active.id), itemName)) ?? `Dropped ${keyName(active.id)}. Nothing moved.`
+    },
+    onDragCancel: ({ active }) => `Moving ${keyName(active.id)} was cancelled.`,
+  }), [items, itemName, keyName])
+  // ⌥↑/⌥↓ moves have no drag lifecycle: announce them in a polite status region.
+  const [moveNote, setMoveNote] = useState('')
   // ⌥↑/⌥↓ from a row's grip (never from its rename field, where ⌥↑ moves the caret).
   const onMoveKey = (key: string) => (e: KeyboardEvent) => {
     if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
@@ -109,7 +132,9 @@ export function LabelManager() {
     e.preventDefault()
     e.stopPropagation()
     refocus.current = { selector: `[data-manager-grip="${window.CSS.escape(key)}"]` }
-    void persist(moveByKey(items, key, e.key === 'ArrowUp' ? 'up' : 'down'))
+    const result = moveByKey(items, key, e.key === 'ArrowUp' ? 'up' : 'down')
+    if (result) setMoveNote(describeMove(result.items, key, itemName) ?? '')
+    void persist(result)
   }
 
   const handleCreate = useCallback(async () => {
@@ -155,7 +180,22 @@ export function LabelManager() {
     }
   }, [dp, reload])
 
+  // After a delete, focus goes to the next row's grip, else "New group".
+  // The confirm dialog / menu reads this when it closes (finalFocus).
+  const pendingFocus = useRef<string | null>(null)
+  const nextFocusSelector = useCallback((key: string) => {
+    const at = items.findIndex((i) => i.key === key)
+    const next = items.slice(at + 1).find((i) => i.kind !== 'ungrouped')
+    return next ? `[data-manager-grip="${window.CSS.escape(next.key)}"]` : '[data-new-group]'
+  }, [items])
+  const deleteFinalFocus = useCallback((): boolean | HTMLElement => {
+    const selector = pendingFocus.current
+    pendingFocus.current = null
+    return (selector && document.querySelector<HTMLElement>(selector)) || true
+  }, [])
+
   const handleDelete = useCallback((label: Label) => {
+    pendingFocus.current = nextFocusSelector(`label:${label.id}`)
     defer(label.id, `Label "${label.name}" deleted`, async () => {
       try {
         await dp.labels.delete(label.id)
@@ -165,7 +205,7 @@ export function LabelManager() {
         reload()
       }
     })
-  }, [dp, defer, reload])
+  }, [dp, defer, reload, nextFocusSelector])
 
   const newGroup = async () => {
     try {
@@ -198,6 +238,7 @@ export function LabelManager() {
   }
 
   const deleteGroup = (group: LabelGroup) => {
+    pendingFocus.current = nextFocusSelector(`group:${group.id}`)
     defer(`group:${group.id}`, `Group "${group.name}" deleted. Its labels are ungrouped.`, async () => {
       try {
         await dp.labels.groups.delete(group.id)
@@ -246,13 +287,14 @@ export function LabelManager() {
   }
 
   const labelRow = (label: Label) => (
-    <LabelRow label={label} onRename={handleRename} onColorChange={handleColorChange} onDelete={() => handleDelete(label)} />
+    <LabelRow label={label} onRename={handleRename} onColorChange={handleColorChange} onDelete={() => handleDelete(label)} deleteFinalFocus={deleteFinalFocus} />
   )
   const systemCount = model.system.reduce((n, s) => n + s.labels.length, 0)
 
   return (
     <div className="space-y-4">
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <p role="status" aria-live="polite" className="sr-only">{moveNote}</p>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd} accessibility={{ announcements }}>
         <SortableContext items={items.map((i) => i.key)} strategy={verticalListSortingStrategy}>
           <div className="space-y-0.5">
             {items.map((item) => {
@@ -261,7 +303,7 @@ export function LabelManager() {
                 if (!group) return null
                 return (
                   <SortableRow key={item.key} id={item.key} gripLabel={`Drag group ${group.name}`} onKeyDown={onMoveKey(item.key)} className="pt-3 first:pt-0">
-                    <GroupHeader group={group} onRename={renameGroup} onPickOne={setPickOne} onDelete={() => deleteGroup(group)} />
+                    <GroupHeader group={group} onRename={renameGroup} onPickOne={setPickOne} onDelete={() => deleteGroup(group)} deleteFinalFocus={deleteFinalFocus} />
                   </SortableRow>
                 )
               }
@@ -350,9 +392,10 @@ export function LabelManager() {
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowForm(true)}>
-            + Add label
+            <Plus className="size-3" />
+            Add label
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void newGroup()}>
+          <Button variant="outline" size="sm" onClick={() => void newGroup()} data-new-group="">
             <Plus className="size-3" />
             New group
           </Button>
@@ -414,11 +457,13 @@ function GroupHeader({
   onRename,
   onPickOne,
   onDelete,
+  deleteFinalFocus,
 }: {
   group: LabelGroup
   onRename: (id: string, name: string) => Promise<boolean>
   onPickOne: (id: string, exclusive: boolean) => void
   onDelete: () => void
+  deleteFinalFocus: () => boolean | HTMLElement
 }) {
   const [draft, setDraft] = useState(group.name)
   // A rename from elsewhere (sync, dt) resets the field — adjusted during
@@ -450,15 +495,17 @@ function GroupHeader({
         aria-label={`Group name ${group.name}`}
         className="min-w-0 flex-1 rounded-md bg-transparent px-1 text-body-strong underline-offset-4 decoration-muted-foreground-subtle hover:underline focus-visible:no-underline"
       />
-      <span className="flex shrink-0 items-center gap-1.5">
+      {/* The visible words are a real, clickable label for the switch; the
+          switch's own name adds which group (it contains "Pick one"). */}
+      <FieldLabel className="flex shrink-0 cursor-pointer items-center gap-1.5 text-meta text-muted-foreground">
         <Switch
           size="sm"
           checked={group.exclusive}
           onCheckedChange={(checked) => onPickOne(group.id, checked)}
           aria-label={`Pick one in ${group.name}`}
         />
-        <span className="text-meta text-muted-foreground" aria-hidden>Pick one</span>
-      </span>
+        Pick one
+      </FieldLabel>
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -467,7 +514,7 @@ function GroupHeader({
             </IconButton>
           }
         />
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent align="end" finalFocus={deleteFinalFocus}>
           <DropdownMenuItem onClick={onDelete}>
             <Trash2 className="size-3.5" />
             Delete group
@@ -509,11 +556,13 @@ function LabelRow({
   onRename,
   onColorChange,
   onDelete,
+  deleteFinalFocus,
 }: {
   label: Label
   onRename: (id: string, name: string) => Promise<boolean>
   onColorChange: (id: string, color: string) => void
   onDelete: () => void
+  deleteFinalFocus: () => boolean | HTMLElement
 }) {
   const [draft, setDraft] = useState(label.name)
 
@@ -587,7 +636,7 @@ function LabelRow({
             </IconButton>
           }
         />
-        <AlertDialogContent>
+        <AlertDialogContent finalFocus={deleteFinalFocus}>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete "{label.name}"?</AlertDialogTitle>
             <AlertDialogDescription>

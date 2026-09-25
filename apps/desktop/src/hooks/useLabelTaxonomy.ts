@@ -43,10 +43,21 @@ export function fetchLabelTaxonomy(force = false): Promise<LabelTaxonomy> {
   return inflight
 }
 
+// Every refresh trigger in one tick (a mutation's explicit reload, its
+// `tasks-changed`, the backend's `labels` event) collapses into one fetch.
+let refreshQueued = false
+function scheduleRefresh() {
+  if (refreshQueued) return
+  refreshQueued = true
+  setTimeout(() => {
+    refreshQueued = false
+    fetchLabelTaxonomy(true).catch(() => {})
+  }, 0)
+}
+
 if (typeof window !== 'undefined') {
-  const refresh = () => { fetchLabelTaxonomy(true).catch(() => {}) }
-  window.addEventListener('tasks-changed', refresh)
-  subscribeDataChanges('labels', refresh)
+  window.addEventListener('tasks-changed', scheduleRefresh)
+  subscribeDataChanges('labels', scheduleRefresh)
 }
 
 export function useLabelTaxonomy(): LabelTaxonomy & { loading: boolean; reload: () => void } {
@@ -66,6 +77,6 @@ export function useLabelTaxonomy(): LabelTaxonomy & { loading: boolean; reload: 
       subscribers.delete(onChange)
     }
   }, [])
-  const reload = useCallback(() => { fetchLabelTaxonomy(true).catch(() => {}) }, [])
+  const reload = useCallback(() => scheduleRefresh(), [])
   return { ...state, loading, reload }
 }

@@ -122,8 +122,8 @@ export function CommandBar() {
   const submittingRef = useRef(false)
 
   // Open/close
-  const openBar = useCallback(() => {
-    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  const openBar = useCallback((opener?: HTMLElement | null) => {
+    openerRef.current = opener !== undefined ? opener : document.activeElement instanceof HTMLElement ? document.activeElement : null
     setOpen(true)
     submittingRef.current = false
     refresh()
@@ -165,7 +165,11 @@ export function CommandBar() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
         if (open) closeBar()
-        else openBar()
+        else if (useTaskSearchStore.getState().open) {
+          // Never stack ⌘K on ⌘F: search closes (carrying nothing over) and
+          // ⌘K opens with search's own opener as the place to return to.
+          openBar(useTaskSearchStore.getState().closeForHandoff())
+        } else openBar()
       }
     }
     window.addEventListener('open-command-bar', handleOpen)

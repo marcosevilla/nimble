@@ -76,7 +76,7 @@ function TaskSearchDialog({ open }: { open: boolean }) {
   const { labels } = useLabelTaxonomy()
   const [query, setQuery] = useState(initialQuery)
   const [filters, setFilters] = useState<TaskSearchFilters>(EMPTY_SEARCH_FILTERS)
-  const [result, setResult] = useState<{ key: string; hits: TaskSearchHit[] } | null>(null)
+  const [result, setResult] = useState<{ key: string; hits: TaskSearchHit[]; failed?: boolean } | null>(null)
   const [recent, setRecent] = useState<string[]>(() => loadRecent(safeStorage()))
   const [selected, setSelected] = useState('')
   const guard = useRef(createLatestGuard())
@@ -97,7 +97,10 @@ function TaskSearchDialog({ open }: { open: boolean }) {
       const id = guard.current.next()
       dp.tasks.search(trimmed, filters).then(
         (hits) => { if (guard.current.isLatest(id)) setResult({ key: requestKey, hits }) },
-        () => { if (guard.current.isLatest(id)) setResult({ key: requestKey, hits: [] }) },
+        (e: unknown) => {
+          console.error('Task search failed', e)
+          if (guard.current.isLatest(id)) setResult({ key: requestKey, hits: [], failed: true })
+        },
       )
     }, SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
@@ -106,6 +109,7 @@ function TaskSearchDialog({ open }: { open: boolean }) {
   // The previous results stay up while the next query runs (no flicker).
   const hits = trimmed && result ? result.hits : []
   const settled = !trimmed || result?.key === requestKey
+  const failed = settled && !!trimmed && !!result?.failed
   const { open: openHits, completed } = groupHits(hits)
   const projectName = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects])
   const filtersOn = hasActiveFilters(filters)
@@ -230,7 +234,10 @@ function TaskSearchDialog({ open }: { open: boolean }) {
                   <Skeleton className="h-4 w-3/5" />
                 </div>
               )}
-              {trimmed && settled && hits.length === 0 && (
+              {failed && (
+                <EmptyState size="compact">Search isn't available right now.</EmptyState>
+              )}
+              {trimmed && settled && !failed && hits.length === 0 && (
                 <EmptyState
                   size="compact"
                   action={filtersOn ? (
