@@ -71,10 +71,11 @@ test('prompt never promises comment refresh or guilt framing', () => {
 test('linked route names the external task and how results reach Nimble', () => {
   const text = buildFocusPrompt(task(), [], snapshot(), { capabilities: caps })
   assert.ok(text.includes('It is linked to todoist task 8123456789012345678.'), text)
-  assert.ok(text.includes('Put results in subtasks or the description of that todoist task; Nimble pulls them in on its next sync.'), text)
+  assert.ok(text.includes('Write results to Nimble with the `dt` CLI using Nimble task ID'), text)
+  assert.ok(text.includes('Nimble syncs them to the todoist task. Do not also write them to todoist; that creates duplicates.'), text)
+  assert.doesNotMatch(text, /Put results in subtasks or the description of that/)
   assert.ok(text.includes('Task comments are not shown in Nimble.'), text)
   assert.doesNotMatch(text, /reply here/i)
-  assert.doesNotMatch(text, /\bdt\b/)
   assert.ok(text.includes('**External ID:** todoist 8123456789012345678'))
 })
 
