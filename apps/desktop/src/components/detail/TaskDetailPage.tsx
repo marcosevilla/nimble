@@ -8,7 +8,6 @@ import type { Section, Label } from '@nimble/types'
 import { useAppStore } from '@/stores/appStore'
 import { useTasksNavStore } from '@/stores/tasksNavStore'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
-import { cn } from '@/lib/utils'
 import { StatusDropdown } from '@/components/tasks/StatusDropdown'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Sparkles, Plus, Ellipsis, ChevronLeft } from 'lucide-react'
@@ -473,15 +472,12 @@ export function TaskDetailPage() {
               onKeyDown={handleDescKeyDown}
               placeholder="Description"
               rows={1}
-              className={cn(
-                'min-h-0 resize-none border-none bg-transparent py-0 shadow-none',
-                // -mx-1 px-1 nets to the same visual left edge as the display
-                // state's px-0 (net offset 0), but gives the caret/first
-                // glyph interior room so it isn't clipped by the page's
-                // overflow-x-hidden scroll container (Dashboard.tsx).
-                '-mx-1 px-1',
-                'text-body placeholder:text-foreground/25',
-              )}
+              variant="ghost"
+              // The ghost well's -mx-2 px-2 already nets to the display
+              // state's left edge (and keeps the caret clear of the page's
+              // overflow-x-hidden scroll container); -my-1 cancels its py-1
+              // so swapping display → edit doesn't move the subtasks below.
+              className="-my-1 text-body placeholder:text-foreground/25"
             />
           ) : task.description ? (
             // TiptapEditor's shared editorProps force a 200px min-height
