@@ -71,7 +71,11 @@ async fn a_recurring_occurrence_counts_once_per_due_date() {
     assert_eq!(e.len(), 1, "{e:?}");
     assert_eq!(e[0].id, format!("recur:{id}:2026-08-16"));
     assert_eq!((e[0].kind.as_str(), e[0].points, e[0].date.as_str()), ("recur", 2, "2026-08-16"));
-    // The next occurrence is a new event; the same occurrence never repeats.
+    // The same occurrence never repeats: put its due date back and complete it again.
+    sqlx::query("UPDATE local_tasks SET due_date='2026-08-16' WHERE id=?").bind(&id).execute(&pool).await.unwrap();
+    update_task_status_at(&pool, &id, "complete", None, today).await.unwrap();
+    assert_eq!(events(&pool).await.len(), 1);
+    // The next occurrence (now due 2026-08-17) is a new event.
     update_task_status_at(&pool, &id, "complete", None, today).await.unwrap();
     let ids: Vec<String> = events(&pool).await.into_iter().map(|x| x.id).collect();
     assert_eq!(ids.len(), 2, "{ids:?}");
@@ -125,4 +129,20 @@ async fn a_broken_ledger_never_fails_the_completion() {
     update_task_status(&pool, &id, "complete", None).await.unwrap();
     let status: String = sqlx::query_scalar("SELECT status FROM local_tasks WHERE id=?").bind(&id).fetch_one(&pool).await.unwrap();
     assert_eq!(status, "complete");
+}
+
+#[tokio::test]
+async fn a_ledger_write_that_aborts_the_transaction_fails_the_completion() {
+    // SQLite rolled the whole transaction back (FULL/IOERR/NOMEM); carrying on
+    // would run the sync/outbox writes in autocommit for a lost mutation.
+    let pool = test_pool().await;
+    let id = task(&pool, "Lost write", 1).await;
+    sqlx::raw_sql("CREATE TRIGGER karma_boom BEFORE INSERT ON karma_events BEGIN SELECT RAISE(ROLLBACK, 'boom'); END")
+        .execute(&pool).await.unwrap();
+    assert!(update_task_status(&pool, &id, "complete", None).await.is_err());
+    let status: String = sqlx::query_scalar("SELECT status FROM local_tasks WHERE id=?").bind(&id).fetch_one(&pool).await.unwrap();
+    assert_eq!(status, "todo");
+    let outbox: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_log WHERE row_id=? AND operation='UPDATE'")
+        .bind(&id).fetch_one(&pool).await.unwrap();
+    assert_eq!(outbox, 0, "no half-applied sync rows");
 }

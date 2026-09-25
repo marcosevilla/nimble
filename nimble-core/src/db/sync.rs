@@ -1026,7 +1026,11 @@ fn build_snapshot_upsert_sql(table_name: &str, columns: &[&str]) -> String {
         .filter(|c| !pk_cols.contains(c))
         .map(|c| { let name = if *c == "group" { "\"group\"" } else { c }; format!("{name} = excluded.{name}") })
         .collect();
-    let action = if set_clauses.is_empty() {
+    // `karma_events` is an append-only ledger with deterministic ids: the
+    // first row for an id wins on every device (matching the local
+    // `INSERT OR IGNORE` in db::karma), so a pulled or pushed copy never
+    // rewrites a row's date or created_at.
+    let action = if set_clauses.is_empty() || table_name == "karma_events" {
         "DO NOTHING".to_string()
     } else {
         format!("DO UPDATE SET {}", set_clauses.join(", "))
@@ -3505,6 +3509,23 @@ mod v19_sync_tests {
         super::apply_remote_change(&pool, "karma_events", id, "INSERT", Some(&snap)).await.unwrap();
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM karma_events").fetch_one(&pool).await.unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[tokio::test]
+    async fn karma_events_are_append_only_across_devices() {
+        let sql = super::build_snapshot_upsert_sql("karma_events", &["id", "date", "kind", "points", "task_id", "created_at"]);
+        assert!(sql.ends_with("ON CONFLICT(id) DO NOTHING"), "got {sql}");
+        let pool = test_pool().await;
+        let id = "recur:t1:2026-09-20";
+        let local = serde_json::json!({"id": id, "date": "2026-09-25", "kind": "recur", "points": 1,
+            "task_id": "t1", "created_at": "2026-09-25 07:00:00"}).to_string();
+        let remote = serde_json::json!({"id": id, "date": "2026-09-26", "kind": "recur", "points": 1,
+            "task_id": "t1", "created_at": "2026-09-26 08:00:00"}).to_string();
+        super::apply_remote_change(&pool, "karma_events", id, "INSERT", Some(&local)).await.unwrap();
+        super::apply_remote_change(&pool, "karma_events", id, "INSERT", Some(&remote)).await.unwrap();
+        let row: (String, String) = sqlx::query_as("SELECT date, created_at FROM karma_events WHERE id = ?")
+            .bind(id).fetch_one(&pool).await.unwrap();
+        assert_eq!(row, ("2026-09-25".to_string(), "2026-09-25 07:00:00".to_string()), "the first row wins");
     }
 }
 

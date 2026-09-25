@@ -13,7 +13,8 @@
 //!
 //! Writes are fire-and-forget like `activity::log_activity`: each insert runs
 //! in its own SAVEPOINT on the caller's connection; a failure rolls back that
-//! savepoint only and is logged, never returned. `_tx` helpers never touch the
+//! savepoint only and is logged, never returned, except when SQLite has
+//! already rolled back the caller's whole transaction (see `record_tx`). `_tx` helpers never touch the
 //! pool (test pools have one connection; the desktop pull holds a write guard).
 //!
 //! Days are LOCAL calendar dates. `created_at` is the local moment the event
@@ -108,19 +109,19 @@ pub fn recur_event(task_id: &str, occurrence_due: &str, priority: i64, at: &str)
 }
 
 /// Insert one event (and its sync_log row) inside a savepoint on the caller's
-/// connection. Returns true when the row is new. Never propagates an error.
-pub(crate) async fn record_tx(conn: &mut SqliteConnection, e: &KarmaEvent) -> bool {
-    match try_record_tx(conn, e).await {
-        Ok(inserted) => inserted,
-        Err(err) => {
-            log::warn!("karma: {} not recorded: {err}", e.id);
-            false
-        }
+/// connection. Returns `Ok(true)` when the row is new.
+///
+/// A statement error (missing table, constraint, bad snapshot) is logged and
+/// swallowed: the savepoint is rolled back and `Ok(false)` returned, so the
+/// caller's mutation carries on. The one hard error is when the savepoint
+/// itself can't be unwound: SQLite has already rolled back the caller's whole
+/// transaction (SQLITE_FULL / IOERR / NOMEM), and carrying on would run the
+/// caller's remaining writes in autocommit for a mutation that was lost.
+pub(crate) async fn record_tx(conn: &mut SqliteConnection, e: &KarmaEvent) -> crate::Result<bool> {
+    if let Err(err) = sqlx::query("SAVEPOINT karma_event").execute(&mut *conn).await {
+        log::warn!("karma: {} not recorded (savepoint): {err}", e.id);
+        return Ok(false);
     }
-}
-
-async fn try_record_tx(conn: &mut SqliteConnection, e: &KarmaEvent) -> crate::Result<bool> {
-    sqlx::query("SAVEPOINT karma_event").execute(&mut *conn).await?;
     let wrote: crate::Result<bool> = async {
         let n = sqlx::query(&format!("INSERT OR IGNORE INTO karma_events ({COLS}) VALUES (?, ?, ?, ?, ?, ?)"))
             .bind(&e.id).bind(&e.date).bind(&e.kind).bind(e.points).bind(&e.task_id).bind(&e.created_at)
@@ -138,45 +139,48 @@ async fn try_record_tx(conn: &mut SqliteConnection, e: &KarmaEvent) -> crate::Re
             Ok(inserted)
         }
         Err(err) => {
+            log::warn!("karma: {} not recorded: {err}", e.id);
             sqlx::query("ROLLBACK TO karma_event").execute(&mut *conn).await?;
             sqlx::query("RELEASE karma_event").execute(&mut *conn).await?;
-            Err(err)
+            Ok(false)
         }
     }
 }
 
 /// A task row just became complete on `conn` (any writer). Records
-/// `task:<id>:<completed_at>` from the row as stored.
-pub(crate) async fn on_completed_tx(conn: &mut SqliteConnection, task_id: &str) {
+/// `task:<id>:<completed_at>` from the row as stored. Errors only when the
+/// caller's transaction is gone (see `record_tx`).
+pub(crate) async fn on_completed_tx(conn: &mut SqliteConnection, task_id: &str) -> crate::Result<()> {
     let row: Result<Option<(i64, Option<String>)>, sqlx::Error> =
         sqlx::query_as("SELECT priority, completed_at FROM local_tasks WHERE id = ?")
             .bind(task_id).fetch_optional(&mut *conn).await;
     match row {
         Ok(Some((priority, Some(completed_at)))) => {
             if let Some(e) = completion_event(task_id, priority, &completed_at) {
-                record_tx(conn, &e).await;
+                record_tx(conn, &e).await?;
             }
         }
         Ok(_) => {}
         Err(err) => log::warn!("karma: completion of {task_id} not read: {err}"),
     }
+    Ok(())
 }
 
 /// A row that was complete (stamped `prior_completed_at`) is open again.
 /// Reverses the original once, on the original's day. Nothing when there is
 /// no original (e.g. completed before the ledger existed and never backfilled).
-pub(crate) async fn on_reopened_tx(conn: &mut SqliteConnection, task_id: &str, prior_completed_at: Option<&str>) {
-    let Some(stamp) = prior_completed_at else { return };
+pub(crate) async fn on_reopened_tx(conn: &mut SqliteConnection, task_id: &str, prior_completed_at: Option<&str>) -> crate::Result<()> {
+    let Some(stamp) = prior_completed_at else { return Ok(()) };
     let original_id = format!("task:{task_id}:{stamp}");
     let original: Result<Option<KarmaEvent>, sqlx::Error> =
         sqlx::query_as(&format!("SELECT {COLS} FROM karma_events WHERE id = ?"))
             .bind(&original_id).fetch_optional(&mut *conn).await;
     let original = match original {
         Ok(Some(o)) => o,
-        Ok(None) => return,
+        Ok(None) => return Ok(()),
         Err(err) => {
             log::warn!("karma: reversal of {original_id} not read: {err}");
-            return;
+            return Ok(());
         }
     };
     let reversal = KarmaEvent {
@@ -187,14 +191,27 @@ pub(crate) async fn on_reopened_tx(conn: &mut SqliteConnection, task_id: &str, p
         task_id: Some(task_id.into()),
         created_at: now_local(),
     };
-    record_tx(conn, &reversal).await;
+    record_tx(conn, &reversal).await?;
+    Ok(())
 }
 
 /// A recurring occurrence due `occurrence_due` was completed at `at` (local).
-pub(crate) async fn on_recurred_tx(conn: &mut SqliteConnection, task_id: &str, occurrence_due: &str, priority: i64, at: &str) {
+pub(crate) async fn on_recurred_tx(conn: &mut SqliteConnection, task_id: &str, occurrence_due: &str, priority: i64, at: &str) -> crate::Result<()> {
     if let Some(e) = recur_event(task_id, occurrence_due, priority, at) {
-        record_tx(conn, &e).await;
+        record_tx(conn, &e).await?;
     }
+    Ok(())
+}
+
+/// The local funnel's variant: the occurrence counts on the caller's `today`
+/// (which may be fixed in tests, or a second before midnight), while
+/// `created_at` is the real local moment.
+pub(crate) async fn on_recurred_on_tx(conn: &mut SqliteConnection, task_id: &str, occurrence_due: &str, priority: i64, today: NaiveDate) -> crate::Result<()> {
+    if let Some(mut e) = recur_event(task_id, occurrence_due, priority, &now_local()) {
+        e.date = day(today);
+        record_tx(conn, &e).await?;
+    }
+    Ok(())
 }
 
 /// Every event, oldest day first (tests, `dt`, debugging).
@@ -241,8 +258,8 @@ mod ledger_tests {
     async fn recording_is_idempotent_and_logs_one_sync_row() {
         let pool = test_pool().await;
         let mut tx = pool.begin().await.unwrap();
-        assert!(record_tx(&mut tx, &ev("task:t1:x")).await);
-        assert!(!record_tx(&mut tx, &ev("task:t1:x")).await);
+        assert!(record_tx(&mut tx, &ev("task:t1:x")).await.unwrap());
+        assert!(!record_tx(&mut tx, &ev("task:t1:x")).await.unwrap());
         tx.commit().await.unwrap();
         assert_eq!(list_events(&pool).await.unwrap().len(), 1);
         let logs: Vec<(String, String)> = sqlx::query_as(
@@ -258,7 +275,7 @@ mod ledger_tests {
         let mut tx = pool.begin().await.unwrap();
         sqlx::query("INSERT INTO settings (key, value, updated_at) VALUES ('probe', '1', datetime('now'))")
             .execute(&mut *tx).await.unwrap();
-        assert!(!record_tx(&mut tx, &ev("task:t1:x")).await);
+        assert!(!record_tx(&mut tx, &ev("task:t1:x")).await.unwrap(), "a statement error is swallowed");
         tx.commit().await.unwrap();
         assert_eq!(crate::db::settings::get_setting(&pool, "probe").await.unwrap().as_deref(), Some("1"));
     }
@@ -267,14 +284,14 @@ mod ledger_tests {
     async fn a_reversal_needs_its_original_and_mirrors_it_once() {
         let pool = test_pool().await;
         let mut tx = pool.begin().await.unwrap();
-        on_reopened_tx(&mut tx, "t1", Some("2026-09-24 10:00:00")).await; // nothing to reverse yet
+        on_reopened_tx(&mut tx, "t1", Some("2026-09-24 10:00:00")).await.unwrap(); // nothing to reverse yet
         let mut original = ev("task:t1:2026-09-24 10:00:00");
         original.date = "2026-09-24".into();
         original.points = 2;
-        record_tx(&mut tx, &original).await;
-        on_reopened_tx(&mut tx, "t1", Some("2026-09-24 10:00:00")).await;
-        on_reopened_tx(&mut tx, "t1", Some("2026-09-24 10:00:00")).await;
-        on_reopened_tx(&mut tx, "t1", None).await;
+        record_tx(&mut tx, &original).await.unwrap();
+        on_reopened_tx(&mut tx, "t1", Some("2026-09-24 10:00:00")).await.unwrap();
+        on_reopened_tx(&mut tx, "t1", Some("2026-09-24 10:00:00")).await.unwrap();
+        on_reopened_tx(&mut tx, "t1", None).await.unwrap();
         tx.commit().await.unwrap();
         let events = list_events(&pool).await.unwrap();
         let rev: Vec<&KarmaEvent> = events.iter().filter(|x| x.kind == "untask").collect();
@@ -288,11 +305,55 @@ mod ledger_tests {
         sqlx::query("INSERT INTO local_tasks (id, content, project_id, priority, status, completed, completed_at) VALUES ('t9', 'x', 'inbox', 3, 'complete', 1, '2026-09-25 18:00:00')")
             .execute(&pool).await.unwrap();
         let mut tx = pool.begin().await.unwrap();
-        on_completed_tx(&mut tx, "t9").await;
-        on_completed_tx(&mut tx, "missing").await; // no row: nothing, no error
-        on_recurred_tx(&mut tx, "t9", "2026-09-25", 3, "2026-09-25 18:00:00").await;
+        on_completed_tx(&mut tx, "t9").await.unwrap();
+        on_completed_tx(&mut tx, "missing").await.unwrap(); // no row: nothing, no error
+        on_recurred_tx(&mut tx, "t9", "2026-09-25", 3, "2026-09-25 18:00:00").await.unwrap();
         tx.commit().await.unwrap();
         let ids: Vec<String> = list_events(&pool).await.unwrap().into_iter().map(|e| e.id).collect();
         assert_eq!(ids, ["recur:t9:2026-09-25", "task:t9:2026-09-25 18:00:00"]);
+    }
+
+    #[tokio::test]
+    async fn a_write_that_kills_the_callers_transaction_is_a_hard_error() {
+        // RAISE(ROLLBACK) rolls back the whole transaction, like SQLITE_FULL /
+        // IOERR / NOMEM do; the savepoint is gone, so ROLLBACK TO fails.
+        let pool = test_pool().await;
+        sqlx::raw_sql("CREATE TRIGGER karma_boom BEFORE INSERT ON karma_events BEGIN SELECT RAISE(ROLLBACK, 'boom'); END")
+            .execute(&pool).await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("INSERT INTO settings (key, value, updated_at) VALUES ('probe', '1', datetime('now'))")
+            .execute(&mut *tx).await.unwrap();
+        assert!(record_tx(&mut tx, &ev("task:t1:x")).await.is_err());
+        let _ = tx.rollback().await;
+        assert_eq!(crate::db::settings::get_setting(&pool, "probe").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn repeated_toggles_with_distinct_stamps_each_count_and_reverse() {
+        use crate::db::tasks::update_task_status;
+        let pool = test_pool().await;
+        // Cycle 1 happened earlier: complete at a past stamp, as the funnel would record it.
+        sqlx::query("INSERT INTO local_tasks (id, content, project_id, priority, status, completed, completed_at) VALUES ('t7', 'x', 'inbox', 1, 'complete', 1, '2026-09-20 09:00:00')")
+            .execute(&pool).await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        on_completed_tx(&mut tx, "t7").await.unwrap();
+        tx.commit().await.unwrap();
+        update_task_status(&pool, "t7", "todo", None).await.unwrap();
+        // Cycle 2 through the funnel, with a fresh (different) stamp.
+        update_task_status(&pool, "t7", "complete", None).await.unwrap();
+        let s2: String = sqlx::query_scalar("SELECT completed_at FROM local_tasks WHERE id='t7'")
+            .fetch_one(&pool).await.unwrap();
+        assert_ne!(s2, "2026-09-20 09:00:00");
+        update_task_status(&pool, "t7", "todo", None).await.unwrap();
+        let mut got: Vec<(String, i64)> = list_events(&pool).await.unwrap().into_iter().map(|e| (e.id, e.points)).collect();
+        got.sort();
+        let mut want = vec![
+            ("task:t7:2026-09-20 09:00:00".to_string(), 1),
+            ("untask:t7:2026-09-20 09:00:00".to_string(), -1),
+            (format!("task:t7:{s2}"), 1),
+            (format!("untask:t7:{s2}"), -1),
+        ];
+        want.sort();
+        assert_eq!(got, want);
     }
 }
