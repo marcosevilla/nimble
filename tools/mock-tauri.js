@@ -1000,6 +1000,7 @@
     { id: 'habits', name: 'Before you start', kind: 'live', requires: [], default_enabled: false, config_schema: [] },
     { id: 'vault', name: 'From your vault', kind: 'fixed', requires: ['vault'], default_enabled: true, config_schema: [] },
     { id: 'notes', name: 'Notes', kind: 'live', requires: [], default_enabled: false, config_schema: [] },
+    { id: 'momentum', name: 'Momentum', kind: 'live', requires: [], default_enabled: true, config_schema: [] },
   ]
   function mergeModuleConfig(m, stored) {
     var c = {}
@@ -1499,6 +1500,9 @@
       MOMENTUM_SETTINGS.weekly_goal = t.weekly
       MOMENTUM_SETTINGS.days_off = days
       MOMENTUM_SETTINGS.karma_enabled = !!t.karma_enabled
+      seedBriefSettings()
+      briefState.goals = { daily: t.daily, weekly: t.weekly, days_off: days.slice() }
+      persistBriefSettings()
       return Object.assign({}, MOMENTUM_SETTINGS)
     },
     momentum_set_paused: function (args) {
@@ -1543,6 +1547,7 @@
             return { id: h.id, name: h.name, icon: h.icon, color: h.color, done: habitDone(h.id, TODAY) }
           })
         },
+        momentum: function () { return momentumSummary('7d') },
       }
       var snapshot = {}
       used.forEach(function (m) { snapshot[m.id] = payloads[m.id] ? payloads[m.id](m) : null })
@@ -1613,7 +1618,13 @@
       if (p.modules !== undefined) briefState.stored_modules = p.modules
       if (p.model !== undefined) briefState.model = p.model
       if (p.effort !== undefined) briefState.effort = p.effort
-      if (p.goals) briefState.goals = Object.assign({}, briefState.goals, p.goals)
+      if (p.goals) {
+        briefState.goals = Object.assign({}, briefState.goals, p.goals)
+        // One set of goals.* keys on the Mac: the momentum mock reads them too.
+        if (p.goals.daily !== undefined) MOMENTUM_SETTINGS.daily_goal = p.goals.daily
+        if (p.goals.weekly !== undefined) MOMENTUM_SETTINGS.weekly_goal = p.goals.weekly
+        if (p.goals.days_off !== undefined) MOMENTUM_SETTINGS.days_off = p.goals.days_off.slice()
+      }
       if (p.complete_setup) briefState.setup_completed_at = nowStamp()
       persistBriefSettings()
       return briefSettingsView()

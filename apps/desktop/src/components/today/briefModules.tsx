@@ -9,6 +9,7 @@ import { StillOpenModule } from './modules/StillOpenModule'
 import { HabitsBox } from './modules/HabitsBox'
 import { NotesBox } from './modules/NotesBox'
 import { VaultModule } from './modules/VaultModule'
+import { MomentumModuleBox } from './MomentumBox'
 
 /** live = today, interactive · snapshot = a past morning, frozen (reads
  *  `payload` = `snapshot[id]`, and `brief`) · preview = today's live data,
@@ -56,6 +57,7 @@ export const BRIEF_MODULES: Record<string, BriefModuleView> = {
   habits: { Box: HabitsBox },
   notes: { Box: NotesBox },
   vault: { Box: VaultModule },
+  momentum: { Box: MomentumModuleBox },
 }
 
 export function briefModuleInfo(id: string): { slot?: 'header'; strip: boolean } {

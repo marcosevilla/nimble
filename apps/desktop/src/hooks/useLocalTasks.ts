@@ -8,7 +8,7 @@ import type { LocalTask, Project } from '@nimble/types'
 import { toast } from 'sonner'
 
 // Simple event bus so all useLocalTasks instances refetch on any mutation
-const TASKS_CHANGED = 'tasks-changed'
+export const TASKS_CHANGED = 'tasks-changed'
 
 // Debounced Todoist push after local mutations: batches rapid-fire edits
 // (e.g. typing, bulk reorders) into a single sync instead of one per
