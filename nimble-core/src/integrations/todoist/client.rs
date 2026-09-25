@@ -179,8 +179,9 @@ struct ActivityPage {
 /// since a moment. Production is `HttpActivitySource`; tests use fakes.
 #[allow(async_fn_in_trait)]
 pub trait ActivitySource {
-    /// `item:completed` events at or after `since` (RFC 3339), optionally
-    /// narrowed to one item.
+    /// Item completion events around `since` (RFC 3339), optionally narrowed
+    /// to one item. The window is coarse (day precision on the wire); the
+    /// caller applies the exact boundary.
     async fn completed_items_since(&self, since: &str, object_id: Option<&str>) -> crate::Result<Vec<ActivityEvent>>;
 }
 
@@ -206,21 +207,44 @@ impl HttpActivitySource {
     }
 }
 
+/// One page's URL, with the parameter names the official Todoist SDK (5.9.0)
+/// sends for `getActivityLogs({objectType, eventType, objectId, since, until,
+/// cursor, limit})`: snake_case, `task` normalized to `item`, and `since` /
+/// `until` as `YYYY-MM-DD` dates. `since` is the day before the instant's UTC
+/// date so any zone's local date is covered; the caller filters precisely.
+/// Built with `query_pairs_mut`: cursors carry `+ / =`.
+pub fn activity_url(
+    base: &reqwest::Url,
+    since: chrono::DateTime<chrono::Utc>,
+    until: chrono::NaiveDate,
+    object_id: Option<&str>,
+    cursor: Option<&str>,
+) -> reqwest::Url {
+    let mut url = base.clone();
+    {
+        let since_day = since.date_naive().pred_opt().unwrap_or(since.date_naive());
+        let mut q = url.query_pairs_mut();
+        q.append_pair("object_type", "item");
+        q.append_pair("event_type", "completed");
+        q.append_pair("since", &since_day.format("%Y-%m-%d").to_string());
+        q.append_pair("until", &until.format("%Y-%m-%d").to_string());
+        q.append_pair("limit", "100");
+        if let Some(id) = object_id { q.append_pair("object_id", id); }
+        if let Some(c) = cursor { q.append_pair("cursor", c); }
+    }
+    url
+}
+
 impl ActivitySource for HttpActivitySource {
     async fn completed_items_since(&self, since: &str, object_id: Option<&str>) -> crate::Result<Vec<ActivityEvent>> {
+        let since = chrono::DateTime::parse_from_rfc3339(since)
+            .map_err(|e| crate::Error::Api(format!("todoist activities since: {e}")))?
+            .with_timezone(&chrono::Utc);
+        let until = chrono::Utc::now().date_naive().succ_opt().unwrap_or(chrono::Utc::now().date_naive());
         let mut out = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..Self::MAX_PAGES {
-            // query_pairs_mut, never string concat: cursors carry `+ / =`.
-            let mut url = self.url.clone();
-            {
-                let mut q = url.query_pairs_mut();
-                q.append_pair("object_event_types", r#"["item:completed"]"#);
-                q.append_pair("date_from", since);
-                q.append_pair("limit", "100");
-                if let Some(id) = object_id { q.append_pair("object_id", id); }
-                if let Some(c) = &cursor { q.append_pair("cursor", c); }
-            }
+            let url = activity_url(&self.url, since, until, object_id, cursor.as_deref());
             let resp = self.client.get(url).bearer_auth(&self.token).send().await
                 .map_err(|e| crate::Error::Api(format!("todoist activities: {e}")))?;
             if !resp.status().is_success() {
@@ -337,6 +361,23 @@ impl SyncTransport for HttpSyncTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_activity_request_uses_the_sdk_parameter_names() {
+        let base = reqwest::Url::parse(TODOIST_ACTIVITIES_URL).unwrap();
+        let since = chrono::DateTime::parse_from_rfc3339("2026-08-04T01:30:00Z").unwrap().with_timezone(&chrono::Utc);
+        let until = chrono::NaiveDate::from_ymd_opt(2026, 8, 6).unwrap();
+        let url = activity_url(&base, since, until, Some("R1"), Some("a+b/c="));
+        let pairs: Vec<(String, String)> = url.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
+        let want: Vec<(String, String)> = [
+            ("object_type", "item"), ("event_type", "completed"),
+            ("since", "2026-08-03"), ("until", "2026-08-06"), ("limit", "100"),
+            ("object_id", "R1"), ("cursor", "a+b/c="),
+        ].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        assert_eq!(pairs, want, "since is a day early so any zone's local date is covered");
+        assert!(url.as_str().starts_with("https://api.todoist.com/api/v1/activities?"));
+        assert!(url.as_str().contains("cursor=a%2Bb%2Fc%3D"), "{url}");
+    }
 
     #[test]
     fn deserializes_sync_response() {

@@ -527,14 +527,26 @@ pub async fn confirm_recurrences<A: client::ActivitySource>(
     let mut counted = 0;
     let result: crate::Result<()> = async {
         let mut tx = pool.begin().await?;
+        // Each logged completion credits at most one occurrence.
+        let mut used: std::collections::HashSet<(String, chrono::DateTime<chrono::Utc>)> = std::collections::HashSet::new();
         for c in candidates {
             let Some(c_since) = mappers::rfc3339_to_utc(&c.since) else { continue };
+            // Strictly after the base change, with a margin: the completion
+            // that produced the base snapshot (a roll-forward whose
+            // `updated_at` is `since`) must never credit the next postpone.
+            let mut after = c_since + chrono::Duration::seconds(ACTIVITY_MARGIN_SECS);
+            // ...and after anything this task already has in the ledger,
+            // which that completion (or Nimble's own) already accounts for.
+            if let Some(latest) = latest_counted_at(&mut tx, &c.task_id).await? {
+                after = after.max(latest);
+            }
             let done = events.iter()
                 .filter(|e| e.object_id == c.external_id && e.event_type == "completed")
                 .filter_map(|e| mappers::rfc3339_to_utc(&e.event_date).map(|at| (at, e)))
-                .filter(|(at, _)| *at >= c_since)
+                .filter(|(at, _)| *at > after && !used.contains(&(c.external_id.clone(), *at)))
                 .min_by_key(|(at, _)| *at);
-            if let Some((_, e)) = done {
+            if let Some((at, e)) = done {
+                used.insert((c.external_id.clone(), at));
                 if let Some(ev) = crate::db::karma::recur_event(&c.task_id, &c.occurrence_due, c.priority, &e.event_date) {
                     if crate::db::karma::record_tx(&mut tx, &ev).await? { counted += 1; }
                 }
@@ -650,6 +662,22 @@ async fn resolve_item_location_tx(
         Some(project_ext) => resolve_remote_ref_tx(&mut *tx, project_ext).await,
         None => Ok(None),
     }
+}
+
+/// How far past a candidate's base `updated_at` a logged completion must be.
+const ACTIVITY_MARGIN_SECS: i64 = 2;
+
+/// The latest `task:`/`recur:` ledger moment for a task, as UTC (`created_at`
+/// is local time).
+async fn latest_counted_at(tx: &mut sqlx::SqliteConnection, task_id: &str) -> crate::Result<Option<chrono::DateTime<chrono::Utc>>> {
+    use chrono::TimeZone;
+    let latest: Option<String> = sqlx::query_scalar(
+        "SELECT MAX(created_at) FROM karma_events WHERE task_id = ? AND kind IN ('task','recur')")
+        .bind(task_id).fetch_one(&mut *tx).await?;
+    Ok(latest
+        .and_then(|s| chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S").ok())
+        .and_then(|n| chrono::Local.from_local_datetime(&n).earliest())
+        .map(|d| d.with_timezone(&chrono::Utc)))
 }
 
 /// Whether the ledger already has an unreversed completion of this task made
@@ -2600,6 +2628,9 @@ mod pull_tests {
 
     /// Fake activity log: the given events, or an error.
     struct FakeActivity { events: Vec<client::ActivityEvent>, fail: bool }
+    async fn karma_points(pool: &sqlx::SqlitePool) -> i64 {
+        karma(pool).await.iter().map(|e| e.points).sum()
+    }
     impl client::ActivitySource for FakeActivity {
         async fn completed_items_since(&self, since: &str, object_id: Option<&str>) -> crate::Result<Vec<client::ActivityEvent>> {
             if self.fail { return Err(crate::Error::Api("activities HTTP 403 Forbidden".into())); }
@@ -2679,6 +2710,53 @@ mod pull_tests {
         let log = FakeActivity { events: vec![completed_event("R1", "2098-12-31T23:59:00Z")], fail: false };
         confirm_recurrences(&pool, &log, &report.recur_candidates).await;
         assert_eq!(karma(&pool).await.iter().map(|e| e.points).sum::<i64>(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_completion_that_rolled_the_task_forward_never_credits_the_next_postpone() {
+        let pool = test_pool().await;
+        // Seed's base updated_at (t0) = 2026-08-03T09:00:00Z: completion A was that change.
+        let id = seed_recurring(&pool, "R1").await;
+        let report = apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [recurring_item("R1", "2026-08-09", "2026-08-05T12:00:00Z")]})))
+            .await.unwrap(); // Postpone B
+        assert_eq!(report.recur_candidates.len(), 1);
+        let log = FakeActivity { events: vec![
+            completed_event("R1", "2026-08-03T09:00:00Z"),
+            completed_event("R1", "2026-08-03T09:00:01Z"),
+        ], fail: false };
+        assert_eq!(confirm_recurrences(&pool, &log, &report.recur_candidates).await, 0);
+        // An event after the window but not after the task's latest ledger row
+        // (it already credited that row) credits nothing either.
+        sqlx::query("INSERT INTO karma_events (id, date, kind, points, task_id, created_at) VALUES (?, '2026-08-04', 'recur', 1, ?, ?)")
+            .bind(format!("recur:{id}:2026-07-28")).bind(&id)
+            .bind(crate::db::karma::local_stamp("2026-08-04T10:00:00Z").unwrap().1)
+            .execute(&pool).await.unwrap();
+        let log = FakeActivity { events: vec![completed_event("R1", "2026-08-04T10:00:00Z")], fail: false };
+        assert_eq!(confirm_recurrences(&pool, &log, &report.recur_candidates).await, 0);
+        assert_eq!(karma_points(&pool).await, 1, "only the pre-existing row");
+    }
+
+    #[tokio::test]
+    async fn a_nimble_repeat_then_a_todoist_postpone_counts_once() {
+        let pool = test_pool().await;
+        let id = seed_recurring(&pool, "R1").await;
+        sqlx::query("UPDATE local_tasks SET recurrence_rule = 'every week' WHERE id = ?").bind(&id).execute(&pool).await.unwrap();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 8, 4).unwrap();
+        crate::db::tasks::update_task_status_at(&pool, &id, "complete", None, today).await.unwrap(); // local 08-04 -> 08-11
+        assert_eq!(karma_points(&pool).await, 1);
+        // Echo of Nimble's close (Todoist rolled to the same date), then a postpone there.
+        let echo = apply_pull(&pool, &resp(json!({"sync_token": "T2", "items": [recurring_item("R1", "2026-08-11", "2026-08-04T16:00:00Z")]})))
+            .await.unwrap();
+        assert!(echo.recur_candidates.is_empty());
+        let postpone = apply_pull(&pool, &resp(json!({"sync_token": "T3", "items": [recurring_item("R1", "2026-08-14", "2026-08-06T08:00:00Z")]})))
+            .await.unwrap();
+        assert_eq!(postpone.recur_candidates.len(), 1);
+        let log = FakeActivity { events: vec![
+            completed_event("R1", "2026-08-04T16:00:00Z"), // Nimble's close, as Todoist logged it
+            completed_event("R1", "2026-08-04T16:00:01Z"),
+        ], fail: false };
+        assert_eq!(confirm_recurrences(&pool, &log, &postpone.recur_candidates).await, 0);
+        assert_eq!(karma_points(&pool).await, 1);
     }
 
     #[tokio::test]
