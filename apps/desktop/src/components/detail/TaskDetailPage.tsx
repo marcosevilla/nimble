@@ -455,7 +455,7 @@ export function TaskDetailPage() {
       {/* Description + Subtasks — 48px gap between the two blocks (frame 79:2009).
           The description (first child, any of its three states) keeps the
           720 reading measure inside the 960 column; subtasks use the full row. */}
-      <div className="flex flex-col gap-12 [&>*:first-child]:max-w-measure">
+      <div className="flex flex-col gap-12 [&>*:first-child:not(textarea)]:max-w-measure">
         {/* Description — rich text with @mentions. Markdown-canonical
             (descFormat === 'markdown'): display is a read-only rendered
             markdown view; clicking anywhere swaps to a raw auto-grown
@@ -477,7 +477,9 @@ export function TaskDetailPage() {
               // state's left edge (and keeps the caret clear of the page's
               // overflow-x-hidden scroll container); -my-1 cancels its py-1
               // so swapping display → edit doesn't move the subtasks below.
-              className="-my-1 text-body placeholder:text-foreground/25"
+              // Measure + the well's 1rem bleed, so edit wraps exactly where
+              // the 720 display does.
+              className="-my-1 max-w-[calc(var(--container-measure)+1rem)] text-body placeholder:text-foreground/25"
             />
           ) : task.description ? (
             // TiptapEditor's shared editorProps force a 200px min-height
