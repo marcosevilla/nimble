@@ -735,9 +735,24 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
         ALTER TABLE briefs ADD COLUMN composed_at TEXT;
         ALTER TABLE briefs ADD COLUMN compose_attempts INTEGER NOT NULL DEFAULT 0",
     },
+    // momentum
+    Migration {
+        version: 27,
+        description: "Momentum ledger (karma_events)",
+        sql: "CREATE TABLE IF NOT EXISTS karma_events (
+            id TEXT PRIMARY KEY,
+            date TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN ('task','untask','recur','goal_day','goal_week','penalty','pause')),
+            points INTEGER NOT NULL,
+            task_id TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_karma_events_date ON karma_events(date)",
+    },
 ];
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 26; // schema-v26 (C4 is v25)
+// Momentum is v27: C4 (v25) and brief phase 3 (v26) merge before it.
+pub const CURRENT_SCHEMA_VERSION: i64 = 27;
 
 pub async fn current_schema_version(pool: &SqlitePool) -> crate::Result<i64> {
     let version = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM schema_version")
@@ -911,6 +926,7 @@ mod v23_tests {
             .fetch_all(&pool).await.unwrap();
         assert_eq!(cols, ["date","version","status","source","layout_json","snapshot_json","snapshot_schema",
             "energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at","composed_at","compose_attempts"]);
+        assert!(super::CURRENT_SCHEMA_VERSION >= 23);
     }
 }
 
@@ -927,6 +943,7 @@ mod v24_tests {
             ("module_id".to_string(), 1), ("cache_key".to_string(), 2),
             ("payload_json".to_string(), 0), ("fetched_at".to_string(), 0),
         ]);
+        assert!(super::CURRENT_SCHEMA_VERSION >= 24); // schema-v24
     }
 
     #[tokio::test]
@@ -983,6 +1000,23 @@ mod v26_tests {
                 .bind(id).execute(&pool).await;
             assert_eq!(r.is_ok(), id == "a", "(date, dedupe_key) is unique");
         }
-        assert_eq!(super::CURRENT_SCHEMA_VERSION, 26);
+        assert!(super::CURRENT_SCHEMA_VERSION >= 26);
+    }
+}
+
+#[cfg(test)]
+mod v27_tests {
+    use crate::test_util::test_pool;
+
+    #[tokio::test]
+    async fn v27_creates_the_karma_ledger() {
+        let pool = test_pool().await;
+        let cols: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('karma_events') ORDER BY cid")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(cols, ["id", "date", "kind", "points", "task_id", "created_at"]);
+        let bad = sqlx::query("INSERT INTO karma_events (id, date, kind, points, created_at) VALUES ('x', '2026-09-25', 'bogus', 1, '2026-09-25 10:00:00')")
+            .execute(&pool).await;
+        assert!(bad.is_err(), "kind is a closed set");
+        assert_eq!(super::CURRENT_SCHEMA_VERSION, 27);
     }
 }

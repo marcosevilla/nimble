@@ -407,6 +407,18 @@ const REMOTE_LABEL_GROUPS_DDL: &str = "CREATE TABLE IF NOT EXISTS label_groups (
     updated_at TEXT NOT NULL
 )";
 
+/// Remote DDL for the v27 `karma_events` ledger. Mirrors `migrations.rs`
+/// version 27 minus the `kind` CHECK (remote tables stay permissive). Shared
+/// by the fresh-init path and `ensure_remote_v27_schema`.
+const REMOTE_KARMA_EVENTS_DDL: &str = "CREATE TABLE IF NOT EXISTS karma_events (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    points INTEGER NOT NULL,
+    task_id TEXT,
+    created_at TEXT NOT NULL
+)";
+
 /// Create all synced tables on the remote Turso database.
 /// Only runs once — checks for `turso_initialized` setting.
 pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
@@ -444,6 +456,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
                 ensure_remote_v24_schema(pool, turso_url, turso_token).await?; // schema-v24
                 ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
                 ensure_remote_v26_schema(pool, turso_url, turso_token).await?; // schema-v26
+                ensure_remote_v27_schema(pool, turso_url, turso_token).await?;
                 return Ok(());
             },
         }
@@ -679,6 +692,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     ensure_remote_v24_schema(pool, turso_url, turso_token).await?; // schema-v24
     ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
     ensure_remote_v26_schema(pool, turso_url, turso_token).await?; // schema-v26
+    ensure_remote_v27_schema(pool, turso_url, turso_token).await?;
 
     Ok(())
 }
@@ -962,6 +976,21 @@ async fn ensure_remote_v25_schema(pool: &SqlitePool, turso_url: &str, turso_toke
     // "duplicate column name" = the ALTER landed on an earlier run; anything else must not latch the gate.
     check_pipeline_statement_errors(&body, "Turso v25 schema upgrade", true)?;
     sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v25_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
+        .execute(pool).await?;
+    Ok(())
+}
+
+async fn ensure_remote_v27_schema(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='turso_schema_v27_upgraded'")
+        .fetch_optional(pool).await?;
+    if done.is_some() { return Ok(()); }
+    let requests = [
+        turso_execute(REMOTE_KARMA_EVENTS_DDL, vec![]),
+        serde_json::json!({"type":"close"}),
+    ];
+    let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
+    check_pipeline_statement_errors(&body, "Turso v27 schema upgrade", true)?;
+    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v27_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
         .execute(pool).await?;
     Ok(())
 }
@@ -1404,6 +1433,9 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     }
     if let Err(e) = ensure_remote_v26_schema(pool, turso_url, turso_token).await { // schema-v26
         log::warn!("Turso v26 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
+    if let Err(e) = ensure_remote_v27_schema(pool, turso_url, turso_token).await {
+        log::warn!("Turso v27 schema gate failed, pushing anyway (gate retries next push): {e}");
     }
 
     // Fetch all unsynced entries
@@ -2119,6 +2151,7 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
         "brief_notes", // schema-v24
         "label_groups",
         "brief_items", // schema-v26
+        "karma_events",
     ];
 
     if ALLOWED.contains(&name) {
@@ -2193,7 +2226,7 @@ pub async fn seed_existing_data(pool: &SqlitePool) -> crate::Result<u64> {
         "habits", "habit_logs", "documents", "doc_folders", "doc_notes",
         "capture_routes", "life_areas", "calendar_feeds", "activity_log",
         "vault_notes", "vault_links", "vault_tags",
-        "labels", "sections", "label_groups",
+        "labels", "sections", "label_groups", "karma_events",
     ];
 
     let mut count: u64 = 0;
@@ -3458,6 +3491,19 @@ mod v19_sync_tests {
         super::seed_existing_data(&pool).await.unwrap();
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_log WHERE table_name = 'label_groups' AND row_id = 'g1'")
             .fetch_one(&pool).await.unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[tokio::test]
+    async fn karma_events_sync_by_id_and_reapply_idempotently() {
+        assert!(super::sanitize_table_name("karma_events").is_ok());
+        let pool = test_pool().await;
+        let id = "task:t1:2026-09-25 10:00:00";
+        let snap = serde_json::json!({"id": id, "date": "2026-09-25", "kind": "task", "points": 1,
+            "task_id": "t1", "created_at": "2026-09-25 10:00:00"}).to_string();
+        super::apply_remote_change(&pool, "karma_events", id, "INSERT", Some(&snap)).await.unwrap();
+        super::apply_remote_change(&pool, "karma_events", id, "INSERT", Some(&snap)).await.unwrap();
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM karma_events").fetch_one(&pool).await.unwrap();
         assert_eq!(n, 1);
     }
 }
