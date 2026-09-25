@@ -80,19 +80,32 @@ export function SyncHealthBanner() {
   const visible = !!health && !healthy && dismissed !== health
   const compact = columnWidth !== null && columnWidth - 2 * INSET < MIN_NOTICE
 
-  // Sonner's toasts share this corner: lift them by the notice's height
-  // (+8px gap) while it shows, and drop the lift when it goes.
+  // While it shows, the notice publishes two lengths on :root and drops
+  // them when it goes:
+  // - `--sync-notice-space` (its height + 8px gap): sonner's toasts share
+  //   this corner and lift by it;
+  // - `--sync-notice-clear` (viewport bottom → its top edge, + 8px gap): the
+  //   right column's visible area ends there, so no rail row, tray or
+  //   detail content ever sits behind the notice (loop 3 rail, bug 1).
+  // Layout sizes (offsetHeight + computed bottom), not the bounding box —
+  // the `panel-in` entrance is scaled and shifted on the first frame.
   useLayoutEffect(() => {
     const el = noticeRef.current
     const root = document.documentElement
     if (!visible || !el) return
-    const measure = () => root.style.setProperty('--sync-notice-space', `${Math.ceil(el.getBoundingClientRect().height) + 8}px`)
+    const measure = () => {
+      const h = el.offsetHeight
+      const bottom = parseFloat(getComputedStyle(el).bottom) || 0
+      root.style.setProperty('--sync-notice-space', `${h + 8}px`)
+      root.style.setProperty('--sync-notice-clear', `${Math.ceil(bottom + h + 8)}px`)
+    }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => {
       ro.disconnect()
       root.style.removeProperty('--sync-notice-space')
+      root.style.removeProperty('--sync-notice-clear')
     }
   }, [visible, compact])
 

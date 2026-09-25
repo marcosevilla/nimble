@@ -23,8 +23,10 @@ const TAB_META: Record<RightTab, { label: string; icon: LucideIcon }> = {
 }
 
 /** Scrolling body shared by the non-calendar tabs. `tab-panel-in` fades
- *  the panel in each time it's shown (Agentation pass 3, A5). */
-const PANEL_CLASS = 'tab-panel-in flex-1 min-h-0 overflow-y-auto p-4 pt-3 [scrollbar-gutter:stable]'
+ *  the panel in each time it's shown (Agentation pass 3, A5). `pb-16`:
+ *  the list's end scrolls clear of the fixed `?` help button (bottom-4,
+ *  36px → its top is 52px up) with an 8px+ gap (loop 3 rail). */
+const PANEL_CLASS = 'tab-panel-in flex-1 min-h-0 overflow-y-auto p-4 pt-3 pb-16 [scrollbar-gutter:stable]'
 
 /* The active tab's pill, drawn once behind the tabs and slid between them
    (Agentation pass 3, A5) instead of each tab painting its own. Measured
@@ -163,10 +165,14 @@ export function RightSidebar() {
             )}
           />
 
+          {/* While the Todoist sync notice shows (fixed, bottom-right), the
+              rail's body ends above it (`--sync-notice-clear`, set by
+              SyncHealthBanner; unset → 0), so nothing in any tab is ever
+              hidden behind it (loop 3 rail, bug 1). */}
           <Tabs
             value={tab}
             onValueChange={(value) => setTab(value as RightTab)}
-            className="flex-1 min-h-0 gap-0"
+            className="flex-1 min-h-0 gap-0 pb-[var(--sync-notice-clear,0px)]"
           >
             {/* Tabs, then the collapse button on the right. The active tab
                 shows its label; the others are icons with a tooltip. */}

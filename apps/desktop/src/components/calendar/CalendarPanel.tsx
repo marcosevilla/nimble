@@ -375,7 +375,9 @@ function TimeGrid({
   return (
     <div
       ref={scrollRef}
-      className="overflow-y-auto flex-1 min-h-0"
+      // pb-12: the grid's last hours scroll clear of the fixed ? help
+      // button (the tab panel's own p-4 supplies the other 16px, loop 3).
+      className="overflow-y-auto flex-1 min-h-0 pb-12"
     >
       <div className="relative" style={{ height: gridHeight }}>
         {/* Hour lines and labels */}
