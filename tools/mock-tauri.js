@@ -1349,6 +1349,61 @@
     restore_activation_required: backupScenario === 'restored',
     error: backupScenario === 'error' ? { stage: 'publish', code: 'offline', at: '2026-09-21T09:00:00Z' } : null,
   }
+  // ── Momentum (db/karma.rs, Lane C) ──────────────────────────────────────
+  // ?momentum=karma|paused|dayoff|empty picks a scenario. The mock TODAY
+  // (2026-08-01) is a Saturday, so default days off are ['sun'] to show the
+  // working meters; `dayoff` restores Sat+Sun.
+  var momentumScenario = new URLSearchParams(window.location.search).get('momentum') || 'default'
+  var MOMENTUM_SETTINGS = {
+    daily_goal: 5,
+    weekly_goal: 25,
+    days_off: momentumScenario === 'dayoff' ? ['sat', 'sun'] : ['sun'],
+    paused: momentumScenario === 'paused',
+    paused_at: momentumScenario === 'paused' ? '2026-07-30 09:00:00' : null,
+    karma_enabled: momentumScenario === 'karma',
+    karma_enabled_at: momentumScenario === 'karma' ? '2026-07-01' : null,
+  }
+  var MOMENTUM_TREND = momentumScenario === 'empty' ? [0, 0, 0, 0, 0, 0, 0] : [1, 4, 0, 3, 5, 6, 3]
+  var MOMENTUM_STATS = {
+    '7d': { from: '2026-07-26', completed: 22, active_days: 6, peak_hour: 10, focused_ms: 12000000 },
+    '30d': { from: '2026-07-03', completed: 87, active_days: 22, peak_hour: 10, focused_ms: 50400000 },
+    all: { from: null, completed: 1240, active_days: 210, peak_hour: 11, focused_ms: 345600000 },
+  }
+  var WEEKDAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+  function momentumSummary(range) {
+    var pausedFrom = MOMENTUM_SETTINGS.paused_at ? MOMENTUM_SETTINGS.paused_at.slice(0, 10) : null
+    var trend = MOMENTUM_TREND.map(function (done, i) {
+      var date = daysAgo(6 - i)
+      var key = WEEKDAY_KEYS[new Date(date + 'T00:00:00').getDay()]
+      return {
+        date: date, done: done,
+        day_off: MOMENTUM_SETTINGS.days_off.indexOf(key) >= 0,
+        paused: MOMENTUM_SETTINGS.paused && pausedFrom !== null && date >= pausedFrom,
+      }
+    })
+    var weekStart = '2026-07-27'
+    var empty = momentumScenario === 'empty'
+    return {
+      today: TODAY,
+      range: MOMENTUM_STATS[range] ? range : '7d',
+      settings: Object.assign({}, MOMENTUM_SETTINGS, { days_off: MOMENTUM_SETTINGS.days_off.slice() }),
+      is_day_off: MOMENTUM_SETTINGS.days_off.indexOf('sat') >= 0,
+      today_done: trend[6].done,
+      week_done: trend.filter(function (d) { return d.date >= weekStart }).reduce(function (n, d) { return n + d.done }, 0),
+      week_start: weekStart,
+      trend: trend,
+      wins: empty ? [] : [
+        { task_id: 'win-1', content: 'Send Dana the case-study draft', priority: 4, date: '2026-07-31' },
+        { task_id: 'win-2', content: 'Edit Fillmore selects', priority: 3, date: '2026-07-30' },
+        { task_id: 'win-3', content: 'Certify EDD weeks 30–31', priority: 3, date: '2026-07-28' },
+      ],
+      stats: Object.assign({}, MOMENTUM_STATS[range] || MOMENTUM_STATS['7d']),
+      karma: MOMENTUM_SETTINGS.karma_enabled
+        ? { total: 1240, level: 'Novice', next_level_at: 2500, daily_streak: 4, weekly_streak: 2 }
+        : null,
+    }
+  }
+
   var commands = {
     backup_get_status: function () { return Object.assign({}, backupMock) },
     backup_run_now: function () { backupMock.last_local_success_at = new Date().toISOString(); return Object.assign({}, backupMock) },
@@ -1425,6 +1480,35 @@
     // Daily state / AI priorities
     get_daily_state: function () { return DAILY_STATE },
     generate_priorities: function () { return DAILY_STATE.priorities },
+
+    // Momentum (db/karma.rs)
+    momentum_summary: function (args) { return momentumSummary(args && args.range) },
+    momentum_settings_get: function () { return Object.assign({}, MOMENTUM_SETTINGS) },
+    goals_save: function (args) {
+      var t = (args && args.targets) || {}
+      if (!(Number.isInteger(t.daily) && t.daily >= 1 && t.daily <= 100)) throw 'Daily goal must be a whole number from 1 to 100.'
+      if (!(Number.isInteger(t.weekly) && t.weekly >= 1 && t.weekly <= 700)) throw 'Weekly goal must be a whole number from 1 to 700.'
+      var order = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+      var given = (t.days_off || []).map(function (d) { return String(d).trim().toLowerCase() })
+      if (given.some(function (d) { return order.indexOf(d) < 0 })) throw 'Days off must be weekday names (mon to sun).'
+      var days = order.filter(function (d) { return given.indexOf(d) >= 0 })
+      if (days.length > 6) throw "Leave at least one day that isn't a day off."
+      // Mirrors karma::save_goals_on: off -> on stamps today; staying on keeps it.
+      if (t.karma_enabled && (!MOMENTUM_SETTINGS.karma_enabled || !MOMENTUM_SETTINGS.karma_enabled_at)) MOMENTUM_SETTINGS.karma_enabled_at = TODAY
+      MOMENTUM_SETTINGS.daily_goal = t.daily
+      MOMENTUM_SETTINGS.weekly_goal = t.weekly
+      MOMENTUM_SETTINGS.days_off = days
+      MOMENTUM_SETTINGS.karma_enabled = !!t.karma_enabled
+      return Object.assign({}, MOMENTUM_SETTINGS)
+    },
+    momentum_set_paused: function (args) {
+      var paused = !!(args && args.paused)
+      if (paused && !MOMENTUM_SETTINGS.paused) MOMENTUM_SETTINGS.paused_at = nowStamp()
+      if (!paused) MOMENTUM_SETTINGS.paused_at = null
+      MOMENTUM_SETTINGS.paused = paused
+      return Object.assign({}, MOMENTUM_SETTINGS)
+    },
+    momentum_backfill: function () { return { tasks: 0, recurrences: 0, goal_days: 0, goal_weeks: 0 } },
 
     // Morning brief (phase 1)
     brief_get: function (args) { return withNotes(BRIEFS[args && args.date]) },

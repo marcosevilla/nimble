@@ -802,3 +802,57 @@ export interface WeatherCapability {
   get(): Promise<WeatherView>
   geocode(query: string): Promise<GeoPlace[]>
 }
+
+// ── Momentum (spec 2026-09-23 §3.5, addendum 2026-09-25 §6; nimble-core/src/db/karma.rs) ──
+
+export type MomentumRange = '7d' | '30d' | 'all'
+export type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+
+export interface MomentumSettings {
+  daily_goal: number
+  weekly_goal: number
+  days_off: WeekdayKey[]
+  paused: boolean
+  paused_at: string | null
+  karma_enabled: boolean
+  karma_enabled_at: string | null
+}
+
+export interface GoalTargets {
+  daily: number
+  weekly: number
+  days_off: WeekdayKey[]
+  karma_enabled: boolean
+}
+
+export interface MomentumTrendDay { date: string; done: number; day_off: boolean; paused: boolean }
+export interface MomentumWin { task_id: string; content: string; priority: number; date: string }
+export interface MomentumRangeStats { from: string | null; completed: number; active_days: number; peak_hour: number | null; focused_ms: number }
+export interface KarmaParity { total: number; level: string; next_level_at: number | null; daily_streak: number; weekly_streak: number }
+
+export interface MomentumSummary {
+  today: string
+  range: MomentumRange
+  settings: MomentumSettings
+  is_day_off: boolean
+  today_done: number
+  week_done: number
+  week_start: string
+  trend: MomentumTrendDay[]
+  wins: MomentumWin[]
+  stats: MomentumRangeStats
+  /** Present only when karma parity mode is on. */
+  karma: KarmaParity | null
+}
+
+export interface MomentumBackfillReport { tasks: number; recurrences: number; goal_days: number; goal_weeks: number }
+
+/** Desktop computes momentum from its ledger; the web reports `supported: false`. */
+export interface MomentumCapability {
+  supported: boolean
+  summary(range: MomentumRange): Promise<MomentumSummary>
+  getSettings(): Promise<MomentumSettings>
+  saveGoals(targets: GoalTargets): Promise<MomentumSettings>
+  setPaused(paused: boolean): Promise<MomentumSettings>
+  backfill(): Promise<MomentumBackfillReport>
+}

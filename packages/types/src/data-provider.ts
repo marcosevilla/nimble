@@ -87,6 +87,7 @@ export interface DataProvider {
   backup: import('./index').BackupCapability
   briefSettings: import('./index').BriefSettingsCapability
   weather: import('./index').WeatherCapability
+  momentum: import('./index').MomentumCapability
   settings: {
     checkSetupComplete(): Promise<boolean>
     get(key: string): Promise<string | null>

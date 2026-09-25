@@ -31,7 +31,7 @@ use tauri::{
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-use commands::{activity, ai, brief, calendar, capture_routes, captures, demo, docs, focus, goals, habits, import, labels, local_tasks, obsidian, open_url, priorities, progress, projects, sections, settings, sync, todoist, todoist_sync, updater, vault, weather};
+use commands::{activity, ai, brief, calendar, capture_routes, captures, demo, docs, focus, goals, habits, import, labels, local_tasks, momentum, obsidian, open_url, priorities, progress, projects, sections, settings, sync, todoist, todoist_sync, updater, vault, weather};
 
 /// Show and focus the main window
 fn show_window(app: &tauri::AppHandle) {
@@ -344,6 +344,10 @@ pub fn run() {
                     Ok(false) => {}
                     Err(e) => log::warn!("Task search index check failed: {e}"),
                 }
+                // Momentum: the first launch on v27 rebuilds the ledger from
+                // history in the background (db::karma::backfill_if_empty).
+                let karma_pool = pool.clone();
+                tauri::async_runtime::spawn(async move { nimble_core::db::karma::backfill_if_empty(&karma_pool).await });
 
                 if demo_mode {
                     log::info!("DEMO MODE — database initialized at {:?}", db_path);
@@ -685,6 +689,11 @@ pub fn run() {
             brief::brief_set_notes,
             weather::weather_get,
             weather::weather_geocode,
+            momentum::momentum_summary,
+            momentum::momentum_settings_get,
+            momentum::goals_save,
+            momentum::momentum_set_paused,
+            momentum::momentum_backfill,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

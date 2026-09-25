@@ -100,6 +100,16 @@ export function createTursoProvider(): DataProvider {
     // web has nothing to read; Today falls back to the synced row's layout.
     briefSettings: { supported: false, get: ni('briefSettings.get'), save: ni('briefSettings.save') },
     weather: { supported: false, get: ni('weather.get'), geocode: ni('weather.geocode') }, // HTTP stays in Rust (§6)
+    // Momentum is computed by the Mac's ledger (db/karma.rs). The web shows the
+    // morning brief snapshot's numbers instead and hides the Activity tiles.
+    momentum: {
+      supported: false,
+      summary: ni('momentum.summary'),
+      getSettings: ni('momentum.getSettings'),
+      saveGoals: ni('momentum.saveGoals'),
+      setPaused: ni('momentum.setPaused'),
+      backfill: ni('momentum.backfill'),
+    },
     settings: {
       // See note 2 in the file header — deliberately resolves.
       checkSetupComplete: () => Promise.resolve(true),

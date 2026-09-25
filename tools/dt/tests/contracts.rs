@@ -749,3 +749,33 @@ async fn seed_script_stops_before_archiving_when_an_assignment_fails() {
     let (_, labels) = run(&root, &["label", "list"]);
     assert!(labels["data"].as_array().unwrap().iter().all(|l| l["archived_at"].is_null()), "nothing archived");
 }
+
+#[tokio::test]
+async fn momentum_backfill_is_direct_and_idempotent() {
+    let root = fixture().await;
+    let (c, t) = run(&root, &["task", "create", "Ship it", "--priority", "3"]);
+    assert_eq!(c, 0, "{t}");
+    let id = t["data"]["id"].as_str().unwrap().to_owned();
+    let (c, v) = run(&root, &["task", "complete", &id]);
+    assert_eq!(c, 0, "{v}");
+    // The completion hook already wrote the ledger row: nothing new to backfill.
+    let (c, v) = run(&root, &["momentum", "backfill"]);
+    assert_eq!(c, 0, "{v}");
+    assert_eq!(v["data"]["tasks"], 0);
+    // A completion from before the ledger existed is picked up exactly once.
+    let options = sqlx::sqlite::SqliteConnectOptions::new().filename(root.join("nimble.db"));
+    let pool = sqlx::SqlitePool::connect_with(options).await.unwrap();
+    sqlx::query("INSERT INTO local_tasks (id, content, project_id, status, completed, completed_at) VALUES ('legacy', 'Old', 'inbox', 'complete', 1, '2026-09-01 10:00:00')")
+        .execute(&pool).await.unwrap();
+    pool.close().await;
+    let (_, v) = run(&root, &["momentum", "backfill"]);
+    assert_eq!(v["data"]["tasks"], 1, "{v}");
+    let (_, v) = run(&root, &["momentum", "backfill"]);
+    assert_eq!(v["data"]["tasks"], 0, "{v}");
+    let (c, v) = run(&root, &["momentum", "summary", "--range", "all"]);
+    assert_eq!(c, 0, "{v}");
+    assert_eq!(v["data"]["stats"]["completed"], 2);
+    let (c, v) = run(&root, &["momentum", "summary", "--range", "year"]);
+    assert_eq!((c, v["error"]["code"].as_str()), (2, Some("validation")));
+    std::fs::remove_dir_all(root).unwrap();
+}
