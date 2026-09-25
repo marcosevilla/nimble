@@ -26,6 +26,11 @@ import { pickBriefDate, resolveBriefDate, shiftIsoDate } from '@/lib/briefDate'
 import { todayKey } from '@/lib/keyGuard'
 import { briefReady, loadTodayCompact, saveTodayCompact, splitDueTasks } from '@/lib/todayBrief'
 import { cn } from '@/lib/utils'
+import { WeatherChip } from '@/components/today/WeatherChip'
+import { useWeather } from '@/hooks/useWeather'
+import { useBriefSettingsStore } from '@/stores/briefSettingsStore'
+import { configValue } from '@/lib/briefLayout'
+import { resolveUnits } from '@/lib/weather'
 
 /** The greeting lives in the header's meta slot — one title per page
  *  (cross-cutting move 1: the second text-title h2 is gone). */
@@ -80,6 +85,11 @@ export function TodayPage() {
   const { events, loadedDate: calLoadedFor, error: calError, goToToday } = useCalendar()
   // Calendar follows the new day (`goToToday` is a stable useCallback).
   useEffect(() => { goToToday() }, [today, goToToday])
+  const briefSettings = useBriefSettingsStore((s) => s.settings)
+  useEffect(() => { void useBriefSettingsStore.getState().load() }, [])
+  const weatherEntry = briefSettings?.modules.find((m) => m.id === 'weather')
+  const location = briefSettings?.location
+  const weather = useWeather(!!weatherEntry?.enabled, `${today}|${location ? `${location.lat},${location.lon}` : ''}`)
   const [tomorrow, setTomorrow] = useState<CalendarEvent[]>([])
   useEffect(() => {
     let live = true
@@ -188,6 +198,17 @@ export function TodayPage() {
       actions={
         <div className="flex items-center gap-3">
           {completed > 0 && <ProgressBar completed={completed} total={total} />}
+          {selected === today && weatherEntry?.enabled && (
+            <WeatherChip
+              view={weather.view}
+              loading={weather.loading}
+              date={today}
+              events={events}
+              unit={resolveUnits(weatherEntry.config.units, navigator.language)}
+              showRainNotes={configValue(weatherEntry.config, 'rain_notes', true)}
+              live
+            />
+          )}
           <DateStrip briefDates={briefDates} selected={selected} today={today} onSelect={select} />
           {selected === today && (
             <IconButton
