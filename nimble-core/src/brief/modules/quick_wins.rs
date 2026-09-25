@@ -6,7 +6,7 @@
 use serde_json::{json, Value};
 
 use crate::brief::compose::quick_labels_from_config;
-use crate::brief::{BriefCtx, BriefModule, ConfigField, Integration, ModuleKind, ModuleManifest};
+use crate::brief::{BriefCtx, BriefModule, ConfigField, ModuleKind, ModuleManifest};
 
 pub struct QuickWins;
 
@@ -16,8 +16,9 @@ impl BriefModule for QuickWins {
             id: "quick_wins",
             name: "Quick wins",
             kind: ModuleKind::Ai,
-            // Works without an AI key (label-only picks), so only tasks are required.
-            requires: vec![Integration::Tasks],
+            // Native tasks + labels only: no integration (sources.tasks means a
+            // Todoist token) and no AI key (label-only picks without one).
+            requires: vec![],
             default_enabled: true,
             config_schema: vec![
                 ConfigField::Label { key: "help_label", label: "I can help", default_name: "needs-claude" },
@@ -46,6 +47,7 @@ mod tests {
         assert_eq!(ids[at + 1], "quick_wins", "{ids:?}");
         let m = QuickWins::manifest();
         assert_eq!((m.name, m.kind, m.default_enabled), ("Quick wins", ModuleKind::Ai, true));
+        assert!(m.requires.is_empty(), "native tasks need no integration (\"tasks\" means a Todoist token)");
         assert_eq!(m.config_schema, vec![
             ConfigField::Label { key: "help_label", label: "I can help", default_name: "needs-claude" },
             ConfigField::Label { key: "self_label", label: "Only you", default_name: "quick" },

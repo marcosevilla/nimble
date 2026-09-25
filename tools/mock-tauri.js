@@ -988,7 +988,7 @@
     { id: 'priorities', name: 'Top priorities', kind: 'ai', requires: ['ai'], default_enabled: true,
       config_schema: [choiceField('count', 'How many', [[1, '1'], [2, '2'], [3, '3']], 3)] },
     // Phase 3 (brief/modules/quick_wins.rs): label pickers stored as label names.
-    { id: 'quick_wins', name: 'Quick wins', kind: 'ai', requires: ['tasks'], default_enabled: true,
+    { id: 'quick_wins', name: 'Quick wins', kind: 'ai', requires: [], default_enabled: true,
       config_schema: [
         { type: 'label', key: 'help_label', label: 'I can help', default_name: 'needs-claude' },
         { type: 'label', key: 'self_label', label: 'Only you', default_name: 'quick' },
