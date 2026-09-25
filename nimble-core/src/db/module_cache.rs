@@ -1,4 +1,4 @@
-//! Device-local cache for brief modules (v25 `module_cache`). Never synced
+//! Device-local cache for brief modules (v24 `module_cache`). Never synced
 //! (not in sync's allow-list) and never exported (export policy excludes it).
 
 use sqlx::SqlitePool;

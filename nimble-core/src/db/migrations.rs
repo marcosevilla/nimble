@@ -677,7 +677,7 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
         )",
     },
     Migration {
-        version: 25, // schema-v25 — C4 owns 24; renumber per plan Global Constraints if C4 hasn't merged
+        version: 24, // schema-v24 — brief phase 2 merges before C4, which renumbers to 25
         description: "Device-local brief module cache (weather) + synced brief notes",
         sql: "CREATE TABLE IF NOT EXISTS module_cache (
             module_id TEXT NOT NULL,
@@ -694,7 +694,7 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
     },
 ];
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 25; // schema-v25
+pub const CURRENT_SCHEMA_VERSION: i64 = 24; // schema-v24
 
 pub async fn current_schema_version(pool: &SqlitePool) -> crate::Result<i64> {
     let version = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM schema_version")
@@ -872,11 +872,11 @@ mod v23_tests {
 }
 
 #[cfg(test)]
-mod v25_tests {
+mod v24_tests {
     use crate::test_util::test_pool;
 
     #[tokio::test]
-    async fn v25_creates_the_device_local_module_cache() { // schema-v25
+    async fn v24_creates_the_device_local_module_cache() { // schema-v24
         let pool = test_pool().await;
         let cols: Vec<(String, i64)> = sqlx::query_as("SELECT name, pk FROM pragma_table_info('module_cache') ORDER BY cid")
             .fetch_all(&pool).await.unwrap();
@@ -884,11 +884,11 @@ mod v25_tests {
             ("module_id".to_string(), 1), ("cache_key".to_string(), 2),
             ("payload_json".to_string(), 0), ("fetched_at".to_string(), 0),
         ]);
-        assert_eq!(super::CURRENT_SCHEMA_VERSION, 25); // schema-v25
+        assert_eq!(super::CURRENT_SCHEMA_VERSION, 24); // schema-v24
     }
 
     #[tokio::test]
-    async fn v25_creates_the_synced_brief_notes_table() { // schema-v25
+    async fn v24_creates_the_synced_brief_notes_table() { // schema-v24
         let pool = test_pool().await;
         let cols: Vec<(String, i64, i64)> = sqlx::query_as("SELECT name, pk, \"notnull\" FROM pragma_table_info('brief_notes') ORDER BY cid")
             .fetch_all(&pool).await.unwrap();

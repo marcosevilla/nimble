@@ -11,7 +11,7 @@ const SNAPSHOT_SCHEMA: i64 = 1;
 
 type Row = (String, i64, String, String, String, String, i64, Option<String>, String, String);
 /// What a snapshot INSERT writes. The phase-1 `briefs.notes` column is left
-/// unused: notes live in `brief_notes` (v25, their own synced row).
+/// unused: notes live in `brief_notes` (v24, their own synced row).
 const COLS: &str = "date, version, status, source, layout_json, snapshot_json, snapshot_schema, generated_at, updated_at";
 /// A brief as read, with the day's notes joined in (blank reads as none).
 const SELECT: &str = "SELECT b.date, b.version, b.status, b.source, b.layout_json, b.snapshot_json, b.snapshot_schema,
@@ -48,7 +48,7 @@ fn sync_snapshot(b: &Brief) -> String {
     }).to_string()
 }
 
-/// Today's scratchpad (the `notes` module) in `brief_notes` (v25), synced as
+/// Today's scratchpad (the `notes` module) in `brief_notes` (v24), synced as
 /// its own row so row-level LWW never plays notes against the snapshot.
 /// Past days are read-only. Blank clears. Writing notes doesn't write the
 /// day's snapshot (that waits for the day's data); they show on it once it's there.

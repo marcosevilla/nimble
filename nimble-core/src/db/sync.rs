@@ -363,10 +363,10 @@ const REMOTE_BRIEFS_DDL: &str = "CREATE TABLE IF NOT EXISTS briefs (
     updated_at TEXT NOT NULL
 )";
 
-/// Remote DDL for the v25 `brief_notes` table (schema-v25). Notes are their
+/// Remote DDL for the v24 `brief_notes` table (schema-v24). Notes are their
 /// own row so row-level LWW never makes a notes edit and a snapshot write
 /// (priorities, weather) on another Mac shadow each other. Shared by the
-/// fresh-init path and the `ensure_remote_v25_schema` gate.
+/// fresh-init path and the `ensure_remote_v24_schema` gate.
 const REMOTE_BRIEF_NOTES_DDL: &str = "CREATE TABLE IF NOT EXISTS brief_notes (
     date TEXT PRIMARY KEY,
     notes TEXT NOT NULL DEFAULT '',
@@ -407,7 +407,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
                 ensure_remote_v21_schema(pool, turso_url, turso_token).await?;
                 ensure_remote_v22_schema(pool, turso_url, turso_token).await?;
                 ensure_remote_v23_schema(pool, turso_url, turso_token).await?;
-                ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
+                ensure_remote_v24_schema(pool, turso_url, turso_token).await?; // schema-v24
                 return Ok(());
             },
         }
@@ -532,7 +532,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
             focus_paused_at TEXT
         )",
         REMOTE_BRIEFS_DDL,
-        REMOTE_BRIEF_NOTES_DDL, // schema-v25
+        REMOTE_BRIEF_NOTES_DDL, // schema-v24
         // activity_log
         "CREATE TABLE IF NOT EXISTS activity_log (
             id TEXT PRIMARY KEY,
@@ -640,7 +640,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     .await?;
     ensure_remote_v21_schema(pool, turso_url, turso_token).await?;
     ensure_remote_v23_schema(pool, turso_url, turso_token).await?;
-    ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
+    ensure_remote_v24_schema(pool, turso_url, turso_token).await?; // schema-v24
 
     Ok(())
 }
@@ -874,9 +874,9 @@ async fn ensure_remote_v23_schema(pool: &SqlitePool, turso_url: &str, turso_toke
     Ok(())
 }
 
-// schema-v25 — renumber with the migration if C4 hasn't merged first.
-async fn ensure_remote_v25_schema(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
-    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='turso_schema_v25_upgraded'")
+// schema-v24 — brief phase 2 merges before C4 (which renumbers to 25).
+async fn ensure_remote_v24_schema(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='turso_schema_v24_upgraded'")
         .fetch_optional(pool).await?;
     if done.is_some() { return Ok(()); }
     let requests = [
@@ -884,8 +884,8 @@ async fn ensure_remote_v25_schema(pool: &SqlitePool, turso_url: &str, turso_toke
         serde_json::json!({"type":"close"}),
     ];
     let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
-    check_pipeline_statement_errors(&body, "Turso v25 schema upgrade", true)?;
-    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v25_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
+    check_pipeline_statement_errors(&body, "Turso v24 schema upgrade", true)?;
+    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v24_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
         .execute(pool).await?;
     Ok(())
 }
@@ -1320,8 +1320,8 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     if let Err(e) = ensure_remote_v23_schema(pool, turso_url, turso_token).await {
         log::warn!("Turso v23 schema gate failed, pushing anyway (gate retries next push): {e}");
     }
-    if let Err(e) = ensure_remote_v25_schema(pool, turso_url, turso_token).await { // schema-v25
-        log::warn!("Turso v25 schema gate failed, pushing anyway (gate retries next push): {e}");
+    if let Err(e) = ensure_remote_v24_schema(pool, turso_url, turso_token).await { // schema-v24
+        log::warn!("Turso v24 schema gate failed, pushing anyway (gate retries next push): {e}");
     }
 
     // Fetch all unsynced entries
@@ -2023,7 +2023,7 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
         "sections",
         "focus_replica",
         "briefs",
-        "brief_notes", // schema-v25
+        "brief_notes", // schema-v24
     ];
 
     if ALLOWED.contains(&name) {
@@ -3238,7 +3238,7 @@ mod v19_sync_tests {
     }
 
     #[tokio::test]
-    async fn notes_and_snapshot_writes_never_shadow_each_other() { // schema-v25
+    async fn notes_and_snapshot_writes_never_shadow_each_other() { // schema-v24
         assert!(super::sanitize_table_name("brief_notes").is_ok());
         // Mac B opened Today after Mac A wrote notes but before pulling: B's
         // local briefs INSERT + priorities patch are NEWER than A's notes.

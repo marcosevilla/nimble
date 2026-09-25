@@ -22,7 +22,7 @@ function toBrief(row: Row): Brief {
   }
 }
 
-/** The day's notes live in their own synced row (`brief_notes`, v25). A
+/** The day's notes live in their own synced row (`brief_notes`, v24). A
  *  remote the Mac hasn't upgraded yet has no such table: read as none. */
 async function getNotes(date: string): Promise<string | null> {
   try {

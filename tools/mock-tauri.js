@@ -888,7 +888,7 @@
     },
   }
 
-  // brief_notes (v25): notes are their own row, joined onto a brief when read.
+  // brief_notes (v24): notes are their own row, joined onto a brief when read.
   var BRIEF_NOTES = {}
   function withNotes(b) {
     if (!b) return null
