@@ -12,7 +12,8 @@ import { useDetailStore } from '@/stores/detailStore'
 import { CommandBarResults } from './CommandBarResults'
 import { toast } from 'sonner'
 import { taskToast } from '@/lib/taskToast'
-import { parseMode } from '@/lib/commandBarMode'
+import { parseMode, searchHandoff } from '@/lib/commandBarMode'
+import { useTaskSearchStore } from '@/stores/taskSearchStore'
 import { routeWithDate, routedToastMessage } from '@/lib/captureActions'
 import { HighlightField } from '@/components/capture/HighlightField'
 import { RoutePill, DateChip, RouteIcon } from '@/components/capture/CaptureTokens'
@@ -48,6 +49,7 @@ export function CommandBar() {
   const [rawQuery, setRawQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
 
   // Breakdown state
   const [breakdownTask, setBreakdownTask] = useState<LocalTask | null>(null)
@@ -121,6 +123,7 @@ export function CommandBar() {
 
   // Open/close
   const openBar = useCallback(() => {
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setOpen(true)
     submittingRef.current = false
     refresh()
@@ -140,6 +143,19 @@ export function CommandBar() {
       setBreakdownTask(null)
       setBreakdownItems([])
     }, 200)
+  }, [])
+
+  // `/search ` belongs to ⌘F now (C4): close at once (no fade — two dialogs
+  // must never overlap) and open search with the text, focus returning to
+  // whatever ⌘K was opened from.
+  const handOffToSearch = useCallback((q: string) => {
+    setOpen(false)
+    setClosing(false)
+    setRawQuery('')
+    setSelectedIndex(0)
+    setBreakdownTask(null)
+    setBreakdownItems([])
+    useTaskSearchStore.getState().openSearch(q, openerRef.current)
   }, [])
 
   // Listen for open events (from nav icon + Cmd+K)
@@ -323,6 +339,11 @@ export function CommandBar() {
   )
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const handoff = searchHandoff(e.target.value)
+    if (handoff !== null) {
+      handOffToSearch(handoff)
+      return
+    }
     setRawQuery(e.target.value)
     const { mode: m, query: q } = parseMode(e.target.value, routes)
     const q2 = q.trim()
@@ -335,7 +356,7 @@ export function CommandBar() {
     } else {
       setSelectedIndex(0)
     }
-  }, [tasks, routes])
+  }, [tasks, routes, handOffToSearch])
 
   if (!open) return null
 

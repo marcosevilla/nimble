@@ -33,3 +33,40 @@ test('likeSnippet: window around the first hit, every hit marked, ellipses when 
   assert.equal(likeSnippet('nothing here', ['portfolio']), null)
   assert.equal(likeSnippet(null, ['portfolio']), null)
 })
+
+import {
+  groupHits, createLatestGuard, formatDoneDate, EMPTY_SEARCH_FILTERS, hasActiveFilters, activeFilterLabels,
+} from '../src/lib/taskSearch.ts'
+
+const hit = (id, status) => ({ task: { id, status, content: id }, snippet: null, matched_in: 'title' })
+
+test('groupHits: open then completed, ranked order kept inside each', () => {
+  const { open, completed } = groupHits([hit('a', 'todo'), hit('b', 'complete'), hit('c', 'blocked'), hit('d', 'complete')])
+  assert.deepEqual(open.map((h) => h.task.id), ['a', 'c'])
+  assert.deepEqual(completed.map((h) => h.task.id), ['b', 'd'])
+})
+
+test('latest guard drops stale responses', () => {
+  const guard = createLatestGuard()
+  const first = guard.next()
+  const second = guard.next()
+  assert.equal(guard.isLatest(first), false, 'an older query never replaces a newer one')
+  assert.equal(guard.isLatest(second), true)
+  guard.next() // clearing the input invalidates whatever is in flight
+  assert.equal(guard.isLatest(second), false)
+})
+
+test('formatDoneDate: short date, year only outside the current year', () => {
+  const now = new Date(2026, 8, 25)
+  assert.equal(formatDoneDate('2026-09-12 14:03:00', now), 'Sep 12')
+  assert.equal(formatDoneDate('2025-12-01T09:00:00', now), 'Dec 1, 2025')
+  assert.equal(formatDoneDate(null, now), 'Done')
+  assert.equal(formatDoneDate('garbage', now), 'Done')
+})
+
+test('filters: active check and plain-language list for the empty state', () => {
+  assert.equal(hasActiveFilters(EMPTY_SEARCH_FILTERS), false)
+  const f = { status: 'completed', label_ids: ['l1', 'gone'], project_id: 'p1' }
+  assert.equal(hasActiveFilters(f), true)
+  assert.deepEqual(activeFilterLabels(f, [{ id: 'l1', name: 'deep' }], [{ id: 'p1', name: 'Portfolio' }]), ['Completed', 'deep', 'Portfolio'])
+})

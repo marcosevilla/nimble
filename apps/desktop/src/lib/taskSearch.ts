@@ -1,5 +1,6 @@
 /* Pure task-search helpers (C4). Type-only imports and no `@/` aliases, so
    node tests load this file directly (tests/taskSearch.test.mjs). */
+import type { TaskSearchFilters, TaskSearchHit, TaskSearchStatus } from '@nimble/types'
 
 /** Snippet markers — Rust's `snippet(tasks_fts, 2, char(2), char(3), …)`. */
 export const MARK_OPEN = '\u0002'
@@ -86,4 +87,58 @@ export function likeSnippet(text: string | null, tokens: readonly string[], radi
   }
   out += slice.slice(pos)
   return (start > 0 ? '…' : '') + out + (end < text.length ? '…' : '')
+}
+
+export const SEARCH_DEBOUNCE_MS = 80
+
+/** Open results, then completed; each keeps its ranked order. */
+export function groupHits(hits: readonly TaskSearchHit[]): { open: TaskSearchHit[]; completed: TaskSearchHit[] } {
+  return {
+    open: hits.filter((h) => h.task.status !== 'complete'),
+    completed: hits.filter((h) => h.task.status === 'complete'),
+  }
+}
+
+/** As-you-type request ids: only the latest response may render. */
+export function createLatestGuard(): { next(): number; isLatest(id: number): boolean } {
+  let latest = 0
+  return { next: () => ++latest, isLatest: (id) => id === latest }
+}
+
+/** "Sep 12", or "Dec 1, 2025" outside the current year. Rust stamps local
+ *  "YYYY-MM-DD HH:MM:SS"; the mock stamps "YYYY-MM-DDTHH:MM:SS". */
+export function formatDoneDate(completedAt: string | null, now: Date = new Date()): string {
+  const match = completedAt?.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return 'Done'
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])]
+  const date = new Date(year, month - 1, day)
+  return date.toLocaleDateString('en-US', year === now.getFullYear()
+    ? { month: 'short', day: 'numeric' }
+    : { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+export const EMPTY_SEARCH_FILTERS: TaskSearchFilters = { status: 'all', label_ids: [], project_id: null }
+
+export const STATUS_LABEL: Record<TaskSearchStatus, string> = { all: 'Any status', open: 'Open', completed: 'Completed' }
+
+export function hasActiveFilters(f: TaskSearchFilters): boolean {
+  return (f.status ?? 'all') !== 'all' || (f.label_ids?.length ?? 0) > 0 || !!f.project_id
+}
+
+/** Active filters in plain words, for the no-results state. */
+export function activeFilterLabels(
+  f: TaskSearchFilters,
+  labels: readonly { id: string; name: string }[],
+  projects: readonly { id: string; name: string }[],
+): string[] {
+  const out: string[] = []
+  const status = f.status ?? 'all'
+  if (status !== 'all') out.push(STATUS_LABEL[status])
+  for (const id of f.label_ids ?? []) {
+    const label = labels.find((l) => l.id === id)
+    if (label) out.push(label.name)
+  }
+  const project = projects.find((p) => p.id === f.project_id)
+  if (project) out.push(project.name)
+  return out
 }
