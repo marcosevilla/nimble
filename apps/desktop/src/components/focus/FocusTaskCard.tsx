@@ -82,11 +82,23 @@ export function FocusTaskMenu({
   tabIndex?: number
 }) {
   const items = taskMenuItems(task, place)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const closeReason = useRef<string | null>(null)
+  // After choosing a card item, focus lands on the card's heading, not the
+  // ⋯ button: Space then pauses the session instead of reopening the menu
+  // (keyGuard.spaceKeyBlocked leaves Space to a focused button). Escape
+  // and outside clicks keep the default return to ⋯. No heading (renaming,
+  // card gone) → leave focus where the item's action put it.
+  const finalFocus = () => {
+    if (place !== 'card' || closeReason.current !== 'item-press') return true
+    return triggerRef.current?.closest('section[aria-label="Focused task"]')?.querySelector<HTMLElement>('h2[tabindex="-1"]') ?? false
+  }
   return (
     // Stop propagation at a React ancestor: portal events still bubble to the row.
     <div className={cn('shrink-0', className)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={(open, details) => { closeReason.current = open ? null : details.reason }}>
         <DropdownMenuTrigger
+          ref={triggerRef}
           aria-label={`More actions for ${task.content}`}
           tabIndex={tabIndex}
           className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-(--transition-fast) hover:bg-hover hover:text-foreground focus-ring"
@@ -97,7 +109,7 @@ export function FocusTaskMenu({
             open upward over the card it acts on, never down over the list
             (loop 2 minor). Base UI flips it down only when there's no room
             above. Row menus keep the default: below, flipping near the end. */}
-        <DropdownMenuContent side={place === 'card' ? 'top' : 'bottom'} align="end" className="w-52">
+        <DropdownMenuContent side={place === 'card' ? 'top' : 'bottom'} align="end" finalFocus={finalFocus} className="w-52">
           {items.map((item) => (
             <div key={item.id}>
               {item.destructive && <DropdownMenuSeparator />}
