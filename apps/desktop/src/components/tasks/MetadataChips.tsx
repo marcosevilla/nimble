@@ -65,25 +65,45 @@ const EXTRA_FIELD_LABELS: Record<ExtraField, string> = {
 
 const EMPTY_DUE: DueValue = { dueDate: null, dueTime: null, durationMinutes: null, recurrenceRule: null }
 
+// Chip <button>s carry an explicit tabIndex={0}: WebKit (and the app's
+// WKWebView) leaves a plain <button> out of the Tab order, which silently
+// skipped the Due and Labels chips in the create modal (loop 3).
 const CHIP_EMPTY =
   'h-6 rounded-md border border-border px-2.5 text-body text-muted-foreground hover:bg-accent transition-colors inline-flex items-center'
-const CHIP_FILLED = 'h-6 rounded-md bg-secondary border border-input pl-2.5 pr-1 text-body text-foreground flex items-center gap-[5px]'
+// A filled chip's TRIGGER is the chip box itself (so the focus ring is the
+// chip's rounded ring, like the empty chips'); pr-6 is the slot for the ✕,
+// which FilledChip overlays inside it.
+const CHIP_FILLED = 'h-6 rounded-md bg-secondary border border-border pl-2.5 pr-6 text-body text-foreground inline-flex items-center gap-[5px]'
 const CHIP_PLUS =
   'h-6 rounded-md border border-dashed border-input px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors inline-flex items-center justify-center'
 
-/** Trailing ✕ shared by every filled chip — 12px icon in a size-4 hit area,
- * revealed on chip hover via the chip's own `group/chip`. stopPropagation
- * keeps the click from also opening/toggling the chip's picker. */
+/** A filled chip: its trigger (styled CHIP_FILLED) plus the ✕ laid over the
+ * trigger's right padding. The ✕ is a sibling, not a child — no <button>
+ * inside a <button> — and always visible (quiet), so the slot it holds never
+ * reads as dead space. */
+function FilledChip({ children, clear }: { children: ReactNode; clear: ReactNode }) {
+  return (
+    <span className="relative inline-flex">
+      {children}
+      {clear}
+    </span>
+  )
+}
+
+/** Trailing ✕ shared by every filled chip — 12px icon in a size-4 box with a
+ * 24px hit area. stopPropagation keeps the click from also opening/toggling
+ * the chip's picker. */
 function ClearButton({ onClear, label }: { onClear: () => void; label: string }) {
   return (
     <button
       type="button"
+      tabIndex={0}
       aria-label={label}
       onClick={(e) => {
         e.stopPropagation()
         onClear()
       }}
-      className="relative flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/chip:opacity-100 focus-visible:opacity-100 hover:text-foreground after:absolute after:-inset-2 after:content-['']"
+      className="absolute top-1/2 right-1 flex size-4 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground-subtle transition-colors hover:text-foreground after:absolute after:-inset-1 after:content-['']"
     >
       <X className="size-3" />
     </button>
@@ -143,13 +163,12 @@ function PriorityChip({ value, onChange }: { value: number; onChange: (p: number
   }
 
   return (
-    <div className={cn(CHIP_FILLED, 'group/chip')}>
-      <PriorityMenu onChange={onChange} triggerProps={{ className: 'flex items-center gap-[5px]' }}>
+    <FilledChip clear={<ClearButton onClear={() => onChange(1)} label="Clear priority" />}>
+      <PriorityMenu onChange={onChange} triggerProps={{ className: CHIP_FILLED }}>
         <PriorityBars priority={value} />
         {opt?.label}
       </PriorityMenu>
-      <ClearButton onClear={() => onChange(1)} label="Clear priority" />
-    </div>
+    </FilledChip>
   )
 }
 
@@ -167,7 +186,7 @@ function DueChip({ value, onChange }: { value: DueValue; onChange: (v: DueValue)
             wrapper's <div> is valid HTML (only <button> inside <button> is
             the anti-pattern), and its native Enter/Space click bubbles up to
             the wrapper, which is what Base UI listens on to open the popover. */}
-        <button type="button" className={CHIP_EMPTY}>
+        <button type="button" tabIndex={0} className={CHIP_EMPTY}>
           Due
         </button>
       </DueDatePopover>
@@ -175,15 +194,14 @@ function DueChip({ value, onChange }: { value: DueValue; onChange: (v: DueValue)
   }
 
   return (
-    <div className={cn(CHIP_FILLED, 'group/chip')}>
+    <FilledChip clear={<ClearButton onClear={() => onChange(EMPTY_DUE)} label="Clear due date" />}>
       <DueDatePopover value={value} onChange={onChange}>
-        <button type="button" className="flex items-center gap-[5px]">
+        <button type="button" tabIndex={0} className={CHIP_FILLED}>
           <Calendar className="size-3" />
           Due {dueBadgeLabel(value.dueDate)}
         </button>
       </DueDatePopover>
-      <ClearButton onClear={() => onChange(EMPTY_DUE)} label="Clear due date" />
-    </div>
+    </FilledChip>
   )
 }
 
@@ -222,7 +240,7 @@ function ReminderChip({ task }: { task: ReminderTask }) {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         tabIndex={0}
-        className={minutes == null ? cn(CHIP_EMPTY, 'focus-ring') : 'focus-ring flex items-center gap-[5px] rounded-sm'}
+        className={cn(minutes == null ? CHIP_EMPTY : CHIP_FILLED, 'focus-ring')}
       >
         {minutes == null ? (
           'Reminder'
@@ -242,10 +260,9 @@ function ReminderChip({ task }: { task: ReminderTask }) {
   if (minutes == null) return popover
 
   return (
-    <div className={cn(CHIP_FILLED, 'group/chip')}>
+    <FilledChip clear={<ClearButton onClear={() => void clear()} label="Clear reminder" />}>
       {popover}
-      <ClearButton onClear={() => void clear()} label="Clear reminder" />
-    </div>
+    </FilledChip>
   )
 }
 
@@ -334,21 +351,20 @@ function LabelsChips({
           display:contents trigger wrappers drop non-button children from
           the tab order entirely. */}
       {selected.length === 0 ? (
-        <button type="button" className={CHIP_EMPTY}>
+        <button type="button" tabIndex={0} className={CHIP_EMPTY}>
           Labels
         </button>
       ) : (
         selected.map((label) => (
-          <div key={label.id} className={cn(CHIP_FILLED, 'group/chip')}>
-            <button type="button" className="flex items-center gap-[5px]">
+          <FilledChip
+            key={label.id}
+            clear={<ClearButton onClear={() => onChange(labelIds.filter((id) => id !== label.id))} label={`Remove ${label.name}`} />}
+          >
+            <button type="button" tabIndex={0} className={CHIP_FILLED}>
               <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: labelColor(label.color) }} />
               {label.name}
             </button>
-            <ClearButton
-              onClear={() => onChange(labelIds.filter((id) => id !== label.id))}
-              label={`Remove ${label.name}`}
-            />
-          </div>
+          </FilledChip>
         ))
       )}
     </LabelsPopover>
@@ -438,12 +454,11 @@ function EntityChip<T extends { id: string; name: string }>({
   }
 
   return (
-    <div className={cn(CHIP_FILLED, 'group/chip')}>
-      <EntityMenu options={options} open={open} onOpenChange={onOpenChange} onSelect={onSelect}>
+    <FilledChip clear={<ClearButton onClear={onClear} label={clearLabel} />}>
+      <EntityMenu options={options} open={open} onOpenChange={onOpenChange} onSelect={onSelect} triggerProps={{ className: CHIP_FILLED }}>
         {entity.name}
       </EntityMenu>
-      <ClearButton onClear={onClear} label={clearLabel} />
-    </div>
+    </FilledChip>
   )
 }
 
@@ -500,11 +515,11 @@ function LinkedDocChip({
   // Real <button>s, not <div>s — see the Due chip's comment: display:contents
   // trigger wrappers drop non-button children from the tab order entirely.
   const trigger = linkedDocId ? (
-    <button type="button" className="flex items-center gap-[5px]">
+    <button type="button" tabIndex={0} className={CHIP_FILLED}>
       {title ?? 'Untitled'}
     </button>
   ) : (
-    <button type="button" className={CHIP_EMPTY}>
+    <button type="button" tabIndex={0} className={CHIP_EMPTY}>
       Linked doc
     </button>
   )
@@ -560,10 +575,9 @@ function LinkedDocChip({
   if (!linkedDocId) return popover
 
   return (
-    <div className={cn(CHIP_FILLED, 'group/chip')}>
+    <FilledChip clear={<ClearButton onClear={onClear} label="Clear linked doc" />}>
       {popover}
-      <ClearButton onClear={onClear} label="Clear linked doc" />
-    </div>
+    </FilledChip>
   )
 }
 

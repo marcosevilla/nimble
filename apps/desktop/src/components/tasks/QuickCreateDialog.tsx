@@ -22,9 +22,13 @@ export function QuickCreateDialog() {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
+      {/* 560 wide, pinned 16vh from the top rather than centred: the
+          description auto-grows, and a centred card would creep upward
+          under the caret on every new line. `sm:max-w-` because the
+          primitive's own `sm:max-w-sm` (384) outranks an unprefixed width. */}
       <DialogContent
         showCloseButton={false}
-        className="max-w-[480px] w-full gap-0 border-none bg-transparent p-0 shadow-none ring-0"
+        className="top-[16vh] w-full max-w-[calc(100%-2rem)] translate-y-0 gap-0 border-none bg-transparent p-0 shadow-none ring-0 sm:max-w-[560px]"
       >
         <DialogTitle className="sr-only">New task</DialogTitle>
         <DialogDescription className="sr-only">Create a new task</DialogDescription>
