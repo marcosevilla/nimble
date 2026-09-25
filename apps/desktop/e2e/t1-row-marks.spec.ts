@@ -446,6 +446,9 @@ for (const key of ['tasks', 'today'] as const) {
       await openSurface(app, page, s)
       const m = mark(rowOf(page, s.row), kind, s.marks[kind])
       await expect(m).toBeVisible()
+      // elementFromPoint only sees the viewport; with brief phase 3's
+      // composed boxes above it, Today's Due today row sits below the fold.
+      await m.scrollIntoViewIfNeeded()
       const b = await box(m)
       const cx = b.x + b.width / 2
       const cy = b.y + b.height / 2

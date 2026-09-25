@@ -821,7 +821,7 @@
       status: 'ready',
       source: 'nimble',
       // Phase-1 shape (string ids) plus one id this build doesn't know (B2 AC10).
-      layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault', 'quick_wins'],
+      layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault', 'not_a_module'],
       snapshot: {
         schedule: {
           events: [
@@ -987,6 +987,12 @@
       config_schema: [boolField('tomorrow_peek', 'Tomorrow peek'), boolField('free_block', 'Free block')] },
     { id: 'priorities', name: 'Top priorities', kind: 'ai', requires: ['ai'], default_enabled: true,
       config_schema: [choiceField('count', 'How many', [[1, '1'], [2, '2'], [3, '3']], 3)] },
+    // Phase 3 (brief/modules/quick_wins.rs): label pickers stored as label names.
+    { id: 'quick_wins', name: 'Quick wins', kind: 'ai', requires: ['tasks'], default_enabled: true,
+      config_schema: [
+        { type: 'label', key: 'help_label', label: 'I can help', default_name: 'needs-claude' },
+        { type: 'label', key: 'self_label', label: 'Only you', default_name: 'quick' },
+      ] },
     { id: 'due_today', name: 'Due today', kind: 'live', requires: [], default_enabled: true,
       config_schema: [boolField('show_completed', 'Show completed')] },
     { id: 'still_open', name: 'Still open', kind: 'fixed', requires: [], default_enabled: true,
