@@ -275,7 +275,7 @@ pub async fn create_task_with_id_tx(
         set_labels_tx(conn, &id, ids, policy).await?;
     }
     let task = fetch(conn, &id).await?;
-    crate::db::task_search::index_task_conn(conn, &task.id, &task.content, task.description.as_deref()).await;
+    crate::db::task_search::index_task_conn(conn, &task.id, &task.content, task.description.as_deref()).await?;
     if policy != MutationPolicy::Remote {
         sync_task(conn, &task, "INSERT", None).await?;
     }
@@ -447,7 +447,7 @@ pub async fn update_task_tx(
             .await?;
     }
     let task = fetch(conn, id).await?;
-    crate::db::task_search::index_task_conn(conn, &task.id, &task.content, task.description.as_deref()).await;
+    crate::db::task_search::index_task_conn(conn, &task.id, &task.content, task.description.as_deref()).await?;
     if policy != MutationPolicy::Remote && !fields.is_empty() {
         fields.dedup();
         let changed =
@@ -648,7 +648,7 @@ pub async fn delete_task_tx(
             .bind(&task.id)
             .execute(&mut *conn)
             .await?;
-        crate::db::task_search::unindex_task_conn(conn, &task.id).await;
+        crate::db::task_search::unindex_task_conn(conn, &task.id).await?;
     }
     if policy != MutationPolicy::Remote {
         for task in &effects.deleted {
@@ -680,7 +680,7 @@ pub async fn restore_deleted_tasks_tx(conn: &mut SqliteConnection, tasks: &[Loca
             .bind(&task.created_at).bind(&task.updated_at).bind(&task.external_id).bind(&task.external_source)
             .bind(&task.remote_updated_at).bind(&task.synced_snapshot).bind(&task.sync_policy)
             .execute(&mut *conn).await?;
-        crate::db::task_search::index_task_conn(conn, &task.id, &task.content, task.description.as_deref()).await;
+        crate::db::task_search::index_task_conn(conn, &task.id, &task.content, task.description.as_deref()).await?;
         sqlx::query("DELETE FROM todoist_outbox WHERE local_id=? AND object_type='task' AND op='delete' AND status='pending'")
             .bind(&task.id).execute(&mut *conn).await?;
         sync_task(conn, task, "INSERT", None).await?;

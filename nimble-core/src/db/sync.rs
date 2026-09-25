@@ -1910,6 +1910,11 @@ pub async fn apply_remote_rows_with_focus(
         .filter(|t| !(t.completed || t.status == "complete") && was_complete.get(&t.id).copied().unwrap_or(false))
         .map(|t| t.id.clone())
         .collect();
+    // A remote project DELETE cascades (FK ON DELETE CASCADE) to its tasks
+    // without going through any task hook, so drop their search rows here.
+    if applied_rows.iter().any(|p| p.row.table_name == "projects" && p.row.operation == "DELETE") {
+        crate::db::task_search::prune_orphans_conn(write.conn()).await?;
+    }
     write.commit(&effects).await?;
 
     for plan in &applied_rows {

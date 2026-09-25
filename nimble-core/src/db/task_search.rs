@@ -13,35 +13,104 @@ use crate::db::task_tx::TaskEffects;
 pub const TASKS_FTS_VERSION: &str = "1";
 const VERSION_KEY: &str = "tasks_fts_version";
 
-async fn try_index(conn: &mut SqliteConnection, id: &str, content: &str, description: Option<&str>) -> sqlx::Result<()> {
-    sqlx::query("DELETE FROM tasks_fts WHERE task_id = ?").bind(id).execute(&mut *conn).await?;
-    sqlx::query("INSERT INTO tasks_fts (task_id, content, description) VALUES (?, ?, ?)")
-        .bind(id).bind(content).bind(description.unwrap_or("")).execute(&mut *conn).await?;
+/// One device-local index write. Each runs inside its own savepoint (see
+/// `best_effort`), so a DELETE+INSERT pair is atomic.
+enum IndexOp<'a> {
+    Upsert { id: &'a str, content: &'a str, description: Option<&'a str> },
+    Remove(&'a str),
+    /// Drop rows whose task is gone (a remote project DELETE cascades task
+    /// deletes in SQLite, bypassing every hook).
+    PruneOrphans,
+}
+
+async fn run_op(conn: &mut SqliteConnection, op: &IndexOp<'_>) -> sqlx::Result<()> {
+    match op {
+        IndexOp::Upsert { id, content, description } => {
+            sqlx::query("DELETE FROM tasks_fts WHERE task_id = ?").bind(*id).execute(&mut *conn).await?;
+            sqlx::query("INSERT INTO tasks_fts (task_id, content, description) VALUES (?, ?, ?)")
+                .bind(*id).bind(*content).bind(description.unwrap_or("")).execute(&mut *conn).await?;
+        }
+        IndexOp::Remove(id) => {
+            sqlx::query("DELETE FROM tasks_fts WHERE task_id = ?").bind(*id).execute(&mut *conn).await?;
+        }
+        IndexOp::PruneOrphans => {
+            sqlx::query("DELETE FROM tasks_fts WHERE task_id NOT IN (SELECT id FROM local_tasks)")
+                .execute(&mut *conn).await?;
+        }
+    }
     Ok(())
 }
 
-/// Refresh one task's row inside the caller's transaction.
-pub(crate) async fn index_task_conn(conn: &mut SqliteConnection, id: &str, content: &str, description: Option<&str>) {
-    if let Err(e) = try_index(conn, id, content, description).await {
-        log::warn!("tasks_fts: indexing {id} failed: {e}");
+/// SQLite primary result codes after which the enclosing transaction may
+/// already be rolled back: BUSY (5), NOMEM (7), IOERR (10), FULL (13).
+/// `code` may be an extended code (e.g. 266 = IOERR_READ); its low byte is
+/// the primary code.
+fn is_fatal_code(code: Option<&str>) -> bool {
+    code.and_then(|c| c.parse::<i32>().ok())
+        .is_some_and(|c| matches!(c & 0xff, 5 | 7 | 10 | 13))
+}
+
+fn is_fatal(e: &sqlx::Error) -> bool {
+    match e {
+        sqlx::Error::Database(db) => is_fatal_code(db.code().as_deref()),
+        // Anything that is not a statement error (I/O, a dead worker) means
+        // the connection itself is in doubt.
+        _ => true,
     }
 }
 
-pub(crate) async fn unindex_task_conn(conn: &mut SqliteConnection, id: &str) {
-    if let Err(e) = sqlx::query("DELETE FROM tasks_fts WHERE task_id = ?").bind(id).execute(&mut *conn).await {
-        log::warn!("tasks_fts: unindexing {id} failed: {e}");
+/// Run one index write inside a savepoint on the caller's transaction.
+/// A statement error (missing table, constraint, corrupt index row) rolls
+/// back to the savepoint and is logged: the index is best-effort and heals on
+/// the next launch. An error that may have killed the caller's transaction
+/// (BUSY/NOMEM/IOERR/FULL), or a savepoint that cannot be set or rolled back,
+/// is returned, so the mutation fails cleanly instead of carrying on in
+/// autocommit and leaving orphan sync_log / outbox rows.
+async fn best_effort(conn: &mut SqliteConnection, op: IndexOp<'_>) -> crate::Result<()> {
+    sqlx::query("SAVEPOINT tasks_fts_write").execute(&mut *conn).await?;
+    match run_op(conn, &op).await {
+        Ok(()) => {
+            sqlx::query("RELEASE tasks_fts_write").execute(&mut *conn).await?;
+            Ok(())
+        }
+        Err(e) if is_fatal(&e) => {
+            log::error!("tasks_fts: index write failed and the transaction may be gone: {e}");
+            Err(e.into())
+        }
+        Err(e) => {
+            log::warn!("tasks_fts: index write skipped: {e}");
+            sqlx::query("ROLLBACK TO tasks_fts_write").execute(&mut *conn).await?;
+            sqlx::query("RELEASE tasks_fts_write").execute(&mut *conn).await?;
+            Ok(())
+        }
     }
+}
+
+/// Refresh one task's row inside the caller's transaction (best-effort; see
+/// `best_effort` for the only errors it returns).
+pub(crate) async fn index_task_conn(conn: &mut SqliteConnection, id: &str, content: &str, description: Option<&str>) -> crate::Result<()> {
+    best_effort(conn, IndexOp::Upsert { id, content, description }).await
+}
+
+pub(crate) async fn unindex_task_conn(conn: &mut SqliteConnection, id: &str) -> crate::Result<()> {
+    best_effort(conn, IndexOp::Remove(id)).await
+}
+
+/// Remove index rows whose task no longer exists (best-effort).
+pub(crate) async fn prune_orphans_conn(conn: &mut SqliteConnection) -> crate::Result<()> {
+    best_effort(conn, IndexOp::PruneOrphans).await
 }
 
 /// Mirror an incoming apply (Turso pull, Todoist pull, reconcile, calendar
 /// edit) in the same transaction that applied it.
-pub(crate) async fn apply_effects_conn(conn: &mut SqliteConnection, effects: &TaskEffects) {
+pub(crate) async fn apply_effects_conn(conn: &mut SqliteConnection, effects: &TaskEffects) -> crate::Result<()> {
     for task in &effects.deleted {
-        unindex_task_conn(conn, &task.id).await;
+        unindex_task_conn(conn, &task.id).await?;
     }
     for task in &effects.changed {
-        index_task_conn(conn, &task.id, &task.content, task.description.as_deref()).await;
+        index_task_conn(conn, &task.id, &task.content, task.description.as_deref()).await?;
     }
+    Ok(())
 }
 
 /// Rebuild from `local_tasks` in one transaction (~1.4k rows: well under a second).
@@ -193,6 +262,56 @@ mod tests {
         write.commit(&crate::db::task_tx::TaskEffects { changed: vec![changed], ..Default::default() }).await.unwrap();
         assert_eq!(hits(&pool, "todoist").await, vec![t.id.clone()]);
         assert!(hits(&pool, "before").await.is_empty());
+    }
+
+    #[test]
+    fn only_transaction_killing_codes_are_fatal() {
+        for code in ["5", "7", "10", "13", "266", "517", "3850"] {
+            assert!(is_fatal_code(Some(code)), "{code} is BUSY/NOMEM/IOERR/FULL (primary or extended)");
+        }
+        for code in ["1", "19", "2067", "11"] {
+            assert!(!is_fatal_code(Some(code)), "{code} is a statement error: skip and continue");
+        }
+        assert!(!is_fatal_code(None));
+    }
+
+    #[tokio::test]
+    async fn a_broken_index_never_fails_a_task_write() {
+        let pool = test_pool().await;
+        sqlx::query("DROP TABLE tasks_fts").execute(&pool).await.unwrap();
+        let t = create_local_task(&pool, CreateTaskInput { content: "Still saved".into(), ..Default::default() }).await.unwrap();
+        update_local_task(&pool, &t.id, UpdateTaskInput { content: Some("Still edited".into()), ..Default::default() }).await.unwrap();
+        let mut snap: serde_json::Value = serde_json::from_str(&sync::task_sync_snapshot(&t)).unwrap();
+        snap["content"] = "From the phone".into();
+        assert_eq!(
+            sync::apply_remote_rows_with_focus(&pool, None, &[remote(&t.id, "UPDATE", Some(snap.to_string()))]).await.unwrap(),
+            1
+        );
+        let content: String = sqlx::query_scalar("SELECT content FROM local_tasks WHERE id = ?").bind(&t.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(content, "From the phone");
+        delete_local_task(&pool, &t.id).await.unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM local_tasks").fetch_one(&pool).await.unwrap();
+        assert_eq!(left, 0);
+        // Every write replicated: the savepoint rollback never took sync_log rows with it.
+        let ops: Vec<String> = sqlx::query_scalar("SELECT DISTINCT operation FROM sync_log WHERE table_name = 'local_tasks' AND row_id = ? ORDER BY operation")
+            .bind(&t.id).fetch_all(&pool).await.unwrap();
+        assert_eq!(ops, ["DELETE", "INSERT", "UPDATE"]);
+    }
+
+    #[tokio::test]
+    async fn a_remote_project_delete_drops_its_cascaded_tasks_from_the_index() {
+        let pool = test_pool().await;
+        let project = crate::db::projects::create_project(&pool, "Gone soon", "gray", None).await.unwrap();
+        let t = create_local_task(&pool, CreateTaskInput {
+            content: "Cascade victim".into(), project_id: Some(project.id.clone()), ..Default::default()
+        }).await.unwrap();
+        assert_eq!(hits(&pool, "victim").await, vec![t.id.clone()]);
+        let mut row = remote(&project.id, "DELETE", None);
+        row.table_name = "projects".into();
+        sync::apply_remote_rows_with_focus(&pool, None, &[row]).await.unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM local_tasks WHERE id = ?").bind(&t.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(left, 0, "FK cascade removed the task");
+        assert!(hits(&pool, "victim").await.is_empty());
     }
 
     #[tokio::test]

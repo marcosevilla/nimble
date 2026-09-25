@@ -84,15 +84,22 @@ export async function listLabelGroups(): Promise<LabelGroup[]> {
  * are never auto-archived.
  */
 export async function unusedLabelIds(): Promise<string[]> {
-  const rows = await query(
-    `SELECT l.id FROM labels l
-     LEFT JOIN label_groups g ON g.id = l."group"
-     WHERE l.archived_at IS NULL
-       AND g.id IS NULL
-       AND NOT EXISTS (
-         SELECT 1 FROM task_labels tl JOIN local_tasks t ON t.id = tl.task_id
-         WHERE tl.label_id = l.id AND t.status != 'complete')
-     ORDER BY l.position, l.created_at`,
-  )
-  return rows.map((r) => str(r, 'id'))
+  try {
+    const rows = await query(
+      `SELECT l.id FROM labels l
+       LEFT JOIN label_groups g ON g.id = l."group"
+       WHERE l.archived_at IS NULL
+         AND g.id IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM task_labels tl JOIN local_tasks t ON t.id = tl.task_id
+           WHERE tl.label_id = l.id AND t.status != 'complete')
+       ORDER BY l.position, l.created_at`,
+    )
+    return rows.map((r) => str(r, 'id'))
+  } catch (e) {
+    // Pre-v24 remote (no label_groups table / archived_at column yet): nothing
+    // to archive until a desktop push runs the v24 gate. Other errors surface.
+    if (e instanceof TursoError && /no such (table|column)/i.test(e.message)) return []
+    throw e
+  }
 }

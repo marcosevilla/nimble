@@ -586,6 +586,31 @@ mod md_migration_tests {
         assert_eq!(reloaded_md.description.as_deref(), Some("**already** markdown, e.g. from Todoist"));
     }
 
+    /// C4: the backfill's raw UPDATE bypasses task_tx, so the search index
+    /// must be rebuilt at the end of it (no restart needed).
+    #[tokio::test]
+    async fn markdown_backfill_refreshes_the_search_index() {
+        let pool = test_pool().await;
+        let t = super::create_local_task(&pool, CreateTaskInput {
+            content: "Backfill".into(),
+            description: Some("<p>hello <strong>zebra</strong></p>".into()),
+            ..Default::default()
+        }).await.unwrap();
+        let hits = |token: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, String>("SELECT task_id FROM tasks_fts WHERE tasks_fts MATCH ?")
+                    .bind(format!("\"{token}\"*")).fetch_all(&pool).await.unwrap()
+            }
+        };
+        assert_eq!(hits("strong").await, vec![t.id.clone()], "the HTML tag name is indexed before");
+        let tmp = std::env::temp_dir().join(format!("nimble-test-backup-fts-{}.db", uuid::Uuid::new_v4()));
+        super::migrate_tasks_to_markdown(&pool, tmp.to_str().unwrap()).await.unwrap();
+        std::fs::remove_file(&tmp).ok();
+        assert!(hits("strong").await.is_empty(), "the converted markdown replaced the HTML in the index");
+        assert_eq!(hits("zebra").await, vec![t.id.clone()]);
+    }
+
     #[tokio::test]
     async fn migrate_converts_html_and_leaves_markdown_untouched() {
         let pool = test_pool().await;
