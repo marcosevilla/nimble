@@ -132,3 +132,8 @@ test('g s is labelled as Activity in Settings, and number keys match the five-pa
   assert.ok(keys.includes('1–5') && keys.includes('⌘1–5'))
   assert.ok(!keys.includes('1–6') && !keys.includes('⌘1–6'))
 })
+
+test('Today lists the brief setup and Boxes keys', () => {
+  const keys = keysIn('Today')
+  for (const k of ['⌥↑ / ⌥↓', 'Enter (setup)', 'Escape (setup)']) assert.ok(keys.includes(k), `Today missing ${k}`)
+})

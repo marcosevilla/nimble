@@ -1,4 +1,4 @@
-//! Per-day morning-brief snapshots (spec 2026-09-23 §4.1/§4.5, phase 1).
+//! Per-day morning-brief snapshots (phase 1 storage; phase 2 gathers through crate::brief).
 //! Written once for today at first open, frozen afterwards except for the
 //! priorities patch; synced through sync_log keyed by `date` like daily_state.
 
@@ -7,25 +7,28 @@ use sqlx::SqlitePool;
 use crate::db::sync;
 use crate::types::{Brief, Priority};
 
-pub const LAYOUT_V1: [&str; 5] = ["schedule", "priorities", "due_today", "still_open", "vault"];
 const SNAPSHOT_SCHEMA: i64 = 1;
-const STILL_OPEN_SHOWN: usize = 5;
-const TOMORROW_SHOWN: usize = 2;
 
-type Row = (String, i64, String, String, String, String, i64, String, String);
+type Row = (String, i64, String, String, String, String, i64, Option<String>, String, String);
+/// What a snapshot INSERT writes. The phase-1 `briefs.notes` column is left
+/// unused: notes live in `brief_notes` (v24, their own synced row).
 const COLS: &str = "date, version, status, source, layout_json, snapshot_json, snapshot_schema, generated_at, updated_at";
+/// A brief as read, with the day's notes joined in (blank reads as none).
+const SELECT: &str = "SELECT b.date, b.version, b.status, b.source, b.layout_json, b.snapshot_json, b.snapshot_schema,
+    NULLIF(n.notes, ''), b.generated_at, b.updated_at FROM briefs b LEFT JOIN brief_notes n ON n.date = b.date";
+const NOTES_MAX: usize = 20_000;
 
 fn to_brief(r: Row) -> Brief {
     Brief {
         date: r.0, version: r.1, status: r.2, source: r.3,
         layout: serde_json::from_str(&r.4).unwrap_or(serde_json::Value::Null),
         snapshot: serde_json::from_str(&r.5).unwrap_or(serde_json::Value::Null),
-        snapshot_schema: r.6, generated_at: r.7, updated_at: r.8,
+        snapshot_schema: r.6, notes: r.7, generated_at: r.8, updated_at: r.9,
     }
 }
 
 pub async fn get_brief(pool: &SqlitePool, date: &str) -> crate::Result<Option<Brief>> {
-    let row: Option<Row> = sqlx::query_as(&format!("SELECT {COLS} FROM briefs WHERE date = ?"))
+    let row: Option<Row> = sqlx::query_as(&format!("{SELECT} WHERE b.date = ?"))
         .bind(date).fetch_optional(pool).await?;
     Ok(row.map(to_brief))
 }
@@ -34,57 +37,57 @@ pub async fn list_brief_dates(pool: &SqlitePool) -> crate::Result<Vec<String>> {
     Ok(sqlx::query_scalar("SELECT date FROM briefs ORDER BY date DESC").fetch_all(pool).await?)
 }
 
-/// The row as sync sees it: DB column names, JSON columns as text.
+/// The row as sync sees it: DB column names, JSON columns as text. Notes are
+/// not part of it: they sync as their own `brief_notes` row.
 fn sync_snapshot(b: &Brief) -> String {
     serde_json::json!({
         "date": b.date, "version": b.version, "status": b.status, "source": b.source,
         "layout_json": b.layout.to_string(), "snapshot_json": b.snapshot.to_string(),
-        "snapshot_schema": b.snapshot_schema, "generated_at": b.generated_at, "updated_at": b.updated_at,
+        "snapshot_schema": b.snapshot_schema,
+        "generated_at": b.generated_at, "updated_at": b.updated_at,
     }).to_string()
 }
 
-fn task_ref(t: &crate::types::LocalTask) -> serde_json::Value {
-    serde_json::json!({"id": t.id, "content": t.content, "due_date": t.due_date,
-        "priority": t.priority, "project_id": t.project_id})
+/// Today's scratchpad (the `notes` module) in `brief_notes` (v24), synced as
+/// its own row so row-level LWW never plays notes against the snapshot.
+/// Past days are read-only. Blank clears. Writing notes doesn't write the
+/// day's snapshot (that waits for the day's data); they show on it once it's there.
+pub async fn set_notes(pool: &SqlitePool, date: &str, today: &str, notes: &str) -> crate::Result<()> {
+    if date != today { return Err(crate::Error::Other("notes_read_only".into())); }
+    if notes.chars().count() > NOTES_MAX { return Err(crate::Error::Other("notes_too_long".into())); }
+    let notes = if notes.trim().is_empty() { "" } else { notes };
+    let updated_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let existed: Option<String> = sqlx::query_scalar("SELECT date FROM brief_notes WHERE date = ?")
+        .bind(date).fetch_optional(pool).await?;
+    sqlx::query(
+        "INSERT INTO brief_notes (date, notes, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(date) DO UPDATE SET notes = excluded.notes, updated_at = excluded.updated_at",
+    )
+    .bind(date).bind(notes).bind(&updated_at).execute(pool).await?;
+    let snapshot = serde_json::json!({"date": date, "notes": notes, "updated_at": updated_at}).to_string();
+    let (op, changed) = if existed.is_some() {
+        ("UPDATE", Some(serde_json::json!(["notes", "updated_at"]).to_string()))
+    } else {
+        ("INSERT", None)
+    };
+    sync::append_sync_log(pool, "brief_notes", date, op, changed.as_deref(), Some(&snapshot)).await.ok();
+    Ok(())
 }
 
-async fn priorities_for(pool: &SqlitePool, date: &str) -> Option<Vec<Priority>> {
-    let json: Option<Option<String>> = sqlx::query_scalar("SELECT top_priorities FROM daily_state WHERE date = ?")
-        .bind(date).fetch_optional(pool).await.ok()?;
-    json.flatten().and_then(|j| serde_json::from_str(&j).ok())
-}
-
-async fn gather(pool: &SqlitePool, date: &str) -> crate::Result<serde_json::Value> {
-    let events = crate::api::calendar::read_cached_events(pool, date).await.unwrap_or_default();
-    let tomorrow_date = (chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-        .map_err(|e| crate::Error::Other(e.to_string()))? + chrono::Duration::days(1))
-        .format("%Y-%m-%d").to_string();
-    let tomorrow: Vec<_> = crate::api::calendar::read_cached_events(pool, &tomorrow_date).await
-        .unwrap_or_default().into_iter().filter(|e| !e.event.all_day).take(TOMORROW_SHOWN).collect();
-    let tasks = crate::db::tasks::get_local_tasks(pool, None, Some(date), false).await?;
-    let top: Vec<_> = tasks.iter().filter(|t| t.parent_id.is_none()).collect();
-    let due_today: Vec<_> = top.iter().filter(|t| t.due_date.as_deref() == Some(date)).map(|t| task_ref(t)).collect();
-    let mut still: Vec<_> = top.iter().filter(|t| t.due_date.as_deref().is_some_and(|d| d < date)).collect();
-    still.sort_by(|a, b| a.due_date.cmp(&b.due_date));
-    Ok(serde_json::json!({
-        "schedule": {"events": events, "tomorrow": tomorrow},
-        "priorities": priorities_for(pool, date).await,
-        "due_today": due_today,
-        "still_open": {"total": still.len(), "oldest": still.iter().take(STILL_OPEN_SHOWN).map(|t| task_ref(t)).collect::<Vec<_>>()},
-    }))
-}
-
-/// Today's snapshot, written on first call. Past and future dates are only
-/// ever read: a missing past brief stays missing (never fabricated from
-/// today's data).
+/// Today's snapshot, written on first call from the enabled modules in
+/// `brief.modules` order. Past and future dates are only ever read: a
+/// missing past brief stays missing (never fabricated from today's data).
 pub async fn ensure_snapshot(pool: &SqlitePool, date: &str, today: &str) -> crate::Result<Option<Brief>> {
     if let Some(b) = get_brief(pool, date).await? { return Ok(Some(b)); }
     if date != today { return Ok(None); }
+    let layout = crate::brief::settings::load_layout(pool).await?;
+    let (snapshot, partial) = crate::brief::gather_snapshot(&crate::brief::BriefCtx { pool, date }, &layout).await;
+    let used: Vec<_> = layout.into_iter().filter(|e| e.enabled).collect();
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let brief = Brief {
-        date: date.into(), version: 1, status: "ready".into(), source: "nimble".into(),
-        layout: serde_json::json!(LAYOUT_V1), snapshot: gather(pool, date).await?,
-        snapshot_schema: SNAPSHOT_SCHEMA, generated_at: now.clone(), updated_at: now,
+        date: date.into(), version: 1, status: if partial { "partial" } else { "ready" }.into(), source: "nimble".into(),
+        layout: serde_json::json!(used), snapshot,
+        snapshot_schema: SNAPSHOT_SCHEMA, notes: None, generated_at: now.clone(), updated_at: now,
     };
     let inserted = sqlx::query(&format!("INSERT OR IGNORE INTO briefs ({COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"))
         .bind(&brief.date).bind(brief.version).bind(&brief.status).bind(&brief.source)
@@ -98,15 +101,47 @@ pub async fn ensure_snapshot(pool: &SqlitePool, date: &str, today: &str) -> crat
 }
 
 /// Patch generated priorities into the day's snapshot. No row → no-op.
+/// One `json_set` in SQL (not read-modify-write), so a concurrent patch to
+/// another key of the same snapshot (weather) can't be lost to a stale read.
 pub async fn set_priorities(pool: &SqlitePool, date: &str, priorities: &[Priority]) -> crate::Result<()> {
-    let Some(mut b) = get_brief(pool, date).await? else { return Ok(()) };
-    b.snapshot["priorities"] = serde_json::to_value(priorities).unwrap_or(serde_json::Value::Null);
-    b.updated_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    sqlx::query("UPDATE briefs SET snapshot_json = ?, updated_at = ? WHERE date = ?")
-        .bind(b.snapshot.to_string()).bind(&b.updated_at).bind(date).execute(pool).await?;
-    sync::append_sync_log(pool, "briefs", date, "UPDATE",
-        Some(&serde_json::json!(["snapshot_json", "updated_at"]).to_string()), Some(&sync_snapshot(&b))).await.ok();
+    let value = serde_json::to_value(priorities).unwrap_or(serde_json::Value::Null);
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let changed = sqlx::query(
+        "UPDATE briefs SET snapshot_json = json_set(snapshot_json, '$.priorities', json(?)), updated_at = ? WHERE date = ?",
+    )
+    .bind(value.to_string()).bind(&now).bind(date)
+    .execute(pool).await?
+    .rows_affected();
+    if changed == 0 { return Ok(()); }
+    if let Some(b) = get_brief(pool, date).await? {
+        sync::append_sync_log(pool, "briefs", date, "UPDATE",
+            Some(&serde_json::json!(["snapshot_json", "updated_at"]).to_string()), Some(&sync_snapshot(&b))).await.ok();
+    }
     Ok(())
+}
+
+/// Fill one module's payload if that morning recorded it empty (key
+/// present, value JSON null). An absent key means the module was off; a
+/// filled one stays frozen. Atomic in SQL. Returns whether it wrote.
+pub async fn patch_snapshot_if_null(pool: &SqlitePool, date: &str, key: &str, value: serde_json::Value) -> crate::Result<bool> {
+    if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(crate::Error::Other(format!("invalid snapshot key: {key}")));
+    }
+    let path = format!("$.{key}");
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let changed = sqlx::query(
+        "UPDATE briefs SET snapshot_json = json_set(snapshot_json, ?, json(?)), updated_at = ?
+         WHERE date = ? AND json_type(snapshot_json, ?) = 'null'",
+    )
+    .bind(&path).bind(value.to_string()).bind(&now).bind(date).bind(&path)
+    .execute(pool).await?
+    .rows_affected();
+    if changed == 0 { return Ok(false); }
+    if let Some(b) = get_brief(pool, date).await? {
+        sync::append_sync_log(pool, "briefs", date, "UPDATE",
+            Some(&serde_json::json!(["snapshot_json", "updated_at"]).to_string()), Some(&sync_snapshot(&b))).await.ok();
+    }
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -137,7 +172,12 @@ mod tests {
         let b = super::ensure_snapshot(&pool, "2026-09-23", "2026-09-23").await.unwrap().unwrap();
         assert_eq!(b.version, 1);
         assert_eq!(b.status, "ready");
-        assert_eq!(b.layout, serde_json::json!(super::LAYOUT_V1));
+        // (replaces the LAYOUT_V1 assertion)
+        let ids: Vec<&str> = b.layout.as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["weather", "schedule", "priorities", "due_today", "still_open", "vault"]);
+        let mut keys: Vec<&String> = b.snapshot.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["due_today", "priorities", "schedule", "still_open", "vault", "weather"]);
         let s = &b.snapshot;
         assert_eq!(s["due_today"][0]["content"], "Today A");
         assert_eq!(s["still_open"]["total"], 2);
@@ -191,5 +231,72 @@ mod tests {
         super::ensure_snapshot(&pool, "2026-09-22", "2026-09-22").await.unwrap();
         super::ensure_snapshot(&pool, "2026-09-23", "2026-09-23").await.unwrap();
         assert_eq!(super::list_brief_dates(&pool).await.unwrap(), ["2026-09-23", "2026-09-22"]);
+    }
+
+    #[tokio::test]
+    async fn snapshot_follows_brief_modules() {
+        let pool = test_pool().await;
+        for (c, d) in [("A", "2026-06-01"), ("B", "2026-07-01"), ("C", "2026-08-01"), ("D", "2026-09-01"), ("Today", "2026-09-23")] {
+            task(&pool, c, d).await;
+        }
+        crate::db::settings::set_setting(&pool, "brief.modules",
+            r#"[{"id":"due_today","enabled":true,"config":{}},{"id":"schedule","enabled":false,"config":{}},
+                {"id":"still_open","enabled":true,"config":{"count":3}}]"#).await.unwrap();
+        let b = super::ensure_snapshot(&pool, "2026-09-23", "2026-09-23").await.unwrap().unwrap();
+        let ids: Vec<&str> = b.layout.as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["due_today", "still_open", "weather", "priorities", "vault"], "stored order, then enabled defaults");
+        assert_eq!(b.layout[1]["config"]["count"], 3, "the layout records the config used");
+        assert!(b.snapshot.get("schedule").is_none(), "a hidden module is not gathered");
+        assert_eq!(b.snapshot["still_open"]["total"], 4);
+        assert_eq!(b.snapshot["still_open"]["oldest"].as_array().unwrap().len(), 3);
+        assert_eq!(b.snapshot["due_today"][0]["content"], "Today");
+    }
+
+    #[tokio::test]
+    async fn habits_payload_marks_the_days_check_ins() {
+        let pool = test_pool().await;
+        for (id, name, active, pos) in [("h1", "Stretch", 1, 0), ("h2", "Read", 1, 1), ("h3", "Old", 0, 2)] {
+            sqlx::query("INSERT INTO habits (id, name, active, position) VALUES (?, ?, ?, ?)")
+                .bind(id).bind(name).bind(active).bind(pos).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO habit_logs (id, habit_id, date) VALUES ('l1', 'h1', '2026-09-23')").execute(&pool).await.unwrap();
+        crate::db::settings::set_setting(&pool, "brief.modules", r#"[{"id":"habits","enabled":true,"config":{}}]"#).await.unwrap();
+        let b = super::ensure_snapshot(&pool, "2026-09-23", "2026-09-23").await.unwrap().unwrap();
+        let h = b.snapshot["habits"].as_array().unwrap();
+        assert_eq!(h.len(), 2, "inactive habits are left out");
+        assert_eq!((h[0]["name"].as_str(), h[0]["done"].as_bool()), (Some("Stretch"), Some(true)));
+        assert_eq!((h[1]["name"].as_str(), h[1]["done"].as_bool()), (Some("Read"), Some(false)));
+    }
+
+    #[tokio::test]
+    async fn notes_save_for_today_and_sync_as_their_own_row() {
+        let pool = test_pool().await;
+        super::set_notes(&pool, "2026-09-23", "2026-09-23", "Call the venue").await.unwrap();
+        assert!(super::get_brief(&pool, "2026-09-23").await.unwrap().is_none(), "notes don't write the snapshot early");
+        super::ensure_snapshot(&pool, "2026-09-23", "2026-09-23").await.unwrap();
+        let b = super::get_brief(&pool, "2026-09-23").await.unwrap().unwrap();
+        assert_eq!(b.notes.as_deref(), Some("Call the venue"), "joined in from brief_notes");
+        let logged: Vec<(String, String)> = sqlx::query_as(
+            "SELECT table_name, snapshot FROM sync_log WHERE table_name IN ('briefs','brief_notes') ORDER BY rowid")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(logged[0].0, "brief_notes");
+        let snap: serde_json::Value = serde_json::from_str(&logged[0].1).unwrap();
+        assert_eq!(snap, serde_json::json!({"date": "2026-09-23", "notes": "Call the venue", "updated_at": snap["updated_at"]}));
+        assert!(!logged[1].1.contains("\"notes\""), "the briefs row never carries notes");
+        let unused: Option<String> = sqlx::query_scalar("SELECT notes FROM briefs WHERE date = '2026-09-23'").fetch_one(&pool).await.unwrap();
+        assert!(unused.is_none(), "the phase-1 briefs.notes column stays unused");
+        super::set_notes(&pool, "2026-09-23", "2026-09-23", "   ").await.unwrap();
+        assert!(super::get_brief(&pool, "2026-09-23").await.unwrap().unwrap().notes.is_none(), "blank clears");
+        let ops: Vec<String> = sqlx::query_scalar("SELECT operation FROM sync_log WHERE table_name='brief_notes' ORDER BY rowid")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(ops, ["INSERT", "UPDATE"]);
+    }
+
+    #[tokio::test]
+    async fn notes_are_read_only_on_other_days() {
+        let pool = test_pool().await;
+        super::ensure_snapshot(&pool, "2026-09-22", "2026-09-22").await.unwrap();
+        assert!(super::set_notes(&pool, "2026-09-22", "2026-09-23", "late").await.is_err());
+        assert!(super::set_notes(&pool, "2026-09-23", "2026-09-23", &"x".repeat(20_001)).await.is_err());
     }
 }

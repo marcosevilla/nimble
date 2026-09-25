@@ -54,6 +54,13 @@ export function isMissingTodayNote(raw: unknown): boolean {
   return /today\.md: not found/i.test(String(raw))
 }
 
+/** Rust's vault commands reject with "Obsidian vault path not configured"
+ * when no vault is set: a normal state since the setup gate went away
+ * (brief phase 2). Callers show "no daily note", never an error toast. */
+export function isVaultNotConfigured(raw: unknown): boolean {
+  return /vault path not configured/i.test(String(raw))
+}
+
 export async function retryOnce<T>(fn: () => Promise<T>, delayMs = 2000): Promise<T> {
   try {
     return await fn()

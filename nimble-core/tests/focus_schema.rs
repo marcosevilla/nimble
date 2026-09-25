@@ -69,7 +69,7 @@ async fn v20_upgrade_preserves_task_and_is_idempotent() {
     let row: (String, String) = sqlx::query_as("SELECT content, sync_policy FROM local_tasks WHERE id='old-task'")
         .fetch_one(&pool).await.unwrap();
     assert_eq!(row, ("Keep me".into(), "default".into()));
-    assert_eq!(current_schema_version(&pool).await.unwrap(), 23);
+    assert_eq!(current_schema_version(&pool).await.unwrap(), 24); // schema-v24
     assert_eq!(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM schema_version WHERE version=21")
         .fetch_one(&pool).await.unwrap(), 1);
 }

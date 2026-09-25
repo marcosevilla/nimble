@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { shouldIgnoreKey, calendarKey, todayKey, INTERACTIVE_SELECTOR, OVERLAY_SELECTOR } from '../src/lib/keyGuard.ts'
+import { shouldIgnoreKey, calendarKey, todayKey, setupKey, INTERACTIVE_SELECTOR, OVERLAY_SELECTOR } from '../src/lib/keyGuard.ts'
 
 // Minimal element stand-in: `inside` lists the selectors this element sits
 // inside (closest() hits), `is` the selectors it matches itself.
@@ -140,4 +140,21 @@ test('one overlay selector: real popups only — no tooltip triggers, no inline 
 test('a focused nav icon whose tooltip is showing keeps the shell keys', () => {
   const icon = el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR, '[data-popup-open]'] })
   assert.equal(shellKeyBlocked(icon, false), false)
+})
+
+test('setupKey: ↵ continues and Esc skips, never from fields, controls, overlays or chords', () => {
+  const ev = (key, target = el(), extra = {}) => ({ key, target, ...extra })
+  assert.equal(setupKey(ev('Enter'), false), 'continue', 'the focused step heading')
+  assert.equal(setupKey(ev('Escape'), false), 'skip')
+  assert.equal(setupKey(ev('Enter', el({ tag: 'INPUT' })), false), null, 'city search / time / number fields own ↵')
+  assert.equal(setupKey(ev('Enter', el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR] })), false), null, 'Back, a preset, Connect')
+  assert.equal(setupKey(ev('Escape', el({ tag: 'INPUT' })), false), 'skip', 'Esc from a field still skips (fields that use Esc preventDefault)')
+  assert.equal(setupKey(ev('Escape', el({ inside: [OVERLAY_SELECTOR] })), false), null, 'a menu or Select closes first')
+  assert.equal(setupKey(ev('Enter'), true), null, 'an open popup anywhere')
+  assert.equal(setupKey(ev('Escape'), true), null)
+  assert.equal(setupKey(ev('Enter', el(), { metaKey: true }), false), null)
+  assert.equal(setupKey(ev('Enter', el(), { defaultPrevented: true }), false), null)
+  assert.equal(setupKey(ev('Enter', el(), { repeat: true }), false), null, 'a held ↵ does not race through the steps')
+  assert.equal(setupKey(ev('Enter', el({ tag: 'LI', is: ['[data-box-row]'] })), false), null, 'a focused Boxes row never finishes setup')
+  assert.equal(setupKey(ev('Escape', el({ tag: 'LI', is: ['[data-box-row]'] })), false), 'skip', 'Esc still finishes later from a row')
 })

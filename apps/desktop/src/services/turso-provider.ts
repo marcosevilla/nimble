@@ -18,7 +18,8 @@
  *    no user-facing setup in the browser. Turso credentials live in Vercel
  *    environment variables behind `api/turso.ts` and are never reachable
  *    from client JS, so there is nothing for a setup dialog to collect.
- *    Rejecting here would park the web build permanently on SetupDialog.
+ *    (Nothing gates on it since brief phase 2 dropped the setup dialog;
+ *    it stays for compatibility.)
  *
  * When implementing a method, delete its `ni(...)` and write the real thing.
  * The object is checked structurally against the DataProvider interface in
@@ -94,6 +95,10 @@ export function createTursoProvider(): DataProvider {
       configureRemote: ni('backup.configureRemote'),
       activateRestoredProfile: ni('backup.activateRestoredProfile'),
     },
+    // Settings live in the Mac's local KV store and are not synced, so the
+    // web has nothing to read; Today falls back to the synced row's layout.
+    briefSettings: { supported: false, get: ni('briefSettings.get'), save: ni('briefSettings.save') },
+    weather: { supported: false, get: ni('weather.get'), geocode: ni('weather.geocode') }, // HTTP stays in Rust (§6)
     settings: {
       // See note 2 in the file header — deliberately resolves.
       checkSetupComplete: () => Promise.resolve(true),
@@ -274,6 +279,7 @@ export function createTursoProvider(): DataProvider {
       get: getBrief,
       listDates: listBriefDates,
       ensureSnapshot: () => Promise.resolve(null),
+      setNotes: ni('brief.setNotes'),
     },
 
     // Out of v1 (§5).

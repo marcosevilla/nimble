@@ -42,7 +42,7 @@ import { FONT_OPTIONS } from '@/lib/fonts'
 import type { ProductFont } from '@/lib/fonts'
 import { IconButton } from '@/components/shared/IconButton'
 import { PageFrame } from '@/components/shared/PageFrame'
-import { Label as SectionLabel, Meta, SectionTitle } from '@/components/shared/typography'
+import { Label as SectionLabel, Meta } from '@/components/shared/typography'
 import { BackupSection } from '@/components/settings/BackupSection'
 import { TodoistSyncSection } from '@/components/settings/TodoistSyncSection'
 import { TodoistMigrationSection } from '@/components/settings/TodoistMigrationSection'
@@ -50,6 +50,10 @@ import { DocsMigrationSection } from '@/components/settings/DocsMigrationSection
 import { TasksMigrationSection } from '@/components/settings/TasksMigrationSection'
 import { VaultSection } from '@/components/settings/VaultSection'
 import { LabelManager } from '@/components/settings/LabelManager'
+import { TodayBriefSettings } from '@/components/settings/TodayBriefSettings'
+import { BriefLocationSettings } from '@/components/settings/BriefLocationSettings'
+import { BriefBoxesSettings } from '@/components/settings/BriefBoxesSettings'
+import { useBriefSettingsStore } from '@/stores/briefSettingsStore'
 import { ActivityLog } from '@/components/activity/ActivityLog'
 import { Lightbulb, Quote, CheckSquare, FileText, Pencil, Trash2, ChevronDown } from 'lucide-react'
 import {
@@ -65,23 +69,9 @@ import { settingsFailure, settingsMessage } from '@/lib/settingsMessage'
 import type { SettingsFailure } from '@/lib/settingsMessage'
 import { validateRoutePrefix } from '@/lib/captureRoutes'
 import { useDeferredDeletes } from '@/hooks/useDeferredDeletes'
+import { FailureNote, SECTION_CLASS, SectionHeader, SettingFieldRow, type FieldState, type SettingField } from '@/components/settings/SettingsFields'
 
 // ── Types ──
-
-interface SettingField {
-  key: string
-  label: string
-  placeholder: string
-  help: string
-  type: 'text' | 'password'
-}
-
-interface FieldState {
-  value: string
-  saving: boolean
-  saved: boolean
-  error: SettingsFailure | null
-}
 
 // ── Field definitions by section ──
 
@@ -116,24 +106,6 @@ const ALL_FIELDS = [...INTEGRATIONS_FIELDS, ...OBSIDIAN_FIELDS]
 
 // ── Components ──
 
-/** Neutral headline + the raw error behind a disclosure (settings P2-16). */
-function FailureNote({ failure }: { failure: SettingsFailure | null }) {
-  if (!failure) return null
-  return (
-    <div className="space-y-1">
-      <p className="text-meta text-destructive" role="alert">{failure.message}</p>
-      {failure.detail && failure.detail !== failure.message && (
-        <details>
-          <summary className="cursor-pointer text-label text-muted-foreground">Details</summary>
-          <code className="block whitespace-pre-wrap break-all font-mono text-label text-muted-foreground">
-            {failure.detail}
-          </code>
-        </details>
-      )}
-    </div>
-  )
-}
-
 function toastFailure(error: unknown) {
   const failure = settingsFailure(error)
   toast.error(failure.message, failure.detail ? { description: failure.detail } : undefined)
@@ -141,79 +113,6 @@ function toastFailure(error: unknown) {
 
 function fontLabel(value: ProductFont): string {
   return FONT_OPTIONS.find((f) => f.value === value)?.label ?? value
-}
-
-function SettingFieldRow({
-  field,
-  state,
-  onChange,
-  onSave,
-}: {
-  field: SettingField
-  state: FieldState
-  onChange: (value: string) => void
-  onSave: () => void
-}) {
-  const [visible, setVisible] = useState(false)
-  const isPassword = field.type === 'password'
-
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={field.key} className="text-body-strong">
-        {field.label}
-      </Label>
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Input
-            id={field.key}
-            type={isPassword && !visible ? 'password' : 'text'}
-            placeholder={field.placeholder}
-            value={state.value}
-            onChange={(e) => onChange(e.target.value)}
-            className="pr-10"
-          />
-          {isPassword && state.value && (
-            <button
-              type="button"
-              onClick={() => setVisible(!visible)}
-              className="absolute right-1 top-1/2 -translate-y-1/2 rounded-sm px-1 py-0.5 text-meta text-muted-foreground transition-colors duration-(--transition-fast) hover:text-foreground"
-            >
-              {visible ? 'Hide' : 'Show'}
-            </button>
-          )}
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onSave}
-          disabled={state.saving}
-        >
-          {state.saving ? 'Saving...' : state.saved ? 'Saved' : 'Save'}
-        </Button>
-      </div>
-      <Meta as="p">{field.help}</Meta>
-      <FailureNote failure={state.error} />
-    </div>
-  )
-}
-
-function SectionHeader({
-  title,
-  description,
-  as = 'h2',
-}: {
-  title: string
-  description?: string
-  as?: 'h2' | 'h3'
-}) {
-  return (
-    <div className="space-y-1">
-      <SectionTitle as={as} size="lg">{title}</SectionTitle>
-      {description && (
-        <p className="text-body text-muted-foreground">{description}</p>
-      )}
-    </div>
-  )
 }
 
 // ── Accent theme definitions ──
@@ -1305,7 +1204,6 @@ function SyncMaintenance() {
 
 // ── Scroll-spy (settings P2-1) ──
 
-const SECTION_CLASS = 'space-y-4 scroll-mt-[calc(var(--page-header-h)+1.5rem)]'
 const SCROLL_SPY_THRESHOLDS = Array.from({ length: 21 }, (_, i) => i / 20)
 const NAV_CLICK_LOCK_MS = 800
 
@@ -1368,7 +1266,6 @@ const THEME_LABELS = { light: 'Light', dark: 'Dark', system: 'System' } as const
 export function SettingsPage() {
   const dp = useDataProvider()
   const { theme, setTheme, accent, setAccent, headingFont, setHeadingFont, bodyFont, setBodyFont } = useTheme()
-  const setSetupComplete = useAppStore((s) => s.setSetupComplete)
   const [fields, setFields] = useState<Record<string, FieldState>>(() => {
     const initial: Record<string, FieldState> = {}
     for (const f of ALL_FIELDS) {
@@ -1394,9 +1291,10 @@ export function SettingsPage() {
   const backupSupported = dp.backup.supported
   const remindersSupported = dp.reminders.supported
   const googleSupported = dp.googleCalendar.supported
+  const briefSupported = dp.briefSettings.supported
   const sections = useMemo(
-    () => visibleSections({ backup: backupSupported, reminders: remindersSupported, googleCalendar: googleSupported }),
-    [backupSupported, remindersSupported, googleSupported],
+    () => visibleSections({ backup: backupSupported, reminders: remindersSupported, googleCalendar: googleSupported, briefSettings: briefSupported }),
+    [backupSupported, remindersSupported, googleSupported, briefSupported],
   )
 
   // Load current values on mount
@@ -1466,13 +1364,16 @@ export function SettingsPage() {
     setResetting(true)
     try {
       await dp.settings.clearAll()
-      setSetupComplete(false)
+      // Reset clears today.setup_completed_at too: reload the brief settings
+      // and land on Today, where the setup opens (addendum §3).
+      await useBriefSettingsStore.getState().load(true)
+      useAppStore.getState().setCurrentPage('today')
     } catch (e) {
       console.error('Failed to reset settings:', e)
     } finally {
       setResetting(false)
     }
-  }, [setSetupComplete, dp])
+  }, [dp])
 
   const handleCheckForUpdates = useCallback(async () => {
     setChecking(true)
@@ -1773,9 +1674,9 @@ export function SettingsPage() {
       </section>
     ),
 
-    /* Lane B mounts <TodayBriefSettings /> here (one root
-       <section id="today-brief">). While null, the page stays hidden. */
-    'today-brief': null,
+    'today-brief': <TodayBriefSettings />,
+    'today-location': <BriefLocationSettings />,
+    'today-boxes': <BriefBoxesSettings />,
 
     /* One-time migrations and developer verbs, collapsed and last
        (settings P2-1). Each keeps its old id so deep links still land. */
@@ -1846,9 +1747,7 @@ export function SettingsPage() {
     ),
   }
 
-  // A section renders only when it has a body; `today-brief` stays null
-  // until Lane B mounts its component, which keeps "Today & brief" out of
-  // the rail until then.
+  // A section renders only when it has a body.
   const renderable = sections.filter((s) => bodies[s.id] != null)
   const pages = visiblePages(renderable)
   const page = resolveSettingsPage(storedPage, pages) ?? DEFAULT_SETTINGS_PAGE

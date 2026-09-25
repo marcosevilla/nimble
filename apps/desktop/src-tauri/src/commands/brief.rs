@@ -27,3 +27,25 @@ pub async fn brief_ensure_snapshot(app: AppHandle, date: String) -> Result<Optio
         .await
         .map_err(|e| e.to_string())
 }
+
+pub use nimble_core::brief::settings::{BriefSettingsPatch, BriefSettingsView};
+
+#[tauri::command]
+pub async fn brief_settings_get(app: AppHandle) -> Result<BriefSettingsView, String> {
+    let pool = app.state::<SqlitePool>();
+    nimble_core::brief::settings::load_view(pool.inner()).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn brief_settings_save(app: AppHandle, patch: BriefSettingsPatch) -> Result<BriefSettingsView, String> {
+    let pool = app.state::<SqlitePool>();
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    nimble_core::brief::settings::save_patch(pool.inner(), patch, &now).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn brief_set_notes(app: AppHandle, date: String, notes: String) -> Result<(), String> {
+    let pool = app.state::<SqlitePool>();
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    nimble_core::db::briefs::set_notes(pool.inner(), &date, &today, &notes).await.map_err(|e| e.to_string())
+}

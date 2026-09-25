@@ -7,8 +7,9 @@
      page in that same order, and within a page its order is render order.
    - Adding a section = a row here (with its `page`) and a matching body in
      SettingsPage's `bodies` map. A section whose body is null does not
-     render, and a page with no rendered section is hidden from the rail
-     (that is how "Today & brief" stays out until Lane B mounts it).
+     render, and a page with no rendered section is hidden from the rail.
+     The Today & brief page needs the briefSettings capability (desktop):
+     settings are not synced, so the web has nothing to show there.
    - `requires` names the DataProvider capability that must be `supported`
      for the section to render (web build drops Backups / Reminders /
      Phone alerts). `standalone` sections draw their own top rule, so the
@@ -17,7 +18,7 @@
 
    Plain TS, no JSX — tests/settingsSections.test.mjs imports it directly. */
 
-export type SettingsCapability = 'backup' | 'reminders' | 'googleCalendar'
+export type SettingsCapability = 'backup' | 'reminders' | 'googleCalendar' | 'briefSettings'
 
 export type SettingsPageId = 'general' | 'brief' | 'tasks' | 'connections' | 'data' | 'activity'
 
@@ -50,7 +51,9 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'appearance', label: 'Appearance', page: 'general' },
   { id: 'demo', label: 'Demo mode', page: 'general' },
   { id: 'about', label: 'About', page: 'general' },
-  { id: 'today-brief', label: 'Today & brief', page: 'brief' },
+  { id: 'today-brief', label: 'Brief', page: 'brief', requires: 'briefSettings' },
+  { id: 'today-location', label: 'Location & weather', page: 'brief', requires: 'briefSettings' },
+  { id: 'today-boxes', label: 'Boxes', page: 'brief', requires: 'briefSettings' },
   { id: 'capture-routes', label: 'Capture routes', page: 'tasks' },
   { id: 'labels', label: 'Labels', page: 'tasks' },
   { id: 'reminders', label: 'Reminders', page: 'tasks', requires: 'reminders', standalone: true },

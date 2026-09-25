@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/stores/appStore'
-import { SetupDialog } from '@/components/setup/SetupDialog'
 import { Dashboard } from '@/components/layout/Dashboard'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -123,15 +122,6 @@ function App() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <p className="text-body text-muted-foreground">Loading...</p>
-      </div>
-    )
-  }
-
-  // Needs setup
-  if (!setupComplete) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <SetupDialog open onComplete={() => setSetupComplete(true)} />
       </div>
     )
   }

@@ -19,6 +19,7 @@ export function ScheduleBox({
   today,
   live,
   error = null,
+  showFreeBlock = true,
 }: {
   events: CalendarEvent[]
   loading: boolean
@@ -26,11 +27,12 @@ export function ScheduleBox({
   today: string
   live: boolean
   error?: string | null
+  showFreeBlock?: boolean
 }) {
   const offline = !loading && !!error && events.length === 0
   // "From now" only while the wall clock is still on this box's day.
   const from = live && localIsoDate() === today ? nowHHMM() : undefined
-  const block = loading || offline ? null : largestFreeBlock(events, { from })
+  const block = loading || offline || !showFreeBlock ? null : largestFreeBlock(events, { from })
   const peek = tomorrow[0]
 
   return (

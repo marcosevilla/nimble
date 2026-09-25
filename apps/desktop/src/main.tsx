@@ -14,8 +14,8 @@ import { useSelectionStore } from '@/stores/selectionStore'
 import { navigateTo, useSettingsNavStore } from '@/stores/settingsNavStore'
 
 // DEV-only: expose stores on window so the audit-loop Playwright session can
-// bypass onboarding (no Tauri runtime in a plain browser → invoke() throws →
-// SetupDialog blocks the UI). See nimble/docs/audit-loop-playbook.md.
+// deep-link pages (no Tauri runtime in a plain browser, so the mock drives
+// the app). See nimble/docs/audit-loop-playbook.md.
 // detail/selection stores let capture scripts open the task detail page and
 // the inline task composer card deterministically.
 if (import.meta.env.DEV) {

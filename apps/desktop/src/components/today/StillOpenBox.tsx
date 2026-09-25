@@ -5,7 +5,6 @@ import { cn } from '@/lib/utils'
 import { ageLabel } from '@/lib/todayBrief'
 import { BriefBox } from './BriefBox'
 
-const MAX_ROWS = 5
 
 type StillOpenTask = { id: string; content: string; due_date: string | null }
 
@@ -19,12 +18,15 @@ export function StillOpenBox({
   today,
   loading = false,
   readOnly = false,
+  max = 5,
 }: {
   tasks: StillOpenTask[]
   total: number
   today: string
   loading?: boolean
   readOnly?: boolean
+  /** Rows shown before "+N more in Tasks" (the module's `count`). */
+  max?: number
 }) {
   return (
     <BriefBox title="Still open" count={loading ? undefined : total}>
@@ -41,7 +43,7 @@ export function StillOpenBox({
         <Meta as="p">Everything's current.</Meta>
       ) : (
         <div className="-mx-2">
-          {tasks.slice(0, MAX_ROWS).map((task) => {
+          {tasks.slice(0, max).map((task) => {
             const row = (
               <>
                 <span className="min-w-0 flex-1 truncate text-body">{task.content}</span>
@@ -64,7 +66,7 @@ export function StillOpenBox({
               </button>
             )
           })}
-          {total > MAX_ROWS && <Meta as="p" className="px-2 pt-1">+{total - MAX_ROWS} more in Tasks</Meta>}
+          {total > max && <Meta as="p" className="px-2 pt-1">+{total - max} more in Tasks</Meta>}
         </div>
       )}
     </BriefBox>

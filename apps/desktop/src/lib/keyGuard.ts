@@ -148,3 +148,19 @@ export function todayKey(e: CalendarKeyEvent): 'toggle' | 'prev' | 'next' | null
   if (e.key === ']') return 'next'
   return null
 }
+
+/**
+ * The Today setup's keys (addendum §3): ↵ continues, Esc skips the whole
+ * setup. ↵ stands down on text entry (the city search, time and number
+ * fields own it) and on any focused control (a button activates itself);
+ * both stand down while any popup is open (`overlayOpen` = rowNav's
+ * hasOpenOverlay) or the key is inside one. Fields that use Esc (the city
+ * search) preventDefault it. Held keys never repeat through the steps.
+ */
+export function setupKey(e: CalendarKeyEvent & { repeat?: boolean }, overlayOpen: boolean): 'continue' | 'skip' | null {
+  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat || overlayOpen) return null
+  if (e.key === 'Escape') return e.target?.closest?.(OVERLAY_SELECTOR) ? null : 'skip'
+  // A focused Boxes row (Arrange step) keeps ↵ for itself: never Finish.
+  if (e.key === 'Enter') return shouldIgnoreKey(e.target) || e.target?.closest?.('[data-box-row]') ? null : 'continue'
+  return null
+}

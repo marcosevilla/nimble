@@ -817,7 +817,8 @@
       version: 1,
       status: 'ready',
       source: 'nimble',
-      layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault'],
+      // Phase-1 shape (string ids) plus one id this build doesn't know (B2 AC10).
+      layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault', 'quick_wins'],
       snapshot: {
         schedule: {
           events: [
@@ -881,14 +882,149 @@
         },
       },
       snapshot_schema: 1,
+      notes: null,
       generated_at: '2026-07-31 07:05:00',
       updated_at: '2026-07-31 07:05:00',
     },
   }
 
+  // brief_notes (v24): notes are their own row, joined onto a brief when read.
+  var BRIEF_NOTES = {}
+  function withNotes(b) {
+    if (!b) return null
+    var n = BRIEF_NOTES[b.date]
+    return n === undefined ? b : Object.assign({}, b, { notes: n })
+  }
+
   function briefTaskRef(t) {
     return { id: t.id, content: t.content, due_date: t.due_date, priority: t.priority, project_id: t.project_id }
   }
+
+  // ── Brief settings (phase 2) ────────────────────────────────────────────
+  // Mirrors nimble-core brief::settings. ?setup=fresh = a profile that never
+  // ran the Today setup (no setup_completed_at, no location). Specs may seed
+  // window.__MOCK_BRIEF_SETTINGS__ ({ modules, time, location, … }); it is
+  // read on the first brief_settings_* call, after page init scripts ran.
+
+  function boolField(key, label) { return { type: 'bool', key: key, label: label, default: true } }
+  function choiceField(key, label, pairs, def) {
+    return { type: 'choice', key: key, label: label, options: pairs.map(function (p) { return { value: p[0], label: p[1] } }), default: def }
+  }
+  var BRIEF_MANIFESTS = [
+    { id: 'weather', name: 'Weather chip', kind: 'fixed', requires: ['location'], default_enabled: true,
+      config_schema: [choiceField('units', 'Units', [['auto', 'Auto'], ['F', '°F'], ['C', '°C']], 'auto'), boolField('rain_notes', 'Rain notes')] },
+    { id: 'schedule', name: 'Schedule', kind: 'fixed', requires: ['calendar'], default_enabled: true,
+      config_schema: [boolField('tomorrow_peek', 'Tomorrow peek'), boolField('free_block', 'Free block')] },
+    { id: 'priorities', name: 'Top priorities', kind: 'ai', requires: ['ai'], default_enabled: true,
+      config_schema: [choiceField('count', 'How many', [[1, '1'], [2, '2'], [3, '3']], 3)] },
+    { id: 'due_today', name: 'Due today', kind: 'live', requires: [], default_enabled: true,
+      config_schema: [boolField('show_completed', 'Show completed')] },
+    { id: 'still_open', name: 'Still open', kind: 'fixed', requires: [], default_enabled: true,
+      config_schema: [choiceField('count', 'How many', [[3, '3'], [5, '5'], [10, '10']], 5)] },
+    { id: 'habits', name: 'Before you start', kind: 'live', requires: [], default_enabled: false, config_schema: [] },
+    { id: 'vault', name: 'From your vault', kind: 'fixed', requires: ['vault'], default_enabled: true, config_schema: [] },
+    { id: 'notes', name: 'Notes', kind: 'live', requires: [], default_enabled: false, config_schema: [] },
+  ]
+  function mergeModuleConfig(m, stored) {
+    var c = {}
+    m.config_schema.forEach(function (f) {
+      var v = stored ? stored[f.key] : undefined
+      if (f.type === 'bool') c[f.key] = typeof v === 'boolean' ? v : f.default
+      else if (f.type === 'choice') c[f.key] = f.options.some(function (o) { return o.value === v }) ? v : f.default
+      else c[f.key] = typeof v === 'string' && v.trim() ? v.trim() : f.default_name
+    })
+    return c
+  }
+  function resolveModules(stored) {
+    var out = []
+    ;(Array.isArray(stored) ? stored : []).forEach(function (e) {
+      var m = e && BRIEF_MANIFESTS.find(function (x) { return x.id === e.id })
+      if (!m || out.some(function (o) { return o.id === e.id })) return
+      out.push({ id: e.id, enabled: e.enabled !== false, config: mergeModuleConfig(m, e.config) })
+    })
+    BRIEF_MANIFESTS.forEach(function (m) {
+      if (!out.some(function (o) { return o.id === m.id })) out.push({ id: m.id, enabled: m.default_enabled, config: mergeModuleConfig(m, null) })
+    })
+    return out
+  }
+  var freshSetup = new URLSearchParams(window.location.search).get('setup') === 'fresh'
+  var briefState = {
+    time: '06:30',
+    location: freshSetup ? null : { name: 'San Francisco, California', lat: 37.7749, lon: -122.4194, tz: 'America/Los_Angeles' },
+    stored_modules: null,
+    model: 'claude-opus-5-5',
+    effort: 'low',
+    setup_completed_at: freshSetup ? null : '2026-07-01 07:00:00',
+    goals: { daily: 5, weekly: 25, days_off: ['sat', 'sun'] },
+  }
+  var briefSeeded = false
+  // Saved brief settings survive a reload in the same tab (like the Mac's
+  // KV store), so "setup shows once" can be tested across page.reload().
+  var BRIEF_STATE_KEY = '__mock_brief_state'
+  function seedBriefSettings() {
+    if (briefSeeded) return
+    briefSeeded = true
+    var seed = window.__MOCK_BRIEF_SETTINGS__
+    if (seed) {
+      if (seed.modules) briefState.stored_modules = seed.modules
+      ;['time', 'location', 'model', 'effort', 'setup_completed_at', 'goals'].forEach(function (k) { if (k in seed) briefState[k] = seed[k] })
+    }
+    try {
+      var saved = window.sessionStorage.getItem(BRIEF_STATE_KEY)
+      if (saved) Object.assign(briefState, JSON.parse(saved))
+    } catch (e) { /* no storage: keep the seed */ }
+  }
+  function persistBriefSettings() {
+    try { window.sessionStorage.setItem(BRIEF_STATE_KEY, JSON.stringify(briefState)) } catch (e) { /* noop */ }
+  }
+  function briefSettingsView() {
+    seedBriefSettings()
+    return {
+      time: briefState.time,
+      location: briefState.location,
+      modules: resolveModules(briefState.stored_modules),
+      model: briefState.model,
+      effort: briefState.effort,
+      setup_completed_at: briefState.setup_completed_at,
+      goals: { daily: briefState.goals.daily, weekly: briefState.goals.weekly, days_off: briefState.goals.days_off.slice() },
+      sources: { calendar: !!SETTINGS.ical_feed_url, tasks: !!SETTINGS.todoist_api_token, vault: !!SETTINGS.obsidian_vault_path, ai: !!SETTINGS.anthropic_api_key },
+      manifests: BRIEF_MANIFESTS,
+    }
+  }
+
+  // ── Weather (phase 2) ─ ?weather=fresh (default) | stale | none | unavailable
+  // TODAY in San Francisco: 21.1/13.9 °C (70/57 °F), 60% rain 19:00–21:00,
+  // which puts a rain note on the 19:00 Warfield event.
+  var weatherScenario = new URLSearchParams(window.location.search).get('weather') || 'fresh'
+  function mockForecast() {
+    var hourly = []
+    ;[TODAY, '2026-08-02'].forEach(function (d) {
+      for (var h = 0; h < 24; h++) {
+        hourly.push({
+          time: d + 'T' + String(h).padStart(2, '0') + ':00',
+          temp_c: Math.round((13.9 + 7.2 * Math.max(0, Math.sin(((h - 6) / 12) * Math.PI))) * 10) / 10,
+          precip: d === TODAY && h >= 19 && h <= 21 ? 60 : 10,
+        })
+      }
+    })
+    return {
+      timezone: 'America/Los_Angeles', current_time: TODAY + 'T07:00', current_c: 15.0, hourly: hourly,
+      days: [{ date: TODAY, high_c: 21.1, low_c: 13.9, precip_max: 60 }, { date: '2026-08-02', high_c: 20.0, low_c: 13.0, precip_max: 10 }],
+    }
+  }
+  // snapshot.weather as Rust freezes it; null when there's nothing to show.
+  // Both fetch stamps fall on TODAY in San Francisco, so both freeze.
+  function mockWeatherPayload() {
+    var loc = briefSettingsView().location
+    if (!loc || weatherScenario === 'none' || weatherScenario === 'unavailable') return null
+    return { location: loc, forecast: mockForecast(), fetched_at: weatherScenario === 'stale' ? '2026-08-01T13:31:00Z' : '2026-08-01T14:00:00Z' }
+  }
+  var MOCK_PLACES = [
+    { name: 'San Francisco', admin1: 'California', country: 'United States', lat: 37.7749, lon: -122.4194, tz: 'America/Los_Angeles' },
+    { name: 'San Diego', admin1: 'California', country: 'United States', lat: 32.7157, lon: -117.1611, tz: 'America/Los_Angeles' },
+    { name: 'Santiago', admin1: 'Santiago Metropolitan', country: 'Chile', lat: -33.4489, lon: -70.6693, tz: 'America/Santiago' },
+    { name: 'Lisbon', admin1: 'Lisbon', country: 'Portugal', lat: 38.7223, lon: -9.1393, tz: 'Europe/Lisbon' },
+  ]
 
   // ── Obsidian today.md ────────────────────────────────────────────────────
 
@@ -1215,14 +1351,14 @@
     generate_priorities: function () { return DAILY_STATE.priorities },
 
     // Morning brief (phase 1)
-    brief_get: function (args) { return BRIEFS[args && args.date] || null },
+    brief_get: function (args) { return withNotes(BRIEFS[args && args.date]) },
     brief_list_dates: function () {
       return Object.keys(BRIEFS).sort().reverse()
     },
     brief_ensure_snapshot: function (args) {
       var date = args && args.date
-      if (date !== TODAY) return BRIEFS[date] || null
-      if (BRIEFS[date]) return BRIEFS[date]
+      if (date !== TODAY) return withNotes(BRIEFS[date])
+      if (BRIEFS[date]) return withNotes(BRIEFS[date])
 
       var topLevelOpen = TASKS.filter(function (t) { return !t.parent_id && !t.completed })
       var dueToday = topLevelOpen.filter(function (t) { return t.due_date === TODAY }).map(briefTaskRef)
@@ -1230,24 +1366,76 @@
         .filter(function (t) { return t.due_date && t.due_date < TODAY })
         .sort(function (a, b) { return a.due_date < b.due_date ? -1 : a.due_date > b.due_date ? 1 : 0 })
 
+      // Mirrors brief::gather_snapshot: the enabled modules of the saved
+      // layout, in order, each keyed by id (null = nothing frozen).
+      var used = briefSettingsView().modules.filter(function (m) { return m.enabled })
+      var payloads = {
+        weather: function () { return mockWeatherPayload() },
+        schedule: function () { return { events: CALENDAR_EVENTS.slice(), tomorrow: [] } },
+        priorities: function () { return DAILY_STATE.priorities },
+        due_today: function () { return dueToday },
+        still_open: function (m) {
+          var count = typeof m.config.count === 'number' ? m.config.count : 5
+          return { total: stillOpen.length, oldest: stillOpen.slice(0, count).map(briefTaskRef) }
+        },
+        habits: function () {
+          return HABITS.filter(function (h) { return h.active }).map(function (h) {
+            return { id: h.id, name: h.name, icon: h.icon, color: h.color, done: habitDone(h.id, TODAY) }
+          })
+        },
+      }
+      var snapshot = {}
+      used.forEach(function (m) { snapshot[m.id] = payloads[m.id] ? payloads[m.id](m) : null })
+
       var brief = {
         date: date,
         version: 1,
         status: 'ready',
         source: 'nimble',
-        layout: ['schedule', 'priorities', 'due_today', 'still_open', 'vault'],
-        snapshot: {
-          schedule: { events: CALENDAR_EVENTS.slice(), tomorrow: [] },
-          priorities: DAILY_STATE.priorities,
-          due_today: dueToday,
-          still_open: { total: stillOpen.length, oldest: stillOpen.slice(0, 5).map(briefTaskRef) },
-        },
+        layout: used,
+        snapshot: snapshot,
         snapshot_schema: 1,
+        notes: null,
         generated_at: iso(TODAY, '07:00:00').replace('T', ' '),
         updated_at: iso(TODAY, '07:00:00').replace('T', ' '),
       }
       BRIEFS[date] = brief
-      return brief
+      return withNotes(brief)
+    },
+    brief_settings_get: function () { return briefSettingsView() },
+    brief_settings_save: function (args) {
+      seedBriefSettings()
+      var p = (args && args.patch) || {}
+      if (p.time !== undefined) briefState.time = p.time
+      if (p.location !== undefined) briefState.location = p.location
+      if (p.modules !== undefined) briefState.stored_modules = p.modules
+      if (p.model !== undefined) briefState.model = p.model
+      if (p.effort !== undefined) briefState.effort = p.effort
+      if (p.goals) briefState.goals = Object.assign({}, briefState.goals, p.goals)
+      if (p.complete_setup) briefState.setup_completed_at = nowStamp()
+      persistBriefSettings()
+      return briefSettingsView()
+    },
+    brief_set_notes: function (args) {
+      // Like db::briefs::set_notes: its own row (brief_notes), today only.
+      if (!args || args.date !== TODAY) throw new Error('notes_read_only')
+      BRIEF_NOTES[args.date] = args.notes && args.notes.trim() ? args.notes : null
+      return null
+    },
+    weather_get: function () {
+      var loc = briefSettingsView().location
+      if (weatherScenario === 'none' || !loc) return { status: 'no_location', location: null, forecast: null, fetched_at: null }
+      if (weatherScenario === 'unavailable') return { status: 'unavailable', location: loc, forecast: null, fetched_at: null }
+      var payload = mockWeatherPayload()
+      // Like brief::modules::weather::refresh: fill today's snapshot once.
+      var today = BRIEFS[TODAY]
+      if (today && today.snapshot && today.snapshot.weather === null) today.snapshot.weather = payload
+      return { status: weatherScenario === 'stale' ? 'stale' : 'fresh', location: loc, forecast: payload.forecast, fetched_at: payload.fetched_at }
+    },
+    weather_geocode: function (args) {
+      var q = String((args && args.query) || '').trim().toLowerCase()
+      if (q.length < 2) return []
+      return MOCK_PLACES.filter(function (p) { return p.name.toLowerCase().indexOf(q) === 0 }).slice(0, 5)
     },
     break_down_task: function () {
       return [

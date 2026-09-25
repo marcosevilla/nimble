@@ -1,4 +1,5 @@
 import { subscribeDataChanges } from '@/lib/dataChanges'
+import { useVaultConfigured } from '@/hooks/useVaultConfigured'
 import { shellKeyBlocked } from '@/lib/keyGuard'
 import { hasOpenOverlay } from '@/lib/rowNav'
 import { useEffect, useCallback, useMemo, useState, useRef } from 'react'
@@ -286,6 +287,10 @@ export function InboxPage() {
     setCaptures((prev) => (prev.some((c) => c.id === capture.id) ? prev : [capture, ...prev]))
   }, [])
 
+  // Importing reads the vault's capture file; with no vault set (optional
+  // since brief phase 2) the action is hidden rather than failing raw.
+  const vaultConfigured = useVaultConfigured()
+
   const handleImport = useCallback(async () => {
     setImporting(true)
     try {
@@ -334,7 +339,7 @@ export function InboxPage() {
       title="Inbox"
       meta={items.length > 0 ? `${items.length} item${items.length !== 1 ? 's' : ''}` : undefined}
       actions={
-        <button
+        vaultConfigured && <button
           onClick={handleImport}
           disabled={importing}
           className="flex items-center gap-1 rounded-md px-2 py-1 text-meta text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:opacity-50"

@@ -5,6 +5,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ActivityTimeline } from '@/components/activity/ActivityTimeline'
 import { EmptyState } from '@/components/shared/EmptyState'
+import { Button } from '@/components/ui/button'
+import { isVaultNotConfigured } from '@/lib/errors'
+import { openSettings } from '@/stores/settingsNavStore'
 import { Terminal } from 'lucide-react'
 
 // ── Lightweight inline-markdown renderer ──
@@ -218,6 +221,18 @@ function SessionsTab() {
           <Skeleton key={i} className="h-24 rounded-lg" />
         ))}
       </div>
+    )
+  }
+
+  // No vault set (optional since brief phase 2): a normal state, not an error.
+  if (error && isVaultNotConfigured(error)) {
+    return (
+      <EmptyState
+        icon={Terminal}
+        action={<Button variant="outline" size="sm" onClick={() => openSettings('obsidian')}>Connect a vault</Button>}
+      >
+        Connect your Obsidian vault to see session notes.
+      </EmptyState>
     )
   }
 

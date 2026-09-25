@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useVaultConfigured } from '@/hooks/useVaultConfigured'
 import { cn } from '@/lib/utils'
 import { useGoalsStore } from '@/stores/goalsStore'
 import { useDataProvider } from '@/services/provider-context'
@@ -391,6 +392,9 @@ export function GoalsPage() {
     return counts
   }, [goals])
 
+  // Import reads the vault; hidden when none is set (optional since brief phase 2).
+  const vaultConfigured = useVaultConfigured()
+
   const handleImport = useCallback(async () => {
     setImporting(true)
     try {
@@ -438,18 +442,20 @@ export function GoalsPage() {
           <GanttChart className="size-3.5" />
         </ToggleGroupItem>
       </ToggleGroup>
-      <Tooltip>
-        <TooltipTrigger
-          className={cn(
-            'inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground',
-            importing && 'opacity-50 pointer-events-none',
-          )}
-          onClick={handleImport}
-        >
-          <Download className="size-3.5" />
-        </TooltipTrigger>
-        <TooltipContent>Import from Obsidian vault</TooltipContent>
-      </Tooltip>
+      {vaultConfigured && (
+        <Tooltip>
+          <TooltipTrigger
+            className={cn(
+              'inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground',
+              importing && 'opacity-50 pointer-events-none',
+            )}
+            onClick={handleImport}
+          >
+            <Download className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipContent>Import from Obsidian vault</TooltipContent>
+        </Tooltip>
+      )}
       <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
         <Plus className="size-3.5" />
         New goal
@@ -518,7 +524,7 @@ export function GoalsPage() {
             </Button>
           }
         >
-          No goals yet. Start one here, or import them from Obsidian.
+          {vaultConfigured ? 'No goals yet. Start one here, or import them from Obsidian.' : 'No goals yet. Start one here.'}
         </EmptyState>
       ) : view === 'cards' ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
