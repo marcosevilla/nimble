@@ -472,9 +472,12 @@ export function CalendarPanel() {
   const timedEvents = events.filter((e) => !e.all_day)
 
   return (
+    // data-key-region: the page's j/k row list ignores keys typed in here
+    // (lib/rowNav KEY_REGION_SELECTOR); the calendar keeps ← → t.
     <div
       className="flex flex-col h-full"
       tabIndex={0}
+      data-key-region="calendar"
       onKeyDown={handleKeyDown}
     >
       <DayNavigationHeader

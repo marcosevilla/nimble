@@ -126,7 +126,9 @@ export function DocsSearch() {
       </div>
 
       {showList && (
-        <div id={listId} role="listbox" aria-label="Search results" className="mt-1 space-y-0.5">
+        // Inline, not a popup: it stays up after blur while the query is
+        // set, so it must not count as an open overlay (lib/keyGuard).
+        <div id={listId} role="listbox" data-inline-listbox aria-label="Search results" className="mt-1 space-y-0.5">
           {hits.map((hit, i) => {
             const active = i === activeIdx
             return (

@@ -99,3 +99,45 @@ test('todayKey: b toggles, [ and ] step days, never from fields, overlays or cho
   assert.equal(todayKey(ev('B', { shiftKey: true })), null)
   assert.equal(todayKey({ key: 'b', target: el({ tag: 'INPUT' }) }), null)
 })
+
+import { shellKeyBlocked, spaceKeyBlocked, ROW_SELECTOR } from '../src/lib/keyGuard.ts'
+
+test('shell keys (? ⇧F ⇧H q digits g-chord) skip every text entry, a SELECT included', () => {
+  for (const tag of ['INPUT', 'TEXTAREA', 'SELECT']) assert.equal(shellKeyBlocked(el({ tag }), false), true, tag)
+  assert.equal(shellKeyBlocked(el({ editable: true }), false), true, 'contenteditable')
+})
+
+test('shell keys skip while any overlay is open, focused or not', () => {
+  assert.equal(shellKeyBlocked(el({ inside: [OVERLAY_SELECTOR] }), false), true, 'focus inside a menu/dialog')
+  assert.equal(shellKeyBlocked(el({ tag: 'BODY' }), true), true, 'an overlay open elsewhere')
+})
+
+test('shell keys still act from the page and from a focused button', () => {
+  assert.equal(shellKeyBlocked(el({ tag: 'BODY' }), false), false)
+  assert.equal(shellKeyBlocked(el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR] }), false), false, 'a nav button keeps digits')
+  assert.equal(shellKeyBlocked(null, false), false)
+})
+
+test('Space leaves buttons, fields and overlays alone but not a list row', () => {
+  assert.equal(spaceKeyBlocked(el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR] }), false), true, 'a button activates')
+  assert.equal(spaceKeyBlocked(el({ tag: 'SELECT' }), false), true)
+  assert.equal(spaceKeyBlocked(el({ inside: [OVERLAY_SELECTOR] }), false), true, 'inside a dialog')
+  assert.equal(spaceKeyBlocked(el({ tag: 'BODY' }), true), true, 'an overlay open elsewhere')
+  const row = el({ tag: 'DIV', is: [INTERACTIVE_SELECTOR, ROW_SELECTOR] })
+  assert.equal(spaceKeyBlocked(row, false), false, 'a task row (role=button) hands Space to the session')
+  assert.equal(spaceKeyBlocked(el({ tag: 'BODY' }), false), false)
+})
+
+test('one overlay selector: real popups only — no tooltip triggers, no inline listboxes', async () => {
+  const rowNav = await import('../src/lib/rowNav.ts')
+  assert.equal(rowNav.OVERLAY_SELECTOR, OVERLAY_SELECTOR, 'rowNav uses the same selector')
+  assert.doesNotMatch(OVERLAY_SELECTOR, /data-popup-open|data-open/, 'a tooltip trigger/popup is not an overlay')
+  for (const part of ['[role="dialog"]', '[role="alertdialog"]', '[role="menu"]', '[data-slot="popover-content"]', '[data-slot="select-content"]'])
+    assert.ok(OVERLAY_SELECTOR.includes(part), part)
+  assert.match(OVERLAY_SELECTOR, /\[role="listbox"\]:not\(\[data-inline-listbox\]\)/, 'inline listboxes (Docs search) excluded')
+})
+
+test('a focused nav icon whose tooltip is showing keeps the shell keys', () => {
+  const icon = el({ tag: 'BUTTON', is: [INTERACTIVE_SELECTOR, '[data-popup-open]'] })
+  assert.equal(shellKeyBlocked(icon, false), false)
+})

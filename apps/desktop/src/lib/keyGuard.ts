@@ -14,8 +14,14 @@
 export const INTERACTIVE_SELECTOR =
   'button, a[href], summary, [role="button"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], [role="tab"], [role="radio"]'
 
+/** Anything open on top of the page: dialogs, menus, popovers, a Select's
+ * popup. The one definition (rowNav, HelpPanel and the shell use it too).
+ * Deliberately NOT `[data-popup-open]` / `[data-open][data-side]`: Base UI
+ * sets those on a tooltip trigger/popup too, and nav tooltips open on
+ * keyboard focus. An inline results list (Docs search) carries
+ * `data-inline-listbox` — it stays rendered after blur and is not a popup. */
 export const OVERLAY_SELECTOR =
-  '[role="dialog"], [role="alertdialog"], [role="menu"], [data-popup-open], [data-open][data-side]'
+  '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]:not([data-inline-listbox]), [data-slot="popover-content"], [data-slot="select-content"]'
 
 export interface KeyTargetLike {
   tagName?: string
@@ -43,6 +49,34 @@ export function shouldIgnoreKey(
     return true
   }
   return false
+}
+
+/** A page list row (TaskItem, InboxNoteRow): `role="button"` rows that
+ * hand Space to a running focus session (they check `focusSpaceAction`). */
+export const ROW_SELECTOR = '[data-nav-row]'
+
+/**
+ * Dashboard's single-key shell shortcuts (`?`, ⇧F, ⇧H, `q`, digits and the
+ * `g` chord) stand down for any text entry — a SELECT included — and while
+ * a menu, popover or dialog is open, whether or not focus is inside it
+ * (1b follow-up). `overlayOpen` is `hasOpenOverlay()` from lib/rowNav,
+ * passed in so this stays DOM-free. A focused button keeps them: digits
+ * still navigate after clicking a nav item.
+ */
+export function shellKeyBlocked(target: KeyTargetLike | null | undefined, overlayOpen: boolean): boolean {
+  if (overlayOpen) return true
+  if (!target) return false
+  return isTextEntry(target) || !!target.closest?.(OVERLAY_SELECTOR)
+}
+
+/**
+ * Space-pauses-focus stands down like the shell keys, and also for any
+ * focused control but a list row, so Space activates the button it was
+ * aimed at (the project delete-confirm's "Keep it") instead of pausing.
+ */
+export function spaceKeyBlocked(target: KeyTargetLike | null | undefined, overlayOpen: boolean): boolean {
+  if (overlayOpen) return true
+  return shouldIgnoreKey(target, { rowSelector: ROW_SELECTOR })
 }
 
 /** An Up next row (the roving list owns its own keys: Enter promotes it). */

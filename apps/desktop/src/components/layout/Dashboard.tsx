@@ -29,6 +29,8 @@ import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { connectFocusCache, focusSpaceAction, isDroppedRepeat, sendFocusAction, useFocusCache } from '@/stores/focusStore'
 import { useFocusSurface } from '@/stores/focusSurfaceStore'
 import { isFocusTrayShortcut } from '@/lib/focusFlows'
+import { shellKeyBlocked, spaceKeyBlocked } from '@/lib/keyGuard'
+import { hasOpenOverlay } from '@/lib/rowNav'
 import { pageHidesRightRail, toggleFocusQueue, toggleHabits } from '@/lib/rightRail'
 import { FocusView } from '@/components/focus/FocusView'
 import { FocusBanner } from '@/components/focus/FocusBanner'
@@ -148,9 +150,13 @@ export function Dashboard() {
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
+      // Single-key shortcuts below also stand down for a SELECT and while a
+      // menu, popover or dialog is open (loop 3 keys; lib/keyGuard).
+      const overlayOpen = hasOpenOverlay()
+      const shellBlocked = shellKeyBlocked(target, overlayOpen)
 
       // ? — toggle the keyboard-shortcuts panel (shell P1-1, §1.5)
-      if (e.key === '?' && !isInput && !meta && !e.altKey) {
+      if (e.key === '?' && !shellBlocked && !meta && !e.altKey) {
         e.preventDefault()
         useHelpPanelStore.getState().toggle()
         return
@@ -188,21 +194,23 @@ export function Dashboard() {
 
       // ⇧F — open/close the focus queue in the right column (presentation
       // only; works with an empty queue)
-      if (!isInput && isFocusTrayShortcut(e)) {
+      if (!shellBlocked && isFocusTrayShortcut(e)) {
         e.preventDefault()
         toggleFocusQueue()
         return
       }
 
       // ⇧H — open/close habits in the right column (re-score goals N-P1-1)
-      if (!isInput && isHabitsShortcut(e)) {
+      if (!shellBlocked && isHabitsShortcut(e)) {
         e.preventDefault()
         toggleHabits()
         return
       }
 
-      // Space — pause a running focus session (never starts or resumes one)
-      const spaceAction = e.key === ' ' && !isInput && !meta ? focusSpaceAction() : null
+      // Space — pause a running focus session (never starts or resumes one).
+      // A focused control (the project delete-confirm) keeps Space for its
+      // own activation; a list row hands it over (TaskItem checks too).
+      const spaceAction = e.key === ' ' && !meta && !e.altKey && !spaceKeyBlocked(target, overlayOpen) ? focusSpaceAction() : null
       if (spaceAction) {
         e.preventDefault()
         if (!e.repeat) {
@@ -214,7 +222,7 @@ export function Dashboard() {
       }
 
       // Q — open quick create dialog (only when not typing in an input)
-      if (e.key === 'q' && !isInput && !meta) {
+      if (e.key === 'q' && !shellBlocked && !meta && !e.altKey) {
         e.preventDefault()
         useQuickCreateStore.getState().openCreate()
         return
@@ -222,7 +230,7 @@ export function Dashboard() {
 
       // Number keys for navigation — follows user's custom nav order
       const pages = useLayoutStore.getState().navOrder
-      if (!isInput) {
+      if (!shellBlocked && !meta && !e.altKey) {
         const num = parseInt(e.key, 10)
         if (num >= 1 && num <= pages.length) {
           e.preventDefault()
@@ -252,12 +260,10 @@ export function Dashboard() {
   const pendingGRef = useRef<number | null>(null)
   useEffect(() => {
     function handleChord(e: KeyboardEvent) {
-      const target = e.target as HTMLElement
-      const isInput =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      if (isInput || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      // A field (SELECT included) or an open menu/dialog keeps `g` and the
+      // key after it — Base UI menus use letters for typeahead.
+      if (shellKeyBlocked(e.target as HTMLElement, hasOpenOverlay())) return
       // Reaching for Shift (or any modifier) must not cancel a pending `g`.
       if (isModifierOnlyKey(e.key)) return
 
