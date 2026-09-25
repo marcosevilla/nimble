@@ -127,7 +127,9 @@ export function FocusAddPanel({
             setError(null)
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+            // WKWebView: the IME-committing Enter has isComposing=false, keyCode 229.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return
+            if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               void submit()
             }

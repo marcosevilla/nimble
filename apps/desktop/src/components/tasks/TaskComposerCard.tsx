@@ -19,10 +19,10 @@ const FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports?.('field-sizing'
 
 /** Grow a textarea to its content where `field-sizing: content` is missing
  * (older WebKit). A no-op where the CSS does the job. */
-function autoGrow(el: HTMLTextAreaElement | null) {
+function autoGrow(el: HTMLTextAreaElement | null, maxPx = Infinity) {
   if (!el || FIELD_SIZING) return
   el.style.height = 'auto'
-  el.style.height = `${el.scrollHeight}px`
+  el.style.height = `${Math.min(el.scrollHeight, maxPx)}px`
 }
 
 /** `defaults.parentId` seeds a subtask create (Task Details' "Add subtask"
@@ -163,7 +163,10 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
   // inserts a newline (the title wraps visually but stays one line of
   // text). ⌘/Ctrl+Enter falls through to the card-level handler.
   const handleTitleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
+    // WKWebView sends the IME-committing Enter with isComposing=false but
+    // keyCode 229: leave both alone so composing never jumps fields.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
+    if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
       e.preventDefault()
       descriptionRef.current?.focus()
     }
@@ -171,7 +174,7 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
 
   // Engines without `field-sizing: content` get the same auto-grow by hand.
   useLayoutEffect(() => autoGrow(titleRef.current), [title])
-  useLayoutEffect(() => autoGrow(descriptionRef.current), [description])
+  useLayoutEffect(() => autoGrow(descriptionRef.current, window.innerHeight * 0.4), [description])
 
   return (
     <div
@@ -212,7 +215,9 @@ export function TaskComposerCard({ defaults, onClose, onCreated }: TaskComposerC
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Description"
           aria-label="Description"
-          className="mt-2 min-h-16 text-body"
+          // Capped at 40vh and scrolls inside: the card is pinned near the
+          // top, so an unbounded paste would push Save off screen.
+          className="mt-2 min-h-16 max-h-[40vh] overflow-y-auto text-body"
         />
 
         {/* Metadata chips */}
