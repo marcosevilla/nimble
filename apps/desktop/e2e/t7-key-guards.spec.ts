@@ -227,6 +227,43 @@ test.describe('1 shell keys', () => {
   })
 })
 
+// ── 1c. review round: things that must NOT count as an open overlay ─────
+
+test.describe('1c not overlays', () => {
+  test('Docs search results left showing after blur do not block shell keys', async ({ app, page }) => {
+    await app.open('docs')
+    const search = page.getByRole('combobox', { name: 'Search docs and vault' })
+    await search.fill('case')
+    await expect(page.getByRole('listbox', { name: 'Search results' })).toBeVisible()
+    await search.blur()
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await expect(page.getByRole('listbox', { name: 'Search results' }), 'results stay rendered').toBeVisible()
+    await page.keyboard.press('2')
+    await expect.poll(() => currentPage(page)).not.toBe('docs')
+    await page.keyboard.press('Shift+H')
+    await expect.poll(() => railTab(page)).toBe('Habits')
+  })
+
+  test('a collapsed nav icon with its tooltip showing keeps digits and the g-chord', async ({ app, page }) => {
+    await app.open('today')
+    await page.getByRole('navigation').getByRole('button', { name: 'Collapse sidebar' }).click()
+    const inbox = page.getByRole('navigation').getByRole('button', { name: 'Inbox', exact: true })
+    const today = page.getByRole('navigation').getByRole('button', { name: 'Today', exact: true })
+    await today.focus()
+    await page.keyboard.press('Tab')
+    // Walk to the Inbox icon by keyboard so its tooltip opens on focus.
+    for (let i = 0; i < 6 && !(await inbox.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('Tab')
+    await expect(inbox).toBeFocused()
+    await expect(inbox, 'tooltip open on the focused icon').toHaveAttribute('data-popup-open', '')
+    await page.keyboard.press('3')
+    await expect.poll(() => currentPage(page)).not.toBe('today')
+    const after = await currentPage(page)
+    await inbox.focus()
+    await pressAll(page, ['g', 't'])
+    await expect.poll(() => currentPage(page), `g t from ${after}`).toBe('today')
+  })
+})
+
 // ── 1b. page single keys with the same guard (self-critique round) ────
 
 test.describe('1b page keys', () => {
@@ -299,6 +336,20 @@ test.describe('2 space', () => {
     await expect(confirm).toHaveCount(0)
     await page.waitForTimeout(200)
     expect(await focusCalls(page)).toEqual([])
+  })
+
+  test('after choosing an item from the card ⋯ menu, Space pauses (focus is not left on ⋯)', async ({ app, page }) => {
+    await installFocus(page, { queued: ['task-01', 'task-04'], running: true })
+    await app.open('today')
+    await page.getByRole('tab', { name: 'Focus queue' }).click()
+    const trigger = page.locator('aside').getByRole('button', { name: /^More actions for / }).first()
+    await trigger.click()
+    await page.getByRole('menuitem', { name: 'Copy assistant context' }).click()
+    await expect(page.getByRole('menu')).toHaveCount(0)
+    await expect(trigger, 'focus moves off the ⋯ trigger').not.toBeFocused()
+    await page.keyboard.press(' ')
+    await expect.poll(() => focusCalls(page)).toEqual([{ kind: 'pause' }])
+    await expect(page.getByRole('menu'), 'Space did not reopen the menu').toHaveCount(0)
   })
 
   test('Space on a nav button activates it and does not pause', async ({ app, page }) => {
