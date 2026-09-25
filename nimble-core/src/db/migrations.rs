@@ -708,9 +708,35 @@ CREATE INDEX IF NOT EXISTS idx_action_log_synced ON action_log(synced)
             ALTER TABLE labels ADD COLUMN archived_at TEXT;
             CREATE VIRTUAL TABLE tasks_fts USING fts5(task_id UNINDEXED, content, description, tokenize = 'unicode61 remove_diacritics 2')",
     },
+    // schema-v26
+    Migration {
+        version: 26,
+        description: "Morning brief items and composition bookkeeping",
+        sql: "CREATE TABLE IF NOT EXISTS brief_items (
+            id TEXT PRIMARY KEY,
+            date TEXT NOT NULL,
+            module_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT,
+            task_id TEXT,
+            origin TEXT NOT NULL,
+            dedupe_key TEXT,
+            action_kind TEXT,
+            action_state TEXT NOT NULL DEFAULT 'none' CHECK(action_state IN ('none','produced','dismissed','confirmed')),
+            produced_ref TEXT,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_brief_items_dedupe ON brief_items(date, dedupe_key);
+        CREATE INDEX IF NOT EXISTS idx_brief_items_date ON brief_items(date);
+        ALTER TABLE briefs ADD COLUMN composed_at TEXT;
+        ALTER TABLE briefs ADD COLUMN compose_attempts INTEGER NOT NULL DEFAULT 0",
+    },
 ];
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 25; // schema-v25
+pub const CURRENT_SCHEMA_VERSION: i64 = 26; // schema-v26 (C4 is v25)
 
 pub async fn current_schema_version(pool: &SqlitePool) -> crate::Result<i64> {
     let version = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM schema_version")
@@ -883,7 +909,7 @@ mod v23_tests {
         let cols: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('briefs') ORDER BY cid")
             .fetch_all(&pool).await.unwrap();
         assert_eq!(cols, ["date","version","status","source","layout_json","snapshot_json","snapshot_schema",
-            "energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at"]);
+            "energy_level","model","input_tokens","output_tokens","error_code","notes","generated_at","updated_at","composed_at","compose_attempts"]);
     }
 }
 
@@ -931,6 +957,31 @@ mod v25_tests {
         let hit: Option<String> = sqlx::query_scalar("SELECT task_id FROM tasks_fts WHERE tasks_fts MATCH '\"resume\"*'")
             .fetch_optional(&pool).await.unwrap();
         assert_eq!(hit.as_deref(), Some("t1"), "remove_diacritics folds é");
-        assert_eq!(super::CURRENT_SCHEMA_VERSION, 25); // schema-v25
+    }
+}
+
+#[cfg(test)]
+mod v26_tests {
+    use crate::test_util::test_pool;
+
+    #[tokio::test]
+    async fn v26_adds_brief_items_and_composition_columns() {
+        let pool = test_pool().await;
+        let cols: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('brief_items') ORDER BY cid")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(cols, ["id","date","module_id","kind","title","body","task_id","origin","dedupe_key",
+            "action_kind","action_state","produced_ref","position","created_at","updated_at"]);
+        let briefs: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('briefs') ORDER BY cid")
+            .fetch_all(&pool).await.unwrap();
+        assert!(briefs.ends_with(&["composed_at".to_string(), "compose_attempts".to_string()]), "{briefs:?}");
+        let bad = sqlx::query("INSERT INTO brief_items (id,date,module_id,kind,title,origin,action_state,created_at,updated_at) VALUES ('x','2026-09-25','priorities','priority','t','ai','bogus','n','n')")
+            .execute(&pool).await;
+        assert!(bad.is_err(), "action_state is constrained");
+        for id in ["a", "b"] {
+            let r = sqlx::query("INSERT INTO brief_items (id,date,module_id,kind,title,origin,dedupe_key,created_at,updated_at) VALUES (?, '2026-09-25','priorities','priority','t','ai','priority:t1','n','n')")
+                .bind(id).execute(&pool).await;
+            assert_eq!(r.is_ok(), id == "a", "(date, dedupe_key) is unique");
+        }
+        assert_eq!(super::CURRENT_SCHEMA_VERSION, 26);
     }
 }

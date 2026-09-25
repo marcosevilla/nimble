@@ -363,6 +363,26 @@ const REMOTE_BRIEFS_DDL: &str = "CREATE TABLE IF NOT EXISTS briefs (
     updated_at TEXT NOT NULL
 )";
 
+/// Remote DDL for v26 `brief_items`. Mirrors `migrations.rs` version 26 minus
+/// the CHECK and the unique index (remote tables stay permissive).
+const REMOTE_BRIEF_ITEMS_DDL: &str = "CREATE TABLE IF NOT EXISTS brief_items (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    module_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT,
+    task_id TEXT,
+    origin TEXT NOT NULL,
+    dedupe_key TEXT,
+    action_kind TEXT,
+    action_state TEXT NOT NULL DEFAULT 'none',
+    produced_ref TEXT,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)";
+
 /// Remote DDL for the v24 `brief_notes` table (schema-v24). Notes are their
 /// own row so row-level LWW never makes a notes edit and a snapshot write
 /// (priorities, weather) on another Mac shadow each other. Shared by the
@@ -422,6 +442,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
                 ensure_remote_v23_schema(pool, turso_url, turso_token).await?;
                 ensure_remote_v24_schema(pool, turso_url, turso_token).await?; // schema-v24
                 ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
+                ensure_remote_v26_schema(pool, turso_url, turso_token).await?; // schema-v26
                 return Ok(());
             },
         }
@@ -656,6 +677,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     ensure_remote_v23_schema(pool, turso_url, turso_token).await?;
     ensure_remote_v24_schema(pool, turso_url, turso_token).await?; // schema-v24
     ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
+    ensure_remote_v26_schema(pool, turso_url, turso_token).await?; // schema-v26
 
     Ok(())
 }
@@ -885,6 +907,26 @@ async fn ensure_remote_v23_schema(pool: &SqlitePool, turso_url: &str, turso_toke
     let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
     check_pipeline_statement_errors(&body, "Turso v23 schema upgrade", true)?;
     sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v23_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
+        .execute(pool).await?;
+    Ok(())
+}
+
+// schema-v26
+async fn ensure_remote_v26_schema(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='turso_schema_v26_upgraded'")
+        .fetch_optional(pool).await?;
+    if done.is_some() { return Ok(()); }
+    let requests = [
+        turso_execute(REMOTE_BRIEF_ITEMS_DDL, vec![]),
+        turso_execute("ALTER TABLE briefs ADD COLUMN composed_at TEXT", vec![]),
+        turso_execute("ALTER TABLE briefs ADD COLUMN compose_attempts INTEGER NOT NULL DEFAULT 0", vec![]),
+        serde_json::json!({"type":"close"}),
+    ];
+    let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
+    // "duplicate column name" = an earlier run already added it; anything else
+    // (e.g. "no such table: briefs" before the v23 gate) must not latch the gate.
+    check_pipeline_statement_errors(&body, "Turso v26 schema upgrade", true)?;
+    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v26_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
         .execute(pool).await?;
     Ok(())
 }
@@ -1358,6 +1400,9 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     }
     if let Err(e) = ensure_remote_v25_schema(pool, turso_url, turso_token).await { // schema-v25
         log::warn!("Turso v25 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
+    if let Err(e) = ensure_remote_v26_schema(pool, turso_url, turso_token).await { // schema-v26
+        log::warn!("Turso v26 schema gate failed, pushing anyway (gate retries next push): {e}");
     }
 
     // Fetch all unsynced entries
@@ -2066,6 +2111,7 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
         "briefs",
         "brief_notes", // schema-v24
         "label_groups",
+        "brief_items", // schema-v26
     ];
 
     if ALLOWED.contains(&name) {
@@ -3307,6 +3353,25 @@ mod v19_sync_tests {
         let got = crate::db::briefs::get_brief(&a, "2026-09-26").await.unwrap().unwrap();
         assert_eq!(got.snapshot["priorities"][0]["title"], "Ship");
         assert_eq!(got.notes.as_deref(), Some("Mine"));
+    }
+
+    #[test]
+    fn brief_items_sync_by_id() {
+        assert!(super::sanitize_table_name("brief_items").is_ok());
+        let sql = super::build_snapshot_upsert_sql("brief_items", &["id", "action_state"]);
+        assert!(sql.contains("ON CONFLICT(id) DO UPDATE SET action_state = excluded.action_state"), "got {sql}");
+    }
+
+    #[tokio::test]
+    async fn a_pulled_brief_item_lands_and_reads_back() {
+        let pool = test_pool().await;
+        let snap = serde_json::json!({"id":"2026-09-25:priority:t","date":"2026-09-25","module_id":"priorities","kind":"priority",
+            "title":"Ship","body":null,"task_id":"t","origin":"ai","dedupe_key":"priority:t","action_kind":null,
+            "action_state":"none","produced_ref":null,"position":0,"created_at":"n","updated_at":"n"}).to_string();
+        super::apply_remote_change(&pool, "brief_items", "2026-09-25:priority:t", "INSERT", Some(&snap)).await.unwrap();
+        let items = crate::db::brief_items::list_items(&pool, "2026-09-25").await.unwrap();
+        assert_eq!(items[0].title, "Ship");
+        assert!(items[0].task.is_none(), "no local task with that id");
     }
 
     #[tokio::test]
