@@ -80,6 +80,10 @@ export function hasOpenOverlay(doc: Document = document): boolean {
 
 export const TREE_SELECTOR = '[role="tree"]'
 
+/** A panel that owns the keys typed inside it (the calendar rail: ← → t).
+ * j/k/Enter/x there must not drive the page's row list (1b follow-up). */
+export const KEY_REGION_SELECTOR = '[data-key-region]'
+
 export interface RowKeyDecision {
   /** False: leave the event alone (no preventDefault, no row action). */
   handle: boolean
@@ -98,7 +102,7 @@ interface ElementLike {
 const SKIP: RowKeyDecision = { handle: false, rowId: null }
 
 /** Decide whether the window-level row handler takes `key` from `target`:
- * - open overlay (popover, menu, dialog), a tree, or a field → skip every key;
+ * - open overlay (popover, menu, dialog), a tree, a key region or a field → skip every key;
  * - a nested control (status button, "Convert to task") → skip Enter and
  *   Space so the control activates; other keys act on its row;
  * - a row, the page, or plain content → handle. */
@@ -107,7 +111,7 @@ export function decideRowKey(target: unknown, key: string): RowKeyDecision {
   if (!el || typeof el.closest !== 'function' || typeof el.matches !== 'function') {
     return { handle: true, rowId: null }
   }
-  if (el.closest(OVERLAY_SELECTOR) || el.closest(TREE_SELECTOR)) return SKIP
+  if (el.closest(OVERLAY_SELECTOR) || el.closest(TREE_SELECTOR) || el.closest(KEY_REGION_SELECTOR)) return SKIP
   if (el.isContentEditable || el.matches(FIELD_SELECTOR)) return SKIP
   const row = el.closest(NAV_ROW_SELECTOR)
   const rowId = row?.getAttribute?.('data-nav-row') ?? null

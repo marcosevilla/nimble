@@ -134,3 +134,14 @@ test('keys typed inside a nav tree never reach the row list (docs N-P1-1)', () =
     assert.deepEqual(decideRowKey(treeRow, key), { handle: false, rowId: null }, key)
   }
 })
+
+test('keys typed inside a key region (the calendar) never reach the row list', () => {
+  const region = el(['[data-key-region]'], body)
+  const chevron = el(['button'], region)
+  const cell = el(['div'], region)
+  for (const key of ['j', 'k', 'ArrowDown', 'Enter', 'x', 'Escape']) {
+    assert.deepEqual(decideRowKey(region, key), { handle: false, rowId: null }, `${key} on the region`)
+    assert.deepEqual(decideRowKey(chevron, key), { handle: false, rowId: null }, `${key} on its chevron`)
+    assert.deepEqual(decideRowKey(cell, key), { handle: false, rowId: null }, `${key} on its content`)
+  }
+})
