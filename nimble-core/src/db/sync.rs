@@ -407,6 +407,18 @@ const REMOTE_LABEL_GROUPS_DDL: &str = "CREATE TABLE IF NOT EXISTS label_groups (
     updated_at TEXT NOT NULL
 )";
 
+/// Remote DDL for the v27 `karma_events` ledger. Mirrors `migrations.rs`
+/// version 27 minus the `kind` CHECK (remote tables stay permissive). Shared
+/// by the fresh-init path and `ensure_remote_v27_schema`.
+const REMOTE_KARMA_EVENTS_DDL: &str = "CREATE TABLE IF NOT EXISTS karma_events (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    points INTEGER NOT NULL,
+    task_id TEXT,
+    created_at TEXT NOT NULL
+)";
+
 /// Create all synced tables on the remote Turso database.
 /// Only runs once — checks for `turso_initialized` setting.
 pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
@@ -444,6 +456,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
                 ensure_remote_v24_schema(pool, turso_url, turso_token).await?; // schema-v24
                 ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
                 ensure_remote_v26_schema(pool, turso_url, turso_token).await?; // schema-v26
+                ensure_remote_v27_schema(pool, turso_url, turso_token).await?;
                 return Ok(());
             },
         }
@@ -679,6 +692,7 @@ pub async fn initialize_remote(pool: &SqlitePool, turso_url: &str, turso_token: 
     ensure_remote_v24_schema(pool, turso_url, turso_token).await?; // schema-v24
     ensure_remote_v25_schema(pool, turso_url, turso_token).await?; // schema-v25
     ensure_remote_v26_schema(pool, turso_url, turso_token).await?; // schema-v26
+    ensure_remote_v27_schema(pool, turso_url, turso_token).await?;
 
     Ok(())
 }
@@ -966,6 +980,21 @@ async fn ensure_remote_v25_schema(pool: &SqlitePool, turso_url: &str, turso_toke
     Ok(())
 }
 
+async fn ensure_remote_v27_schema(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crate::Result<()> {
+    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='turso_schema_v27_upgraded'")
+        .fetch_optional(pool).await?;
+    if done.is_some() { return Ok(()); }
+    let requests = [
+        turso_execute(REMOTE_KARMA_EVENTS_DDL, vec![]),
+        serde_json::json!({"type":"close"}),
+    ];
+    let body = turso_pipeline(turso_url, turso_token, requests.to_vec()).await?;
+    check_pipeline_statement_errors(&body, "Turso v27 schema upgrade", true)?;
+    sqlx::query("INSERT INTO settings(key,value,updated_at) VALUES('turso_schema_v27_upgraded','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
+        .execute(pool).await?;
+    Ok(())
+}
+
 // ── Push ──
 
 /// Conflict target (primary-key columns) per synced table, for building the
@@ -997,7 +1026,11 @@ fn build_snapshot_upsert_sql(table_name: &str, columns: &[&str]) -> String {
         .filter(|c| !pk_cols.contains(c))
         .map(|c| { let name = if *c == "group" { "\"group\"" } else { c }; format!("{name} = excluded.{name}") })
         .collect();
-    let action = if set_clauses.is_empty() {
+    // `karma_events` is an append-only ledger with deterministic ids: the
+    // first row for an id wins on every device (matching the local
+    // `INSERT OR IGNORE` in db::karma), so a pulled or pushed copy never
+    // rewrites a row's date or created_at.
+    let action = if set_clauses.is_empty() || table_name == "karma_events" {
         "DO NOTHING".to_string()
     } else {
         format!("DO UPDATE SET {}", set_clauses.join(", "))
@@ -1404,6 +1437,9 @@ pub async fn push(pool: &SqlitePool, turso_url: &str, turso_token: &str) -> crat
     }
     if let Err(e) = ensure_remote_v26_schema(pool, turso_url, turso_token).await { // schema-v26
         log::warn!("Turso v26 schema gate failed, pushing anyway (gate retries next push): {e}");
+    }
+    if let Err(e) = ensure_remote_v27_schema(pool, turso_url, turso_token).await {
+        log::warn!("Turso v27 schema gate failed, pushing anyway (gate retries next push): {e}");
     }
 
     // Fetch all unsynced entries
@@ -1877,14 +1913,25 @@ pub async fn apply_remote_rows_with_focus(
     // Completion state of each task before this chunk first touched it, so a
     // pull that un-completes a task is reported as a reopen (focus restore).
     let mut was_complete: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    // Momentum (db::karma): each task's completion stamp and due date before
+    // this chunk first touched it, and the rows that rolled a repeat forward.
+    let mut prior_stamps: std::collections::HashMap<String, (Option<String>, Option<String>)> = std::collections::HashMap::new();
+    let mut rolled_forward: std::collections::HashSet<String> = std::collections::HashSet::new();
     let result: crate::Result<()> = async {
         for plan in &planned {
             let row = plan.row;
             let conn = write.conn();
             if row.table_name == "local_tasks" && row.operation != "DELETE" && !was_complete.contains_key(&row.row_id) {
-                let prior: Option<(i64, String)> = sqlx::query_as("SELECT completed,status FROM local_tasks WHERE id = ?")
-                    .bind(&row.row_id).fetch_optional(&mut *conn).await?;
-                was_complete.insert(row.row_id.clone(), prior.is_some_and(|(done, status)| done != 0 || status == "complete"));
+                let prior: Option<(i64, String, Option<String>, Option<String>)> =
+                    sqlx::query_as("SELECT completed,status,completed_at,due_date FROM local_tasks WHERE id = ?")
+                        .bind(&row.row_id).fetch_optional(&mut *conn).await?;
+                was_complete.insert(row.row_id.clone(), prior.as_ref().is_some_and(|(done, status, _, _)| *done != 0 || status == "complete"));
+                if let Some((_, _, completed_at, due_date)) = prior {
+                    prior_stamps.insert(row.row_id.clone(), (completed_at, due_date));
+                }
+            }
+            if row.table_name == "local_tasks" && crate::db::karma::is_roll_forward(row.changed_columns.as_deref()) {
+                rolled_forward.insert(row.row_id.clone());
             }
             sqlx::query("SAVEPOINT pulled_row").execute(&mut *conn).await?;
             let outcome: crate::Result<Vec<LocalTask>> = async {
@@ -1960,6 +2007,43 @@ pub async fn apply_remote_rows_with_focus(
     // without going through any task hook, so drop their search rows here.
     if applied_rows.iter().any(|p| p.row.table_name == "projects" && p.row.operation == "DELETE") {
         crate::db::task_search::prune_orphans_conn(write.conn()).await?;
+    }
+    // Momentum ledger (fire-and-forget; see db::karma), judged against each
+    // task's state before this chunk so a complete-then-reopen chunk nets out.
+    // Only a lost transaction (see karma::record_tx) comes back as an error.
+    let ledger: crate::Result<()> = async {
+        let conn = write.conn();
+        for task in &effects.changed {
+            let was = was_complete.get(&task.id).copied().unwrap_or(false);
+            let now = task.completed || task.status == "complete";
+            let (prior_done_at, prior_due) = prior_stamps.get(&task.id).cloned().unwrap_or((None, None));
+            if now && !was {
+                crate::db::karma::on_completed_tx(conn, &task.id).await?;
+            } else if !now && was {
+                crate::db::karma::on_reopened_tx(conn, &task.id, prior_done_at.as_deref()).await?;
+            } else if !now && rolled_forward.contains(&task.id) {
+                let recurring = task.recurrence_rule.as_deref().and_then(crate::recurrence::parse_rule).is_some();
+                if let (true, Some(before), Some(after)) = (recurring, prior_due.as_deref(), task.due_date.as_deref()) {
+                    if after > before {
+                        // Dated by the pulled row's own stamp (the web writes a
+                        // local `updated_at` with the roll-forward), not by
+                        // when this device happened to pull it.
+                        let at = if crate::db::karma::local_stamp(&task.updated_at).is_some() {
+                            task.updated_at.clone()
+                        } else {
+                            crate::db::karma::now_local()
+                        };
+                        crate::db::karma::on_recurred_tx(conn, &task.id, before, task.priority, &at).await?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(e) = ledger {
+        let _ = write.abandon().await;
+        return Err(e);
     }
     write.commit(&effects).await?;
 
@@ -2119,6 +2203,7 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
         "brief_notes", // schema-v24
         "label_groups",
         "brief_items", // schema-v26
+        "karma_events",
     ];
 
     if ALLOWED.contains(&name) {
@@ -2193,7 +2278,7 @@ pub async fn seed_existing_data(pool: &SqlitePool) -> crate::Result<u64> {
         "habits", "habit_logs", "documents", "doc_folders", "doc_notes",
         "capture_routes", "life_areas", "calendar_feeds", "activity_log",
         "vault_notes", "vault_links", "vault_tags",
-        "labels", "sections", "label_groups",
+        "labels", "sections", "label_groups", "karma_events",
     ];
 
     let mut count: u64 = 0;
@@ -3459,6 +3544,36 @@ mod v19_sync_tests {
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_log WHERE table_name = 'label_groups' AND row_id = 'g1'")
             .fetch_one(&pool).await.unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[tokio::test]
+    async fn karma_events_sync_by_id_and_reapply_idempotently() {
+        assert!(super::sanitize_table_name("karma_events").is_ok());
+        let pool = test_pool().await;
+        let id = "task:t1:2026-09-25 10:00:00";
+        let snap = serde_json::json!({"id": id, "date": "2026-09-25", "kind": "task", "points": 1,
+            "task_id": "t1", "created_at": "2026-09-25 10:00:00"}).to_string();
+        super::apply_remote_change(&pool, "karma_events", id, "INSERT", Some(&snap)).await.unwrap();
+        super::apply_remote_change(&pool, "karma_events", id, "INSERT", Some(&snap)).await.unwrap();
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM karma_events").fetch_one(&pool).await.unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[tokio::test]
+    async fn karma_events_are_append_only_across_devices() {
+        let sql = super::build_snapshot_upsert_sql("karma_events", &["id", "date", "kind", "points", "task_id", "created_at"]);
+        assert!(sql.ends_with("ON CONFLICT(id) DO NOTHING"), "got {sql}");
+        let pool = test_pool().await;
+        let id = "recur:t1:2026-09-20";
+        let local = serde_json::json!({"id": id, "date": "2026-09-25", "kind": "recur", "points": 1,
+            "task_id": "t1", "created_at": "2026-09-25 07:00:00"}).to_string();
+        let remote = serde_json::json!({"id": id, "date": "2026-09-26", "kind": "recur", "points": 1,
+            "task_id": "t1", "created_at": "2026-09-26 08:00:00"}).to_string();
+        super::apply_remote_change(&pool, "karma_events", id, "INSERT", Some(&local)).await.unwrap();
+        super::apply_remote_change(&pool, "karma_events", id, "INSERT", Some(&remote)).await.unwrap();
+        let row: (String, String) = sqlx::query_as("SELECT date, created_at FROM karma_events WHERE id = ?")
+            .bind(id).fetch_one(&pool).await.unwrap();
+        assert_eq!(row, ("2026-09-25".to_string(), "2026-09-25 07:00:00".to_string()), "the first row wins");
     }
 }
 

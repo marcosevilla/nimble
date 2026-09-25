@@ -13,8 +13,8 @@ import {
 } from '../src/lib/settingsSections.ts'
 import { settingsFailure, settingsMessage } from '../src/lib/settingsMessage.ts'
 
-const ALL = { backup: true, reminders: true, googleCalendar: true, briefSettings: true }
-const NONE = { backup: false, reminders: false, googleCalendar: false, briefSettings: false }
+const ALL = { backup: true, reminders: true, googleCalendar: true, briefSettings: true, momentum: true }
+const NONE = { backup: false, reminders: false, googleCalendar: false, briefSettings: false, momentum: false }
 
 const ACRONYMS = ['API']
 function assertSentenceCase(label) {
@@ -48,7 +48,7 @@ test('six pages in the decided order (Activity last), each section on the decide
   const byPage = Object.fromEntries(SETTINGS_PAGES.map((p) => [p.id, sectionsOnPage(SETTINGS_SECTIONS, p.id).map((s) => s.id)]))
   assert.deepEqual(byPage, {
     general: ['appearance', 'demo', 'about'],
-    brief: ['today-brief', 'today-location', 'today-boxes'],
+    brief: ['today-brief', 'today-location', 'today-boxes', 'momentum'],
     tasks: ['capture-routes', 'labels', 'reminders'],
     connections: ['integrations', 'obsidian', 'todoist-sync', 'calendars', 'google-calendar'],
     data: ['sync', 'backups', 'maintenance'],
@@ -85,6 +85,7 @@ test('visibleSections drops capability-gated sections and keeps order', () => {
   const none = visibleSections(NONE).map((s) => s.id)
   const gated = SETTINGS_SECTIONS.filter((s) => s.requires).map((s) => s.id)
   for (const id of gated) assert.ok(!none.includes(id), id)
+  assert.ok(gated.includes('momentum'), 'Goals & momentum is desktop-only')
   assert.equal(none.length, all.length - gated.length)
 })
 
@@ -106,6 +107,7 @@ test('settingsTarget maps a section to its page; unknown ids open the default pa
   assert.deepEqual(settingsTarget('todoist-sync'), { page: 'connections', section: 'todoist-sync' })
   assert.deepEqual(settingsTarget('demo'), { page: 'general', section: 'demo' })
   assert.deepEqual(settingsTarget('today-brief'), { page: 'brief', section: 'today-brief' })
+  assert.deepEqual(settingsTarget('momentum'), { page: 'brief', section: 'momentum' })
   assert.deepEqual(settingsTarget('activity'), { page: 'activity', section: 'activity' })
   assert.deepEqual(settingsTarget('no-such-section'), { page: 'general', section: null })
 })
@@ -154,8 +156,11 @@ test('activeSectionId resolves to the last section once the scroller is at its e
 
 test('Today & brief sections are desktop-only and named for the addendum', () => {
   const brief = SETTINGS_SECTIONS.filter((s) => s.page === 'brief')
-  assert.deepEqual(brief.map((s) => [s.id, s.label]), [['today-brief', 'Brief'], ['today-location', 'Location & weather'], ['today-boxes', 'Boxes']])
-  for (const s of brief) assert.equal(s.requires, 'briefSettings', s.id)
+  assert.deepEqual(brief.map((s) => [s.id, s.label]), [
+    ['today-brief', 'Brief'], ['today-location', 'Location & weather'], ['today-boxes', 'Boxes'], ['momentum', 'Goals & momentum'],
+  ])
+  // Lane A's sections need brief settings; Lane C's needs the Mac's momentum ledger.
+  for (const s of brief) assert.equal(s.requires, s.id === 'momentum' ? 'momentum' : 'briefSettings', s.id)
   assert.ok(!visiblePages(visibleSections(NONE)).some((p) => p.id === 'brief'), 'the web never shows the page')
   assert.deepEqual(settingsTarget('today-location'), { page: 'brief', section: 'today-location' })
 })

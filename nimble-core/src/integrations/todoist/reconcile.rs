@@ -19,7 +19,8 @@ use super::sync_loop::{self, PulledRows, SyncReport};
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum RemoteStatus {
-    Completed,
+    /// Done in Todoist; `at` is its `completed_at` (RFC 3339) when reported.
+    Completed { at: Option<String> },
     Deleted,
     /// Still open. When the full sync didn't return it, its project is
     /// archived (full sync omits archived projects' items).
@@ -33,7 +34,7 @@ pub fn classify_task_json(v: &serde_json::Value) -> RemoteStatus {
         return RemoteStatus::Deleted;
     }
     if v["checked"].as_bool().unwrap_or(false) {
-        return RemoteStatus::Completed;
+        return RemoteStatus::Completed { at: v["completed_at"].as_str().map(str::to_owned) };
     }
     RemoteStatus::Active {
         project_id: v["project_id"].as_str().unwrap_or_default().to_string(),
@@ -53,6 +54,11 @@ pub struct ReconcilePlan {
     pub projects_archived: Vec<(String, String)>,
     /// (local task id, content)
     pub to_complete: Vec<(String, String)>,
+    /// Local task id -> Todoist's `completed_at` (RFC 3339), when reported.
+    /// Only these completions are credited to momentum (db::karma); the rest
+    /// would all land on the reconcile's own second.
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub completed_at: HashMap<String, String>,
     pub to_delete: Vec<(String, String)>,
     pub kept_in_archived_project: Vec<(String, String)>,
     pub missing_to_create: usize,
@@ -85,7 +91,7 @@ pub fn plan_stale(
         }
         let entry = (local_id.clone(), content.clone());
         match statuses.get(external_id) {
-            Some(RemoteStatus::Completed) => complete.push(entry),
+            Some(RemoteStatus::Completed { .. }) => complete.push(entry),
             Some(RemoteStatus::Deleted) => delete.push(entry),
             Some(RemoteStatus::Active { .. }) => keep.push(entry),
             None => {}
@@ -203,6 +209,11 @@ pub async fn build_plan(
     let open = open_linked(pool).await?;
     let (complete, delete, keep) = plan_stale(&open, &active_ids, statuses);
     plan.to_complete = complete;
+    for (local_id, ext, _) in &open {
+        if let Some(RemoteStatus::Completed { at: Some(at) }) = statuses.get(ext) {
+            plan.completed_at.insert(local_id.clone(), at.clone());
+        }
+    }
     plan.to_delete = delete;
     plan.kept_in_archived_project = keep;
     plan.lookup_errors = open
@@ -395,17 +406,25 @@ async fn apply_structure_tx(
     // 7. Tasks finished in Todoist. The base snapshot records `checked` too,
     // so a later reopen in Todoist merges as a remote change.
     for (id, _) in &plan.to_complete {
+        // Todoist's own completion time (local) when it reported one.
+        let done_at = plan.completed_at.get(id).and_then(|at| crate::db::karma::local_stamp(at)).map(|(_, s)| s);
         let res = sqlx::query(
             "UPDATE local_tasks SET completed = 1, status = 'complete',
-                completed_at = datetime('now','localtime'), updated_at = datetime('now','localtime'),
+                completed_at = COALESCE(?, datetime('now','localtime')), updated_at = datetime('now','localtime'),
                 synced_snapshot = CASE WHEN json_valid(synced_snapshot)
                     THEN json_set(synced_snapshot, '$.checked', json('true')) ELSE synced_snapshot END
              WHERE id = ? AND completed = 0",
         )
+        .bind(&done_at)
         .bind(id)
         .execute(&mut *conn)
         .await?;
         expect_one(res, || format!("task {id} is missing or already complete"))?;
+        // Momentum: only a completion Todoist dated counts; an undated one
+        // would credit every stale task to the reconcile's second.
+        if done_at.is_some() {
+            crate::db::karma::on_completed_tx(&mut *conn, id).await?;
+        }
         rows.logged.push((id.clone(), "UPDATE"));
     }
 
@@ -773,7 +792,7 @@ mod tests {
         ];
         let active: HashSet<String> = ["RD".to_string()].into();
         let mut st = HashMap::new();
-        st.insert("RA".into(), RemoteStatus::Completed);
+        st.insert("RA".into(), RemoteStatus::Completed { at: None });
         st.insert("RB".into(), RemoteStatus::Deleted);
         st.insert("RC".into(), RemoteStatus::Active { project_id: "ARCH".into() });
         let (complete, delete, keep) = plan_stale(&open, &active, &st);
@@ -818,7 +837,7 @@ mod tests {
         let pool = test_pool().await;
         seed_legacy(&pool).await;
         let mut st = HashMap::new();
-        st.insert("R5".to_string(), RemoteStatus::Completed);
+        st.insert("R5".to_string(), RemoteStatus::Completed { at: None });
         let plan = build_plan(&pool, &full(), &st).await.unwrap();
         assert_eq!(plan.fake_sections_converted.len(), 1);
         assert_eq!(plan.fake_sections_archived.len(), 1);          // Review Focus #2
@@ -873,7 +892,7 @@ mod tests {
         let pool = test_pool().await;
         seed_legacy(&pool).await;
         let mut st = HashMap::new();
-        st.insert("R5".to_string(), RemoteStatus::Completed);
+        st.insert("R5".to_string(), RemoteStatus::Completed { at: None });
         let mut plan = build_plan(&pool, &full(), &st).await.unwrap();
         assert!(plan.lookup_errors.is_empty());
         plan.to_complete.push(("does-not-exist".into(), "x".into()));
@@ -938,12 +957,41 @@ mod tests {
             .bind(json!({"content": "stale", "project_external_id": "DEAD", "checked": false}).to_string())
             .execute(&pool).await.unwrap();
         let mut st = HashMap::new();
-        st.insert("R5".to_string(), RemoteStatus::Completed);
+        st.insert("R5".to_string(), RemoteStatus::Completed { at: None });
         let plan = build_plan(&pool, &full(), &st).await.unwrap();
         apply(&pool, &full(), &plan).await.unwrap();
         let snap: String = sqlx::query_scalar("SELECT synced_snapshot FROM local_tasks WHERE id='t5'").fetch_one(&pool).await.unwrap();
         let snap: crate::integrations::todoist::mappers::TaskSnapshot = serde_json::from_str(&snap).unwrap();
         assert!(snap.checked, "base now matches Todoist, so a later reopen there merges cleanly");
+        let status: String = sqlx::query_scalar("SELECT status FROM local_tasks WHERE id='t5'").fetch_one(&pool).await.unwrap();
+        assert_eq!(status, "complete");
+    }
+
+    #[tokio::test]
+    async fn a_reconciled_completion_counts_once_dated_by_todoist() {
+        let pool = test_pool().await;
+        seed_legacy(&pool).await;
+        let mut st = HashMap::new();
+        st.insert("R5".to_string(), RemoteStatus::Completed { at: Some("2026-09-01T17:00:00Z".into()) });
+        let plan = build_plan(&pool, &full(), &st).await.unwrap();
+        apply(&pool, &full(), &plan).await.unwrap();
+        let rows: Vec<(String, String)> = sqlx::query_as("SELECT id, date FROM karma_events WHERE task_id = 't5'")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        let (day, at) = crate::db::karma::local_stamp("2026-09-01T17:00:00Z").unwrap();
+        assert_eq!(rows[0], (format!("task:t5:{at}"), crate::db::karma::day(day)), "when it was done in Todoist, not the reconcile");
+    }
+
+    #[tokio::test]
+    async fn a_reconciled_completion_without_todoist_s_date_is_not_credited() {
+        let pool = test_pool().await;
+        seed_legacy(&pool).await;
+        let mut st = HashMap::new();
+        st.insert("R5".to_string(), RemoteStatus::Completed { at: None });
+        let plan = build_plan(&pool, &full(), &st).await.unwrap();
+        apply(&pool, &full(), &plan).await.unwrap();
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM karma_events").fetch_one(&pool).await.unwrap();
+        assert_eq!(n, 0, "a bulk reconcile stamp is not a day's work");
         let status: String = sqlx::query_scalar("SELECT status FROM local_tasks WHERE id='t5'").fetch_one(&pool).await.unwrap();
         assert_eq!(status, "complete");
     }
@@ -963,7 +1011,7 @@ mod tests {
         let pool = test_pool().await;
         seed_legacy(&pool).await;
         let mut st = HashMap::new();
-        st.insert("R5".to_string(), RemoteStatus::Completed);
+        st.insert("R5".to_string(), RemoteStatus::Completed { at: None });
         let plan = build_plan(&pool, &full(), &st).await.unwrap();
         apply(&pool, &full(), &plan).await.unwrap();
         let again = build_plan(&pool, &full(), &st).await.unwrap();
@@ -1012,7 +1060,7 @@ mod tests {
         seed_legacy(&pool).await;
         let payload = full_with(json!([{"id": "DEAD", "name": "Dead", "is_archived": true}]), json!([]));
         let mut st = HashMap::new();
-        st.insert("R5".to_string(), RemoteStatus::Completed);
+        st.insert("R5".to_string(), RemoteStatus::Completed { at: None });
         let plan = build_plan(&pool, &payload, &st).await.unwrap();
         assert!(plan.projects_archived.iter().any(|(id, _)| id == "ldead"));
         apply(&pool, &payload, &plan).await.unwrap();
@@ -1038,7 +1086,7 @@ mod tests {
         let pool = test_pool().await;
         seed_legacy(&pool).await;
         let mut st = HashMap::new();
-        st.insert("R5".to_string(), RemoteStatus::Completed);
+        st.insert("R5".to_string(), RemoteStatus::Completed { at: None });
         let bad = full_with(json!([]), json!([{"id": "RX", "content": "__FORCE_TEST_APPLY_FAILURE__", "project_id": "P", "checked": false, "is_deleted": false}]));
         let plan = build_plan(&pool, &bad, &st).await.unwrap();
         let err = apply(&pool, &bad, &plan).await.unwrap_err().to_string();
@@ -1062,7 +1110,7 @@ mod tests {
         let pool = test_pool().await;
         seed_legacy(&pool).await;
         let mut st = HashMap::new();
-        st.insert("R5".to_string(), RemoteStatus::Completed);
+        st.insert("R5".to_string(), RemoteStatus::Completed { at: None });
         let plan = build_plan(&pool, &full(), &st).await.unwrap();
         apply(&pool, &full(), &plan).await.unwrap();
         let again = build_plan(&pool, &full(), &st).await.unwrap();
@@ -1078,7 +1126,7 @@ mod tests {
     #[test]
     fn positive_control_requires_an_active_answer() {
         assert!(verify_positive_control("A", &RemoteStatus::Active { project_id: "P".into() }).is_ok());
-        for wrong in [RemoteStatus::Deleted, RemoteStatus::Completed] {
+        for wrong in [RemoteStatus::Deleted, RemoteStatus::Completed { at: None }] {
             let err = verify_positive_control("A", &wrong).unwrap_err().to_string();
             assert!(err.contains("can't be trusted"), "{err}");
         }
@@ -1103,7 +1151,7 @@ mod tests {
         let pool = test_pool().await;
         seed_legacy(&pool).await;
         let mut st = HashMap::new();
-        st.insert("R5".to_string(), RemoteStatus::Completed);
+        st.insert("R5".to_string(), RemoteStatus::Completed { at: None });
         let plan = build_plan(&pool, &full(), &st).await.unwrap();
         preflight_apply(&pool).await.unwrap();
         // Sync switched on between preflight and apply.
@@ -1117,7 +1165,9 @@ mod tests {
 
     #[test]
     fn task_json_classifies_like_the_probed_api() {
-        assert_eq!(classify_task_json(&json!({"checked": true, "is_deleted": false, "project_id": "P"})), RemoteStatus::Completed);
+        assert_eq!(classify_task_json(&json!({"checked": true, "is_deleted": false, "project_id": "P"})), RemoteStatus::Completed { at: None });
+        assert_eq!(classify_task_json(&json!({"checked": true, "is_deleted": false, "completed_at": "2026-09-01T17:00:00Z"})),
+            RemoteStatus::Completed { at: Some("2026-09-01T17:00:00Z".into()) });
         assert_eq!(classify_task_json(&json!({"checked": false, "is_deleted": true, "project_id": "P"})), RemoteStatus::Deleted);
         assert_eq!(classify_task_json(&json!({"checked": true, "is_deleted": true})), RemoteStatus::Deleted);
         assert_eq!(

@@ -58,9 +58,10 @@ pub(crate) const TABLES: &[TablePolicy] = &[
 /// and the synced `brief_notes` table (reviewed, included: the day's scratchpad). (schema-v24)
 /// V25 (C4) adds reviewed, included label_groups + labels.archived_at; tasks_fts is device-local and excluded.
 /// V26 adds the reviewed, included `brief_items` table and `briefs.composed_at`/`compose_attempts`. (schema-v26)
+/// V27 adds the reviewed, included `karma_events` ledger (momentum).
 pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
     if version == 19 { return Some(TABLES.to_vec()); }
-    if !(20..=26).contains(&version) { return None; } // schema-v25, schema-v26
+    if !(20..=27).contains(&version) { return None; } // schema-v25, schema-v26, momentum v27
     let mut tables = TABLES.to_vec();
     for policy in &mut tables {
         match policy.name {
@@ -128,6 +129,9 @@ pub(crate) fn tables_for_version(version: i64) -> Option<Vec<TablePolicy>> {
         }
         tables.push(table!("brief_items"; ["id","date","module_id","kind","title","body","task_id","origin","dedupe_key","action_kind","action_state","produced_ref","position","created_at","updated_at","composed_at"]; ["id","date","module_id","kind","title","body","task_id","origin","dedupe_key","action_kind","action_state","produced_ref","position","created_at","updated_at","composed_at"]));
     }
+    if version >= 27 {
+        tables.push(table!("karma_events"; ["id","date","kind","points","task_id","created_at"]; ["id","date","kind","points","task_id","created_at"]));
+    }
     tables.sort_by_key(|policy| policy.name);
     Some(tables)
 }
@@ -159,4 +163,16 @@ pub(crate) fn fts_tables_for_version(version: i64) -> Vec<(&'static str, &'stati
         tables.extend_from_slice(TASKS_FTS_TABLES);
     }
     tables
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn v27_policy_includes_the_karma_ledger() {
+        let tables = super::tables_for_version(27).expect("v27 is a reviewed version");
+        let karma = tables.iter().find(|p| p.name == "karma_events").expect("karma_events reviewed");
+        assert_eq!(karma.columns, ["id", "date", "kind", "points", "task_id", "created_at"]);
+        assert_eq!(karma.included, karma.columns, "the ledger is portable user history");
+        assert!(super::tables_for_version(23).unwrap().iter().all(|p| p.name != "karma_events"));
+    }
 }

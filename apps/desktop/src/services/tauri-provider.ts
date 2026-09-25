@@ -28,6 +28,14 @@ export function createTauriProvider(): DataProvider {
     },
     briefSettings: { supported: true, get: tauri.briefSettingsGet, save: tauri.briefSettingsSave },
     weather: { supported: true, get: tauri.weatherGet, geocode: tauri.weatherGeocode },
+    momentum: {
+      supported: true,
+      summary: tauri.momentumSummary,
+      getSettings: tauri.momentumSettingsGet,
+      saveGoals: tauri.goalsSave,
+      setPaused: tauri.momentumSetPaused,
+      backfill: tauri.momentumBackfill,
+    },
     settings: {
       checkSetupComplete: tauri.checkSetupComplete,
       get: tauri.getSetting,

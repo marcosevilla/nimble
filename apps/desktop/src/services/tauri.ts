@@ -1,6 +1,11 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
   BackupStatus,
+  MomentumRange,
+  MomentumSummary,
+  MomentumSettings,
+  GoalTargets,
+  MomentumBackfillReport,
   FocusCapabilities,
   FocusCommand,
   FocusDeliveryResolution,
@@ -1095,3 +1100,25 @@ export const googleCalendarDisconnect = () => invoke<import('@nimble/types').Goo
 export const googleCalendarSyncNow = () => invoke<{ changedTaskIds: string[]; errorCode: string | null }>('google_calendar_sync_now')
 export const googleCalendarListConflicts = () => invoke<import('@nimble/types').GoogleCalendarConflict[]>('google_calendar_list_conflicts')
 export const googleCalendarResolveConflict = (taskId: string, resolution: 'keep_nimble' | 'use_calendar') => invoke<void>('google_calendar_resolve_conflict', { taskId, resolution })
+
+// ── Momentum (db/karma.rs) ──
+
+export async function momentumSummary(range: MomentumRange): Promise<MomentumSummary> {
+  return invoke<MomentumSummary>('momentum_summary', { range })
+}
+
+export async function momentumSettingsGet(): Promise<MomentumSettings> {
+  return invoke<MomentumSettings>('momentum_settings_get')
+}
+
+export async function goalsSave(targets: GoalTargets): Promise<MomentumSettings> {
+  return invoke<MomentumSettings>('goals_save', { targets })
+}
+
+export async function momentumSetPaused(paused: boolean): Promise<MomentumSettings> {
+  return invoke<MomentumSettings>('momentum_set_paused', { paused })
+}
+
+export async function momentumBackfill(): Promise<MomentumBackfillReport> {
+  return invoke<MomentumBackfillReport>('momentum_backfill')
+}

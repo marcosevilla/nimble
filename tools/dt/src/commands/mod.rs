@@ -684,6 +684,12 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
                 "Use dt gap REASON or dt gap list --from DATE --to DATE.",
             )),
         },
+        Command::Momentum(Momentum::Backfill) => result(db::karma::backfill(pool).await?, vec![Domain::Activity]),
+        // Read-only: goal bonuses are persisted by the app's own summary reads.
+        Command::Momentum(Momentum::Summary { range }) => result(
+            db::karma::read_summary_at(pool, &range, chrono::Local::now().date_naive()).await?,
+            vec![],
+        ),
         Command::Sync(Sync::Status) => result(db::sync::get_sync_status(pool).await?, vec![]),
         Command::Sync(Sync::Reconcile { .. }) => Err(CliError::new(
             "internal",

@@ -296,10 +296,10 @@ mod tests {
         assert_eq!(b.status, "ready");
         // (replaces the LAYOUT_V1 assertion)
         let ids: Vec<&str> = b.layout.as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, ["weather", "schedule", "priorities", "quick_wins", "due_today", "still_open", "vault"]);
+        assert_eq!(ids, ["weather", "schedule", "priorities", "quick_wins", "due_today", "still_open", "vault", "momentum"]);
         let mut keys: Vec<&String> = b.snapshot.as_object().unwrap().keys().collect();
         keys.sort();
-        assert_eq!(keys, ["due_today", "priorities", "quick_wins", "schedule", "still_open", "vault", "weather"]);
+        assert_eq!(keys, ["due_today", "momentum", "priorities", "quick_wins", "schedule", "still_open", "vault", "weather"]);
         let s = &b.snapshot;
         assert_eq!(s["due_today"][0]["content"], "Today A");
         assert_eq!(s["still_open"]["total"], 2);
@@ -366,7 +366,7 @@ mod tests {
                 {"id":"still_open","enabled":true,"config":{"count":3}}]"#).await.unwrap();
         let b = super::ensure_snapshot(&pool, "2026-09-23", "2026-09-23").await.unwrap().unwrap();
         let ids: Vec<&str> = b.layout.as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, ["due_today", "still_open", "weather", "priorities", "quick_wins", "vault"], "stored order, then enabled defaults");
+        assert_eq!(ids, ["due_today", "still_open", "weather", "priorities", "quick_wins", "vault", "momentum"], "stored order, then enabled defaults");
         assert_eq!(b.layout[1]["config"]["count"], 3, "the layout records the config used");
         assert!(b.snapshot.get("schedule").is_none(), "a hidden module is not gathered");
         assert_eq!(b.snapshot["still_open"]["total"], 4);

@@ -1,6 +1,7 @@
 // Pure helpers for the brief's module layout and settings (addendum §1–§2).
 // Plain TS (type-only imports) so node tests import it directly.
 import type { BriefGoals, BriefLayoutEntry, BriefLocation, BriefSettings, BriefSettingsPatch } from '@nimble/types'
+import { daysOffError } from './momentum.ts'
 
 /** The phase-1 boxes: a brief with no readable layout (the web without a
  *  synced row, or a malformed one) renders these. */
@@ -122,9 +123,10 @@ export function boxRowKey(
 export type PresetId = 'focused' | 'full' | 'minimal'
 
 /** Setup step 1 (base §3.4; UX checkpoint 4). Presets only toggle; the
- *  order stays the user's. Phase 3 appends 'quick_wins' to Focused. */
+ *  order stays the user's. Phase 3 appends 'quick_wins' to Focused; Momentum
+ *  (on by default, addendum A5) is in Focused too. */
 export const PRESETS: { id: PresetId; name: string; description: string; enabled: string[] | 'all' }[] = [
-  { id: 'focused', name: 'Focused', description: 'Your schedule, top priorities and what’s due today.', enabled: ['weather', 'schedule', 'priorities', 'due_today', 'vault'] },
+  { id: 'focused', name: 'Focused', description: 'Your schedule, top priorities and what’s due today.', enabled: ['weather', 'schedule', 'priorities', 'due_today', 'vault', 'momentum'] },
   { id: 'full', name: 'Full', description: 'Every box, including habits and notes.', enabled: 'all' },
   { id: 'minimal', name: 'Minimal', description: 'Your schedule and what’s due today. No AI.', enabled: ['weather', 'schedule', 'due_today', 'vault'] },
 ]
@@ -155,11 +157,17 @@ export function draftFrom(s: BriefSettings): SetupDraft {
 
 /** Finish (and Skip): every setup key in one save (addendum §3). */
 export function setupPatch(d: SetupDraft): BriefSettingsPatch {
+  // All seven days off is refused by Rust (`brief::settings`), which would fail
+  // the whole save — so Finish later / Skip drops just that value and the
+  // stored days off stay.
+  const goals: BriefSettingsPatch['goals'] = daysOffError(d.goals.days_off)
+    ? { daily: d.goals.daily, weekly: d.goals.weekly }
+    : { daily: d.goals.daily, weekly: d.goals.weekly, days_off: d.goals.days_off }
   return {
     time: d.time,
     location: d.location,
     modules: d.modules,
-    goals: { daily: d.goals.daily, weekly: d.goals.weekly, days_off: d.goals.days_off },
+    goals,
     complete_setup: true,
   }
 }

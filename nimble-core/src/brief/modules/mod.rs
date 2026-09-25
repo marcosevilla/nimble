@@ -3,6 +3,7 @@
 
 pub mod due_today;
 pub mod habits;
+pub mod momentum;
 pub mod notes;
 pub mod priorities;
 pub mod quick_wins;

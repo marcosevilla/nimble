@@ -174,10 +174,13 @@ fn validate_location(l: &BriefLocation) -> crate::Result<()> {
     Ok(())
 }
 
-/// Known weekdays only, deduplicated, in week order.
+/// Known weekdays in week order. All seven off is refused (one rule with
+/// `karma::save_goals` and the forms: at least one day is a goal day).
 fn normalize_days(days: &[String]) -> crate::Result<Vec<String>> {
     if days.iter().any(|d| !WEEKDAYS.contains(&d.as_str())) { return Err(invalid(KEY_GOALS_DAYS_OFF)); }
-    Ok(WEEKDAYS.iter().filter(|w| days.iter().any(|d| d.as_str() == **w)).map(|w| w.to_string()).collect())
+    let days: Vec<String> = WEEKDAYS.iter().filter(|w| days.iter().any(|d| d.as_str() == **w)).map(|w| w.to_string()).collect();
+    if days.len() == WEEKDAYS.len() { return Err(invalid(KEY_GOALS_DAYS_OFF)); }
+    Ok(days)
 }
 
 pub async fn read_location(pool: &SqlitePool) -> crate::Result<Option<BriefLocation>> {
@@ -303,7 +306,7 @@ mod tests {
     #[test]
     fn defaults_match_the_phase_one_layout() {
         let l = resolve_layout(None);
-        assert_eq!(enabled(&l), ["weather", "schedule", "priorities", "quick_wins", "due_today", "still_open", "vault"]);
+        assert_eq!(enabled(&l), ["weather", "schedule", "priorities", "quick_wins", "due_today", "still_open", "vault", "momentum"]);
         let off: Vec<&str> = l.iter().filter(|e| !e.enabled).map(|e| e.id.as_str()).collect();
         assert_eq!(off, ["habits", "notes"]);
         assert_eq!(l.iter().find(|e| e.id == "still_open").unwrap().config, json!({"count": 5}));
@@ -316,7 +319,7 @@ mod tests {
             r#"[{"id":"vault","enabled":false},{"id":"quick_wins","enabled":true},{"id":"schedule"},{"id":"vault","enabled":true}]"#,
         ));
         let ids: Vec<&str> = l.iter().map(|e| e.id.as_str()).collect();
-        assert_eq!(ids, ["vault", "quick_wins", "schedule", "weather", "priorities", "due_today", "still_open", "habits", "notes"]);
+        assert_eq!(ids, ["vault", "quick_wins", "schedule", "weather", "priorities", "due_today", "still_open", "habits", "notes", "momentum"]);
         assert!(!l[0].enabled, "the first vault entry wins");
         assert!(l[1].enabled, "a missing `enabled` reads as on");
     }
@@ -426,6 +429,7 @@ mod tests {
             BriefSettingsPatch { location: Some(Some(BriefLocation { lat: 91.0, ..sf() })), ..Default::default() },
             BriefSettingsPatch { location: Some(Some(BriefLocation { name: "  ".into(), ..sf() })), ..Default::default() },
             BriefSettingsPatch { goals: Some(GoalsPatch { days_off: Some(vec!["someday".into()]), ..Default::default() }), ..Default::default() },
+            BriefSettingsPatch { goals: Some(GoalsPatch { days_off: Some(WEEKDAYS.map(String::from).to_vec()), ..Default::default() }), ..Default::default() },
             BriefSettingsPatch { goals: Some(GoalsPatch { daily: Some(0), ..Default::default() }), ..Default::default() },
             BriefSettingsPatch { modules: Some(vec![dup.clone(), dup.clone()]), ..Default::default() },
         ] {

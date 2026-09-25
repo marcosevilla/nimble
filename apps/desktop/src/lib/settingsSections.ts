@@ -18,7 +18,7 @@
 
    Plain TS, no JSX — tests/settingsSections.test.mjs imports it directly. */
 
-export type SettingsCapability = 'backup' | 'reminders' | 'googleCalendar' | 'briefSettings'
+export type SettingsCapability = 'backup' | 'reminders' | 'googleCalendar' | 'briefSettings' | 'momentum'
 
 export type SettingsPageId = 'general' | 'brief' | 'tasks' | 'connections' | 'data' | 'activity'
 
@@ -54,6 +54,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'today-brief', label: 'Brief', page: 'brief', requires: 'briefSettings' },
   { id: 'today-location', label: 'Location & weather', page: 'brief', requires: 'briefSettings' },
   { id: 'today-boxes', label: 'Boxes', page: 'brief', requires: 'briefSettings' },
+  { id: 'momentum', label: 'Goals & momentum', page: 'brief', requires: 'momentum' },
   { id: 'capture-routes', label: 'Capture routes', page: 'tasks' },
   { id: 'labels', label: 'Labels', page: 'tasks' },
   { id: 'reminders', label: 'Reminders', page: 'tasks', requires: 'reminders', standalone: true },

@@ -38,6 +38,8 @@ pub enum Command {
     #[command(subcommand)]
     Sync(Sync),
     Gap(Gap),
+    #[command(subcommand)]
+    Momentum(Momentum),
 }
 #[derive(Args, Debug, Default, Clone)]
 pub struct Fields {
@@ -333,5 +335,16 @@ pub enum GapCommand {
     List {
         #[command(flatten)]
         dates: DateRange,
+    },
+}
+#[derive(Subcommand, Debug, Clone)]
+pub enum Momentum {
+    /// Rebuild the momentum ledger from completed tasks and repeat history.
+    /// Safe to rerun (e.g. after an import): existing rows are kept.
+    Backfill,
+    /// The numbers behind Today's Momentum box and the Activity tiles.
+    Summary {
+        #[arg(long, default_value = "7d", value_parser = ["7d", "30d", "all"])]
+        range: String,
     },
 }

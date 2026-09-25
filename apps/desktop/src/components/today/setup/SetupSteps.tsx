@@ -9,6 +9,7 @@ import { FieldLabel } from '@/components/settings/SettingsFields'
 import { useBriefSettingsStore } from '@/stores/briefSettingsStore'
 import { openSettings } from '@/stores/settingsNavStore'
 import { applyPreset, parseGoal, PRESETS, type PresetId, type SetupDraft } from '@/lib/briefLayout'
+import { daysOffError } from '@/lib/momentum'
 import { useTodaySetupStore } from '@/stores/todaySetupStore'
 import { BoxesList } from '../BoxesList'
 import { CitySearch } from '../CitySearch'
@@ -155,7 +156,12 @@ export function GoalsStep({ draft, onChange, onContinue }: StepProps) {
     setText(next)
     const n = parseGoal(raw, max)
     if (n !== null) setGoals({ [k]: n })
-    setInvalid(GOAL_FIELDS.some((f) => parseGoal(textOf(f.key, next), f.max) === null))
+    setInvalid(GOAL_FIELDS.some((f) => parseGoal(textOf(f.key, next), f.max) === null) || daysOffError(draft.goals.days_off) !== null)
+  }
+  const daysError = daysOffError(draft.goals.days_off)
+  const changeDays = (days: Weekday[]) => {
+    setGoals({ days_off: days })
+    setInvalid(GOAL_FIELDS.some((f) => parseGoal(textOf(f.key), f.max) === null) || daysOffError(days) !== null)
   }
   return (
     <div className="space-y-4">
@@ -189,10 +195,12 @@ export function GoalsStep({ draft, onChange, onContinue }: StepProps) {
       </div>
       <div className="space-y-1.5">
         <FieldLabel id="setup-days-off">Days off</FieldLabel>
-        <ToggleGroup multiple aria-labelledby="setup-days-off" value={draft.goals.days_off} onValueChange={(v) => setGoals({ days_off: v as Weekday[] })}>
+        <ToggleGroup multiple aria-labelledby="setup-days-off" aria-describedby={daysError ? 'setup-days-off-hint' : undefined}
+          value={draft.goals.days_off} onValueChange={(v) => changeDays(v as Weekday[])}>
           {DAYS.map((d) => <ToggleGroupItem key={d.id} value={d.id} className="px-2 text-label">{d.label}</ToggleGroupItem>)}
         </ToggleGroup>
-        <Meta as="p">Days off count toward nothing. Missing a goal never changes anything the next day.</Meta>
+        {daysError && <p id="setup-days-off-hint" role="alert" className="text-meta text-destructive">{daysError}</p>}
+        <Meta as="p">Days off count toward nothing. Each day and week start fresh.</Meta>
       </div>
     </div>
   )

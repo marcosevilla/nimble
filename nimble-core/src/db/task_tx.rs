@@ -521,6 +521,8 @@ pub async fn set_status_tx(
                         .await?;
                     }
                 }
+                // Momentum: this occurrence is done (db::karma, fire-and-forget).
+                crate::db::karma::on_recurred_on_tx(conn, id, due_str, before.priority, today).await?;
                 effects.recurrence = Some(RecurrenceEffect {
                     task_id: id.into(),
                     before_due: due_str.clone(),
@@ -535,11 +537,18 @@ pub async fn set_status_tx(
         let children: Vec<LocalTask>=sqlx::query_as(&format!("UPDATE local_tasks SET status='complete',completed=1,completed_at=datetime('now','localtime'),updated_at=datetime('now','localtime') WHERE parent_id=? AND completed=0 RETURNING {SELECT_COLS}"))
             .bind(id).fetch_all(&mut *conn).await?;
         effects.changed.extend(children);
+        // Momentum: the task and every open child this closed.
+        crate::db::karma::on_completed_tx(conn, id).await?;
+        for child in &effects.changed {
+            crate::db::karma::on_completed_tx(conn, &child.id).await?;
+        }
     } else {
         sqlx::query("UPDATE local_tasks SET status=?,completed=0,completed_at=NULL,updated_at=datetime('now','localtime') WHERE id=?")
             .bind(status).bind(id).execute(&mut *conn).await?;
         if before.completed || before.status == "complete" {
             effects.reopened.push(id.to_string());
+            // Momentum: reverse the completion this reopen undoes.
+            crate::db::karma::on_reopened_tx(conn, id, before.completed_at.as_deref()).await?;
         }
     }
     let task = fetch(conn, id).await?;

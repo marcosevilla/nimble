@@ -99,6 +99,7 @@ pub fn manifests() -> Vec<ModuleManifest> {
         habits::Habits::manifest(),
         vault::Vault::manifest(),
         notes::Notes::manifest(),
+        momentum::Momentum::manifest(),
     ]
 }
 
@@ -115,6 +116,7 @@ pub async fn gather_module(id: &str, ctx: &BriefCtx<'_>, config: &Value) -> Opti
         "habits" => habits::Habits.gather(ctx, config).await,
         "vault" => vault::Vault.gather(ctx, config).await,
         "notes" => notes::Notes.gather(ctx, config).await,
+        "momentum" => momentum::Momentum.gather(ctx, config).await,
         _ => return None,
     })
 }
@@ -154,6 +156,13 @@ mod tests {
             assert!(gather_module(m.id, &ctx, &Value::Null).await.is_some(), "{} has no gather arm", m.id);
         }
         assert!(gather_module("not_a_module", &ctx, &Value::Null).await.is_none());
+    }
+
+    #[test]
+    fn momentum_is_registered_last_and_enabled() {
+        let ms = manifests();
+        let last = ms.last().unwrap();
+        assert_eq!((last.id, last.default_enabled), ("momentum", true));
     }
 
     #[test]
