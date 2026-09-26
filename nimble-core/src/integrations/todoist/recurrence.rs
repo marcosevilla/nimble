@@ -100,10 +100,41 @@ pub struct RecurrenceRepair {
 /// (and so the reconcile's final pull). Idempotent.
 pub async fn repair_linked_recurrence_tx(conn: &mut SqliteConnection) -> crate::Result<RecurrenceRepair> {
     let mut out = RecurrenceRepair::default();
+    // Complete here, open and recurring in Todoist on the date we already
+    // hold, with no close still on its way: Todoist already took the
+    // completion. (An errored close is not "on its way" — Todoist still has
+    // the occurrence open, so it is open here too.)
+    let stuck: Vec<(String,)> = sqlx::query_as(
+        "SELECT id FROM local_tasks t
+         WHERE external_source = 'todoist' AND external_id IS NOT NULL
+           AND (completed = 1 OR status = 'complete')
+           AND json_valid(synced_snapshot)
+           AND json_extract(synced_snapshot, '$.due.is_recurring') = 1
+           AND json_extract(synced_snapshot, '$.checked') = 0
+           AND due_date IS json_extract(synced_snapshot, '$.due_date')
+           AND NOT EXISTS (SELECT 1 FROM todoist_outbox o
+                           WHERE o.local_id = t.id AND o.op = 'close' AND o.status IN ('pending', 'sending'))",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    for (id,) in stuck {
+        sqlx::query(
+            "UPDATE local_tasks SET completed = 0, status = 'todo', completed_at = NULL,
+                updated_at = datetime('now','localtime') WHERE id = ?",
+        )
+        .bind(&id)
+        .execute(&mut *conn)
+        .await?;
+        out.reopened.push(id);
+    }
+    // Open rows only: completed history keeps its rule untouched (and out of
+    // sync_log). Runs after the reopen so a reopened row gets its rule.
     let empty: Vec<(String, String)> = sqlx::query_as(
         "SELECT id, synced_snapshot FROM local_tasks
          WHERE external_source = 'todoist' AND external_id IS NOT NULL
+           AND completed = 0 AND status != 'complete'
            AND json_valid(synced_snapshot) AND json_extract(synced_snapshot, '$.due.is_recurring') = 1
+           AND json_extract(synced_snapshot, '$.checked') = 0
            AND (recurrence_rule IS NULL OR trim(recurrence_rule) = '')",
     )
     .fetch_all(&mut *conn)
@@ -118,31 +149,6 @@ pub async fn repair_linked_recurrence_tx(conn: &mut SqliteConnection) -> crate::
                 .await?;
             out.rules_filled.push(id);
         }
-    }
-    // Complete here, open and recurring in Todoist on the date we already
-    // hold, with no undelivered close: Todoist already took the completion.
-    let stuck: Vec<(String,)> = sqlx::query_as(
-        "SELECT id FROM local_tasks t
-         WHERE external_source = 'todoist' AND external_id IS NOT NULL
-           AND (completed = 1 OR status = 'complete')
-           AND json_valid(synced_snapshot)
-           AND json_extract(synced_snapshot, '$.due.is_recurring') = 1
-           AND json_extract(synced_snapshot, '$.checked') = 0
-           AND due_date IS json_extract(synced_snapshot, '$.due_date')
-           AND NOT EXISTS (SELECT 1 FROM todoist_outbox o
-                           WHERE o.local_id = t.id AND o.status IN ('pending', 'sending', 'error'))",
-    )
-    .fetch_all(&mut *conn)
-    .await?;
-    for (id,) in stuck {
-        sqlx::query(
-            "UPDATE local_tasks SET completed = 0, status = 'todo', completed_at = NULL,
-                updated_at = datetime('now','localtime') WHERE id = ?",
-        )
-        .bind(&id)
-        .execute(&mut *conn)
-        .await?;
-        out.reopened.push(id);
     }
     Ok(out)
 }

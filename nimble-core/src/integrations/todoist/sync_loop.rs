@@ -1073,13 +1073,17 @@ pub(crate) async fn apply_pull_tx(
                 if let Some(due) = &plan.due_date {
                     sqlx::query("UPDATE local_tasks SET due_date = ? WHERE id = ?").bind(due).bind(&local_task.id).execute(&mut *tx).await?;
                 }
-                // Recurrence follows Todoist when it changed there (or on
-                // first contact); a rule that never changed remotely is left
-                // as the user set it.
+                // Recurrence follows Todoist when it changed there; on first
+                // contact only when Todoist recurs (no snapshot evidence says a
+                // local rule is stale). A rule that never changed remotely is
+                // left as the user set it.
                 let remote_rule = super::recurrence::rule_from_due(remote.due.as_ref());
-                let base_rule = base.as_ref().and_then(|b| super::recurrence::rule_from_due(b.due.as_ref()));
                 let local_rule = local_task.recurrence_rule.clone().filter(|r| !r.trim().is_empty());
-                let rule_changed = (base.is_none() || remote_rule != base_rule) && remote_rule != local_rule;
+                let remote_says = match &base {
+                    None => remote_rule.is_some(),
+                    Some(b) => remote_rule != super::recurrence::rule_from_due(b.due.as_ref()),
+                };
+                let rule_changed = remote_says && remote_rule != local_rule;
                 if rule_changed {
                     sqlx::query("UPDATE local_tasks SET recurrence_rule = ? WHERE id = ?")
                         .bind(&remote_rule).bind(&local_task.id).execute(&mut *tx).await?;
@@ -2957,6 +2961,43 @@ mod recurrence_tests {
         // Idempotent.
         let again = apply_pull(&pool, &resp(json!({"items": []}))).await.unwrap();
         assert_eq!(again.updated, 0);
+    }
+
+    #[tokio::test]
+    async fn repair_is_not_blocked_by_an_unrelated_errored_op() {
+        let pool = test_pool().await;
+        let id = seed_legacy(&pool, &[("R1", "2026-10-04", true)]).await.remove(0);
+        sqlx::query("INSERT INTO todoist_outbox (id, local_id, object_type, op, command_uuid, status, error) VALUES ('o1', ?, 'task', 'update', 'u1', 'error', 'boom')")
+            .bind(&id).execute(&pool).await.unwrap();
+        apply_pull(&pool, &resp(json!({"items": []}))).await.unwrap();
+        assert!(!task(&pool, "R1").await.completed);
+    }
+
+    #[tokio::test]
+    async fn repair_leaves_completed_history_alone() {
+        let pool = test_pool().await;
+        let id = seed_legacy(&pool, &[("R1", "2026-10-04", true)]).await.remove(0);
+        // Completed in Todoist too (e.g. "complete forever", or imported history).
+        sqlx::query("UPDATE local_tasks SET synced_snapshot = json_set(synced_snapshot, '$.checked', json('true')) WHERE id = ?")
+            .bind(&id).execute(&pool).await.unwrap();
+        let report = apply_pull(&pool, &resp(json!({"items": []}))).await.unwrap();
+        let t = task(&pool, "R1").await;
+        assert!(t.completed && t.recurrence_rule.is_none());
+        assert_eq!(report.updated, 0);
+    }
+
+    #[tokio::test]
+    async fn first_contact_keeps_a_local_rule_todoist_has_no_opinion_on() {
+        let pool = test_pool().await;
+        let t = crate::db::tasks::create_local_task(&pool, crate::types::CreateTaskInput {
+            content: "Water plants".into(), due_date: Some("2026-10-06".into()),
+            recurrence_rule: Some("every week".into()), ..Default::default()
+        }).await.unwrap();
+        sqlx::query("UPDATE local_tasks SET external_id = 'R1', external_source = 'todoist' WHERE id = ?")
+            .bind(&t.id).execute(&pool).await.unwrap();
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [item("R1", "2026-10-06", "Oct 6", false, "2026-09-20T00:00:00Z")]})))
+            .await.unwrap();
+        assert_eq!(task(&pool, "R1").await.recurrence_rule.as_deref(), Some("every week"));
     }
 
     #[tokio::test]
