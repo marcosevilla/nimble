@@ -32,9 +32,18 @@ test('hover-only reveals also reveal on keyboard focus', () => {
 test('click-to-edit text is keyboard-operable', () => {
   for (const f of ['components/detail/InlineDescription.tsx', 'components/detail/GoalDetailPage.tsx']) {
     const src = read(f)
-    assert.match(src, /role="button"\s+tabIndex=\{0\}/, f)
+    assert.match(src, /tabIndex=\{0\}/, f)
     assert.match(src, /e\.key === 'Enter' \|\| e\.key === ' '/, f)
   }
   const detail = read('components/detail/TaskDetailPage.tsx')
   assert.equal(detail.match(/onKeyDown=\{editDescriptionKey\}/g)?.length, 2)
+})
+
+test('a written description is never inside a button (its text stays readable, links not nested)', () => {
+  const detail = read('components/detail/TaskDetailPage.tsx')
+  assert.doesNotMatch(detail, /aria-label="Edit description"/)
+  assert.match(detail, /role="group"\s+tabIndex=\{0\}\s+aria-label="Description"\s+aria-describedby=\{descHintId\}/)
+  const inline = read('components/detail/InlineDescription.tsx')
+  assert.doesNotMatch(inline, /Edit description/)
+  assert.match(inline, /role=\{value \? 'group' : 'button'\}/)
 })

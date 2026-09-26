@@ -1,5 +1,5 @@
 import { useDataVersion } from '@/hooks/useDataVersion'
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, useId } from 'react'
 import { useDetailStore } from '@/stores/detailStore'
 import { useTaskDetail } from '@/hooks/useTaskDetail'
 import { useProjects } from '@/hooks/useLocalTasks'
@@ -135,6 +135,7 @@ export function TaskDetailPage() {
   // display-only <TiptapEditor format="markdown"> below has no onChange, so
   // there is no callback it could even reach.
   const [descEditing, setDescEditing] = useState(false)
+  const descHintId = useId()
   const [descDraft, setDescDraft] = useState('')
   const descTextareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -495,16 +496,21 @@ export function TaskDetailPage() {
             // (sized for the docs editor) — override it for this compact,
             // read-only display so the 48px description→subtask gap below
             // is real space, not swallowed by dead min-height.
-            // Click-to-edit, keyboard too (loop 4 P2-13).
+            // Click-to-edit, keyboard too (loop 4 P2-13). A named group, not a
+            // button: the description stays readable (a button's label would
+            // replace it) and its links aren't nested in a button. Tab stop +
+            // Enter to edit, announced through the hint.
             <div
-              role="button"
+              role="group"
               tabIndex={0}
-              aria-label="Edit description"
+              aria-label="Description"
+              aria-describedby={descHintId}
               onClick={startEditingDescription}
               onKeyDown={editDescriptionKey}
-              className="focus-ring cursor-text rounded-md [&_.tiptap-editor]:min-h-0"
+              className="focus-ring cursor-text [&_.tiptap-editor]:min-h-0"
             >
               <TiptapEditor key={task.id} content={task.description} format="markdown" />
+              <span id={descHintId} className="sr-only">Press Enter to edit.</span>
             </div>
           ) : (
             // Placeholder: muted-foreground, ≥4.5:1 (foreground/25 was ≈1.6:1, loop 4 P2-19).

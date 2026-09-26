@@ -386,7 +386,7 @@ function TimeGrid({
       tabIndex={0}
       role="region"
       aria-label="Day schedule"
-      className="focus-ring-inset rounded-md overflow-y-auto flex-1 min-h-0 pb-[max(1.5rem,calc(3rem-var(--sync-notice-clear,0px)))]"
+      className="focus-ring-inset overflow-y-auto flex-1 min-h-0 pb-[max(1.5rem,calc(3rem-var(--sync-notice-clear,0px)))]"
     >
       <div className="relative" style={{ height: gridHeight }}>
         {/* Hour lines and labels */}
