@@ -691,9 +691,9 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
             vec![],
         ),
         Command::Sync(Sync::Status) => result(db::sync::get_sync_status(pool).await?, vec![]),
-        Command::Sync(Sync::Reconcile { .. }) => Err(CliError::new(
+        Command::Sync(Sync::Reconcile { .. }) | Command::Todoist(_) => Err(CliError::new(
             "internal",
-            "Reconcile is handled before direct commands.",
+            "Handled before direct commands.",
         )),
         Command::Backup(_) | Command::Sync(Sync::Now) => Err(CliError::new(
             "app_required",
@@ -865,4 +865,127 @@ async fn refresh_app(profile: &nimble_core::agent_protocol::AgentProfile) -> boo
     )
     .await
     .is_ok()
+}
+
+fn import_text(out: &nimble_core::integrations::todoist::history::RunOutcome, refreshed: bool) -> String {
+    use std::fmt::Write;
+    let p = &out.plan;
+    let mut t = String::new();
+    let _ = writeln!(
+        t,
+        "Todoist history import: {}\n",
+        if out.applied.is_some() { "applied." } else { "dry run, nothing written." }
+    );
+    let rows: [(&str, String); 11] = [
+        ("Range", format!("{} .. {} ({} windows, {} requests)", p.since, p.until, p.windows, p.requests)),
+        ("Completions fetched", format!("{} ({} unique tasks)", p.fetched, p.unique_tasks)),
+        ("Already in Nimble (skipped)", p.already_local.to_string()),
+        ("Still open in Todoist (skipped)", p.still_open_remote.to_string()),
+        ("To import", p.would_import.to_string()),
+        ("  into \"Todoist history\" (archived)", p.to_history_project.to_string()),
+        ("Sections matched / not found", format!("{} / {}", p.sections_matched, p.sections_unmatched)),
+        ("Subtasks linked / orphaned", format!("{} / {}", p.parents_linked, p.orphan_parents)),
+        ("Tasks with labels", p.tasks_with_labels.to_string()),
+        ("Label names with no local label", p.labels_unmatched.len().to_string()),
+        ("Rate-limit retries", p.rate_limited_retries.to_string()),
+    ];
+    for (label, value) in rows {
+        let _ = writeln!(t, "  {label:<40} {value}");
+    }
+    if !p.by_project.is_empty() {
+        let _ = writeln!(t, "\nBy project:");
+        for b in &p.by_project {
+            let _ = writeln!(
+                t,
+                "  {:>5}  {}{}",
+                b.tasks,
+                b.local_project_name,
+                if b.local_project_archived { " (archived)" } else { "" }
+            );
+        }
+    }
+    if !p.labels_unmatched.is_empty() {
+        let names: Vec<String> = p.labels_unmatched.iter().map(|(n, c)| format!("{n} ({c})")).collect();
+        let _ = writeln!(t, "\nUnmatched labels (not created): {}", names.join(", "));
+    }
+    if let Some(a) = &out.archive {
+        let _ = writeln!(
+            t,
+            "\nArchive: {} completions ({} tasks), {} .. {}, {} projects + {} archived, {} sections, {} labels\n  {}",
+            a.completed,
+            a.unique_tasks,
+            a.oldest_completed_at.as_deref().unwrap_or("-"),
+            a.newest_completed_at.as_deref().unwrap_or("-"),
+            a.projects,
+            a.archived_projects,
+            a.sections,
+            a.labels,
+            a.path
+        );
+    }
+    match &out.applied {
+        Some(done) => {
+            let _ = writeln!(
+                t,
+                "\nImported {} tasks ({} subtasks linked, {} labels attached). Momentum backfill: {} completions counted.",
+                done.imported, done.parents_linked, done.labels_attached, done.momentum.tasks
+            );
+            if done.imported > 0 {
+                let _ = writeln!(
+                    t,
+                    "{}",
+                    if refreshed {
+                        "Nimble was asked to refresh."
+                    } else {
+                        "Nimble didn't confirm a refresh. Quit and reopen Nimble to see the history."
+                    }
+                );
+            }
+        }
+        None if p.would_import > 0 => {
+            let _ = writeln!(
+                t,
+                "\nTo import: dt todoist import-history --apply (backs up through the running Nimble app first)."
+            );
+        }
+        None => {}
+    }
+    t
+}
+
+/// `dt todoist import-history [--since-months N] [--apply] [--archive DIR]`.
+pub async fn import_history(
+    pool: &SqlitePool,
+    profile: &nimble_core::agent_protocol::AgentProfile,
+    since_months: u32,
+    apply: bool,
+    archive: Option<std::path::PathBuf>,
+) -> Result<(Value, String), CliError> {
+    use nimble_core::integrations::todoist::history as h;
+    let fail = |e: nimble_core::Error| CliError::new("import_failed", e.to_string());
+    let token = h::read_token(pool).await.map_err(fail)?;
+    let source = h::HttpTodoistGet::todoist(token).map_err(fail)?;
+    let opts = h::RunOptions {
+        since_months,
+        apply,
+        archive_dir: archive,
+        now: chrono::Utc::now(),
+        today: chrono::Local::now().date_naive(),
+    };
+    let backup = || async {
+        // Same code path as `dt backup now`; no backup, no import.
+        crate::ipc::request(profile, AgentOperation::BackupNow)
+            .await
+            .map(|_| ())
+            .map_err(|e| nimble_core::Error::Other(format!("{} ({})", e.message, e.code)))
+    };
+    let out = h::run(pool, &source, h::RetryPolicy::default(), opts, backup).await.map_err(fail)?;
+    let refreshed = match &out.applied {
+        Some(a) if a.imported > 0 => refresh_app(profile).await,
+        _ => false,
+    };
+    let text = import_text(&out, refreshed);
+    let mut data = serde_json::to_value(&out).map_err(|_| CliError::new("internal", "Cannot encode result."))?;
+    data["app_refreshed"] = json!(refreshed);
+    Ok((data, text))
 }
