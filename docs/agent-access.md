@@ -26,12 +26,16 @@ Installation on PATH and workflow activation are separate release steps. The dev
 | capture | list, create, delete |
 | activity | list, summary |
 | backup | status, now, verify |
-| sync | status, now |
+| sync | status, now, `reconcile [--apply]` |
+| todoist | `import-history [--since-months 12] [--apply] [--archive DIR]` |
+| momentum | backfill, summary |
 | gap | `gap "reason"`, `gap list --from YYYY-MM-DD --to YYYY-MM-DD` |
 
 Task creation supports project/parent IDs, description, priority (1–4), due date, due time, duration, recurrence, section, labels, reminder offset and explicit Google Calendar publishing intent. Updates support these existing core fields except changing a parent, and add linked-document and explicit clear flags. Dates use `YYYY-MM-DD`, times use `HH:MM`. IDs are exact; ambiguous name matching is not performed. `task labels --ids` replaces the entire set; preserve the old labels when adding one. `task labels --clear` intentionally empties the set.
 
 Completing a recurring task calls native core completion; it may advance to the next occurrence instead of becoming complete. Task search will arrive with the dedicated C4 search work. Capture conversion is not exposed as a fragile pair of unrelated writes.
+
+`todoist import-history` reads Todoist's completed-task log (`GET /api/v1/tasks/completed/by_completion_date`, 90-day windows, 429 retried with Retry-After) and never calls a Todoist write endpoint. The default is a dry run: a report of what is already local, what would be imported and where (by project), unmatched labels and orphan subtasks; nothing is written. `--apply` backs up through the running app first (no backup, no import; skipped when there is nothing to import), then imports in one transaction: completed, linked (`external_source='todoist'`) rows with Todoist's `completed_at` as local time, `sync_log` rows for Turso/web, no Todoist outbox rows, one `todoist_history_imported` activity entry, the search index and the momentum backfill. Tasks whose Todoist project Nimble doesn't know land in the archived, unlinked **Todoist history** project (id `todoist-history`), which is never pushed to Todoist. Labels are matched by name (active or archived) and never created. A second `--apply` imports 0. `--archive DIR` also writes every completed task ever (walked back to the account's `joined_at`), plus projects (archived too), sections and labels, as raw Todoist JSON to `DIR/todoist-completed-archive-YYYY-MM-DD.json` (mode 0600, atomic, never overwritten); the archive never writes to the database.
 
 ## Saved versus refreshed versus synchronized
 
