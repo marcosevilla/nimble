@@ -483,8 +483,14 @@ pub async fn set_status_tx(
     if status == "complete" && before.completed && before.status == "complete" {
         return Ok(effects);
     }
+    // A task Todoist recurs is advanced by Todoist: complete it here, push
+    // `item_close`, and the pull reopens it on Todoist's next date (see
+    // `integrations::todoist::recurrence`). Only a user completion pushes.
+    let todoist_owned = status == "complete"
+        && policy == MutationPolicy::User
+        && crate::integrations::todoist::recurrence::todoist_owns_recurrence_tx(conn, &before).await?;
     if status == "complete" {
-        if let (Some(rule_str), Some(due_str)) = (&before.recurrence_rule, &before.due_date) {
+        if let (false, Some(rule_str), Some(due_str)) = (todoist_owned, &before.recurrence_rule, &before.due_date) {
             if let (Some(rule), Ok(due)) = (
                 crate::recurrence::parse_rule(rule_str),
                 NaiveDate::parse_from_str(due_str, "%Y-%m-%d"),
@@ -534,9 +540,12 @@ pub async fn set_status_tx(
         }
         sqlx::query("UPDATE local_tasks SET status=?,completed=1,completed_at=datetime('now','localtime'),updated_at=datetime('now','localtime') WHERE id=?")
             .bind(status).bind(id).execute(&mut *conn).await?;
-        let children: Vec<LocalTask>=sqlx::query_as(&format!("UPDATE local_tasks SET status='complete',completed=1,completed_at=datetime('now','localtime'),updated_at=datetime('now','localtime') WHERE parent_id=? AND completed=0 RETURNING {SELECT_COLS}"))
-            .bind(id).fetch_all(&mut *conn).await?;
-        effects.changed.extend(children);
+        // The occurrence comes back from Todoist; its subtasks stay as they are.
+        if !todoist_owned {
+            let children: Vec<LocalTask>=sqlx::query_as(&format!("UPDATE local_tasks SET status='complete',completed=1,completed_at=datetime('now','localtime'),updated_at=datetime('now','localtime') WHERE parent_id=? AND completed=0 RETURNING {SELECT_COLS}"))
+                .bind(id).fetch_all(&mut *conn).await?;
+            effects.changed.extend(children);
+        }
         // Momentum: the task and every open child this closed.
         crate::db::karma::on_completed_tx(conn, id).await?;
         for child in &effects.changed {

@@ -107,6 +107,7 @@ nimble/
 - Blocked status prompts for reason (logged to activity)
 - Status changes log `task_completed` / `task_uncompleted` / `status_changed` (via `activity::log_task_status`), each carrying the task title as `content`
 - Completing a recurring task (a parseable `recurrence_rule` plus a `due_date`) doesn't move it to `complete` — it reschedules `due_date` to the next occurrence and resets `status` to `todo`, logged as a `task_recurred` activity event instead of `status_changed`. A task with an unparseable rule, or no due date, falls through and completes normally — the rule is inert in that case.
+- Exception — Todoist owns linked recurrence (`integrations/todoist/recurrence.rs`): while Todoist sync is on, a linked task whose `synced_snapshot.due.is_recurring` is true completes locally (no native advance, no child cascade) and pushes `item_close`; Todoist rolls the due forward and the pull reopens the row on that date. The pull mirrors Todoist's `due.string` into `recurrence_rule` (grammar strings as-is, "every other X"/"daily"… translated, anything else verbatim), and every pull repairs linked rows from their stored snapshot. Nimble-side recurrence edits on linked tasks do NOT push to Todoist yet.
 - Every completion, reopen and recurring occurrence also writes a `karma_events` row in the same transaction (`db::karma`, SAVEPOINT, fire-and-forget; the one hard error is when SQLite has already rolled back the caller's transaction)
 
 ## Style Guide

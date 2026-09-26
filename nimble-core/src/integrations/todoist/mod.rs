@@ -6,3 +6,4 @@ pub mod merge;
 pub mod observer;
 pub mod sync_loop;
 pub mod reconcile;
+pub mod recurrence;
