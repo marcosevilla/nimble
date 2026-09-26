@@ -793,11 +793,46 @@ pub async fn backfill_at(pool: &SqlitePool, today: NaiveDate) -> crate::Result<B
 pub const BACKFILL_VERSION: &str = "1";
 const K_BACKFILL: &str = "momentum.backfill_version";
 
+/// Held for the whole of a launch backfill. The brief's momentum gather waits
+/// on it ([`backfill_settled`]) so the first v27 launch can't snapshot the
+/// ledger half-built (zeros frozen into today's brief until Regenerate).
+static BACKFILL_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Take the backfill gate, waiting out a backfill in flight.
+pub async fn claim_backfill() -> tokio::sync::MutexGuard<'static, ()> {
+    BACKFILL_GATE.lock().await
+}
+
+/// Wait for a launch backfill in flight; returns at once when none is.
+/// Never starts one (the brief stays read-only).
+pub async fn backfill_settled() {
+    drop(BACKFILL_GATE.lock().await);
+}
+
+/// The launch hook, for the caller to spawn. It takes the gate *before*
+/// returning, so a brief gathered right after launch can't slip in ahead of
+/// the spawned backfill.
+pub fn launch_backfill(pool: SqlitePool) -> impl std::future::Future<Output = ()> + Send + 'static {
+    let claimed = BACKFILL_GATE.try_lock().ok();
+    async move {
+        let _gate = match claimed {
+            Some(gate) => gate,
+            None => claim_backfill().await,
+        };
+        backfill_if_needed_claimed(&pool).await
+    }
+}
+
 /// Launch hook: rebuild until one run succeeds for this `BACKFILL_VERSION`
 /// (stamped in `momentum.backfill_version` only after a fully successful run).
 /// A non-empty ledger is no signal: a live completion can land first. The
 /// backfill is idempotent by id, so a retry is harmless. Fire-and-forget.
 pub async fn backfill_if_needed(pool: &SqlitePool) {
+    let _gate = claim_backfill().await;
+    backfill_if_needed_claimed(pool).await
+}
+
+async fn backfill_if_needed_claimed(pool: &SqlitePool) {
     match get_setting(pool, K_BACKFILL).await {
         Ok(Some(v)) if v == BACKFILL_VERSION => return,
         Ok(_) => {}
