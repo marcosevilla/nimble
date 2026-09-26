@@ -163,6 +163,14 @@ export function GoalsStep({ draft, onChange, onContinue }: StepProps) {
     setGoals({ days_off: days })
     setInvalid(GOAL_FIELDS.some((f) => parseGoal(textOf(f.key), f.max) === null) || daysOffError(days) !== null)
   }
+  // `go()` clears `invalid` on every step change, so re-entering Goals
+  // (Back, then Continue) must re-check the draft it comes back to: all
+  // seven days off would otherwise pass Continue and be dropped at Finish.
+  // The typed text starts over from the draft's (valid) numbers on mount.
+  const daysInvalid = daysError !== null
+  useEffect(() => {
+    if (daysInvalid) setInvalid(true)
+  }, [daysInvalid, setInvalid])
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-4">

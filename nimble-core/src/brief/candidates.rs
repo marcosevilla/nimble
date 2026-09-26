@@ -16,6 +16,11 @@ pub const DUE_WINDOW_DAYS: i64 = 7;
 /// The labelled tier comes last and takes at most this many per configured
 /// label, so a big `quick` backlog can never crowd out what's due.
 pub const LABELLED_PER_LABEL: usize = 15;
+/// …but the earlier tiers leave this many slots per configured label for
+/// it (when that many labelled tasks exist), so a big overdue backlog can't
+/// fill all 80 and empty the Quick wins box. Twice a Quick wins list (3),
+/// room for acted-on rows and priorities that take a labelled task.
+pub const LABELLED_RESERVED_PER_LABEL: usize = 6;
 pub const DEFAULT_HELP_LABEL: &str = "needs-claude";
 pub const DEFAULT_SELF_LABEL: &str = "quick";
 
@@ -118,7 +123,8 @@ fn urgency(a: &LocalTask, b: &LocalTask) -> Ordering {
 /// Tiers, in order (base spec §4.6), each sorted by urgency: in progress →
 /// due within 7 days or before today → priority ≥ 3 → the 20 oldest open
 /// tasks → then tasks carrying the help or self label, at most
-/// `LABELLED_PER_LABEL` per label. Capped at 80, top-level, open and in a
+/// `LABELLED_PER_LABEL` per label, for which the earlier tiers leave up to
+/// `LABELLED_RESERVED_PER_LABEL` slots each. Capped at 80, top-level, open and in a
 /// non-archived project only. `blocked` tasks are never candidates (they're
 /// waiting on something else); `backlog` tasks only enter through the oldest
 /// tier (parked on purpose, so never picked as due or important).
@@ -146,40 +152,66 @@ pub fn select_open(input: &SelectInput) -> Vec<Candidate> {
     let important = |t: &LocalTask| -> bool { active(t) && t.priority >= 3 };
     let tiers: [&dyn Fn(&LocalTask) -> bool; 3] = [&in_progress, &due_soon, &important];
 
-    let mut picked: Vec<&LocalTask> = Vec::new();
-    let mut seen: HashSet<&str> = HashSet::new();
-    for tier in tiers {
-        for &t in &eligible {
-            if picked.len() == MAX_CANDIDATES { break; }
-            if tier(t) && seen.insert(t.id.as_str()) { picked.push(t); }
-        }
-    }
     let mut oldest = eligible.clone();
     oldest.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
-    for t in oldest.into_iter().take(OLDEST_OPEN) {
-        if picked.len() == MAX_CANDIDATES { break; }
-        if seen.insert(t.id.as_str()) { picked.push(t); }
-    }
-    // Labelled last, each configured label with its own sub-cap.
+    let oldest: Vec<&LocalTask> = oldest.into_iter().take(OLDEST_OPEN).collect();
+
     let mut wanted: Vec<&str> = [input.labels.help_label.as_str(), input.labels.self_label.as_str()]
         .into_iter()
         .map(str::trim)
         .filter(|w| !w.is_empty())
         .collect();
     wanted.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-    for label in wanted {
-        let carries = |t: &LocalTask| -> bool {
-            names_of(t).iter().any(|n| n.eq_ignore_ascii_case(label)) || t.labels.iter().any(|id| id == label)
-        };
-        let mut taken = 0;
-        for &t in &eligible {
-            if picked.len() == MAX_CANDIDATES || taken == LABELLED_PER_LABEL { break; }
-            if active(t) && carries(t) && seen.insert(t.id.as_str()) {
-                picked.push(t);
-                taken += 1;
+    let carries = |t: &LocalTask, label: &str| -> bool {
+        names_of(t).iter().any(|n| n.eq_ignore_ascii_case(label)) || t.labels.iter().any(|id| id == label)
+    };
+    // Slots the tiers leave for the labelled tier: per label, up to
+    // LABELLED_RESERVED_PER_LABEL of the tasks that carry it.
+    let reserved: usize = wanted
+        .iter()
+        .map(|label| eligible.iter().filter(|t| active(t) && carries(t, label)).count().min(LABELLED_RESERVED_PER_LABEL))
+        .sum();
+
+    let mut picked: Vec<&LocalTask> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    // Tiers, then the oldest open tasks, up to `cap`.
+    fn fill<'a>(
+        tiers: &[&dyn Fn(&LocalTask) -> bool],
+        eligible: &[&'a LocalTask],
+        oldest: &[&'a LocalTask],
+        picked: &mut Vec<&'a LocalTask>,
+        seen: &mut HashSet<&'a str>,
+        cap: usize,
+    ) {
+        for tier in tiers {
+            for &t in eligible {
+                if picked.len() >= cap { return; }
+                if tier(t) && seen.insert(t.id.as_str()) { picked.push(t); }
+            }
+        }
+        for &t in oldest {
+            if picked.len() >= cap { return; }
+            if seen.insert(t.id.as_str()) { picked.push(t); }
+        }
+    }
+    fill(&tiers, &eligible, &oldest, &mut picked, &mut seen, MAX_CANDIDATES.saturating_sub(reserved));
+    // Labelled last: first each label up to its own reserve (so one label
+    // can't take another's slots), then each up to its LABELLED_PER_LABEL cap.
+    let mut taken = vec![0usize; wanted.len()];
+    for cap in [LABELLED_RESERVED_PER_LABEL, LABELLED_PER_LABEL] {
+        for (i, label) in wanted.iter().enumerate() {
+            for &t in &eligible {
+                if picked.len() == MAX_CANDIDATES || taken[i] >= cap { break; }
+                if active(t) && carries(t, label) && seen.insert(t.id.as_str()) {
+                    picked.push(t);
+                    taken[i] += 1;
+                }
             }
         }
     }
+    // Reserved slots the labelled tier didn't need (its tasks were already
+    // picked as due or important) go back to the tiers.
+    fill(&tiers, &eligible, &oldest, &mut picked, &mut seen, MAX_CANDIDATES);
 
     picked
         .into_iter()
@@ -310,6 +342,54 @@ mod tests {
         let labelled = out.iter().filter(|c| c.task_id.starts_with('q')).count();
         assert_eq!(labelled, OLDEST_OPEN + 2 * LABELLED_PER_LABEL, "20 via the oldest tier, then ≤15 per label");
         assert_eq!(out.len(), 1 + OLDEST_OPEN + 2 * LABELLED_PER_LABEL);
+    }
+
+    #[test]
+    fn a_big_overdue_backlog_leaves_room_for_labelled_tasks() {
+        // 100 overdue tasks would fill all 80 slots before the labelled tier.
+        let mut tasks: Vec<LocalTask> = (0..100).map(|i| {
+            let mut x = t(&format!("od{i:03}"));
+            x.due_date = Some("2026-08-01".into());
+            x
+        }).collect();
+        for i in 0..20 {
+            let mut x = t(&format!("quick{i:02}"));
+            x.labels = vec!["l-quick".into()];
+            x.created_at = "2026-09-20 10:00:00".into();
+            tasks.push(x);
+        }
+        let mut help = t("help");
+        help.labels = vec!["l-help".into()];
+        help.created_at = "2026-09-20 10:00:00".into();
+        tasks.push(help);
+        let out = select(&tasks, &[("l-help", "needs-claude"), ("l-quick", "quick")], &[]);
+        assert_eq!(out.len(), MAX_CANDIDATES);
+        let quick = out.iter().filter(|c| c.has_label("quick")).count();
+        assert_eq!(quick, LABELLED_RESERVED_PER_LABEL, "each label keeps its reserved slots");
+        assert!(out.iter().any(|c| c.task_id == "help"), "the one help task is a candidate");
+        // One help task reserves one slot; the rest go back to what's due.
+        assert_eq!(out.iter().filter(|c| c.task_id.starts_with("od")).count(), MAX_CANDIDATES - LABELLED_RESERVED_PER_LABEL - 1);
+    }
+
+    #[test]
+    fn one_label_never_takes_the_other_labels_reserved_slots() {
+        let mut tasks: Vec<LocalTask> = (0..100).map(|i| {
+            let mut x = t(&format!("od{i:03}"));
+            x.due_date = Some("2026-08-01".into());
+            x
+        }).collect();
+        for (label, prefix) in [("l-help", "help"), ("l-quick", "quick")] {
+            for i in 0..20 {
+                let mut x = t(&format!("{prefix}{i:02}"));
+                x.labels = vec![label.into()];
+                x.created_at = "2026-09-20 10:00:00".into();
+                tasks.push(x);
+            }
+        }
+        let out = select(&tasks, &[("l-help", "needs-claude"), ("l-quick", "quick")], &[]);
+        assert_eq!(out.len(), MAX_CANDIDATES);
+        assert_eq!(out.iter().filter(|c| c.has_label("needs-claude")).count(), LABELLED_RESERVED_PER_LABEL);
+        assert_eq!(out.iter().filter(|c| c.has_label("quick")).count(), LABELLED_RESERVED_PER_LABEL);
     }
 
     #[test]

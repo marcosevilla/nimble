@@ -13,7 +13,6 @@ import { PageFrame } from '@/components/shared/PageFrame'
 import { IconButton } from '@/components/shared/IconButton'
 import { DateStrip } from '@/components/shared/DateStrip'
 import { useLocalTasks, useProjects } from '@/hooks/useLocalTasks'
-import { useObsidian } from '@/hooks/useObsidian'
 import { useCalendar } from '@/hooks/useCalendar'
 import { useLocalToday } from '@/hooks/useLocalToday'
 import { useGreeting } from '@/hooks/useGreeting'
@@ -212,14 +211,11 @@ export function TodayPage() {
   )
 
   // Header count: today's top-level tasks (checked-off ones included) and the
-  // open ones still carried from before, plus the Obsidian daily note's
-  // checkboxes. Completed tasks from past days are not part of today.
-  const { todayData } = useObsidian()
+  // open ones still carried from before. Completed tasks from past days are
+  // not part of today.
   const dueTodayOpen = dueToday.filter((t) => !t.completed).length
-  const obsidianChecked = todayData?.tasks.filter((t) => t.checked).length ?? 0
-  const obsidianTotal = todayData?.tasks.length ?? 0
-  const completed = obsidianChecked + (dueToday.length - dueTodayOpen)
-  const total = obsidianTotal + dueToday.length + stillOpen.length
+  const completed = dueToday.length - dueTodayOpen
+  const total = dueToday.length + stillOpen.length
   const remaining = total - completed
 
   const live: BriefLive = {

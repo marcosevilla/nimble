@@ -197,10 +197,10 @@ async fn the_launch_backfill_runs_until_one_full_run_succeeds() {
     nimble_core::db::tasks::update_task_status(&pool, &fresh, "complete", None).await.unwrap();
     // The first attempt fails part-way (here: its history table is unreadable).
     sqlx::query("ALTER TABLE activity_log RENAME TO activity_log_away").execute(&pool).await.unwrap();
-    karma::backfill_if_needed(&pool).await;
+    karma::launch_backfill(pool.clone()).await;
     assert_eq!(backfill_version(&pool).await, None, "a failed run is retried");
     sqlx::query("ALTER TABLE activity_log_away RENAME TO activity_log").execute(&pool).await.unwrap();
-    karma::backfill_if_needed(&pool).await;
+    karma::launch_backfill(pool.clone()).await;
     assert!(backfill_version(&pool).await.is_some());
     let ids: Vec<String> = karma::list_events(&pool).await.unwrap().into_iter().map(|e| e.id).collect();
     assert!(ids.contains(&format!("task:{old}:2026-09-01 10:00:00")), "{ids:?}");
@@ -208,7 +208,7 @@ async fn the_launch_backfill_runs_until_one_full_run_succeeds() {
     let later = task(&pool, "Imported later", 1).await;
     sqlx::query("UPDATE local_tasks SET status='complete', completed=1, completed_at='2026-09-02 10:00:00' WHERE id=?")
         .bind(&later).execute(&pool).await.unwrap();
-    karma::backfill_if_needed(&pool).await;
+    karma::launch_backfill(pool.clone()).await;
     assert!(!karma::list_events(&pool).await.unwrap().iter().any(|e| e.task_id.as_deref() == Some(later.as_str())));
 }
 

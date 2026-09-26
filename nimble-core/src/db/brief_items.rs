@@ -179,6 +179,18 @@ pub(crate) async fn replace_unacted_tx(
             return Err(crate::Error::Other(format!("invalid brief item {}/{}", it.kind, it.origin)));
         }
     }
+    // Re-read inside the write transaction: the caller's acted-on set was
+    // read before a model call that takes seconds, and a task acted on
+    // meanwhile must not come back under another heading (a duplicate).
+    let acted: HashSet<String> = sqlx::query_scalar(
+        "SELECT task_id FROM brief_items WHERE date = ? AND action_state != 'none' AND task_id IS NOT NULL",
+    )
+    .bind(date)
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .collect();
+    let items: Vec<&NewBriefItem> = items.iter().filter(|it| !acted.contains(&it.task_id)).collect();
     let picked: HashSet<String> = items.iter().map(|it| item_id(date, &it.kind, &it.task_id)).collect();
     let stale: Vec<String> = sqlx::query_scalar("SELECT id FROM brief_items WHERE date = ? AND action_state = 'none'")
         .bind(date)
@@ -325,6 +337,20 @@ mod tests {
         let kept = items.iter().find(|i| i.kind == "quick_help").unwrap();
         assert_eq!((kept.action_state.as_str(), kept.produced_ref.as_deref(), kept.position), ("produced", Some("[\"s1\",\"s2\"]"), 0));
         assert_eq!(count(&pool, "SELECT count(*) FROM sync_log WHERE table_name='brief_items' AND operation='DELETE'").await, 1);
+    }
+
+    #[tokio::test]
+    async fn a_task_acted_on_mid_compose_is_not_added_again_under_another_kind() {
+        let pool = test_pool().await;
+        let (a, b) = (task(&pool, "A").await, task(&pool, "B").await);
+        briefs::ensure_snapshot(&pool, D, D).await.unwrap();
+        briefs::record_composition(&pool, &record(vec![item("quick_help", &b, 0)], false, 1)).await.unwrap();
+        // Regenerate read the acted-on set before its model call; the user
+        // acts on B while the call runs, and the model picks B as a priority.
+        set_item_state(&pool, &item_id(D, "quick_help", &b), "produced", Some("break_down"), Some("[\"s1\"]")).await.unwrap();
+        briefs::record_composition(&pool, &record(vec![item("priority", &b, 0), item("priority", &a, 1)], true, 1)).await.unwrap();
+        let summary: Vec<(String, String)> = list_items(&pool, D).await.unwrap().into_iter().map(|i| (i.kind, i.task_id.unwrap())).collect();
+        assert_eq!(summary, [("priority".to_string(), a.clone()), ("quick_help".to_string(), b.clone())]);
     }
 
     #[tokio::test]

@@ -24,7 +24,6 @@ import { FocusRequestError } from './focus-events'
 export type {
   Setting,
   CheckboxItem,
-  ParsedTodayMd,
   CalendarEvent,
   CalendarFeed,
   QuickCapture,
@@ -79,7 +78,6 @@ export type {
 
 import type {
   Setting,
-  ParsedTodayMd,
   TodoistMigrationPreview,
   TodoistMigrationResult,
   CalendarEvent,
@@ -134,10 +132,6 @@ import type {
 
 // ── Settings ──
 
-export async function checkSetupComplete(): Promise<boolean> {
-  return invoke<boolean>('check_setup_complete')
-}
-
 export async function getSetting(key: string): Promise<string | null> {
   return invoke<string | null>('get_setting', { key })
 }
@@ -155,20 +149,6 @@ export async function clearAllSettings(): Promise<void> {
 }
 
 // ── Obsidian ──
-
-export async function readTodayMd(): Promise<ParsedTodayMd> {
-  return invoke<ParsedTodayMd>('read_today_md')
-}
-
-export async function toggleObsidianCheckbox(
-  fileName: string,
-  lineNumber: number,
-): Promise<ParsedTodayMd> {
-  return invoke<ParsedTodayMd>('toggle_obsidian_checkbox', {
-    fileName,
-    lineNumber,
-  })
-}
 
 // ── Todoist ──
 

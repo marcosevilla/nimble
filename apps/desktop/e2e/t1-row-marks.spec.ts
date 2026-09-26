@@ -43,7 +43,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Locator, Page } from '@playwright/test'
-import { test, expect, expectNoClipping, expectFocusRing, expectNoNewAxeViolations, type App } from './fixtures'
+import { test, expect, expectNoClipping, expectFocusRing, expectNoNewAxeViolations, settleRect, type App } from './fixtures'
 
 const MOCK_NOW = new Date('2026-08-01T10:00:00')
 
@@ -446,6 +446,9 @@ for (const key of ['tasks', 'today'] as const) {
       await openSurface(app, page, s)
       const m = mark(rowOf(page, s.row), kind, s.marks[kind])
       await expect(m).toBeVisible()
+      // Today's boxes load after its rows and push them down: scroll a
+      // settled page, or the mark moves between scroll and hit test.
+      await settleRect(m)
       // elementFromPoint only sees the viewport; with brief phase 3's
       // composed boxes above it, Today's Due today row sits below the fold.
       await m.scrollIntoViewIfNeeded()

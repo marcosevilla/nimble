@@ -16,7 +16,6 @@
 
 import type {
   Setting,
-  ParsedTodayMd,
   CalendarEvent,
   CalendarFeed,
   QuickCapture,
@@ -90,7 +89,6 @@ export interface DataProvider {
   momentum: import('./index').MomentumCapability
   omnibar: import('./index').OmnibarCapability
   settings: {
-    checkSetupComplete(): Promise<boolean>
     get(key: string): Promise<string | null>
     set(key: string, value: string): Promise<void>
     getAll(): Promise<Setting[]>
@@ -98,8 +96,6 @@ export interface DataProvider {
   }
 
   obsidian: {
-    readTodayMd(): Promise<ParsedTodayMd>
-    toggleCheckbox(fileName: string, lineNumber: number): Promise<ParsedTodayMd>
     importCaptures(): Promise<number>
   }
 

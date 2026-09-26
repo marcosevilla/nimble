@@ -47,7 +47,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Locator, Page } from '@playwright/test'
-import { test, expect, expectNoClipping, expectFocusRing, expectNoNewAxeViolations, type App } from './fixtures'
+import { test, expect, expectNoClipping, expectFocusRing, expectNoNewAxeViolations, settleRect, type App } from './fixtures'
 
 const MOCK_NOW = new Date('2026-08-01T10:00:00')
 
@@ -279,11 +279,31 @@ async function expectTitleUncovered(page: Page, row: Locator) {
 }
 
 /** Popup just below (or, flipped, just above) `anchor`. */
-function expectVerticallyAdjacent(p: Rect, anchor: Rect, what: string) {
+function adjacent(p: Rect, anchor: Rect) {
   const below = p.top >= anchor.bottom - 6 && p.top <= anchor.bottom + 14
   const above = p.bottom <= anchor.top + 6 && p.bottom >= anchor.top - 14
-  expect(below || above, `popup ${JSON.stringify(p)} adjacent to ${what} ${JSON.stringify(anchor)}`).toBe(true)
+  return below || above
 }
+
+function expectVerticallyAdjacent(p: Rect, anchor: Rect, what: string) {
+  expect(adjacent(p, anchor), `popup ${JSON.stringify(p)} adjacent to ${what} ${JSON.stringify(anchor)}`).toBe(true)
+}
+
+/** The one open popup and `anchor`, read in the same frame (Today's layout
+ * can still move between two separate reads). */
+async function pickerAndMark(page: Page, anchor: Locator): Promise<{ popup: Rect; anchor: Rect }> {
+  const handle = await anchor.elementHandle()
+  return page.evaluate((a) => {
+    const box = (e: Element) => {
+      const r = e.getBoundingClientRect()
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }
+    }
+    const open = Array.from(document.querySelectorAll('[role=dialog], [role=menu], [role=listbox]')).filter((e) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden')
+    if (open.length !== 1) throw new Error(`expected one open popup, found ${open.length}`)
+    return { popup: box(open[0]), anchor: box(a!) }
+  }, handle)
+}
+
 
 async function pressRowKey(page: Page, kind: Kind) {
   await page.keyboard.press(KEY[kind])
@@ -355,19 +375,20 @@ for (const key of ['tasks', 'today'] as const) {
       const row = rowOf(page, s.row)
       const m = mark(row, kind)
       await expect(m, `${kind} mark (T1)`).toBeVisible()
+      // Today's boxes load after its rows and push them down: measure a
+      // settled page, and each popup with its mark in one read.
+      await settleRect(m)
 
       // Reference: the click-opened picker's box.
       await m.click()
       await expectPicker(page, kind, '(click)')
       await page.waitForTimeout(250)
-      const clickBox = (await popupRects(page))[0]
-      const clickAnchor = await rectOf(m)
+      const { popup: clickBox, anchor: clickAnchor } = await pickerAndMark(page, m)
       await closeAllPopups(page)
 
       await focusByKeyboard(page, s, s.row)
       await keyOpen(page, kind)
-      const [p] = await popupRects(page)
-      const anchor = await rectOf(m)
+      const { popup: p, anchor } = await pickerAndMark(page, m)
       expect(Math.abs(p.left - clickBox.left), 'same x as the click-opened picker').toBeLessThanOrEqual(4)
       // Click and keyboard focus can scroll a row near the fold differently,
       // so a picker may flip to the other side of the mark (by exactly its
@@ -383,6 +404,40 @@ for (const key of ['tasks', 'today'] as const) {
       await expectTitleUncovered(page, row)
     })
   }
+}
+
+// Found by the AC2 Today flake (2026-09-25): Today's boxes load after its
+// rows, so a picker opened near the fold saw its mark move ~350px down a
+// moment later. WebKit's IntersectionObserver (floating-ui's layout-shift
+// check) followed the mark off-screen but not back, leaving the picker
+// stranded. An open picker must stay against its mark through the shift.
+for (const kind of KINDS) {
+  test(`AC2 today: an open ${kind} picker follows its mark when the page shifts under it`, async ({ app, page }) => {
+    const s = SURFACES.today
+    await openSurface(app, page, s)
+    const row = rowOf(page, s.row)
+    const m = mark(row, kind)
+    await settleRect(m)
+    await m.click()
+    await expectPicker(page, kind)
+    await page.waitForTimeout(250)
+    const gap = async () => {
+      const { popup, anchor } = await pickerAndMark(page, m)
+      return Math.round(popup.top - anchor.top)
+    }
+    const before = await gap()
+    const list = row.locator('xpath=..')
+    // Push the rows down past the fold (a box loading above them)…
+    await list.evaluate((el) => ((el as HTMLElement).style.paddingTop = '356px'))
+    await expect.poll(async () => {
+      const { popup, anchor } = await pickerAndMark(page, m)
+      return adjacent(popup, anchor)
+    }, { message: 'picker follows the mark down', timeout: 500 }).toBe(true)
+    // …and back up (the box collapsing): the picker returns with it.
+    await list.evaluate((el) => ((el as HTMLElement).style.paddingTop = ''))
+    // Within a few frames, not after floating-ui's 1 s clipped-anchor retry.
+    await expect.poll(gap, { message: 'picker back against the mark', timeout: 500 }).toBe(before)
+  })
 }
 
 // Marco 2026-09-24: Normal gets an empty icon — every row has a priority

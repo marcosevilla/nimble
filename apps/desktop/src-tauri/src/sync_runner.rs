@@ -135,6 +135,10 @@ async fn run_turso_report(app: &AppHandle, min_interval_secs: i64) -> TursoRunRe
         let _ = app.emit("remote-sync-applied", ());
         crate::focus_service::broadcast(app).await;
     }
+    if pushed.is_ok() && pulled.is_ok() {
+        // What `dt sync status` / Settings report as the last sync.
+        let _ = nimble_core::db::sync::record_turso_sync_completed(pool, &chrono::Utc::now().to_rfc3339()).await;
+    }
     turso_outcomes(pushed, pulled)
 }
 fn turso_outcomes(

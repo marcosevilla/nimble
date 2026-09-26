@@ -25,6 +25,8 @@ impl BriefModule for Momentum {
     async fn gather(&self, ctx: &BriefCtx<'_>, _config: &Value) -> crate::Result<Value> {
         let today = chrono::NaiveDate::parse_from_str(ctx.date, "%Y-%m-%d")
             .map_err(|e| crate::Error::Other(format!("momentum: brief date {}: {e}", ctx.date)))?;
+        // First v27 launch: read the ledger the background backfill rebuilt.
+        crate::db::karma::backfill_settled().await;
         let summary = crate::db::karma::read_summary_at(ctx.pool, "7d", today).await?;
         serde_json::to_value(summary).map_err(|e| crate::Error::Other(e.to_string()))
     }
@@ -59,5 +61,29 @@ mod tests {
         assert!(v["karma"].is_null());
         let goals: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM karma_events WHERE kind LIKE 'goal_%'").fetch_one(&pool).await.unwrap();
         assert_eq!(goals, 0, "gather never writes the ledger, even with a goal met");
+    }
+
+    /// First v27 launch: the backfill runs in the background while Today
+    /// snapshots/composes its brief. The momentum gather must read the
+    /// rebuilt ledger, not freeze zeros taken mid-backfill.
+    #[tokio::test]
+    async fn gather_waits_for_a_launch_backfill_in_flight() {
+        let pool = crate::test_util::test_pool().await;
+        let gate = crate::db::karma::claim_backfill().await;
+        let gather_pool = pool.clone();
+        let gather = tokio::spawn(async move {
+            let ctx = BriefCtx { pool: &gather_pool, date: "2026-09-23" };
+            Momentum.gather(&ctx, &serde_json::json!({})).await.unwrap()
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!gather.is_finished(), "gather waits while the backfill holds the gate");
+        // What the backfill writes before it lets go.
+        for i in 0..3 {
+            crate::db::karma::record_tx(&mut *pool.acquire().await.unwrap(),
+                &crate::db::karma::completion_event(&format!("t{i}"), 1, &format!("2026-09-23 1{i}:00:00")).unwrap()).await.unwrap();
+        }
+        drop(gate);
+        let v = gather.await.unwrap();
+        assert_eq!(v["week_done"], 3, "the snapshot sees the rebuilt ledger");
     }
 }

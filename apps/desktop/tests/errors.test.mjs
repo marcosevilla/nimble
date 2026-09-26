@@ -1,17 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { friendlyError, friendlyErrorOrNull, isMissingTodayNote, isVaultNotConfigured, isWebNotImplemented } from '../src/lib/errors.ts'
-
-test('a missing vault-root today.md is recognised', () => {
-  assert.equal(isMissingTodayNote('Failed to read today.md: not found'), true)
-  assert.equal(isMissingTodayNote(new Error('Failed to read today.md: not found')), true)
-})
-
-test('other not-found errors are not mistaken for a missing today.md', () => {
-  assert.equal(isMissingTodayNote('Failed to read Quick Captures.md: not found'), false)
-  assert.equal(isMissingTodayNote('Vault path not found'), false)
-  assert.equal(isMissingTodayNote(undefined), false)
-})
+import { friendlyError, friendlyErrorOrNull, isVaultNotConfigured, isWebNotImplemented } from '../src/lib/errors.ts'
 
 test('a vault-path not-found error still gets the vault-path message', () => {
   assert.match(friendlyError('Vault path not found'), /vault path/)

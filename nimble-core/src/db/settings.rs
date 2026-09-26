@@ -2,29 +2,11 @@ use sqlx::SqlitePool;
 
 use crate::types::SettingRow;
 
-/// Settings the app needs before it runs: none since brief phase 2
-/// (addendum §3). Every integration is optional and degrades on its own —
-/// no Todoist token, no sync; no vault, no vault box; no AI key, a
-/// rule-based brief. The Today setup (`today.setup_completed_at`) is the
-/// onboarding now. Pinned to `lib/setupGate.ts` by tests/setupGate.test.mjs.
-const REQUIRED_SETTINGS: &[&str] = &[];
-
-/// Check if all required settings are configured
-pub async fn check_setup_complete(pool: &SqlitePool) -> crate::Result<bool> {
-    for key in REQUIRED_SETTINGS {
-        let row: Option<SettingRow> = sqlx::query_as(
-            "SELECT key, value FROM settings WHERE key = ? AND value != ''",
-        )
-        .bind(key)
-        .fetch_optional(pool)
-        .await?;
-
-        if row.is_none() {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
+// No first-run gate: since brief phase 2 (addendum §3) nothing is required
+// before the app runs. Every integration is optional and degrades on its own
+// (no Todoist token, no sync; no vault, no vault box; no AI key, a rule-based
+// brief); the Today setup (`today.setup_completed_at`) is the onboarding.
+// Pinned by apps/desktop/tests/setupGate.test.mjs.
 
 /// Get a single setting by key
 pub async fn get_setting(pool: &SqlitePool, key: &str) -> crate::Result<Option<String>> {
@@ -67,15 +49,4 @@ pub async fn clear_all_settings(pool: &SqlitePool) -> crate::Result<()> {
         .await?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::test_util::test_pool;
-
-    #[tokio::test]
-    async fn setup_is_complete_with_nothing_configured() {
-        let pool = test_pool().await;
-        assert!(super::check_setup_complete(&pool).await.unwrap(), "every integration is optional (addendum §3)");
-    }
 }

@@ -1104,6 +1104,14 @@ fn build_data_mutation_requests(
                 // Epoch changes require a separate stopped-owner takeover.
                 sql.push_str(" WHERE focus_replica.writer_device_id=excluded.writer_device_id AND focus_replica.owner_epoch=excluded.owner_epoch AND excluded.revision>focus_replica.revision");
             }
+            // schema-v26, mirroring the pull-side guard in apply_remote_change:
+            // a plain brief shell (a second Mac's first open) never overwrites
+            // the remote composed row for that date. Only when the shell names
+            // `composed_at` itself, so a pre-v26 remote never sees the column
+            // through this WHERE alone.
+            if table_name == "briefs" && obj.get("composed_at").is_some_and(serde_json::Value::is_null) && sql.contains("DO UPDATE") {
+                sql.push_str(" WHERE briefs.composed_at IS NULL");
+            }
 
             let args: Vec<serde_json::Value> = columns
                 .iter()
@@ -2225,6 +2233,17 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
 }
 
 /// Get current sync status: pending changes, last sync time, device_id, config state.
+/// Settings key holding when a scheduled/agent Turso sync last *completed*
+/// (push and pull both ok; RFC 3339, UTC). Written by the desktop sync
+/// runner. `turso_last_sync_at` is the attempt stamp (a rate limiter), and
+/// `last_pull_timestamp` a data watermark that only moves when a remote entry
+/// arrives, so neither says when the Mac last synced.
+pub const TURSO_LAST_COMPLETED_KEY: &str = "turso_last_completed_at";
+
+pub async fn record_turso_sync_completed(pool: &SqlitePool, at: &str) -> crate::Result<()> {
+    crate::db::settings::set_setting(pool, TURSO_LAST_COMPLETED_KEY, at).await
+}
+
 pub async fn get_sync_status(pool: &SqlitePool) -> crate::Result<SyncStatus> {
     let pending_changes: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sync_log WHERE synced = 0"
@@ -2233,9 +2252,11 @@ pub async fn get_sync_status(pool: &SqlitePool) -> crate::Result<SyncStatus> {
     .await
     .unwrap_or(0);
 
+    // The last completed Turso sync; before the first one, the pull watermark.
     let last_sync: Option<String> = sqlx::query_scalar(
-        "SELECT value FROM settings WHERE key = 'last_pull_timestamp'"
+        "SELECT COALESCE((SELECT value FROM settings WHERE key = ?), (SELECT value FROM settings WHERE key = 'last_pull_timestamp'))"
     )
+    .bind(TURSO_LAST_COMPLETED_KEY)
     .fetch_optional(pool)
     .await
     .unwrap_or(None);
@@ -3498,6 +3519,63 @@ mod v19_sync_tests {
         super::apply_remote_change(&pool, "briefs", "2026-09-26", "UPDATE", Some(&composed)).await.unwrap();
         let b = crate::db::briefs::get_brief(&pool, "2026-09-26").await.unwrap().unwrap();
         assert_eq!((b.version, b.snapshot["compose"]["summary"].as_str()), (2, Some("Theirs.")));
+    }
+
+    /// Run pushed statements against a local pool standing in for Turso.
+    async fn exec_pushed(pool: &sqlx::SqlitePool, reqs: &[serde_json::Value]) {
+        for r in reqs {
+            let sql = r.pointer("/stmt/sql").and_then(|v| v.as_str()).unwrap();
+            let mut q = sqlx::query(sql);
+            for a in r.pointer("/stmt/args").and_then(|v| v.as_array()).unwrap() {
+                let v = a["value"].as_str().map(str::to_string);
+                q = match a["type"].as_str().unwrap() {
+                    "null" => q.bind(None::<String>),
+                    "integer" => q.bind(v.unwrap().parse::<i64>().unwrap()),
+                    "float" => q.bind(v.unwrap().parse::<f64>().unwrap()),
+                    _ => q.bind(v),
+                };
+            }
+            q.execute(pool).await.unwrap();
+        }
+    }
+
+    /// C3 acceptance: `dt sync status` showed a `last_sync` stuck at the pull
+    /// watermark (it only moves when a remote entry arrives) while the app
+    /// synced every 60 s. It reports the last completed Turso sync now.
+    #[tokio::test]
+    async fn sync_status_reports_the_last_completed_turso_sync() {
+        let pool = test_pool().await;
+        crate::db::settings::set_setting(&pool, "last_pull_timestamp", "2026-09-20 08:00:00").await.unwrap();
+        let s = super::get_sync_status(&pool).await.unwrap();
+        assert_eq!(s.last_sync.as_deref(), Some("2026-09-20 08:00:00"), "before any completed run: the pull watermark");
+        super::record_turso_sync_completed(&pool, "2026-09-25T18:01:00+00:00").await.unwrap();
+        let s = super::get_sync_status(&pool).await.unwrap();
+        assert_eq!(s.last_sync.as_deref(), Some("2026-09-25T18:01:00+00:00"));
+    }
+
+    #[tokio::test]
+    async fn a_pushed_shell_never_overwrites_a_remote_composed_brief() { // schema-v26
+        let remote = test_pool().await;
+        let push = |snap: serde_json::Value| super::build_data_mutation_requests("briefs", "2026-09-26", "UPDATE", &Some(snap.to_string()));
+        let composed = serde_json::json!({"date":"2026-09-26","version":2,"status":"ready","source":"nimble",
+            "layout_json":"[]","snapshot_json":"{\"compose\":{\"summary\":\"Calm.\"}}","snapshot_schema":1,
+            "composed_at":"2026-09-26 06:30:00","generated_at":"g","updated_at":"u1"});
+        exec_pushed(&remote, &push(composed)).await;
+        // A second Mac's first open: a plain shell for the same date.
+        let shell = serde_json::json!({"date":"2026-09-26","version":1,"status":"ready","source":"nimble",
+            "layout_json":"[]","snapshot_json":"{}","snapshot_schema":1,"composed_at":null,
+            "generated_at":"2026-09-26 06:40:00","updated_at":"2026-09-26 06:40:00"});
+        exec_pushed(&remote, &push(shell)).await;
+        let b = crate::db::briefs::get_brief(&remote, "2026-09-26").await.unwrap().unwrap();
+        assert_eq!(b.composed_at.as_deref(), Some("2026-09-26 06:30:00"));
+        assert_eq!(b.snapshot["compose"]["summary"], "Calm.");
+        // Another composed row still lands (LWW decides, as on pull).
+        let theirs = serde_json::json!({"date":"2026-09-26","version":3,"status":"ready","source":"nimble",
+            "layout_json":"[]","snapshot_json":"{\"compose\":{\"summary\":\"Theirs.\"}}","snapshot_schema":1,
+            "composed_at":"2026-09-26 06:31:00","generated_at":"g","updated_at":"u2"});
+        exec_pushed(&remote, &push(theirs)).await;
+        let b = crate::db::briefs::get_brief(&remote, "2026-09-26").await.unwrap().unwrap();
+        assert_eq!((b.version, b.snapshot["compose"]["summary"].as_str()), (3, Some("Theirs.")));
     }
 
     #[tokio::test]

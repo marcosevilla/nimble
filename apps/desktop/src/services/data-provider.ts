@@ -20,7 +20,6 @@ export type { DataProvider } from '@nimble/types'
 // instead of reaching into tauri.ts.
 export type {
   Setting,
-  ParsedTodayMd,
   TodoistMigrationPreview,
   TodoistMigrationResult,
   CalendarEvent,
