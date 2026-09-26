@@ -8,13 +8,11 @@ import { useDataProvider } from '@/services/provider-context'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { playCompletionSound } from '@/lib/sound'
+import { taskCompleteDelayMs } from '@/lib/motion'
 import { toast } from 'sonner'
 import { reopenTask } from './reopenTask'
 import type { DataProvider, TaskStatus } from '@nimble/types'
 import type { LucideIcon } from 'lucide-react'
-
-/** Matches the `task-complete-exit` keyframe duration in index.css. */
-const TASK_COMPLETE_ANIM_MS = 580
 
 export interface StatusConfig {
   value: TaskStatus
@@ -53,7 +51,7 @@ export function completeTaskWithExit(dp: DataProvider, taskId: string, dueDate?:
     } finally {
       useSelectionStore.getState().clearTaskCompleting(taskId)
     }
-  }, TASK_COMPLETE_ANIM_MS)
+  }, taskCompleteDelayMs())
 }
 
 interface StatusDropdownProps {
@@ -130,7 +128,7 @@ export function StatusDropdown({ taskId, status, size = 'sm', onComplete, dueDat
         } finally {
           clearTaskCompleting(taskId)
         }
-      }, TASK_COMPLETE_ANIM_MS)
+      }, taskCompleteDelayMs())
       return
     }
 

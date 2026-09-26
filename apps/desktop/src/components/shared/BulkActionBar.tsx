@@ -8,6 +8,8 @@ import { completionSummary, isStaleRefusal } from '@/lib/focusFlows'
 import { useDataProvider } from '@/services/provider-context'
 import { emitTasksChanged } from '@/hooks/useLocalTasks'
 import { cn } from '@/lib/utils'
+import { useLatched, usePresence } from '@/hooks/usePresence'
+import { taskCompleteDelayMs } from '@/lib/motion'
 import { toast } from 'sonner'
 import {
   X,
@@ -43,6 +45,12 @@ export function BulkActionBar() {
   const count = useSelectionStore((s) => s.count)
   const selectedIds = useSelectionStore((s) => s.selectedIds)
   const selectionType = useSelectionStore((s) => s.selectionType)
+  // Leaves with `.panel-out` instead of vanishing (loop 4 P2-18); what it
+  // renders keeps the last count and kind while it goes (handlers read the
+  // live store, and the bar is inert while exiting).
+  const { mounted, exiting } = usePresence(hasSelection)
+  const shownCount = useLatched(count, exiting)
+  const shownType = useLatched(selectionType, exiting)
   const clear = useSelectionStore((s) => s.clear)
   const setAddingSubtaskTo = useSelectionStore((s) => s.setAddingSubtaskTo)
   const markTaskCompleting = useSelectionStore((s) => s.markTaskCompleting)
@@ -124,7 +132,7 @@ export function BulkActionBar() {
         if (summary.ok) toast.success(summary.message)
         else toast(summary.message)
         emitTasksChanged()
-      }, lastStartDelay + 580)
+      }, lastStartDelay + taskCompleteDelayMs())
       clear()
       return
     }
@@ -207,19 +215,22 @@ export function BulkActionBar() {
   }, [selectionType, selectedIds, clear])
   const focusNowBlocked = focusNowBlockedReason(focusCapabilities)
 
-  if (!hasSelection) return null
+  if (!mounted) return null
 
-  const isTask = selectionType === 'task'
-  const showSingleTaskActions = isTask && count === 1
+  const isTask = shownType === 'task'
+  const showSingleTaskActions = isTask && shownCount === 1
   const canAddSubtask = showSingleTaskActions && singleSelected && !singleSelected.parent_id
 
   return (
     <>
     {deleteDialog}
-    <div className="fixed bottom-6 inset-x-0 z-30 flex justify-center bulk-action-bar-enter">
+    <div
+      className={cn('fixed bottom-6 inset-x-0 z-30 flex justify-center', exiting ? 'panel-out' : 'bulk-action-bar-enter')}
+      inert={exiting || undefined}
+    >
       <div className="flex items-center gap-1 rounded-xl border border-border/20 bg-popover px-2 py-1.5 shadow-lg shadow-black/5">
         <span className="px-2 text-body-strong tabular-nums">
-          {count} selected
+          {shownCount} selected
         </span>
 
         <div className="mx-1 h-4 w-px bg-border/30" />
@@ -246,7 +257,7 @@ export function BulkActionBar() {
                 >
                   <Play className="size-3.5 text-muted-foreground" />
                   <span className="flex flex-col">
-                    {count > 1 ? 'Focus now (first selected)' : 'Focus now'}
+                    {shownCount > 1 ? 'Focus now (first selected)' : 'Focus now'}
                     {focusNowBlocked && <span className="text-label text-muted-foreground">{focusNowBlocked}</span>}
                   </span>
                 </DropdownMenuItem>
@@ -308,7 +319,7 @@ export function BulkActionBar() {
           </>
         )}
 
-        {selectionType === 'capture' && (
+        {shownType === 'capture' && (
           <ActionButton
             icon={ArrowRight}
             label="Convert to tasks"
