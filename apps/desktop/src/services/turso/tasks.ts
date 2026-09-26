@@ -28,7 +28,7 @@ import {
   type TursoStatement,
 } from './client'
 import { commit, newId, rowTimestamp, rowTimestampUtc, type SyncEntry } from './mutations'
-import { nextOccurrence, parseRule, type RecurrenceRule } from './recurrence'
+import { completionPlan, type CompletionPlan } from './completionPlan'
 
 /** Exactly `SELECT_COLS` from nimble-core/src/db/tasks.rs — keep in sync. */
 export const SELECT_COLS =
@@ -288,25 +288,6 @@ function today(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-/**
- * `nextOccurrence` for a `due_date` that may not be a valid date.
- *
- * Returns null where desktop would fall through to ordinary completion, so the
- * caller can branch on a value instead of on an exception. See the call site for
- * why the two implementations differ here.
- */
-function tryNextOccurrence(
-  rule: RecurrenceRule,
-  currentDue: string,
-  todayDate: string,
-): string | null {
-  try {
-    return nextOccurrence(rule, currentDue, todayDate)
-  } catch {
-    return null
-  }
-}
-
 /** Read one full row, labels included, so a snapshot can be built from it. */
 async function fetchTask(id: string): Promise<LocalTask> {
   const [taskRows, labelRows] = await pipeline([
@@ -325,7 +306,12 @@ async function fetchTask(id: string): Promise<LocalTask> {
  * `completed_at` are derived from it, set only when status becomes `'complete'`,
  * which is why they are written here rather than by the caller.
  *
- * Three branches, matching Rust's order:
+ * Branches, matching Rust's order (decided by `completionPlan`):
+ *
+ * 0. **Todoist-owned recurring, moving to complete** (linked, and Todoist's
+ *    stored state says it recurs): completes normally WITHOUT the subtask
+ *    cascade. The Mac pushes `item_close`, Todoist advances it, and the pull
+ *    reopens it on Todoist's date — Nimble's calculation never touches it.
  *
  * 1. **Recurring, moving to complete.** A task with a parseable `recurrence_rule`
  *    AND a `due_date` does NOT complete — its due date advances to the next
@@ -350,55 +336,48 @@ export async function setTaskStatus(id: string, status: TaskStatus, expectedDueD
   const task = await fetchTask(id)
   const now = rowTimestamp()
 
-  if (status === 'complete' && task.recurrence_rule != null && task.due_date != null) {
-    const rule = parseRule(task.recurrence_rule)
-    // Same guard as the desktop focus service: completing the occurrence the
-    // user saw must not advance a date another device already advanced.
-    if (rule != null && expectedDueDate !== undefined && expectedDueDate !== task.due_date) {
-      throw new TursoError('stale_occurrence: recurring due identity changed; refresh and retry')
+  let plan: CompletionPlan | null = null
+  if (status === 'complete') {
+    try {
+      plan = completionPlan(task, expectedDueDate, today())
+    } catch (e) {
+      throw new TursoError(e instanceof Error ? e.message : String(e))
     }
-    // Rust parses `due_date` OUTSIDE the recurrence module — `if let Ok(current_due)`
-    // at tasks.rs:564 — so a row whose due_date is not a valid `YYYY-MM-DD` falls
-    // through and completes normally. Here that parse lives inside
-    // `nextOccurrence`, which throws instead. Catching restores desktop's
-    // behavior: a corrupt date must not make the task impossible to complete.
-    const nextDue = rule != null ? tryNextOccurrence(rule, task.due_date, today()) : null
-    if (rule != null && nextDue != null) {
-      const nextDueTime = rule.time ?? task.due_time
-
-      const rescheduled: LocalTask = {
-        ...task,
-        due_date: nextDue,
-        due_time: nextDueTime,
-        status: 'todo',
-        updated_at: now,
-      }
-
-      await commit(
-        [
-          {
-            sql: 'UPDATE local_tasks SET due_date = ?, due_time = ?, status = ?, updated_at = ? WHERE id = ?',
-            args: [
-              text(nextDue),
-              textOrNull(nextDueTime),
-              text('todo'),
-              text(now),
-              text(id),
-            ],
-          },
-        ],
-        [
-          {
-            table: 'local_tasks',
-            rowId: id,
-            operation: 'UPDATE',
-            snapshot: rescheduled,
-            changedColumns: ['due_date', 'due_time', 'status'],
-          },
-        ],
-      )
-      return
+  }
+  if (plan?.kind === 'advance') {
+    const { nextDue, nextDueTime } = plan
+    const rescheduled: LocalTask = {
+      ...task,
+      due_date: nextDue,
+      due_time: nextDueTime,
+      status: 'todo',
+      updated_at: now,
     }
+
+    await commit(
+      [
+        {
+          sql: 'UPDATE local_tasks SET due_date = ?, due_time = ?, status = ?, updated_at = ? WHERE id = ?',
+          args: [
+            text(nextDue),
+            textOrNull(nextDueTime),
+            text('todo'),
+            text(now),
+            text(id),
+          ],
+        },
+      ],
+      [
+        {
+          table: 'local_tasks',
+          rowId: id,
+          operation: 'UPDATE',
+          snapshot: rescheduled,
+          changedColumns: ['due_date', 'due_time', 'status'],
+        },
+      ],
+    )
+    return
   }
 
   const isComplete = status === 'complete'
@@ -428,7 +407,9 @@ export async function setTaskStatus(id: string, status: TaskStatus, expectedDueD
     },
   ]
 
-  if (isComplete) {
+  // A Todoist-owned recurring task does not cascade: the occurrence comes back
+  // from Todoist with its subtasks as they were (see `completionPlan`).
+  if (isComplete && plan?.kind === 'complete' && plan.cascade) {
     // Read the subtasks before mutating so each one's full row is available to
     // snapshot. Only incomplete ones need touching, which also keeps the pipeline
     // small for a parent that is being re-completed.
