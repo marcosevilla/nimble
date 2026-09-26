@@ -135,6 +135,10 @@ export async function expectNoNewAxeViolations(page: Page, pageKey: string, opts
     // popup is open — library-internal, present on main with any popover, so
     // a no-popup baseline can't account for them.
     .exclude('[data-base-ui-focus-guard]')
+    // The Agentation dev toolbar (DEV builds only, never shipped) was most of
+    // every page's baseline — 8 button-name, 2 label, 1 link-name, 1
+    // nested-interactive — which hid the app's own counts (loop 4 H2).
+    .exclude('[class*="styles-module__toolbar"]')
     .analyze()
   const counts: Record<string, number> = {}
   for (const v of results.violations) counts[v.id] = v.nodes.length
