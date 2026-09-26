@@ -2224,6 +2224,17 @@ fn sanitize_table_name(name: &str) -> crate::Result<&str> {
 }
 
 /// Get current sync status: pending changes, last sync time, device_id, config state.
+/// Settings key holding when a scheduled/agent Turso sync last *completed*
+/// (push and pull both ok; RFC 3339, UTC). Written by the desktop sync
+/// runner. `turso_last_sync_at` is the attempt stamp (a rate limiter), and
+/// `last_pull_timestamp` a data watermark that only moves when a remote entry
+/// arrives, so neither says when the Mac last synced.
+pub const TURSO_LAST_COMPLETED_KEY: &str = "turso_last_completed_at";
+
+pub async fn record_turso_sync_completed(pool: &SqlitePool, at: &str) -> crate::Result<()> {
+    crate::db::settings::set_setting(pool, TURSO_LAST_COMPLETED_KEY, at).await
+}
+
 pub async fn get_sync_status(pool: &SqlitePool) -> crate::Result<SyncStatus> {
     let pending_changes: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sync_log WHERE synced = 0"
@@ -2232,9 +2243,11 @@ pub async fn get_sync_status(pool: &SqlitePool) -> crate::Result<SyncStatus> {
     .await
     .unwrap_or(0);
 
+    // The last completed Turso sync; before the first one, the pull watermark.
     let last_sync: Option<String> = sqlx::query_scalar(
-        "SELECT value FROM settings WHERE key = 'last_pull_timestamp'"
+        "SELECT COALESCE((SELECT value FROM settings WHERE key = ?), (SELECT value FROM settings WHERE key = 'last_pull_timestamp'))"
     )
+    .bind(TURSO_LAST_COMPLETED_KEY)
     .fetch_optional(pool)
     .await
     .unwrap_or(None);
@@ -3515,6 +3528,20 @@ mod v19_sync_tests {
             }
             q.execute(pool).await.unwrap();
         }
+    }
+
+    /// C3 acceptance: `dt sync status` showed a `last_sync` stuck at the pull
+    /// watermark (it only moves when a remote entry arrives) while the app
+    /// synced every 60 s. It reports the last completed Turso sync now.
+    #[tokio::test]
+    async fn sync_status_reports_the_last_completed_turso_sync() {
+        let pool = test_pool().await;
+        crate::db::settings::set_setting(&pool, "last_pull_timestamp", "2026-09-20 08:00:00").await.unwrap();
+        let s = super::get_sync_status(&pool).await.unwrap();
+        assert_eq!(s.last_sync.as_deref(), Some("2026-09-20 08:00:00"), "before any completed run: the pull watermark");
+        super::record_turso_sync_completed(&pool, "2026-09-25T18:01:00+00:00").await.unwrap();
+        let s = super::get_sync_status(&pool).await.unwrap();
+        assert_eq!(s.last_sync.as_deref(), Some("2026-09-25T18:01:00+00:00"));
     }
 
     #[tokio::test]
