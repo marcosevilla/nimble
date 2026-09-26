@@ -26,7 +26,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
-import { GOAL_COLORS } from '@/lib/goalStatus'
+import { GOAL_COLORS, swatchName } from '@/lib/swatches'
 import { habitProgress } from '@/lib/habitToggle'
 
 /* Stored `habit.icon` is a lucide name (kebab or Pascal). This curated map
@@ -332,7 +332,8 @@ function AddHabitPopover({
               )}
               style={{ backgroundColor: c }}
               onClick={() => setColor(c)}
-              aria-label={`Select color ${c}`}
+              aria-label={swatchName(c)}
+              aria-pressed={color === c}
             />
           ))}
         </div>
@@ -440,11 +441,12 @@ function ManageHabitRow({
           if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur() }
           if (e.key === 'Escape') { setDraft(habit.name); (e.target as HTMLInputElement).blur() }
         }}
-        className="flex-1 min-w-0 bg-transparent text-body outline-none"
+        aria-label={`Rename ${habit.name}`}
+        className="focus-ring-inset flex-1 min-w-0 rounded-sm bg-transparent text-body"
       />
       <button
         onClick={onDelete}
-        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-[opacity,color] duration-(--transition-fast)"
+        className="focus-ring rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-muted-foreground hover:text-destructive transition-[opacity,color] duration-(--transition-fast)"
         aria-label={`Delete habit ${habit.name}`}
       >
         <Trash2 className="size-3.5" />

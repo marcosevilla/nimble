@@ -72,6 +72,7 @@ import { validateRoutePrefix } from '@/lib/captureRoutes'
 import { formatSyncTime } from '@/lib/syncTime'
 import { useDeferredDeletes } from '@/hooks/useDeferredDeletes'
 import { FailureNote, SECTION_CLASS, SectionHeader, SettingFieldRow, type FieldState, type SettingField } from '@/components/settings/SettingsFields'
+import { FEED_COLORS, ROUTE_COLORS, swatchName } from '@/lib/swatches'
 
 // ── Types ──
 
@@ -223,17 +224,6 @@ function AccentPicker({ accent, onChange }: { accent: AccentTheme; onChange: (ne
     </div>
   )
 }
-
-// ── Color presets for calendar feeds ──
-
-const FEED_COLORS = [
-  '#6366f1', // indigo
-  '#ec4899', // pink
-  '#22c55e', // green
-  '#f59e0b', // amber
-  '#06b6d4', // cyan
-  '#f43f5e', // rose
-]
 
 // ── Calendar Feeds Section ──
 
@@ -398,7 +388,7 @@ function CalendarsSection() {
                   type="button"
                   role="radio"
                   aria-checked={newColor === color}
-                  aria-label={`Color ${color}`}
+                  aria-label={swatchName(color)}
                   className={cn(
                     'h-6 w-6 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
                     newColor === color ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',
@@ -517,16 +507,6 @@ const ROUTE_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>
 }
 
 const ROUTE_ICON_OPTIONS = ['FileText', 'Lightbulb', 'Quote', 'CheckSquare']
-
-const ROUTE_COLORS = [
-  '#f59e0b', // amber
-  '#3b82f6', // blue
-  '#22c55e', // green
-  '#ec4899', // pink
-  '#6366f1', // indigo
-  '#ef4444', // red
-  '#06b6d4', // cyan
-]
 
 // ── Capture Routes Section ──
 
@@ -804,7 +784,7 @@ function CaptureRoutesSection() {
                   type="button"
                   role="radio"
                   aria-checked={formColor === color}
-                  aria-label={`Color ${color}`}
+                  aria-label={swatchName(color)}
                   className={cn(
                     'h-6 w-6 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
                     formColor === color ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',

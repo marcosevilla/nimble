@@ -15,10 +15,3 @@ export function statusLabel(status: GoalStatus): string {
 export function statusColor(status: GoalStatus): string {
   return GOAL_STATUSES.find((s) => s.value === status)?.color ?? 'text-muted-foreground'
 }
-
-/* User-data swatch palette for goals and habits (stored as hex on the row,
-   rendered as a dot) — the same sanctioned-hex class as projectColors.ts. */
-export const GOAL_COLORS = [
-  '#f59e0b', '#ef4444', '#22c55e', '#3b82f6', '#8b5cf6',
-  '#ec4899', '#14b8a6', '#f97316',
-]

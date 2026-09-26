@@ -147,7 +147,7 @@ function BoxRow({
       aria-label={`${name}, ${entry.enabled ? 'shown' : 'hidden'}`}
       aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
       onFocus={(e) => { if (e.target === e.currentTarget) onFocusRow() }}
-      className={cn('bg-card outline-none first:rounded-t-lg last:rounded-b-lg focus:ring-2 focus:ring-ring focus:ring-inset', isDragging && 'relative z-10 shadow-popover')}
+      className={cn('focus-ring-roving bg-card first:rounded-t-lg last:rounded-b-lg', isDragging && 'relative z-10 shadow-popover')}
     >
       <div className="flex min-h-10 min-w-0 items-center gap-2 px-2">
         <button

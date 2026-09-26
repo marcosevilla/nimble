@@ -712,14 +712,18 @@
     { id: 'feed-shows', label: 'Shows', url: 'https://calendar.google.com/calendar/ical/shows/basic.ics', color: '#d46a9e', enabled: 1 },
   ]
 
+  // Timed events carry `HH:MM` local times, exactly as Rust returns them
+  // (nimble-core/src/parsers/ical.rs formats `%H:%M`; all-day events keep
+  // the raw date). ISO datetimes here made every harness calendar stack its
+  // events at 12a (loop 4 H1).
   var CALENDAR_EVENTS = [
     {
       id: 'evt-01',
       summary: 'Morning run — Marina loop',
       description: null,
       location: 'Marina Green',
-      start_time: iso(TODAY, '08:30:00'),
-      end_time: iso(TODAY, '09:15:00'),
+      start_time: '08:30',
+      end_time: '09:15',
       all_day: false,
       meeting_url: null,
       date: TODAY,
@@ -731,8 +735,8 @@
       summary: 'Portfolio work block',
       description: 'Case study draft — no phone',
       location: null,
-      start_time: iso(TODAY, '10:00:00'),
-      end_time: iso(TODAY, '12:30:00'),
+      start_time: '10:00',
+      end_time: '12:30',
       all_day: false,
       meeting_url: null,
       date: TODAY,
@@ -744,8 +748,8 @@
       summary: 'Coffee with Jordan',
       description: null,
       location: 'Sightglass, SoMa',
-      start_time: iso(TODAY, '14:00:00'),
-      end_time: iso(TODAY, '15:00:00'),
+      start_time: '14:00',
+      end_time: '15:00',
       all_day: false,
       meeting_url: null,
       date: TODAY,
@@ -757,8 +761,8 @@
       summary: 'Turnstile @ The Warfield — photo pass',
       description: 'Pit access first three songs. Doors 7pm.',
       location: 'The Warfield, San Francisco',
-      start_time: iso(TODAY, '19:00:00'),
-      end_time: iso(TODAY, '23:00:00'),
+      start_time: '19:00',
+      end_time: '23:00',
       all_day: false,
       meeting_url: null,
       date: TODAY,
@@ -766,6 +770,10 @@
       feed_color: '#d46a9e',
     },
   ]
+
+  function calendarFor(args) {
+    return args && args.date && args.date !== TODAY ? [] : CALENDAR_EVENTS
+  }
 
   // ── Todoist (raw rows: integer booleans) ─────────────────────────────────
 
@@ -830,8 +838,8 @@
               summary: 'Portfolio review with Jordan',
               description: null,
               location: null,
-              start_time: iso('2026-07-31', '10:00:00'),
-              end_time: iso('2026-07-31', '11:00:00'),
+              start_time: '10:00',
+              end_time: '11:00',
               all_day: false,
               meeting_url: null,
               date: '2026-07-31',
@@ -843,8 +851,8 @@
               summary: 'Dentist appointment',
               description: null,
               location: 'SoMa Dental',
-              start_time: iso('2026-07-31', '15:30:00'),
-              end_time: iso('2026-07-31', '16:15:00'),
+              start_time: '15:30',
+              end_time: '16:15',
               all_day: false,
               meeting_url: null,
               date: '2026-07-31',
@@ -1430,12 +1438,11 @@
     migrated_todoist_ids: function () { return [] },
 
     // Calendar
-    fetch_calendar_events: function () { return CALENDAR_EVENTS },
-    get_cached_calendar_events: function (args) {
-      // Only "today" has events in mock-world; other dates render empty states
-      if (args && args.date && args.date !== TODAY) return []
-      return CALENDAR_EVENTS
-    },
+    // Both honour the requested date like Rust does (fetch defaults to
+    // today). Only mock-world's today has events; other dates render the
+    // empty state, so a spec wanting events installs the clock at TODAY.
+    fetch_calendar_events: function (args) { return calendarFor(args) },
+    get_cached_calendar_events: function (args) { return calendarFor(args) },
     get_calendar_feeds: function () { return CALENDAR_FEEDS },
     add_calendar_feed: function (args) {
       return { id: newId('feed'), label: args.label, url: args.url, color: args.color, enabled: 1 }
@@ -1961,7 +1968,23 @@
 
     // Activity
     log_activity: function () { return null },
-    get_activity_log: function () { return ACTIVITY_LOG },
+    // Mirrors nimble-core db::activity::get_activity_log's target / action
+    // filters, newest-first order and limit (default 200). Returning every row
+    // made each task / capture detail list the whole log (loop 4 H3). The
+    // date window is NOT applied: mock-world is pinned to TODAY while specs
+    // without page.clock run at the real date, and the activity views ask
+    // for "today" by that clock.
+    get_activity_log: function (args) {
+      args = args || {}
+      return ACTIVITY_LOG
+        .filter(function (e) {
+          return (!args.targetId || e.target_id === args.targetId) &&
+            (!args.actionType || e.action_type === args.actionType)
+        })
+        .slice()
+        .sort(function (a, b) { return a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0 })
+        .slice(0, args.limit == null ? 200 : args.limit)
+    },
     get_activity_summary: function () { return ACTIVITY_SUMMARY },
 
     // Captures

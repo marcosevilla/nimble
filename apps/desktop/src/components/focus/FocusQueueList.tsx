@@ -145,7 +145,7 @@ function QueueRowItem({
         if (!renaming) onRowClick()
       }}
       className={cn(
-        'group relative flex min-w-0 items-center gap-2.5 bg-background py-1.5 pr-2.5 pl-5 transition-colors duration-(--transition-fast) hover:bg-hover focus:outline-2 focus:-outline-offset-2 focus:outline-ring motion-reduce:transition-none',
+        'group relative flex min-w-0 items-center gap-2.5 bg-background py-1.5 pr-2.5 pl-5 transition-colors duration-(--transition-fast) hover:bg-hover focus-ring-roving motion-reduce:transition-none',
         current && 'group-focus-within/queue:bg-accent/10',
         isDragging && 'z-10 opacity-90 shadow-md',
       )}

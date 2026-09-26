@@ -563,7 +563,9 @@ test.describe('A3 tree motion', () => {
 
   test('A3 project tree: chevron click animates; chevron rotates with a transition', async ({ app, page }) => {
     await app.open('tasks')
-    const chevronBtn = tasksTree(page).getByRole('button', { name: /^(Collapse|Expand) Nimble$/ })
+    // The chevron is the mouse twin of ←/→ on the row, aria-hidden so the
+    // tree owns treeitems only (loop 4 P2-19) — found with includeHidden.
+    const chevronBtn = tasksTree(page).getByRole('button', { name: /^(Collapse|Expand) Nimble$/, includeHidden: true })
     expectChevronMotion(await chevronTransition(chevronBtn.locator('svg')), 'project chevron')
     await expect(page.locator(children(TASKAPP)), `children wrapper ${children(TASKAPP)}`).toHaveCount(1)
     const s = await sampleWhile(page, children(TASKAPP), () => chevronBtn.click())

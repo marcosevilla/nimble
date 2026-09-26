@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/shared/IconButton'
 import { Icon } from '@/components/shared/Icon'
 import { cn } from '@/lib/utils'
+import { useLatched, usePresence } from '@/hooks/usePresence'
 import { toast } from 'sonner'
 
 const POLL_MS = 60_000
@@ -78,6 +79,11 @@ export function SyncHealthBanner() {
   }, [healthy])
 
   const visible = !!health && !healthy && dismissed !== health
+  // Dismiss / recovery play `.panel-out` instead of cutting it (loop 4
+  // P2-18); the leaving notice keeps the message it showed. The published
+  // lengths below drop at once, so the rail reflows while it fades.
+  const { mounted, exiting } = usePresence(visible)
+  const shownHealth = useLatched(health, exiting)
   const compact = columnWidth !== null && columnWidth - 2 * INSET < MIN_NOTICE
 
   // While it shows, the notice publishes two lengths on :root and drops
@@ -114,9 +120,9 @@ export function SyncHealthBanner() {
     }
   }, [visible, compact])
 
-  if (!visible) return null
+  if (!mounted) return null
 
-  const isError = health === 'error'
+  const isError = shownHealth === 'error'
 
   const dismiss = () => {
     sessionDismissed = health
@@ -148,7 +154,8 @@ export function SyncHealthBanner() {
         ref={noticeRef}
         role="status"
         aria-live="polite"
-        className="panel-in fixed bottom-16 z-20"
+        inert={exiting || undefined}
+        className={cn('fixed bottom-16 z-20', exiting ? 'panel-out' : 'panel-in')}
         style={{ right: Math.max(0, ((columnWidth ?? COMPACT) - COMPACT) / 2) }}
       >
         <span className="sr-only">{message}</span>
@@ -172,7 +179,11 @@ export function SyncHealthBanner() {
       ref={noticeRef}
       role="status"
       aria-live="polite"
-      className="panel-in fixed bottom-16 z-20 flex items-start gap-2.5 rounded-lg border border-border bg-popover py-3 pr-2 pl-3 text-popover-foreground shadow-popover"
+      inert={exiting || undefined}
+      className={cn(
+        'fixed bottom-16 z-20 flex items-start gap-2.5 rounded-lg border border-border bg-popover py-3 pr-2 pl-3 text-popover-foreground shadow-popover',
+        exiting ? 'panel-out' : 'panel-in',
+      )}
       style={{ right: INSET, width: columnWidth === null ? 256 : Math.min(MAX_NOTICE, columnWidth - 2 * INSET) }}
     >
       <Icon

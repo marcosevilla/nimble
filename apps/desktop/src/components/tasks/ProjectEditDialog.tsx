@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import type { Project } from '@nimble/types'
-import { PROJECT_COLORS } from '@/lib/projectColors'
+import { PROJECT_COLORS, swatchName } from '@/lib/swatches'
 
 interface ProjectEditDialogProps {
   project: Project | null
@@ -82,7 +82,8 @@ export function ProjectEditDialog({
                       : 'border-transparent hover:border-muted-foreground/50',
                   )}
                   style={{ backgroundColor: c }}
-                  aria-label={`Set color ${c}`}
+                  aria-label={swatchName(c)}
+                  aria-pressed={color === c}
                 />
               ))}
             </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { hasOpenOverlay } from '@/lib/rowNav'
 import { cn } from '@/lib/utils'
+import { motionMs } from '@/lib/motion'
 import { HelpCircle, X, Keyboard, Map, Circle, CheckCircle2 } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Label, Meta } from '@/components/shared/typography'
@@ -30,7 +31,8 @@ export function HelpPanel() {
   // `closing` on the store; the panel unmounts after the exit transition.
   useEffect(() => {
     if (!closing) return
-    const t = setTimeout(finishClose, 150)
+    // The exit transition below runs on --transition-fast.
+    const t = setTimeout(finishClose, motionMs('--transition-fast'))
     return () => clearTimeout(t)
   }, [closing, finishClose])
 

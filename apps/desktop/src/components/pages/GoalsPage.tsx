@@ -38,7 +38,8 @@ import { GoalTimeline } from '@/components/goals/GoalTimeline'
 import { PageFrame } from '@/components/shared/PageFrame'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { useDetailStore } from '@/stores/detailStore'
-import { GOAL_STATUSES, GOAL_COLORS, statusLabel, statusColor } from '@/lib/goalStatus'
+import { GOAL_STATUSES, statusLabel, statusColor } from '@/lib/goalStatus'
+import { GOAL_COLORS, swatchName } from '@/lib/swatches'
 
 // ── Goal Card ──
 
@@ -313,7 +314,8 @@ function GoalCreateDialog({
                   )}
                   style={{ backgroundColor: c }}
                   onClick={() => setColor(c)}
-                  aria-label={`Select color ${c}`}
+                  aria-label={swatchName(c)}
+                  aria-pressed={color === c}
                 />
               ))}
             </div>
@@ -450,6 +452,7 @@ export function GoalsPage() {
               importing && 'opacity-50 pointer-events-none',
             )}
             onClick={handleImport}
+            aria-label="Import from Obsidian vault"
           >
             <Download className="size-3.5" />
           </TooltipTrigger>

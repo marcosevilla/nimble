@@ -125,6 +125,13 @@
        transition utilities; use these. */
     --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);  /* smooth settle */
     --ease-exit:     cubic-bezier(0.4, 0, 1, 1);     /* steeper lift */
+
+    /* Tailwind's fallbacks for a bare `transition` / `transition-colors` /
+       `transition-[…]` with no `duration-*` / `ease-*` of its own (loop 4
+       P2-18: 41 of them rode Tailwind's 150ms material curve). Reduced
+       motion zeroes --transition-fast, so they follow it too. */
+    --default-transition-duration: var(--transition-fast);
+    --default-transition-timing-function: var(--ease-entrance);
 }
 
 @layer base {
@@ -141,6 +148,11 @@
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+    /* An element with no radius of its own takes its parent's, so the ring
+       on an unrounded child of a rounded card / pill follows that shape
+       instead of squaring off (loop 4 P2-13). Any `rounded-*` utility
+       (utilities layer) still wins. */
+    border-radius: inherit;
     }
   /* Rendered height of PageHeader's main row (40px min-height + 1px
      border). Anything that sticks or scroll-margins beneath the header
@@ -148,6 +160,11 @@
      (settings P2-3). */
   :root {
     --page-header-h: 41px;
+    /* The task-complete row exit (`.animate-task-complete`). Its own token,
+       not a --transition-*: reduced motion keeps this beat (a fade in
+       place), so it must not collapse to 0 with the others. The JS timer
+       that removes the row reads it through lib/motion.ts motionMs(). */
+    --motion-task-complete: 600ms;
     }
   html, body {
     /* Lock the root on both axes — kills the native macOS webview
@@ -205,6 +222,15 @@
      it), so the ring has to be calm enough to show on every click. */
   .focus-ring-inset {
     @apply focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring;
+  }
+
+  /* Roving-focus rows — a list whose own keys move focus by script (the
+     Today boxes list, the focus queue). Same inset ring, but on :focus:
+     WebKit drops :focus-visible when script re-focuses a row the mouse
+     focused first, so a ⌥↓ reorder after a click would lose its ring
+     (loop 4 P2-13 — this replaces those rows' two ad hoc recipes). */
+  .focus-ring-roving {
+    @apply focus:outline-2 focus:-outline-offset-2 focus:outline-ring;
   }
 
   /* Ghost text fields — borderless title/description fields that read as
@@ -352,6 +378,14 @@
    once it settles; the end frame equals the resting style anyway. */
 .panel-in {
   animation: panel-in var(--transition-base) var(--ease-entrance) backwards;
+}
+/* Exit twin of `.panel-in` for surfaces that used to vanish on the frame
+   they unmounted (loop 4 P2-18). `usePresence` keeps the element mounted
+   for motionMs('--transition-base') while this plays, then removes it, so
+   the `forwards` end frame never outlives the element. */
+.panel-out {
+  animation: panel-out var(--transition-base) var(--ease-exit) forwards;
+  pointer-events: none;
 }
 
 /* Right column scrollers while the Todoist sync notice shows: their
@@ -532,7 +566,7 @@
   100% { opacity: 0; transform: translateX(8px); }
 }
 .animate-task-complete {
-  animation: task-complete-exit 600ms var(--ease-exit) forwards;
+  animation: task-complete-exit var(--motion-task-complete) var(--ease-exit) forwards;
   pointer-events: none;
 }
 /* Reduced-motion variant: opacity + tint only (used in the media block). */
@@ -639,6 +673,7 @@
   }
   .page-enter,
   .panel-in,
+  .panel-out,
   .tab-panel-in,
   .help-panel-enter,
   .capture-strip-in,
@@ -665,7 +700,7 @@
      over the same 600ms the JS timer waits before removing it. The
      duration is !important so it beats the 0.01ms wildcard below. */
   .animate-task-complete {
-    animation: task-complete-fade 600ms linear forwards !important;
+    animation: task-complete-fade var(--motion-task-complete) linear forwards !important;
   }
   .animate-in,
   .animate-out {

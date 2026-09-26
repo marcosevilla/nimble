@@ -1,5 +1,5 @@
 import { useDataVersion } from '@/hooks/useDataVersion'
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, useId } from 'react'
 import { useDetailStore } from '@/stores/detailStore'
 import { useTaskDetail } from '@/hooks/useTaskDetail'
 import { useProjects } from '@/hooks/useLocalTasks'
@@ -137,6 +137,7 @@ export function TaskDetailPage() {
   // display-only <TiptapEditor format="markdown"> below has no onChange, so
   // there is no callback it could even reach.
   const [descEditing, setDescEditing] = useState(false)
+  const descHintId = useId()
   const [descDraft, setDescDraft] = useState('')
   const descTextareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -145,6 +146,15 @@ export function TaskDetailPage() {
     setDescDraft(task.description ?? '')
     setDescEditing(true)
   }, [task])
+
+  /** Enter / Space on the description's display state opens the editor. */
+  const editDescriptionKey = useCallback((e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      startEditingDescription()
+    }
+  }, [startEditingDescription])
 
   const cancelEditingDescription = useCallback(() => {
     setDescEditing(false)
@@ -391,7 +401,7 @@ export function TaskDetailPage() {
             tabIndex={0}
             onClick={backSegment.onClick}
             aria-label={`Back to ${backSegment.label}`}
-            className="focus-ring focus-visible:-outline-offset-2 relative -ml-1.5 flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-body text-muted-foreground transition-colors hover:text-foreground after:absolute after:inset-x-0 after:top-0 after:-bottom-1 after:content-['']"
+            className="focus-ring-inset relative -ml-1.5 flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-body text-muted-foreground transition-colors hover:text-foreground after:absolute after:inset-x-0 after:top-0 after:-bottom-1 after:content-['']"
           >
             <ChevronLeft className="size-3.5 shrink-0" />
             <span className="truncate max-w-[240px]">{backSegment.label}</span>
@@ -489,18 +499,38 @@ export function TaskDetailPage() {
               // so swapping display → edit doesn't move the subtasks below.
               // Measure + the well's 1rem bleed, so edit wraps exactly where
               // the 720 display does.
-              className="-my-1 max-w-[calc(var(--container-measure)+1rem)] text-body placeholder:text-foreground/25"
+              className="-my-1 max-w-[calc(var(--container-measure)+1rem)] text-body placeholder:text-muted-foreground"
             />
           ) : task.description ? (
             // TiptapEditor's shared editorProps force a 200px min-height
             // (sized for the docs editor) — override it for this compact,
             // read-only display so the 48px description→subtask gap below
             // is real space, not swallowed by dead min-height.
-            <div onClick={startEditingDescription} className="cursor-text [&_.tiptap-editor]:min-h-0">
+            // Click-to-edit, keyboard too (loop 4 P2-13). A named group, not a
+            // button: the description stays readable (a button's label would
+            // replace it) and its links aren't nested in a button. Tab stop +
+            // Enter to edit, announced through the hint.
+            <div
+              role="group"
+              tabIndex={0}
+              aria-label="Description"
+              aria-describedby={descHintId}
+              onClick={startEditingDescription}
+              onKeyDown={editDescriptionKey}
+              className="focus-ring cursor-text [&_.tiptap-editor]:min-h-0"
+            >
               <TiptapEditor key={task.id} content={task.description} format="markdown" />
+              <span id={descHintId} className="sr-only">Press Enter to edit.</span>
             </div>
           ) : (
-            <p onClick={startEditingDescription} className="text-body text-foreground/25 cursor-text">
+            // Placeholder: muted-foreground, ≥4.5:1 (foreground/25 was ≈1.6:1, loop 4 P2-19).
+            <p
+              role="button"
+              tabIndex={0}
+              onClick={startEditingDescription}
+              onKeyDown={editDescriptionKey}
+              className="focus-ring rounded-md text-body text-muted-foreground cursor-text"
+            >
               Description
             </p>
           )

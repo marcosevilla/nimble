@@ -6,147 +6,41 @@
     "nested-interactive": 2
   },
   "docs": {
-    "aria-required-children": 1,
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1,
-    "scrollable-region-focusable": 1
+    "aria-required-children": 1
   },
   "docs:dark": {
-    "aria-required-children": 1,
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1,
-    "scrollable-region-focusable": 1
+    "aria-required-children": 1
   },
-  "goals": {
-    "button-name": 9,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1,
-    "scrollable-region-focusable": 1
-  },
-  "goals:dark": {
-    "button-name": 9,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1,
-    "scrollable-region-focusable": 1
-  },
+  "goals": {},
+  "goals:dark": {},
   "inbox": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 8,
-    "scrollable-region-focusable": 1
+    "nested-interactive": 6
   },
   "inbox-marks": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 8,
-    "scrollable-region-focusable": 1
+    "nested-interactive": 6
   },
   "inbox:dark": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 8,
-    "scrollable-region-focusable": 1
+    "nested-interactive": 6
   },
-  "settings": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1
-  },
-  "settings-brief": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1
-  },
-  "settings-brief:dark": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1
-  },
-  "settings:dark": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1
-  },
+  "omnibar": {},
+  "omnibar:dark": {},
+  "settings": {},
+  "settings-brief": {},
+  "settings-brief:dark": {},
+  "settings:dark": {},
   "task-detail": {
-    "aria-required-children": 1,
-    "button-name": 8,
     "color-contrast": 1,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 3,
-    "scrollable-region-focusable": 1
+    "nested-interactive": 2
   },
   "task-detail:dark": {
-    "aria-required-children": 1,
-    "button-name": 8,
     "color-contrast": 1,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 3,
-    "scrollable-region-focusable": 1
+    "nested-interactive": 2
   },
-  "tasks": {
-    "aria-required-children": 1,
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 16,
-    "scrollable-region-focusable": 1
-  },
-  "tasks:dark": {
-    "aria-required-children": 1,
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 16,
-    "scrollable-region-focusable": 1
-  },
-  "today": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1,
-    "scrollable-region-focusable": 1
-  },
-  "today-rows": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 4,
-    "scrollable-region-focusable": 1
-  },
-  "today-setup": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1,
-    "scrollable-region-focusable": 1
-  },
-  "today-setup:dark": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1,
-    "scrollable-region-focusable": 1
-  },
-  "today:dark": {
-    "button-name": 8,
-    "label": 2,
-    "link-name": 1,
-    "nested-interactive": 1,
-    "scrollable-region-focusable": 1
-  }
+  "tasks": {},
+  "tasks:dark": {},
+  "today": {},
+  "today-rows": {},
+  "today-setup": {},
+  "today-setup:dark": {},
+  "today:dark": {}
 }

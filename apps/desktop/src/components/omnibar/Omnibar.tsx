@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { CaptureRoute, LocalTask } from '@nimble/types'
 import { cn } from '@/lib/utils'
+import { motionMs } from '@/lib/motion'
 import { useDataProvider } from '@/services/provider-context'
 import { emitTasksChanged, useProjects } from '@/hooks/useLocalTasks'
 import { useLabelTaxonomy } from '@/hooks/useLabelTaxonomy'
@@ -33,8 +34,6 @@ import { DateChip, RouteIcon, RoutePill } from '@/components/capture/CaptureToke
 import { OmnibarField } from './OmnibarField'
 import { OmnibarResults } from './OmnibarResults'
 import { BreakdownPanel } from './OmnibarRows'
-
-const CLOSE_MS = 200
 
 function runAction(id: OmnibarActionId): void {
   switch (id) {
@@ -175,7 +174,9 @@ export function Omnibar() {
       setClosing(false)
       closingRef.current = false
       reset()
-    }, CLOSE_MS)
+      // Unmount when the exit (`command-bar-*-out`, --transition-base) ends —
+      // the old 200ms cut it 20ms short (loop 4 P2-18).
+    }, motionMs('--transition-base'))
   }, [reset])
 
   // ⌘K toggles; ⌘F opens (or re-selects the text when open) and, like C4,

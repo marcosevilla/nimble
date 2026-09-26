@@ -7,6 +7,7 @@ import { useDataProvider } from '@/services/provider-context'
 import { useProjects, emitTasksChanged } from '@/hooks/useLocalTasks'
 import { cn } from '@/lib/utils'
 import { useDeleteTasks } from './useDeleteTasks'
+import { useLatched, usePresence } from '@/hooks/usePresence'
 import type { LocalTask } from '@nimble/types'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import {
@@ -69,10 +70,14 @@ function reportBatch(successCount: number, total: number, describe: (n: number) 
 export function SelectionActionBar() {
   const dp = useDataProvider()
   const selectionType = useSelectionStore((s) => s.selectionType)
-  const count = useSelectionStore((s) => s.count)
+  const liveCount = useSelectionStore((s) => s.count)
   const selectedIds = useSelectionStore((s) => s.selectedIds)
   const clear = useSelectionStore((s) => s.clear)
   const { projects } = useProjects()
+  // Leaves with `.panel-out` instead of vanishing (loop 4 P2-18), still
+  // reading the last count while it goes.
+  const { mounted, exiting } = usePresence(selectionType === 'task' && liveCount > 0)
+  const count = useLatched(liveCount, exiting)
 
   const handleComplete = useCallback(async () => {
     const ids = Array.from(selectedIds)
@@ -145,12 +150,12 @@ export function SelectionActionBar() {
     await requestDelete(snapshot, clear)
   }, [selectedIds, dp, clear, requestDelete])
 
-  if (selectionType !== 'task' || count === 0) return null
+  if (!mounted) return null
 
   return (
     <>
     {deleteDialog}
-    <div className="sticky bottom-4 z-20 mx-auto w-fit panel-in">
+    <div className={cn('sticky bottom-4 z-20 mx-auto w-fit', exiting ? 'panel-out' : 'panel-in')} inert={exiting || undefined}>
       <div className="flex items-center gap-1 rounded-[10px] border border-input bg-card px-2 py-1.5 shadow-[0px_6px_16px_-2px_rgba(0,0,0,0.12)]">
         <span className="px-2 text-meta text-muted-foreground tabular-nums">
           {count} selected

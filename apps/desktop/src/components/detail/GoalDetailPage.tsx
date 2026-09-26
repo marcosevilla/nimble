@@ -131,7 +131,7 @@ export function GoalDetailPage() {
             <PanelRight className="size-4" />
           </IconButton>
           <Popover>
-            <PopoverTrigger className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover transition-colors">
+            <PopoverTrigger aria-label="Goal actions" className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover transition-colors">
               <MoreHorizontal className="size-4" />
             </PopoverTrigger>
             <PopoverContent side="bottom" align="end" sideOffset={4} className="w-44 gap-0 p-1">
@@ -434,7 +434,7 @@ function MilestonesSection({
                   () => dp.goals.deleteMilestone(m.id),
                   'Failed to delete milestone',
                 )}
-                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-[opacity,color] duration-(--transition-fast)"
+                className="focus-ring rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-muted-foreground hover:text-destructive transition-[opacity,color] duration-(--transition-fast)"
                 aria-label={`Delete milestone ${m.name}`}
               >
                 <Trash2 className="size-3.5" />
@@ -455,13 +455,19 @@ function MilestonesSection({
           }}
           onBlur={() => { if (!input) setInputFocused(false) }}
           placeholder="Add a milestone..."
-          className="w-full bg-transparent text-body outline-none placeholder:text-muted-foreground py-1 px-2"
+          aria-label="Add a milestone"
+          className="focus-ring-inset w-full rounded-md bg-transparent text-body placeholder:text-muted-foreground py-1 px-2"
           autoFocus
         />
       ) : (
         <p
+          role="button"
+          tabIndex={0}
           onClick={() => setInputFocused(true)}
-          className="text-body text-muted-foreground cursor-text hover:text-muted-foreground transition-colors py-1 px-2"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setInputFocused(true) }
+          }}
+          className="focus-ring rounded-md text-body text-muted-foreground cursor-text hover:text-foreground transition-colors py-1 px-2"
         >
           Add a milestone...
         </p>

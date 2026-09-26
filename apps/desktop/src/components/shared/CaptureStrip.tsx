@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { emit, listen } from '@tauri-apps/api/event'
 // eslint-disable-next-line no-restricted-imports
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Check, CornerDownLeft } from 'lucide-react'
 import { useDataProvider } from '@/services/provider-context'
 // Likewise desktop-only: hides the strip window itself. Intentionally NOT on
@@ -19,6 +19,8 @@ import { routeWithDate } from '@/lib/captureActions'
 import { HighlightField } from '@/components/capture/HighlightField'
 import { RoutePill, DateChip } from '@/components/capture/CaptureTokens'
 import { useCaptureDate } from '@/hooks/useCaptureDate'
+import { cn } from '@/lib/utils'
+import { motionMs } from '@/lib/motion'
 
 // Mirror the main window's theme — localStorage is shared across windows,
 // and this window never mounts useTheme()
@@ -35,6 +37,21 @@ const STRIP_WIDTH = 760
 /// The generous bottom/side margins are shadow bleed room — the CSS shadow
 /// clips with a hard edge wherever it crosses the window bounds.
 const WINDOW_PADDING = 90
+
+/** The ⏎ ↔ ✓ swap on the save button. Reduced motion: an opacity cut, no
+ *  scale / blur / spring (loop 4 P2-18). */
+const ICON_SWAP = {
+  initial: { opacity: 0, scale: 0.25, filter: 'blur(4px)' },
+  animate: { opacity: 1, scale: 1, filter: 'blur(0px)' },
+  exit: { opacity: 0, scale: 0.25, filter: 'blur(4px)' },
+  transition: { type: 'spring', duration: 0.3, bounce: 0 },
+} as const
+const ICON_SWAP_REDUCED = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+  transition: { duration: 0 },
+} as const
 
 export function CaptureStrip() {
   const dp = useDataProvider()
@@ -54,6 +71,18 @@ export function CaptureStrip() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const [routes, setRoutes] = useState<CaptureRoute[]>([])
+  const reduceMotion = useReducedMotion() ?? false
+  const iconSwap = reduceMotion ? ICON_SWAP_REDUCED : ICON_SWAP
+  // Escape / a save play `.panel-out`, then hide the window (loop 4 P2-18:
+  // it used to vanish mid-frame). The ghost guard still hides at once.
+  const [leaving, setLeaving] = useState(false)
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const leave = useCallback((reason: string) => {
+    setLeaving(true)
+    clearTimeout(leaveTimer.current)
+    leaveTimer.current = setTimeout(() => dismissCaptureStrip(reason), motionMs('--transition-base'))
+  }, [])
+  useEffect(() => () => clearTimeout(leaveTimer.current), [])
 
   const parsed = useMemo(() => parseRoutePrefix(value, routes), [value, routes])
   const taskBound = parsed.route?.target_type === 'task' && parsed.content.trim() !== ''
@@ -99,6 +128,9 @@ export function CaptureStrip() {
     let focusCheck: ReturnType<typeof setTimeout>
     const unlisten = listen('capture-strip-opened', () => {
       applyThemeFromStorage()
+      // Summoned again mid-exit: stay up.
+      clearTimeout(leaveTimer.current)
+      setLeaving(false)
       setSaved(false)
       setError(false)
       setDateNote(null)
@@ -171,16 +203,13 @@ export function CaptureStrip() {
       } else {
         setDateNote(null)
         setSaved(true)
-        setTimeout(() => {
-          setSaved(false)
-          dismissCaptureStrip('saved')
-        }, 450)
+        setTimeout(() => leave('saved'), 450)
       }
     } catch {
       setDateNote(null)
       setError(true)
     }
-  }, [value, dp, prefillContext, routes, capDate.date])
+  }, [value, dp, prefillContext, routes, capDate.date, leave])
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (capDate.onKeyDown(e)) return
@@ -190,7 +219,7 @@ export function CaptureStrip() {
     }
     if (e.key === 'Escape') {
       e.preventDefault()
-      dismissCaptureStrip('esc')
+      leave('esc')
     }
   }
 
@@ -199,7 +228,8 @@ export function CaptureStrip() {
       <div
         ref={cardRef}
         key={openCount}
-        className="capture-strip-in flex w-full items-end gap-3 rounded-2xl border border-border bg-popover py-3 pl-5 pr-3 shadow-[0_1px_2px_rgba(0,0,0,0.08),0_8px_24px_rgba(0,0,0,0.18),0_20px_40px_rgba(0,0,0,0.10)]"
+        inert={leaving || undefined}
+        className={cn(leaving ? 'panel-out' : 'capture-strip-in', 'flex w-full items-end gap-3 rounded-2xl border border-border bg-popover py-3 pl-5 pr-3 shadow-[0_1px_2px_rgba(0,0,0,0.08),0_8px_24px_rgba(0,0,0,0.18),0_20px_40px_rgba(0,0,0,0.10)]')}
       >
         <HighlightField
           multiline
@@ -251,10 +281,7 @@ export function CaptureStrip() {
               <motion.span
                 key="check"
                 className="flex"
-                initial={{ opacity: 0, scale: 0.25, filter: 'blur(4px)' }}
-                animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, scale: 0.25, filter: 'blur(4px)' }}
-                transition={{ type: 'spring', duration: 0.3, bounce: 0 }}
+                {...iconSwap}
               >
                 <Check className="size-4 text-primary" />
               </motion.span>
@@ -262,10 +289,7 @@ export function CaptureStrip() {
               <motion.span
                 key="enter"
                 className="flex"
-                initial={{ opacity: 0, scale: 0.25, filter: 'blur(4px)' }}
-                animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, scale: 0.25, filter: 'blur(4px)' }}
-                transition={{ type: 'spring', duration: 0.3, bounce: 0 }}
+                {...iconSwap}
               >
                 <CornerDownLeft className="size-4" />
               </motion.span>

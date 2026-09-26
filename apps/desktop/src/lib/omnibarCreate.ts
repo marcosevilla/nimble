@@ -8,7 +8,7 @@ import type { BarMode } from './commandBarMode.ts'
 import type { ParsedCaptureDate } from './captureDate.ts'
 import type { Pill } from './omnibarQuery.ts'
 import { fold, pillFilters } from './omnibarQuery.ts'
-import { DEFAULT_PROJECT_COLOR } from './projectColors.ts'
+import { DEFAULT_PROJECT_COLOR } from './swatches.ts'
 import { DEFAULT_LABEL_COLOR } from './labelColors.ts'
 
 export type CreateKind = 'task' | 'note' | 'doc' | 'goal' | 'project' | 'label'
