@@ -31,7 +31,7 @@ Installation on PATH and workflow activation are separate release steps. The dev
 
 Task creation supports project/parent IDs, description, priority (1–4), due date, due time, duration, recurrence, section, labels, reminder offset and explicit Google Calendar publishing intent. Updates support these existing core fields except changing a parent, and add linked-document and explicit clear flags. Dates use `YYYY-MM-DD`, times use `HH:MM`. IDs are exact; ambiguous name matching is not performed. `task labels --ids` replaces the entire set; preserve the old labels when adding one. `task labels --clear` intentionally empties the set.
 
-Completing a recurring task calls native core completion; it may advance to the next occurrence instead of becoming complete. Task search will arrive with the dedicated C4 search work. Capture conversion is not exposed as a fragile pair of unrelated writes.
+While Todoist sync is on, a task that repeats in Todoist has a read-only rule: `task update --recurrence`/`--clear-recurrence` on it fails with `validation` (edit the rule in Todoist). Completing a recurring task calls native core completion; it may advance to the next occurrence instead of becoming complete. Task search will arrive with the dedicated C4 search work. Capture conversion is not exposed as a fragile pair of unrelated writes.
 
 ## Saved versus refreshed versus synchronized
 

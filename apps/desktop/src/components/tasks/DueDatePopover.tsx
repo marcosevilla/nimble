@@ -40,6 +40,9 @@ interface DueDatePopoverProps {
   triggerProps?: ComponentProps<typeof PopoverTrigger>
   /** Extra popup props (finalFocus, align, onClick…), merged over the defaults. */
   contentProps?: Partial<ComponentProps<typeof PopoverContent>>
+  /** Read-only copy when Todoist owns the rule (lib/todoistRecurrence's
+   * `lockedRecurrenceCopy`): shown in place of the repeat editor. */
+  recurrenceLocked?: string | null
 }
 
 const DURATION_PRESETS = [
@@ -105,6 +108,7 @@ export function DueDatePopover({
   onOpenChange,
   triggerProps,
   contentProps,
+  recurrenceLocked,
 }: DueDatePopoverProps) {
   const [openState, setOpenState] = useState(false)
   const open = openProp ?? openState
@@ -330,7 +334,9 @@ export function DueDatePopover({
           )}
 
           {/* Repeat */}
-          {expanded === 'repeat' ? (
+          {recurrenceLocked ? (
+            <p className="px-1.5 py-1 text-meta text-muted-foreground">{recurrenceLocked}</p>
+          ) : expanded === 'repeat' ? (
             <div ref={repeatSectionRef} className="flex flex-col gap-0.5">
               {REPEAT_PRESETS.map((preset) => (
                 <button

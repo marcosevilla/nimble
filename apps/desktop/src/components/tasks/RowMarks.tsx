@@ -7,6 +7,8 @@ import { taskToast } from '@/lib/taskToast'
 import { rowMarkName, type RowMarkKind } from '@/lib/rowMarks'
 import { dueBadgeLabel } from '@/lib/dueLabel'
 import { taskPatchToUpdate, type TaskPatch } from '@/lib/taskPatch'
+import { lockedRecurrenceCopy } from '@/lib/todoistRecurrence'
+import { useTodoistSyncOn } from '@/hooks/useTodoistSyncOn'
 import { useRowPicker, useRowPickerStore } from '@/stores/rowPickerStore'
 import { PriorityBars } from '@/components/shared/PriorityBars'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -41,7 +43,13 @@ import type { LocalTask } from '@nimble/types'
 export type RowMarkTask = Pick<
   LocalTask,
   'id' | 'priority' | 'due_date' | 'due_time' | 'duration_minutes' | 'recurrence_rule' | 'labels' | 'project_id'
->
+> &
+  Partial<Pick<LocalTask, 'external_source' | 'external_id' | 'sync_policy' | 'synced_snapshot'>>
+
+/** The read-only rule copy for a Todoist-owned task (null = editable). */
+function useRecurrenceLock(task: RowMarkTask): string | null {
+  return lockedRecurrenceCopy(task, useTodoistSyncOn())
+}
 
 /** Shared mark chrome: pointer, and an ::after that grows the target to
  * at least 32px tall (square, so rounded corners don't cut the hit area). */
@@ -69,9 +77,10 @@ function useRowFocus(rowId: string, triggerRef: RefObject<HTMLElement | null>) {
 /** One patch → dp.tasks.update → emitTasksChanged, the detail page's path. */
 function useTaskMarkUpdate(task: RowMarkTask) {
   const dp = useDataProvider()
+  const recurrenceLocked = useRecurrenceLock(task) !== null
   return useCallback(
     async (patch: TaskPatch) => {
-      const updates = taskPatchToUpdate(task, patch)
+      const updates = taskPatchToUpdate(task, patch, { recurrenceLocked })
       if (!updates) return false
       try {
         await dp.tasks.update(updates)
@@ -82,7 +91,7 @@ function useTaskMarkUpdate(task: RowMarkTask) {
         return false
       }
     },
-    [task, dp],
+    [task, dp, recurrenceLocked],
   )
 }
 
@@ -130,6 +139,7 @@ export function DueMark({ task, rowId, date }: MarkProps & { date: string }) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const finalFocus = useRowFocus(rowId, triggerRef)
   const update = useTaskMarkUpdate(task)
+  const recurrenceLocked = useRecurrenceLock(task)
   const label = dueBadgeLabel(date)
   const today = label === 'Today'
 
@@ -143,6 +153,7 @@ export function DueMark({ task, rowId, date }: MarkProps & { date: string }) {
   return (
     <DueDatePopover
       value={value}
+      recurrenceLocked={recurrenceLocked}
       // A new day is the pick that closes the picker; time, duration and
       // repeat edits keep it open like on the detail page.
       onChange={(next) => {
@@ -317,6 +328,7 @@ function RowEndPickerFor({ task, rowId, kind }: MarkProps & { kind: RowMarkKind 
   const triggerRef = useRef<HTMLElement | null>(null)
   const finalFocus = useRowFocus(rowId, triggerRef)
   const update = useTaskMarkUpdate(task)
+  const recurrenceLocked = useRecurrenceLock(task)
 
   const triggerProps = {
     ref: (el: HTMLElement | null) => {
@@ -352,6 +364,7 @@ function RowEndPickerFor({ task, rowId, kind }: MarkProps & { kind: RowMarkKind 
       return (
         <DueDatePopover
           value={value}
+          recurrenceLocked={recurrenceLocked}
           onChange={(next) => {
             if (next.dueDate !== value.dueDate) onOpenChange(false)
             void update({ due: next })

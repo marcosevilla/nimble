@@ -391,6 +391,39 @@ async fn task_mutation_feeds_existing_todoist_outbox_without_network() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[tokio::test]
+async fn a_rule_todoist_owns_is_read_only_while_sync_is_on() {
+    let root = fixture().await;
+    let db = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new().filename(root.join("nimble.db")),
+    )
+    .await
+    .unwrap();
+    nimble_core::integrations::set_enabled(&db, "todoist", true).await.unwrap();
+    nimble_core::db::settings::set_setting(&db, "todoist_api_token", "synthetic-not-a-credential").await.unwrap();
+    let snapshot = json!({"content": "Pay", "due_date": "2026-10-06", "checked": false,
+        "due": {"date": "2026-10-06", "string": "every month", "is_recurring": true}});
+    sqlx::query("INSERT INTO local_tasks (id, content, due_date, recurrence_rule, external_id, external_source, synced_snapshot) VALUES ('t1', 'Pay', '2026-10-06', 'every month', 'R1', 'todoist', ?)")
+        .bind(snapshot.to_string()).execute(&db).await.unwrap();
+    for args in [&["task", "update", "t1", "--recurrence", "every week"][..], &["task", "update", "t1", "--clear-recurrence"][..]] {
+        let (code, value) = run(&root, args);
+        assert_eq!((code, value["error"]["code"].as_str()), (2, Some("validation")), "{value}");
+        assert!(value["error"]["message"].as_str().unwrap().contains("Todoist"), "{value}");
+    }
+    let rule: Option<String> = sqlx::query_scalar("SELECT recurrence_rule FROM local_tasks WHERE id = 't1'").fetch_one(&db).await.unwrap();
+    assert_eq!(rule.as_deref(), Some("every month"));
+    let queued: i64 = sqlx::query_scalar("SELECT count(*) FROM todoist_outbox WHERE local_id = 't1'").fetch_one(&db).await.unwrap();
+    assert_eq!(queued, 0);
+    // Other fields stay editable; with sync off the rule is Nimble's again.
+    let (code, value) = run(&root, &["task", "update", "t1", "--description", "autopay"]);
+    assert_eq!(code, 0, "{value}");
+    nimble_core::integrations::set_enabled(&db, "todoist", false).await.unwrap();
+    let (code, value) = run(&root, &["task", "update", "t1", "--recurrence", "every week"]);
+    assert_eq!(code, 0, "{value}");
+    db.close().await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// A fake app endpoint that answers each NativeTask request with `reply`.
 /// `None` reads the request and hangs up without answering (uncertain).
 async fn native_server(

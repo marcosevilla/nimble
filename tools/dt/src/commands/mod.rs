@@ -207,6 +207,20 @@ async fn checked_status(
             _ => e.into(),
         })
 }
+/// While Todoist sync is on, the rule of a task Todoist recurs is read-only
+/// (nimble_core::integrations::todoist::recurrence). Revisit at C5 cutover.
+async fn recurrence_editable(
+    pool: &SqlitePool,
+    current: &nimble_core::types::LocalTask,
+    input: &UpdateTaskInput,
+) -> Result<(), CliError> {
+    if nimble_core::integrations::todoist::recurrence::recurrence_change_locked(pool, current, input).await? {
+        return Err(CliError::validation(
+            "This task repeats in Todoist. Edit its repeat rule in Todoist; other fields can be updated here.",
+        ));
+    }
+    Ok(())
+}
 fn due_flag(value: &Option<String>) -> String {
     format!(" --expected-due {}", value.as_deref().unwrap_or("none"))
 }
@@ -290,9 +304,11 @@ pub async fn native_write(pool: &SqlitePool, command: Command) -> Result<Option<
             if let Some(c) = &content {
                 nonempty(c)?;
             }
-            task(pool, &id).await?;
+            let current = task(pool, &id).await?;
+            let input = update_input(content, linked_doc, f);
+            recurrence_editable(pool, &current, &input).await?;
             NativeWrite {
-                action: NativeTaskAction::Update { id, input: update_input(content, linked_doc, f) },
+                action: NativeTaskAction::Update { id, input },
                 retry_flags: String::new(),
                 read_back: None,
             }
@@ -414,12 +430,10 @@ pub async fn execute(pool: &SqlitePool, command: Command) -> Result<CommandResul
                 if let Some(c) = &content {
                     nonempty(c)?;
                 }
-                task(pool, &id).await?;
-                result(
-                    db::tasks::update_local_task(pool, &id, update_input(content, linked_doc, f))
-                        .await?,
-                    task_domains(),
-                )
+                let current = task(pool, &id).await?;
+                let input = update_input(content, linked_doc, f);
+                recurrence_editable(pool, &current, &input).await?;
+                result(db::tasks::update_local_task(pool, &id, input).await?, task_domains())
             }
             Task::Complete { id, expected_due: flag } => {
                 let current = task(pool, &id).await?;
