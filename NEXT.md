@@ -2,6 +2,14 @@
 
 Updated 2026-09-23 night (Lane A: loop 2 chunk 1 Settings sub-pages `f97ca10` + chunk 2 capture vocabulary/NL dates `649ca72` merged, installed with Lane B's install; 393 frontend tests). Updated 2026-09-23 eve (Lane B: Rust batch `bb6ac53` + brief phase 1 `e24daa4` merged; **installed at `649ca72`** = both lanes incl. capture-prefixes; DB migrated v22→v23, 1,335 tasks kept, today's brief snapshot written, `turso_schema_v23_upgraded` set). Before that 2026-09-23 (agentation-1 merged + installed at `0ad4bd5`). Before that 2026-09-22 (Focus Queue: all 12 plan tasks implemented, Task 12 verification recorded; awaiting final whole-branch review + Marco's 30-min human checklist; design facelift loop 1, Stage B merged). Earlier: 2026-09-21 installed Google OAuth repair and verified first live sync. Current status below supersedes earlier installation snapshots.
 
+## Lanes in flight (2026-09-25 eve)
+
+- [ ] **C5 completed-history import** — `c5/import-history` (`36276e4`): `dt todoist import-history [--since-months 12] [--apply] [--archive DIR]`. Dry run on a DB copy: 804 fetched, 335 already local, 469 to import; archive 1,254 completed tasks 2023-06-04→2026-09-26. In review. Then install → dry run on real data → `--apply` → `--archive "~/Library/Mobile Documents/com~apple~CloudDocs/Nimble Archive/"`. Todoist CSV backup (open tasks only) already in iCloud → Nimble Archive.
+- [ ] **Recurrence from Todoist** — `fix/todoist-recurrence` (`f4b5cba`): pull never set `recurrence_rule` (design gap since R1); all 6 Todoist-recurring tasks affected; EDD certify stuck complete since 08-19. Fix: Todoist owns next date for linked recurring tasks; pull repairs rules + reopens advanced ones. Marco: OK to reopen EDD (due 10-04); Nimble rule edits on linked tasks must PUSH to Todoist. In review. **Until installed: complete recurring tasks in Todoist, not Nimble.**
+- [ ] **Cleanup lane** — `cleanup/review-followups`: popover anchor on scroll, momentum setup Back bug, snapshot race, 3 brief deferrals, friendlyError/today.md, dead code, `dt sync status` last_sync.
+- [ ] **Deadline field (v28)** — Marco's decisions: row chip (neutral, stronger last 3 days), feeds brief, reminders N days before, Omnibar filter + sort; Todoist two-way; convert `**Deadline:**` lines + `dt --deadline`. Spec being drafted → Marco reviews → plan.
+- [ ] **Design loop 4** — audit `~/Developer/second-brain/outputs/qa/2026-09-25-loop4/findings.md` (grid 3.41→3.13; 4 P1). All 5 decisions accepted (auto-collapse, macOS clock, half-filled in-progress icon, autosave except secrets, context menus + key hints). Chunks: E (motion/focus/a11y/harness) started; A, B, C, D after cleanup merges.
+
 ## QA checklist — real app (consolidated 2026-09-25; newest first)
 
 One place for every pending hands-on check. Tick here; the per-feature sections below keep the detail.
