@@ -876,11 +876,19 @@ fn import_text(out: &nimble_core::integrations::todoist::history::RunOutcome, re
         "Todoist history import: {}\n",
         if out.applied.is_some() { "applied." } else { "dry run, nothing written." }
     );
+    let _ = writeln!(t, "  Still open in Todoist (skipped): {}", p.still_open_remote);
+    if p.still_open_remote > 0 {
+        let _ = writeln!(
+            t,
+            "  ! Expected 0 or a few recurring tasks. A large number means Todoist's response shape changed; check before --apply."
+        );
+    }
+    let _ = writeln!(t);
     let rows: [(&str, String); 11] = [
         ("Range", format!("{} .. {} ({} windows, {} requests)", p.since, p.until, p.windows, p.requests)),
         ("Completions fetched", format!("{} ({} unique tasks)", p.fetched, p.unique_tasks)),
         ("Already in Nimble (skipped)", p.already_local.to_string()),
-        ("Still open in Todoist (skipped)", p.still_open_remote.to_string()),
+        ("Possibly deleted in Nimble (imported)", p.possibly_deleted_locally.len().to_string()),
         ("To import", p.would_import.to_string()),
         ("  into \"Todoist history\" (archived)", p.to_history_project.to_string()),
         ("Sections matched / not found", format!("{} / {}", p.sections_matched, p.sections_unmatched)),
@@ -907,6 +915,22 @@ fn import_text(out: &nimble_core::integrations::todoist::history::RunOutcome, re
     if !p.labels_unmatched.is_empty() {
         let names: Vec<String> = p.labels_unmatched.iter().map(|(n, c)| format!("{n} ({c})")).collect();
         let _ = writeln!(t, "\nUnmatched labels (not created): {}", names.join(", "));
+    }
+    if !p.possibly_deleted_locally.is_empty() {
+        let _ = writeln!(
+            t,
+            "\nPossibly deleted in Nimble (still imported; check before --apply; {} deleted tasks had no recoverable title):",
+            p.deleted_locally_untitled
+        );
+        for d in &p.possibly_deleted_locally {
+            let _ = writeln!(
+                t,
+                "  - {} [{}, by {}]",
+                d.content,
+                d.completed_at.as_deref().unwrap_or("-"),
+                d.matched_by
+            );
+        }
     }
     if let Some(a) = &out.archive {
         let _ = writeln!(

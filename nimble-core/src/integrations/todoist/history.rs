@@ -517,6 +517,62 @@ pub struct ImportPlan {
     /// Label name -> tasks carrying it, for names with no local label.
     /// Labels are never created.
     pub labels_unmatched: BTreeMap<String, usize>,
+    /// Informational: to-import tasks matching a task deleted in Nimble
+    /// (`task_deleted` activity) by Todoist id or title. Still imported;
+    /// check them before `--apply`.
+    pub possibly_deleted_locally: Vec<PossiblyDeleted>,
+    /// `task_deleted` entries whose title can't be recovered (not matchable).
+    pub deleted_locally_untitled: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PossiblyDeleted {
+    pub todoist_id: String,
+    pub content: String,
+    pub completed_at: Option<String>,
+    /// "todoist_id" or "title".
+    pub matched_by: &'static str,
+}
+
+fn norm_title(s: &str) -> String {
+    s.trim().to_lowercase()
+}
+
+/// Titles and Todoist ids of tasks deleted in Nimble. `task_deleted` rows
+/// carry only the local id, so titles come from that task's earlier
+/// activity entries (`metadata.content`) and sync_log snapshots.
+async fn deleted_locally(conn: &mut SqliteConnection) -> crate::Result<(HashSet<String>, HashSet<String>, usize)> {
+    let ids: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT target_id FROM activity_log WHERE action_type = 'task_deleted' AND target_id IS NOT NULL",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    let (mut titles, mut exts, mut untitled) = (HashSet::new(), HashSet::new(), 0usize);
+    for id in ids {
+        let mut found: Vec<String> = sqlx::query_scalar(
+            "SELECT json_extract(metadata, '$.content') FROM activity_log
+             WHERE target_id = ? AND json_valid(metadata) AND json_extract(metadata, '$.content') IS NOT NULL",
+        )
+        .bind(&id)
+        .fetch_all(&mut *conn)
+        .await?;
+        let snaps: Vec<(Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT json_extract(snapshot, '$.content'), json_extract(snapshot, '$.external_id') FROM sync_log
+             WHERE table_name = 'local_tasks' AND row_id = ? AND json_valid(snapshot)",
+        )
+        .bind(&id)
+        .fetch_all(&mut *conn)
+        .await?;
+        for (content, ext) in snaps {
+            found.extend(content);
+            exts.extend(ext);
+        }
+        if found.is_empty() {
+            untitled += 1;
+        }
+        titles.extend(found.iter().map(|t| norm_title(t)).filter(|t| !t.is_empty()));
+    }
+    Ok((titles, exts, untitled))
 }
 
 /// One task to insert, fully resolved.
@@ -681,6 +737,23 @@ async fn classify(
         } else {
             plan.orphan_parents += 1;
         }
+    }
+    let (titles, exts, untitled) = deleted_locally(&mut *conn).await?;
+    plan.deleted_locally_untitled = untitled;
+    for p in &out {
+        let matched_by = if exts.contains(&p.item.id) {
+            "todoist_id"
+        } else if titles.contains(&norm_title(&p.item.content)) {
+            "title"
+        } else {
+            continue;
+        };
+        plan.possibly_deleted_locally.push(PossiblyDeleted {
+            todoist_id: p.item.id.clone(),
+            content: p.item.content.clone(),
+            completed_at: p.item.completed_at.clone(),
+            matched_by,
+        });
     }
     plan.history_project_exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM projects WHERE id = ?")
         .bind(HISTORY_PROJECT_ID)
@@ -1389,6 +1462,32 @@ mod tests {
         let n = get("N").await;
         assert!(n.2 < 60, "no added_at: the UTC column default ({})", n.0);
         assert_eq!(n.0.len(), 19);
+    }
+
+    /// Informational only: to-import tasks whose title (or Todoist id)
+    /// matches a task deleted in Nimble are listed, and still imported.
+    #[tokio::test]
+    async fn dry_run_lists_tasks_possibly_deleted_locally() {
+        let pool = fixture().await;
+        for sql in [
+            // Title from an earlier activity entry.
+            "INSERT INTO activity_log (id, action_type, target_id, metadata) VALUES ('a1', 'task_completed', 'x1', '{\"content\":\"  TASK d \"}')",
+            "INSERT INTO activity_log (id, action_type, target_id) VALUES ('a2', 'task_deleted', 'x1')",
+            // Todoist id from a sync_log snapshot.
+            "INSERT INTO sync_log (id, table_name, row_id, operation, snapshot, device_id, timestamp) VALUES ('s1', 'local_tasks', 'x2', 'INSERT', '{\"content\":\"renamed\",\"external_id\":\"H\"}', 'dev', '2026-01-01T00:00:00.000Z')",
+            "INSERT INTO activity_log (id, action_type, target_id) VALUES ('a3', 'task_deleted', 'x2')",
+            // No title anywhere.
+            "INSERT INTO activity_log (id, action_type, target_id) VALUES ('a4', 'task_deleted', 'x3')",
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap();
+        }
+        let fake = serving(remote());
+        let out = run(&pool, &fake, fast(), opts(false), || async { unreachable!() }).await.unwrap();
+        let flagged: Vec<(&str, &str)> = out.plan.possibly_deleted_locally.iter()
+            .map(|p| (p.todoist_id.as_str(), p.matched_by)).collect();
+        assert_eq!(flagged, vec![("D", "title"), ("H", "todoist_id")]);
+        assert_eq!(out.plan.deleted_locally_untitled, 1);
+        assert_eq!(out.plan.would_import, 5, "still imported");
     }
 
     // ── Archive ──
