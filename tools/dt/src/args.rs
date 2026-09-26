@@ -40,6 +40,8 @@ pub enum Command {
     Gap(Gap),
     #[command(subcommand)]
     Momentum(Momentum),
+    #[command(subcommand)]
+    Todoist(Todoist),
 }
 #[derive(Args, Debug, Default, Clone)]
 pub struct Fields {
@@ -346,5 +348,24 @@ pub enum Momentum {
     Summary {
         #[arg(long, default_value = "7d", value_parser = ["7d", "30d", "all"])]
         range: String,
+    },
+}
+#[derive(Subcommand, Debug, Clone)]
+pub enum Todoist {
+    /// Import completed Todoist tasks into Nimble (default: the last 12
+    /// months). Without --apply: fetch and report only (nothing written).
+    /// With --apply: back up through the running app, then import in one
+    /// transaction; re-running imports nothing new. Reads Todoist only.
+    ImportHistory {
+        #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u32).range(1..=120))]
+        since_months: u32,
+        #[arg(long)]
+        apply: bool,
+        /// Also write EVERY completed task ever, plus projects (archived
+        /// too), sections and labels, as raw Todoist JSON to
+        /// <DIR>/todoist-completed-archive-YYYY-MM-DD.json (0600, never
+        /// overwritten). The archive never writes to the database.
+        #[arg(long, value_name = "DIR")]
+        archive: Option<PathBuf>,
     },
 }

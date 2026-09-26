@@ -638,7 +638,7 @@ pub(crate) async fn local_project_ref_tx(
 /// pre-v22 flattened pseudo-project carrying that same external id (until the
 /// one-time reconcile converts it), then to the item's own project. `None`
 /// means nothing matched (callers use the inbox).
-async fn resolve_item_location_tx(
+pub(crate) async fn resolve_item_location_tx(
     tx: &mut sqlx::SqliteConnection,
     ext: &str,
     item_project_ext: Option<&str>,

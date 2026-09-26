@@ -16,6 +16,7 @@ Nimble (formerly "Daily Triage") — a personal daily triage and briefing macOS 
 - ~~`cd apps/mobile && npx expo start`~~ — **mobile app is DORMANT as of 2026-08-14** (unplugged from npm workspaces; see `apps/mobile/DORMANT.md`)
 - `cd apps/desktop && npm run build` — Build desktop frontend for production
 - `cd apps/desktop && npm run tauri build` — Build distributable .app
+- `dt todoist import-history [--since-months 12] [--apply] [--archive DIR]` — completed-history import from Todoist (GET only). Dry run by default; `--apply` backs up through the running app, then imports in one transaction (raw SQL, no outbox, `sync_log` in the same transaction, momentum backfill after); unknown projects go to the archived, unlinked `todoist-history` project; labels are never created; idempotent. `--archive DIR` writes the full completed history + projects/sections/labels as raw JSON (0600, never overwritten, no DB writes). Code: `nimble-core/src/integrations/todoist/history.rs`. Todoist's completed endpoint takes `since` (inclusive) / `until` (exclusive) at most 3 months apart and returns `items` + `next_cursor`.
 - **Rust tests:** `cargo test --workspace --offline`; desktop `npm run build`, web `npm run build:web`. C1 verification is recorded in `docs/c1-verification.md`.
 
 ## Project Structure (Monorepo)

@@ -175,6 +175,13 @@ pub async fn on_task_mutation_tx(conn: &mut SqliteConnection, m: TaskMutation<'_
 }
 
 pub async fn on_project_mutation(pool: &SqlitePool, m: ProjectMutation<'_>) {
+    // The history import's archive project is Nimble-only for good.
+    let project = match &m {
+        ProjectMutation::Created(p) | ProjectMutation::Renamed(p) | ProjectMutation::Deleted { project: p } => *p,
+    };
+    if project.id == crate::integrations::todoist::history::HISTORY_PROJECT_ID {
+        return;
+    }
     if !active(pool).await {
         return;
     }
@@ -286,7 +293,11 @@ pub async fn seed_outbox_for_unlinked(pool: &SqlitePool) -> crate::Result<(usize
     let mut projects_seeded = 0usize;
     let projects = crate::db::projects::get_projects(pool).await?;
     for p in projects {
-        if p.external_id.is_none() && p.id != "inbox"
+        // Archived unlinked projects stay local (seeding would create them
+        // as ACTIVE projects in Todoist), and the history import's
+        // "Todoist history" project never goes, archived or not.
+        if p.external_id.is_none() && p.id != "inbox" && p.archived_at.is_none()
+            && p.id != crate::integrations::todoist::history::HISTORY_PROJECT_ID
             && outbox::pending_create_temp_id(pool, &p.id).await?.is_none()
         {
             outbox::enqueue(pool, "project", &p.id, "create", serde_json::json!({"name": p.name})).await?;
@@ -632,5 +643,30 @@ mod tests {
         activate(&pool).await;
         on_turso_row_applied_with_status(&pool, "local_tasks", &id, None, None, false, Some(true)).await;
         assert!(ops(&pool, &id).await.iter().any(|(op, _)| op == "reopen"));
+    }
+
+    /// The history import's "Todoist history" project never reaches
+    /// Todoist: not on rename/delete, and not when sync is switched off and
+    /// on again (the first-enable seed), even if the user unarchives it.
+    #[tokio::test]
+    async fn the_todoist_history_project_never_reaches_the_outbox() {
+        use crate::integrations::todoist::history::{HISTORY_PROJECT_ID, HISTORY_PROJECT_NAME};
+        let pool = test_pool().await;
+        activate(&pool).await;
+        sqlx::query("INSERT INTO projects (id, name, archived_at) VALUES (?, ?, datetime('now','localtime'))")
+            .bind(HISTORY_PROJECT_ID).bind(HISTORY_PROJECT_NAME).execute(&pool).await.unwrap();
+        let project = crate::db::projects::get_projects(&pool).await.unwrap()
+            .into_iter().find(|p| p.id == HISTORY_PROJECT_ID).unwrap();
+        on_project_mutation(&pool, ProjectMutation::Renamed(&project)).await;
+        on_project_mutation(&pool, ProjectMutation::Created(&project)).await;
+        on_project_mutation(&pool, ProjectMutation::Deleted { project: &project }).await;
+        assert!(outbox::pending_batch(&pool, 10).await.unwrap().is_empty());
+        // Unarchived by hand, then sync off -> on (what set_todoist_sync_enabled does).
+        sqlx::query("UPDATE projects SET archived_at = NULL WHERE id = ?").bind(HISTORY_PROJECT_ID).execute(&pool).await.unwrap();
+        crate::integrations::set_enabled(&pool, "todoist", false).await.unwrap();
+        crate::integrations::set_enabled(&pool, "todoist", true).await.unwrap();
+        let (_, projects_seeded) = seed_outbox_for_unlinked(&pool).await.unwrap();
+        assert_eq!(projects_seeded, 0);
+        assert!(outbox::pending_batch(&pool, 10).await.unwrap().is_empty());
     }
 }

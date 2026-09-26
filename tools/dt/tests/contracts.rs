@@ -812,3 +812,67 @@ async fn momentum_backfill_is_direct_and_idempotent() {
     assert_eq!((c, v["error"]["code"].as_str()), (2, Some("validation")));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+async fn table_counts(root: &std::path::Path) -> Vec<i64> {
+    let db = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new().filename(root.join("nimble.db")),
+    )
+    .await
+    .unwrap();
+    let mut out = Vec::new();
+    for t in ["local_tasks", "projects", "labels", "sync_log", "activity_log", "karma_events", "todoist_outbox"] {
+        out.push(sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {t}")).fetch_one(&db).await.unwrap());
+    }
+    db.close().await;
+    out
+}
+
+#[tokio::test]
+async fn import_history_without_a_token_fails_before_any_fetch_or_write() {
+    let root = fixture().await;
+    let before = table_counts(&root).await;
+    let archive = root.join("archive");
+    std::fs::create_dir_all(&archive).unwrap();
+    for args in [
+        &["todoist", "import-history"][..],
+        &["todoist", "import-history", "--apply"][..],
+        &["todoist", "import-history", "--since-months", "3", "--archive", archive.to_str().unwrap()][..],
+    ] {
+        let (code, out) = run(&root, args);
+        assert_eq!(code, 1, "{out}");
+        assert_eq!(out["error"]["code"], "import_failed");
+        assert!(out["error"]["message"].as_str().unwrap().contains("todoist_api_token"), "{out}");
+    }
+    assert_eq!(table_counts(&root).await, before);
+    assert_eq!(std::fs::read_dir(&archive).unwrap().count(), 0, "no archive without a fetch");
+    let (code, out) = run(&root, &["todoist", "import-history", "--since-months", "0"]);
+    assert_eq!((code, &out["error"]["code"]), (2, &json!("validation")));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[tokio::test]
+async fn import_history_refuses_an_existing_archive_before_fetching() {
+    let root = fixture().await;
+    let db = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new().filename(root.join("nimble.db")),
+    )
+    .await
+    .unwrap();
+    // A token that would fail any real request: the refusal must come first.
+    nimble_core::db::settings::set_setting(&db, "todoist_api_token", "not-a-real-token").await.unwrap();
+    db.close().await;
+    let before = table_counts(&root).await;
+    let archive = root.join("archive");
+    std::fs::create_dir_all(&archive).unwrap();
+    let existing = archive.join(format!(
+        "todoist-completed-archive-{}.json",
+        chrono::Local::now().format("%Y-%m-%d")
+    ));
+    std::fs::write(&existing, "keep me").unwrap();
+    let (code, out) = run(&root, &["todoist", "import-history", "--archive", archive.to_str().unwrap()]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out["error"]["message"].as_str().unwrap().contains("never overwritten"), "{out}");
+    assert_eq!(std::fs::read_to_string(&existing).unwrap(), "keep me");
+    assert_eq!(table_counts(&root).await, before);
+    std::fs::remove_dir_all(&root).ok();
+}

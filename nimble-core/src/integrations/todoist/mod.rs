@@ -7,3 +7,4 @@ pub mod observer;
 pub mod sync_loop;
 pub mod reconcile;
 pub mod recurrence;
+pub mod history;

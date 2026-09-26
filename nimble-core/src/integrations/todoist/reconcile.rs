@@ -526,7 +526,7 @@ pub async fn finish_apply(pool: &SqlitePool, full: &client::SyncResponse) -> cra
 
 /// The Todoist token straight from settings. Sync is deliberately disabled
 /// during the reconcile, so the adapter helper would report no token.
-async fn read_token(pool: &SqlitePool) -> crate::Result<String> {
+pub(crate) async fn read_token(pool: &SqlitePool) -> crate::Result<String> {
     match crate::db::settings::get_setting(pool, "todoist_api_token").await? {
         Some(t) if !t.trim().is_empty() => Ok(t.trim().to_string()),
         _ => Err(crate::Error::Other(

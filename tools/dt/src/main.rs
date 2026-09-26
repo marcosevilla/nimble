@@ -60,6 +60,13 @@ async fn run(cli: args::Cli) -> Result<(serde_json::Value, Option<String>), outp
         let (data, text) = outcome?;
         return Ok((output::success(data, "not_required"), Some(text)));
     }
+    if let args::Command::Todoist(args::Todoist::ImportHistory { since_months, apply, archive }) = &cli.command {
+        let outcome =
+            commands::import_history(&open.pool, &open.profile, *since_months, *apply, archive.clone()).await;
+        open.pool.close().await;
+        let (data, text) = outcome?;
+        return Ok((output::success(data, "not_required"), Some(text)));
+    }
     if let Some(operation) = commands::app_operation(&cli.command) {
         let data = ipc::request(&open.profile, operation).await?;
         open.pool.close().await;
