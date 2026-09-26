@@ -48,7 +48,7 @@ Production Mac test, 2026-09-21: Marco authorized one reminder test. Installed `
 - [x] Integrate/push installed OAuth repair: merged in b3211dd and verified on GitHub on 2026-09-21.
 - [ ] Physical phone alarm and two-way event-edit acceptance.
 - [x] Install CLI on PATH and verify its connection to the production app using backup RPC.
-- [ ] Agent workflow routing activation and live web propagation acceptance.
+- [x] Agent workflow routing activation and live web propagation acceptance (2026-09-25). Marco approved routing; `/td`, `/task-assist`, `/brief` (triage), `/admin`, `/quick` now write via `dt --json` (shared protocol `~/.claude/skills/references/nimble-dt.md`; drafts + diffs `~/Developer/second-brain/outputs/2026/2026-09-25-c3-skill-drafts/`; prior skills backed up at `~/.claude/skills-backup-20260925-c3/`). Acceptance: parent "C3 test: dt activation" + 3 subtasks (labels quick+admin, due 2026-09-26) created via the /td path — all four `refresh: acknowledged`; local read-back PASS; Todoist mirror 4/4 linked within 31 s, exactly one parent + 3 nested subtasks with `@nimble` (Todoist MCP read); Turso `turso_last_sync_at` advanced past creation with 0 unsynced `sync_log` rows; Marco confirmed all four on the signed-in web Inbox. Test tasks deleted. Instinct unchanged (still writes to Todoist). Note: `dt sync status` `last_sync` doesn't track `turso_last_sync_at` (stale value) — minor bug.
 - [x] Production app update, following review and user approval.
 - [x] Integrate feature branch into main and verify the merged result.
 
