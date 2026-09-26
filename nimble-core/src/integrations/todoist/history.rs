@@ -769,8 +769,8 @@ async fn apply_tx(conn: &mut SqliteConnection, items: &[TodoistItem]) -> crate::
             "INSERT INTO local_tasks
              (id, parent_id, content, description, project_id, section_id, priority, due_date, due_time,
               duration_minutes, completed, completed_at, status, position, external_id, external_source,
-              remote_updated_at, synced_snapshot, created_at, updated_at)
-             VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'complete', ?, ?, 'todoist', ?, ?, COALESCE(?, datetime('now')), ?)",
+              remote_updated_at, synced_snapshot, created_at, updated_at, sync_policy)
+             VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'complete', ?, ?, 'todoist', ?, ?, COALESCE(?, datetime('now')), ?, ?)",
         )
         .bind(&id)
         .bind(&p.item.content)
@@ -788,6 +788,9 @@ async fn apply_tx(conn: &mut SqliteConnection, items: &[TodoistItem]) -> crate::
         .bind(serde_json::to_string(&snapshot).unwrap_or_default())
         .bind(&p.created_at)
         .bind(&now)
+        // The history project has no Todoist home: its rows are Nimble-only
+        // (the observer and push skip them). The rest stay linked.
+        .bind(if p.project_id.is_none() { "local_only" } else { "default" })
         .execute(&mut *conn)
         .await?;
         for label_id in &p.label_ids {
@@ -1275,6 +1278,12 @@ mod tests {
         let h = row("H").await;
         assert_eq!((h.2.as_str(), h.3), ("pa", None), "unknown section: project only");
         assert_eq!(count(&pool, "SELECT COUNT(*) FROM local_tasks WHERE external_id = 'G'").await, 0);
+        // History rows are Nimble-only; the rest stay linked to their project.
+        let policies: Vec<(String, String)> = sqlx::query_as(
+            "SELECT external_id, sync_policy FROM local_tasks WHERE external_id IN ('A','B','C','D','H') ORDER BY external_id")
+            .fetch_all(&pool).await.unwrap();
+        let policies: Vec<(&str, &str)> = policies.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        assert_eq!(policies, vec![("A", "default"), ("B", "default"), ("C", "local_only"), ("D", "local_only"), ("H", "default")]);
         assert_eq!(count(&pool, "SELECT COUNT(*) FROM local_tasks WHERE external_id IN ('EXIST_OPEN','EXIST_DONE')").await, 2);
         assert_eq!(count(&pool, "SELECT completed FROM local_tasks WHERE id = 'open1'").await, 0, "existing rows untouched");
 
