@@ -26,7 +26,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
-import { GOAL_COLORS } from '@/lib/goalStatus'
+import { GOAL_COLORS, swatchName } from '@/lib/swatches'
 import { habitProgress } from '@/lib/habitToggle'
 
 /* Stored `habit.icon` is a lucide name (kebab or Pascal). This curated map
@@ -332,7 +332,8 @@ function AddHabitPopover({
               )}
               style={{ backgroundColor: c }}
               onClick={() => setColor(c)}
-              aria-label={`Select color ${c}`}
+              aria-label={swatchName(c)}
+              aria-pressed={color === c}
             />
           ))}
         </div>

@@ -131,7 +131,7 @@ export function GoalDetailPage() {
             <PanelRight className="size-4" />
           </IconButton>
           <Popover>
-            <PopoverTrigger className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover transition-colors">
+            <PopoverTrigger aria-label="Goal actions" className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover transition-colors">
               <MoreHorizontal className="size-4" />
             </PopoverTrigger>
             <PopoverContent side="bottom" align="end" sideOffset={4} className="w-44 gap-0 p-1">

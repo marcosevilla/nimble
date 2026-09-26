@@ -88,7 +88,9 @@
   --secondary-foreground: oklch(0.93 0.005 75);
   --muted: oklch(0.22 0.008 60);
   --muted-foreground: oklch(0.66 0.01 60); /* 6.39:1 on background, 5.93:1 on card (was 0.58 → 4.64 / 4.30) */
-  --muted-foreground-subtle: oklch(0.54 0.01 60); /* 3.93:1 on background, 3.64:1 on card */
+  /* 5.03:1 on background, 4.67:1 on card/popover (was 0.54 → 3.93 / 3.64,
+     loop 4 P2-19). Still a step under --muted-foreground. */
+  --muted-foreground-subtle: oklch(0.60 0.01 60);
   --hover: color-mix(in oklch, var(--foreground) 9%, transparent); /* 1.18:1 on background, 1.23:1 on card/popover/sidebar */
   --accent: oklch(0.22 0.008 60);
   --accent-foreground: oklch(0.93 0.005 75);
@@ -168,7 +170,10 @@
   --secondary: oklch(0.22 0.01 230);
   --secondary-foreground: oklch(0.93 0.005 230);
   --muted: oklch(0.22 0.01 230);
-  --muted-foreground: oklch(0.58 0.015 230);
+  /* 0.58 measured ≈4.66:1 bg / 4.32:1 card; 0.66 matches warm (≈6.4 / 5.9),
+     leaving room for a ≥4.5:1 subtle step under it (loop 4 P2-19). */
+  --muted-foreground: oklch(0.66 0.015 230);
+  --muted-foreground-subtle: oklch(0.60 0.015 230); /* ≈5.0:1 bg / 4.7:1 card */
   --accent: oklch(0.22 0.01 230);
   --accent-foreground: oklch(0.93 0.005 230);
   --destructive: oklch(0.577 0.245 27.325);
@@ -242,7 +247,10 @@
   --secondary: oklch(0.22 0.008 350);
   --secondary-foreground: oklch(0.93 0.005 350);
   --muted: oklch(0.22 0.008 350);
-  --muted-foreground: oklch(0.58 0.015 350);
+  /* 0.58 measured ≈4.66:1 bg / 4.32:1 card; 0.66 matches warm (≈6.4 / 5.9),
+     leaving room for a ≥4.5:1 subtle step under it (loop 4 P2-19). */
+  --muted-foreground: oklch(0.66 0.015 350);
+  --muted-foreground-subtle: oklch(0.60 0.015 350); /* ≈5.0:1 bg / 4.7:1 card */
   --accent: oklch(0.22 0.008 350);
   --accent-foreground: oklch(0.93 0.005 350);
   --destructive: oklch(0.577 0.245 27.325);
@@ -316,7 +324,9 @@
   --secondary: oklch(0.22 0 0);
   --secondary-foreground: oklch(0.93 0 0);
   --muted: oklch(0.22 0 0);
-  --muted-foreground: oklch(0.58 0 0);
+  /* See ocean dark (loop 4 P2-19): 6.47 / 6.04; subtle 5.10 / 4.76. */
+  --muted-foreground: oklch(0.66 0 0);
+  --muted-foreground-subtle: oklch(0.60 0 0);
   --accent: oklch(0.22 0 0);
   --accent-foreground: oklch(0.93 0 0);
   --destructive: oklch(0.577 0.245 27.325);
@@ -390,7 +400,10 @@
   --secondary: oklch(0.22 0.008 155);
   --secondary-foreground: oklch(0.93 0.005 155);
   --muted: oklch(0.22 0.008 155);
-  --muted-foreground: oklch(0.58 0.015 155);
+  /* 0.58 measured ≈4.66:1 bg / 4.32:1 card; 0.66 matches warm (≈6.4 / 5.9),
+     leaving room for a ≥4.5:1 subtle step under it (loop 4 P2-19). */
+  --muted-foreground: oklch(0.66 0.015 155);
+  --muted-foreground-subtle: oklch(0.60 0.015 155); /* ≈5.0:1 bg / 4.7:1 card */
   --accent: oklch(0.22 0.008 155);
   --accent-foreground: oklch(0.93 0.005 155);
   --destructive: oklch(0.577 0.245 27.325);
@@ -469,7 +482,10 @@
   --secondary: oklch(0.26 0.007 75);
   --secondary-foreground: oklch(0.93 0.005 90);
   --muted: oklch(0.26 0.007 75);
-  --muted-foreground: oklch(0.60 0.008 85);
+  /* Lighter surfaces than the other darks (bg 0.19, card 0.225): 0.60 was
+     4.68 / 4.33; 0.68 is 6.41 / 5.94, subtle 0.62 is 5.07 / 4.70 (loop 4 P2-19). */
+  --muted-foreground: oklch(0.68 0.008 85);
+  --muted-foreground-subtle: oklch(0.62 0.008 85);
   --accent: oklch(0.27 0.008 78);
   --accent-foreground: oklch(0.93 0.005 90);
   --destructive: oklch(0.62 0.22 27);

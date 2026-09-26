@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { ProjectEditDialog } from './ProjectEditDialog'
 import type { Project, LocalTask } from '@nimble/types'
-import { PROJECT_COLORS } from '@/lib/projectColors'
+import { PROJECT_COLORS, swatchName } from '@/lib/swatches'
 import { pickRovingKey } from '@/lib/docsTree'
 import { buildProjectTree, visibleProjectKeys } from '@/lib/projectTree'
 import { handleTreeKeyDown } from '@/components/shared/treeKeys'
@@ -205,8 +205,10 @@ export function ProjectSidebar({
           <span className="min-w-0 flex-1 truncate">{project.name}</span>
         </button>
 
-        {/* Mouse targets; the keyboard uses `e` and ⌫ on the row */}
-        <div className="hidden items-center gap-0.5 group-hover:flex group-focus-within:flex">
+        {/* Mouse targets; the keyboard uses `e` and ⌫ on the row, so they
+            stay out of the tree's accessibility tree (a tree owns treeitems
+            only — loop 4 P2-19). tabIndex -1 keeps aria-hidden legal. */}
+        <div aria-hidden="true" className="hidden items-center gap-0.5 group-hover:flex group-focus-within:flex">
           <button
             type="button"
             tabIndex={-1}
@@ -232,9 +234,11 @@ export function ProjectSidebar({
         </div>
 
         {hasChildren ? (
+          // Mouse twin of →/← on the row (aria-expanded carries the state).
           <button
             type="button"
             tabIndex={-1}
+            aria-hidden="true"
             onClick={() => toggleParentCollapsed(project.id)}
             className="flex w-3 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
             title={collapsed ? 'Expand (→)' : 'Collapse (←)'}
@@ -338,10 +342,13 @@ export function ProjectSidebar({
             className="h-6 text-meta"
             autoFocus
           />
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" role="group" aria-label="Project color">
             {PROJECT_COLORS.map((c) => (
               <button
                 key={c}
+                type="button"
+                aria-label={swatchName(c)}
+                aria-pressed={newProjectColor === c}
                 className={cn(
                   'size-4 rounded-full border-2 transition-[border-color,scale] duration-(--transition-fast)',
                   newProjectColor === c ? 'border-foreground scale-110' : 'border-transparent hover:border-muted-foreground/50',

@@ -380,7 +380,13 @@ function TimeGrid({
       // while the sync notice shows — the rail already ends above it, and
       // 24px is the notice edge fade's height (data-notice-fade, loop 3).
       data-notice-fade
-      className="overflow-y-auto flex-1 min-h-0 pb-[max(1.5rem,calc(3rem-var(--sync-notice-clear,0px)))]"
+      // A Tab stop with a name, so the hour grid scrolls from the keyboard
+      // (↑/↓; ← → t still bubble to the panel) — loop 4 P2-19. Inset ring:
+      // the rail clips anything drawn outside.
+      tabIndex={0}
+      role="region"
+      aria-label="Day schedule"
+      className="focus-ring-inset rounded-md overflow-y-auto flex-1 min-h-0 pb-[max(1.5rem,calc(3rem-var(--sync-notice-clear,0px)))]"
     >
       <div className="relative" style={{ height: gridHeight }}>
         {/* Hour lines and labels */}
