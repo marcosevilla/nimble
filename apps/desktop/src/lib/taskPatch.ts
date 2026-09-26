@@ -22,7 +22,14 @@ type PatchableTask = Pick<
   'id' | 'due_date' | 'due_time' | 'duration_minutes' | 'recurrence_rule'
 >
 
-export function taskPatchToUpdate(task: PatchableTask, patch: TaskPatch): TaskUpdate | null {
+/** `recurrenceLocked`: the rule is Todoist's (see `lib/todoistRecurrence`),
+ * so a patch never sets or clears it — the popover echoes the full due value
+ * (e.g. clearing the due chip sends a null rule too). */
+export function taskPatchToUpdate(
+  task: PatchableTask,
+  patch: TaskPatch,
+  opts: { recurrenceLocked?: boolean } = {},
+): TaskUpdate | null {
   const updates: TaskUpdate = { id: task.id }
   let touched = false
 
@@ -57,7 +64,7 @@ export function taskPatchToUpdate(task: PatchableTask, patch: TaskPatch): TaskUp
       updates.clearDuration = due.durationMinutes === null && task.duration_minutes != null
       touched = true
     }
-    if (due.recurrenceRule !== (task.recurrence_rule ?? null)) {
+    if (!opts.recurrenceLocked && due.recurrenceRule !== (task.recurrence_rule ?? null)) {
       updates.recurrenceRule = due.recurrenceRule ?? undefined
       updates.clearRecurrence = due.recurrenceRule === null && !!task.recurrence_rule
       touched = true

@@ -59,3 +59,30 @@ test('completion notice never predicts a date Todoist will choose', () => {
   assert.deepEqual(recurringCompletionNotice(native, '2026-10-04'), { kind: 'rescheduled', nextDue: '2026-10-18' })
   assert.equal(recurringCompletionNotice(task({ recurrence_rule: null, synced_snapshot: null }), '2026-10-04'), null)
 })
+
+// Rule lock (Marco, 2026-09-25): while Todoist sync is on, a Todoist-owned
+// rule is read-only in Nimble.
+import { lockedRecurrenceCopy } from '../src/lib/todoistRecurrence.ts'
+import { taskPatchToUpdate } from '../src/lib/taskPatch.ts'
+
+test('a Todoist-owned rule shows as read-only copy while sync is on', () => {
+  assert.equal(lockedRecurrenceCopy(task(), true), 'Repeats in Todoist: every 2 weeks @ 09:00 — edit in Todoist')
+  assert.equal(lockedRecurrenceCopy(task({ recurrence_rule: null }), true), 'Repeats in Todoist — edit in Todoist')
+  assert.equal(lockedRecurrenceCopy(task(), false), null, 'sync off: Nimble owns the rule')
+  assert.equal(lockedRecurrenceCopy(task({ synced_snapshot: snapshot(false, 'Oct 4') }), true), null)
+  assert.equal(lockedRecurrenceCopy(task({ sync_policy: 'local_only' }), true), null)
+})
+
+test('a locked rule never leaves in a patch; the rest of the due value does', () => {
+  const t = task({ duration_minutes: null })
+  const due = { dueDate: '2026-10-05', dueTime: '09:00', durationMinutes: null, recurrenceRule: 'every week' }
+  assert.deepEqual(taskPatchToUpdate(t, { due }, { recurrenceLocked: true }), { id: 't1', dueDate: '2026-10-05', clearDueDate: false })
+  // Clearing the due chip sends the empty value: the rule is not cleared with it.
+  const empty = { dueDate: null, dueTime: null, durationMinutes: null, recurrenceRule: null }
+  const update = taskPatchToUpdate(t, { due: empty }, { recurrenceLocked: true })
+  assert.equal(update.clearRecurrence, undefined)
+  assert.equal(update.recurrenceRule, undefined)
+  assert.equal(update.clearDueDate, true)
+  // Unlocked, the rule edits as before.
+  assert.equal(taskPatchToUpdate(t, { due }).recurrenceRule, 'every week')
+})

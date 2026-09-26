@@ -13,7 +13,7 @@ import { nextOccurrenceDate, parseRecurrenceRule } from './recurrence.ts'
  */
 export type TodoistLinkFields = Pick<LocalTask, 'external_source' | 'external_id' | 'sync_policy' | 'synced_snapshot'>
 
-export function todoistOwnsRecurrence(task: TodoistLinkFields): boolean {
+export function todoistOwnsRecurrence(task: Partial<TodoistLinkFields>): boolean {
   if (task.external_source !== 'todoist' || !task.external_id || task.sync_policy === 'local_only') return false
   if (!task.synced_snapshot) return false
   try {
@@ -42,4 +42,19 @@ export function recurringCompletionNotice(
   const rule = parseRecurrenceRule(task.recurrence_rule)
   if (!rule) return null
   return { kind: 'rescheduled', nextDue: nextOccurrenceDate(rule, task.due_date, todayISO) }
+}
+
+/**
+ * Read-only copy for the rule of a task Todoist owns while Todoist sync is on
+ * (Marco, 2026-09-25: lock, don't push — revisit at the C5 cutover). `null`
+ * = the rule is Nimble's and stays editable (sync off, local-only, or not
+ * recurring in Todoist). The backend refuses the edit too (`recurrence_locked`).
+ */
+export function lockedRecurrenceCopy(
+  task: Partial<TodoistLinkFields> & Partial<Pick<LocalTask, 'recurrence_rule'>>,
+  todoistSyncOn: boolean,
+): string | null {
+  if (!todoistSyncOn || !todoistOwnsRecurrence(task)) return null
+  const rule = task.recurrence_rule?.trim()
+  return rule ? `Repeats in Todoist: ${rule} — edit in Todoist` : 'Repeats in Todoist — edit in Todoist'
 }

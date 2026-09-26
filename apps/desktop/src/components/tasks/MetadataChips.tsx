@@ -45,6 +45,8 @@ interface MetadataChipsProps {
   /** Details only: the task whose reminder the Reminder chip edits (it saves
    * straight through dp.tasks.update, not through `onChange`). */
   reminderTask?: ReminderTask
+  /** Details only: read-only rule copy when Todoist owns the recurrence. */
+  recurrenceLocked?: string | null
 }
 
 // Normal 1 / Medium 2 / High 3 / Urgent 4.
@@ -177,10 +179,18 @@ function PriorityChip({ value, onChange }: { value: number; onChange: (p: number
 
 // ── Due ──
 
-function DueChip({ value, onChange }: { value: DueValue; onChange: (v: DueValue) => void }) {
+function DueChip({
+  value,
+  onChange,
+  recurrenceLocked,
+}: {
+  value: DueValue
+  onChange: (v: DueValue) => void
+  recurrenceLocked?: string | null
+}) {
   if (!value.dueDate) {
     return (
-      <DueDatePopover value={value} onChange={onChange}>
+      <DueDatePopover value={value} onChange={onChange} recurrenceLocked={recurrenceLocked}>
         {/* A real <button> here, not a plain <div> — DueDatePopover's own
             trigger wrapper is `display: contents` (see its doc comment), and
             display:contents elements are excluded from the browser's tab
@@ -198,7 +208,7 @@ function DueChip({ value, onChange }: { value: DueValue; onChange: (v: DueValue)
 
   return (
     <FilledChip clear={<ClearButton onClear={() => onChange(EMPTY_DUE)} label="Clear due date" />}>
-      <DueDatePopover value={value} onChange={onChange}>
+      <DueDatePopover value={value} onChange={onChange} recurrenceLocked={recurrenceLocked}>
         <button type="button" tabIndex={0} className={CHIP_FILLED}>
           <Calendar className="size-3" />
           Due {dueBadgeLabel(value.dueDate)}
@@ -602,7 +612,7 @@ function LinkedDocChip({
  * current context (Decision 17) and immediately opens the chosen field's
  * own picker.
  */
-export function MetadataChips({ values, onChange, context, projects = [], sections = [], labels, reminderTask }: MetadataChipsProps) {
+export function MetadataChips({ values, onChange, context, projects = [], sections = [], labels, reminderTask, recurrenceLocked }: MetadataChipsProps) {
   const dp = useDataProvider()
   const [openField, setOpenField] = useState<ExtraField | null>(null)
 
@@ -626,7 +636,7 @@ export function MetadataChips({ values, onChange, context, projects = [], sectio
   return (
     <div className={cn('flex flex-wrap items-center gap-1.5')}>
       <PriorityChip value={values.priority} onChange={(priority) => onChange({ priority })} />
-      <DueChip value={values.due} onChange={(due) => onChange({ due })} />
+      <DueChip value={values.due} onChange={(due) => onChange({ due })} recurrenceLocked={recurrenceLocked} />
       {reminderTask && <ReminderChip task={reminderTask} />}
       <LabelsChips labelIds={values.labelIds} labels={labels} onChange={(labelIds) => onChange({ labelIds })} />
 

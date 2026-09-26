@@ -14,7 +14,8 @@ import { Sparkles, Plus, Ellipsis, ChevronLeft } from 'lucide-react'
 import { taskToast } from '@/lib/taskToast'
 import { useDeleteTasks } from '@/components/tasks/useDeleteTasks'
 import { todayLocalISO } from '@/lib/recurrence'
-import { recurringCompletionNotice } from '@/lib/todoistRecurrence'
+import { lockedRecurrenceCopy, recurringCompletionNotice } from '@/lib/todoistRecurrence'
+import { useTodoistSyncOn } from '@/hooks/useTodoistSyncOn'
 import { useQuickCreateStore } from '@/stores/quickCreateStore'
 import { InlineTitle } from './InlineTitle'
 import { TiptapEditor } from '@/components/docs/TiptapEditor'
@@ -209,9 +210,12 @@ export function TaskDetailPage() {
   // single onChange(patch) contract instead of one handler per field. The
   // patch → update mapping lives in lib/taskPatch.ts, shared with the task
   // row's clickable marks.
+  // Todoist owns this task's rule while sync is on: read-only here.
+  const todoistSyncOn = useTodoistSyncOn()
+  const recurrenceLocked = task ? lockedRecurrenceCopy(task, todoistSyncOn) : null
   const handleChipChange = useCallback(async (patch: Partial<ChipValues>) => {
     if (!task) return
-    const updates = taskPatchToUpdate(task, patch)
+    const updates = taskPatchToUpdate(task, patch, { recurrenceLocked: recurrenceLocked !== null })
     if (!updates) return
 
     try {
@@ -220,7 +224,7 @@ export function TaskDetailPage() {
     } catch (e) {
       toast.error(`Failed to update task: ${e}`)
     }
-  }, [task, dp])
+  }, [task, dp, recurrenceLocked])
 
   const chipValues = useMemo<ChipValues>(() => ({
     priority: task?.priority ?? 1,
@@ -455,6 +459,7 @@ export function TaskDetailPage() {
         sections={sections}
         labels={labels}
         reminderTask={task}
+        recurrenceLocked={recurrenceLocked}
       />
 
       {/* Description + Subtasks — 48px gap between the two blocks (frame 79:2009).
