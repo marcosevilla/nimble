@@ -5,10 +5,6 @@ import type { Page } from '@/lib/navTargets'
 export type { Page }
 
 interface AppState {
-  // Setup
-  setupComplete: boolean | null
-  setSetupComplete: (v: boolean) => void
-
   // Navigation
   currentPage: Page
   setCurrentPage: (page: Page) => void
@@ -23,9 +19,6 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  setupComplete: null,
-  setSetupComplete: (v) => set({ setupComplete: v }),
-
   currentPage: 'today',
   setCurrentPage: (page) => set({ currentPage: page }),
 

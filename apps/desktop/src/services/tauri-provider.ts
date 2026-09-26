@@ -38,7 +38,6 @@ export function createTauriProvider(): DataProvider {
     },
     omnibar: { docs: true, goals: true, createProject: true, createLabel: true, taskLabelsOnCreate: true },
     settings: {
-      checkSetupComplete: tauri.checkSetupComplete,
       get: tauri.getSetting,
       set: tauri.setSetting,
       getAll: tauri.getAllSettings,

@@ -1413,7 +1413,6 @@
     backup_open_folder: function () { return null },
     backup_configure_remote: function (args) { backupMock.remote_configured = true; backupMock.remote_name = args.ownerRepo; return Object.assign({}, backupMock) },
     // Settings
-    check_setup_complete: function () { return true },
     get_setting: function (args) {
       var v = SETTINGS[args && args.key]
       return v === undefined ? null : v
@@ -2571,7 +2570,6 @@
     var stores = window.__stores
     if (stores && stores.useAppStore) {
       clearInterval(timer)
-      stores.useAppStore.setState({ setupComplete: true })
       if (page && !(stores.navigateTo && stores.navigateTo(page))) {
         stores.useAppStore.setState({ currentPage: page })
       }

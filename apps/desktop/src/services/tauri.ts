@@ -132,10 +132,6 @@ import type {
 
 // ── Settings ──
 
-export async function checkSetupComplete(): Promise<boolean> {
-  return invoke<boolean>('check_setup_complete')
-}
-
 export async function getSetting(key: string): Promise<string | null> {
   return invoke<string | null>('get_setting', { key })
 }

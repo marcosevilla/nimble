@@ -4,21 +4,6 @@ use tauri::{AppHandle, Manager};
 pub use nimble_core::types::SettingRow;
 
 #[tauri::command]
-pub async fn check_setup_complete(app: AppHandle) -> Result<bool, String> {
-    if app.try_state::<crate::backup_runner::BackupRuntime>().is_some_and(|r|r.is_test_profile()) { return Ok(true); }
-    // Demo mode runs against a blank throwaway db — never show onboarding.
-    if let Ok(dir) = app.path().app_data_dir() {
-        if dir.join("demo-mode").exists() {
-            return Ok(true);
-        }
-    }
-    let pool = app.state::<SqlitePool>();
-    nimble_core::db::settings::check_setup_complete(pool.inner())
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 pub async fn get_setting(app: AppHandle, key: String) -> Result<Option<String>, String> {
     let pool = app.state::<SqlitePool>();
     nimble_core::db::settings::get_setting(pool.inner(), &key)

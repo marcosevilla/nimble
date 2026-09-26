@@ -532,7 +532,6 @@ pub fn run() {
             commands::backup::backup_open_folder,
             commands::backup::backup_configure_remote,
             dismiss_capture_strip,
-            settings::check_setup_complete,
             settings::get_setting,
             settings::set_setting,
             settings::get_all_settings,

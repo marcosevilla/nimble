@@ -15,13 +15,6 @@ function App() {
   useTheme() // Initialize theme system
   const dp = useDataProvider()
 
-  const setupComplete = useAppStore((s) => s.setupComplete)
-  const setSetupComplete = useAppStore((s) => s.setSetupComplete)
-
-  useEffect(() => {
-    dp.settings.checkSetupComplete().then(setSetupComplete).catch(() => setSetupComplete(false))
-  }, [dp, setSetupComplete])
-
   // Log app_opened once on mount
   const loggedOpen = useRef(false)
   useEffect(() => {
@@ -116,15 +109,6 @@ function App() {
     })
     return unsub
   }, [dp])
-
-  // Still checking
-  if (setupComplete === null) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <p className="text-body text-muted-foreground">Loading...</p>
-      </div>
-    )
-  }
 
   // Main app
   return (

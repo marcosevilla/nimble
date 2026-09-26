@@ -5,21 +5,13 @@
  * methods — tasks, projects, captures, labels, sections — are implemented
  * against Turso; every other method still rejects. Writes land in step 4.
  *
- * Two deliberate choices worth reading before extending this file:
+ * A deliberate choice worth reading before extending this file:
  *
- * 1. Methods return a REJECTED PROMISE; they do not throw synchronously.
+ * Methods return a REJECTED PROMISE; they do not throw synchronously.
  *    App.tsx and useTheme guard their boot calls with `.catch()`, which only
  *    works for async rejection. A synchronous throw escapes the effect and
  *    blanks the page instead of degrading — which would defeat the entire
  *    point of this step (prove the build path, with the chrome rendering).
- *
- * 2. `settings.checkSetupComplete()` resolves `true` rather than rejecting.
- *    This is not a stub shortcut, it is the correct web semantics: there is
- *    no user-facing setup in the browser. Turso credentials live in Vercel
- *    environment variables behind `api/turso.ts` and are never reachable
- *    from client JS, so there is nothing for a setup dialog to collect.
- *    (Nothing gates on it since brief phase 2 dropped the setup dialog;
- *    it stays for compatibility.)
  *
  * When implementing a method, delete its `ni(...)` and write the real thing.
  * The object is checked structurally against the DataProvider interface in
@@ -116,7 +108,6 @@ export function createTursoProvider(): DataProvider {
     omnibar: { docs: false, goals: false, createProject: false, createLabel: false, taskLabelsOnCreate: false },
     settings: {
       // See note 2 in the file header — deliberately resolves.
-      checkSetupComplete: () => Promise.resolve(true),
       get: ni('settings.get'),
       set: ni('settings.set'),
       getAll: ni('settings.getAll'),
