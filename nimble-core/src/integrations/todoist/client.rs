@@ -40,6 +40,9 @@ pub struct TodoistItem {
     /// When a checked item was completed (RFC 3339), if Todoist sent it.
     #[serde(default)]
     pub completed_at: Option<String>,
+    /// When the task was created (RFC 3339), if Todoist sent it.
+    #[serde(default)]
+    pub added_at: Option<String>,
     #[serde(default)]
     pub due: Option<TodoistDue>,
     #[serde(default)]

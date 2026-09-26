@@ -263,7 +263,10 @@ pub async fn seed_outbox_for_unlinked(pool: &SqlitePool) -> crate::Result<(usize
     let mut projects_seeded = 0usize;
     let projects = crate::db::projects::get_projects(pool).await?;
     for p in projects {
-        if p.external_id.is_none() && p.id != "inbox"
+        // Archived unlinked projects (e.g. the history import's "Todoist
+        // history") stay local: seeding would create them as ACTIVE
+        // projects in Todoist.
+        if p.external_id.is_none() && p.id != "inbox" && p.archived_at.is_none()
             && outbox::pending_create_temp_id(pool, &p.id).await?.is_none()
         {
             outbox::enqueue(pool, "project", &p.id, "create", serde_json::json!({"name": p.name})).await?;
