@@ -125,4 +125,15 @@ test('one days-off rule: Settings and the setup both refuse all seven', async ({
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByText('Step 5 of 6')).toBeVisible()
   await expect(page.locator('[data-setup-step]')).not.toContainText(/miss/i)
+
+  // Back and Continue again: the step is still invalid, so Continue stays
+  // (it used to re-enter Goals as valid and drop the days at Finish).
+  await page.getByRole('button', { name: 'Back', exact: true }).click()
+  await expect(page.getByText('Step 4 of 6')).toBeVisible()
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByText('Step 5 of 6')).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveText("Leave at least one day that isn't a day off.")
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByText('Step 5 of 6')).toBeVisible()
+  await expect(page.getByText('Step 6 of 6')).toHaveCount(0)
 })
