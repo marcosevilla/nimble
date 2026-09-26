@@ -16,7 +16,6 @@
 
 import type {
   Setting,
-  ParsedTodayMd,
   CalendarEvent,
   CalendarFeed,
   QuickCapture,
@@ -98,8 +97,6 @@ export interface DataProvider {
   }
 
   obsidian: {
-    readTodayMd(): Promise<ParsedTodayMd>
-    toggleCheckbox(fileName: string, lineNumber: number): Promise<ParsedTodayMd>
     importCaptures(): Promise<number>
   }
 

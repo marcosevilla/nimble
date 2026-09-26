@@ -126,8 +126,6 @@ export function createTursoProvider(): DataProvider {
     // Mac-only: reads and writes files in the Obsidian vault on disk.
     // Permanently unavailable on web (architecture doc §6).
     obsidian: {
-      readTodayMd: ni('obsidian.readTodayMd'),
-      toggleCheckbox: ni('obsidian.toggleCheckbox'),
       importCaptures: ni('obsidian.importCaptures'),
     },
 

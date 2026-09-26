@@ -46,8 +46,6 @@ export function createTauriProvider(): DataProvider {
     },
 
     obsidian: {
-      readTodayMd: tauri.readTodayMd,
-      toggleCheckbox: tauri.toggleObsidianCheckbox,
       importCaptures: tauri.importObsidianCaptures,
     },
 

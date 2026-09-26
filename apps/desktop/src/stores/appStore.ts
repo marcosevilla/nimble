@@ -17,9 +17,6 @@ interface AppState {
   calendarEvents: CalendarEvent[]
   setCalendarEvents: (events: CalendarEvent[]) => void
 
-  obsidianToday: string | null
-  setObsidianToday: (content: string | null) => void
-
   // Quick capture trigger (from tray)
   captureRequested: boolean
   setCaptureRequested: (v: boolean) => void
@@ -34,9 +31,6 @@ export const useAppStore = create<AppState>((set) => ({
 
   calendarEvents: [],
   setCalendarEvents: (events) => set({ calendarEvents: events }),
-
-  obsidianToday: null,
-  setObsidianToday: (content) => set({ obsidianToday: content }),
 
   captureRequested: false,
   setCaptureRequested: (v) => set({ captureRequested: v }),
