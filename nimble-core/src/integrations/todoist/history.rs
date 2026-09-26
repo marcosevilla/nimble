@@ -529,7 +529,7 @@ struct Planned {
     label_ids: Vec<String>,
     /// Local `YYYY-MM-DD HH:MM:SS`, the shape every completed row uses.
     completed_at: String,
-    /// Todoist's `added_at`, as local time.
+    /// Todoist's `added_at` as UTC `YYYY-MM-DD HH:MM:SS`; `None` = column default.
     created_at: Option<String>,
 }
 
@@ -632,7 +632,13 @@ async fn classify(
         if project_id.is_none() {
             plan.to_history_project += 1;
         }
-        let created_at = item.added_at.as_deref().and_then(crate::db::karma::local_stamp).map(|(_, s)| s);
+        // UTC, like the column's `datetime('now')` default (the shape every
+        // other created_at has); `completed_at` above is local time.
+        let created_at = item
+            .added_at
+            .as_deref()
+            .and_then(|a| DateTime::parse_from_rfc3339(a).ok())
+            .map(|d| d.with_timezone(&Utc).format(STAMP).to_string());
         out.push(Planned {
             item: item.clone(),
             project_id,
@@ -758,14 +764,13 @@ async fn apply_tx(conn: &mut SqliteConnection, items: &[TodoistItem]) -> crate::
     for p in &planned {
         let mut snapshot = mappers::item_to_snapshot(&p.item);
         snapshot.checked = true;
-        let created = p.created_at.clone().unwrap_or_else(|| now.clone());
         let id = uuid::Uuid::new_v4().to_string();
         sqlx::query(
             "INSERT INTO local_tasks
              (id, parent_id, content, description, project_id, section_id, priority, due_date, due_time,
               duration_minutes, completed, completed_at, status, position, external_id, external_source,
               remote_updated_at, synced_snapshot, created_at, updated_at)
-             VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'complete', ?, ?, 'todoist', ?, ?, ?, ?)",
+             VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'complete', ?, ?, 'todoist', ?, ?, COALESCE(?, datetime('now')), ?)",
         )
         .bind(&id)
         .bind(&p.item.content)
@@ -781,7 +786,7 @@ async fn apply_tx(conn: &mut SqliteConnection, items: &[TodoistItem]) -> crate::
         .bind(&p.item.id)
         .bind(&p.item.updated_at)
         .bind(serde_json::to_string(&snapshot).unwrap_or_default())
-        .bind(&created)
+        .bind(&p.created_at)
         .bind(&now)
         .execute(&mut *conn)
         .await?;
@@ -1347,6 +1352,34 @@ mod tests {
             sqlx::query_as("SELECT completed, completed_at, status FROM local_tasks WHERE external_id = 'B'").fetch_one(&pool).await.unwrap();
         assert_eq!(before, after);
         assert_eq!(count(&pool, "SELECT COUNT(*) FROM todoist_outbox").await, 0);
+    }
+
+    /// `created_at` follows the column's own convention (UTC, like the
+    /// `datetime('now')` default); `completed_at` is local like every writer's.
+    #[tokio::test]
+    async fn created_at_is_added_at_in_utc_else_the_column_default() {
+        let pool = fixture().await;
+        let mut with = done("W", "P_ACTIVE", "2026-09-10T20:00:00Z");
+        with["added_at"] = json!("2026-01-02T03:04:05.678Z");
+        let mut without = done("N", "P_ACTIVE", "2026-09-11T20:00:00Z");
+        without.as_object_mut().unwrap().remove("added_at");
+        let fake = serving(vec![with, without]);
+        run(&pool, &fake, fast(), opts(true), || async { Ok(()) }).await.unwrap();
+        let get = |ext: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<_, (String, Option<String>, i64)>(
+                    "SELECT created_at, completed_at, ABS(strftime('%s', created_at) - strftime('%s', 'now'))
+                     FROM local_tasks WHERE external_id = ?")
+                    .bind(ext).fetch_one(&pool).await.unwrap()
+            }
+        };
+        let w = get("W").await;
+        assert_eq!(w.0, "2026-01-02 03:04:05");
+        assert_eq!(w.1, crate::db::karma::local_stamp("2026-09-10T20:00:00Z").map(|(_, s)| s));
+        let n = get("N").await;
+        assert!(n.2 < 60, "no added_at: the UTC column default ({})", n.0);
+        assert_eq!(n.0.len(), 19);
     }
 
     // ── Archive ──
