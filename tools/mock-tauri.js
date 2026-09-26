@@ -1103,25 +1103,6 @@
     { name: 'Lisbon', admin1: 'Lisbon', country: 'Portugal', lat: 38.7223, lon: -9.1393, tz: 'Europe/Lisbon' },
   ]
 
-  // ── Obsidian today.md ────────────────────────────────────────────────────
-
-  var TODAY_MD = {
-    tasks: [
-      { line_number: 4, checked: true, text: 'Morning pages' },
-      { line_number: 5, checked: false, text: 'Case study work block' },
-      { line_number: 6, checked: false, text: 'Charge camera batteries' },
-    ],
-    habits_core: [
-      { line_number: 10, checked: true, text: 'Run' },
-      { line_number: 11, checked: false, text: 'Read 20 min' },
-      { line_number: 12, checked: false, text: 'Journal' },
-    ],
-    habits_bonus: [
-      { line_number: 16, checked: false, text: 'Stretch' },
-      { line_number: 17, checked: true, text: '10k steps' },
-    ],
-  }
-
   // ── Reminders / Google Calendar (C2) ──────────────────────────────────
 
   var REMINDER_STATUS = { permission: 'granted', timezone: 'America/Los_Angeles', errorCode: null }
@@ -1424,8 +1405,6 @@
     clear_all_settings: function () { return null },
 
     // Obsidian
-    read_today_md: function () { return TODAY_MD },
-    toggle_obsidian_checkbox: function () { return TODAY_MD },
 
     // Todoist
     fetch_todoist_tasks: function () { return TODOIST_TASKS },

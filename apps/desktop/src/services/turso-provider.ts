@@ -107,7 +107,6 @@ export function createTursoProvider(): DataProvider {
     // refuses labelIds on create — so the Omnibar never offers them here.
     omnibar: { docs: false, goals: false, createProject: false, createLabel: false, taskLabelsOnCreate: false },
     settings: {
-      // See note 2 in the file header — deliberately resolves.
       get: ni('settings.get'),
       set: ni('settings.set'),
       getAll: ni('settings.getAll'),
