@@ -150,3 +150,16 @@ export async function expectNoNewAxeViolations(page: Page, pageKey: string, opts
     .map((v) => `${v.id} (${v.impact}) ${v.nodes.length} > baseline ${known[v.id] ?? 0}: ${v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join(' | ')}`)
   expect(fresh, `new axe violations on ${pageKey}`).toEqual([])
 }
+
+/** Wait until `l` stops moving: Today's boxes load after its rows and push
+ * them down, so a mark measured too early is somewhere else a moment later. */
+export async function settleRect(l: Locator) {
+  let last = ''
+  await expect.poll(async () => {
+    const r = await l.evaluate((e) => e.getBoundingClientRect().toJSON() as DOMRect)
+    const key = `${Math.round(r.left)},${Math.round(r.top)}`
+    const still = key === last
+    last = key
+    return still
+  }, { message: 'layout settles', intervals: [150], timeout: 5000 }).toBe(true)
+}

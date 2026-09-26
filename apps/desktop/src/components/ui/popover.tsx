@@ -2,6 +2,7 @@ import * as React from "react"
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 
 import { cn } from "@/lib/utils"
+import { FollowAnchor } from "@/components/ui/follow-anchor"
 
 function Popover({ ...props }: PopoverPrimitive.Root.Props) {
   return <PopoverPrimitive.Root data-slot="popover" {...props} />
@@ -40,6 +41,7 @@ function PopoverContent({
           )}
           {...props}
         />
+        <FollowAnchor />
       </PopoverPrimitive.Positioner>
     </PopoverPrimitive.Portal>
   )
