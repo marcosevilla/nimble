@@ -84,6 +84,45 @@ pub async fn todoist_owns_recurrence_tx(conn: &mut SqliteConnection, task: &Loca
     Ok(active.is_some())
 }
 
+/// Error prefix for a refused rule edit (`dt` reports it as `validation`).
+pub const RECURRENCE_LOCKED: &str = "recurrence_locked: This task repeats in Todoist. Edit its repeat rule in Todoist.";
+
+/// Whether `input` would change the rule of a task Todoist owns (see the
+/// module doc). While Todoist sync is on, that rule is read-only in Nimble:
+/// edits don't push to Todoist, so allowing one would only make the two
+/// disagree. An unchanged rule (e.g. a full due value echoed back) is fine.
+/// Revisit at the C5 cutover.
+pub async fn recurrence_change_locked_tx(
+    conn: &mut SqliteConnection,
+    task: &LocalTask,
+    input: &crate::types::UpdateTaskInput,
+) -> crate::Result<bool> {
+    let norm = |r: Option<&str>| r.map(str::trim).filter(|r| !r.is_empty()).map(str::to_string);
+    let current = norm(task.recurrence_rule.as_deref());
+    // Same order as `update_task_tx`: set, then clear.
+    let next = if input.clear_recurrence {
+        None
+    } else if input.recurrence_rule.is_some() {
+        norm(input.recurrence_rule.as_deref())
+    } else {
+        current.clone()
+    };
+    if next == current {
+        return Ok(false);
+    }
+    todoist_owns_recurrence_tx(conn, task).await
+}
+
+/// Pool wrapper for callers that validate before writing (`dt`).
+pub async fn recurrence_change_locked(
+    pool: &sqlx::SqlitePool,
+    task: &LocalTask,
+    input: &crate::types::UpdateTaskInput,
+) -> crate::Result<bool> {
+    let mut conn = pool.acquire().await?;
+    recurrence_change_locked_tx(&mut conn, task, input).await
+}
+
 /// What `repair_linked_recurrence_tx` changed.
 #[derive(Debug, Default, PartialEq)]
 pub struct RecurrenceRepair {
@@ -106,7 +145,7 @@ pub async fn repair_linked_recurrence_tx(conn: &mut SqliteConnection) -> crate::
     // the occurrence open, so it is open here too.)
     let stuck: Vec<(String,)> = sqlx::query_as(
         "SELECT id FROM local_tasks t
-         WHERE external_source = 'todoist' AND external_id IS NOT NULL
+         WHERE external_source = 'todoist' AND external_id IS NOT NULL AND sync_policy != 'local_only'
            AND (completed = 1 OR status = 'complete')
            AND json_valid(synced_snapshot)
            AND json_extract(synced_snapshot, '$.due.is_recurring') = 1
@@ -131,7 +170,7 @@ pub async fn repair_linked_recurrence_tx(conn: &mut SqliteConnection) -> crate::
     // sync_log). Runs after the reopen so a reopened row gets its rule.
     let empty: Vec<(String, String)> = sqlx::query_as(
         "SELECT id, synced_snapshot FROM local_tasks
-         WHERE external_source = 'todoist' AND external_id IS NOT NULL
+         WHERE external_source = 'todoist' AND external_id IS NOT NULL AND sync_policy != 'local_only'
            AND completed = 0 AND status != 'complete'
            AND json_valid(synced_snapshot) AND json_extract(synced_snapshot, '$.due.is_recurring') = 1
            AND json_extract(synced_snapshot, '$.checked') = 0

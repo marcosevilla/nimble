@@ -320,6 +320,12 @@ pub async fn update_task_tx(
     policy: MutationPolicy,
 ) -> crate::Result<LocalTask> {
     let mut next = fetch(conn, id).await?;
+    // A rule Todoist owns is read-only here (integrations::todoist::recurrence).
+    if policy == MutationPolicy::User
+        && crate::integrations::todoist::recurrence::recurrence_change_locked_tx(conn, &next, &input).await?
+    {
+        return Err(crate::Error::Other(crate::integrations::todoist::recurrence::RECURRENCE_LOCKED.into()));
+    }
     let was_local_only = next.sync_policy == "local_only";
     let implicit_section_clear = input
         .project_id

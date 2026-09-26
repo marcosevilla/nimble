@@ -3000,6 +3000,73 @@ mod recurrence_tests {
         assert_eq!(task(&pool, "R1").await.recurrence_rule.as_deref(), Some("every week"));
     }
 
+    // Rule lock (Marco, 2026-09-25): while Todoist sync is on, the rule of a
+    // task Todoist recurs is read-only in Nimble.
+    async fn owned(pool: &sqlx::SqlitePool) -> String {
+        activate(pool).await;
+        apply_pull(pool, &resp(json!({"sync_token": "T1", "items": [item("R1", "2026-10-06", "every month", true, "2026-09-20T00:00:00Z")]})))
+            .await.unwrap();
+        task(pool, "R1").await.id
+    }
+    fn set_rule(rule: &str) -> crate::types::UpdateTaskInput {
+        crate::types::UpdateTaskInput { recurrence_rule: Some(rule.into()), ..Default::default() }
+    }
+
+    #[tokio::test]
+    async fn a_todoist_recurring_rule_is_locked_while_sync_is_on() {
+        let pool = test_pool().await;
+        let id = owned(&pool).await;
+        for input in [set_rule("every week"), crate::types::UpdateTaskInput { clear_recurrence: true, ..Default::default() }] {
+            let err = crate::db::tasks::update_local_task(&pool, &id, input).await.unwrap_err();
+            assert!(err.to_string().contains("recurrence_locked"), "{err}");
+        }
+        assert_eq!(task(&pool, "R1").await.recurrence_rule.as_deref(), Some("every month"));
+        assert!(outbox_ops(&pool, &id).await.is_empty(), "nothing queued for Todoist");
+        // The rest of the task stays editable, including an unchanged rule echo.
+        crate::db::tasks::update_local_task(&pool, &id, crate::types::UpdateTaskInput {
+            due_date: Some("2026-10-07".into()), recurrence_rule: Some("every month".into()), ..Default::default()
+        }).await.unwrap();
+        assert_eq!(task(&pool, "R1").await.due_date.as_deref(), Some("2026-10-07"));
+    }
+
+    #[tokio::test]
+    async fn the_rule_stays_editable_when_todoist_does_not_own_it() {
+        // Sync off.
+        let pool = test_pool().await;
+        let id = owned(&pool).await;
+        crate::integrations::set_enabled(&pool, "todoist", false).await.unwrap();
+        crate::db::tasks::update_local_task(&pool, &id, set_rule("every week")).await.unwrap();
+        assert_eq!(task(&pool, "R1").await.recurrence_rule.as_deref(), Some("every week"));
+        // Linked but not recurring in Todoist.
+        let pool = test_pool().await;
+        activate(&pool).await;
+        apply_pull(&pool, &resp(json!({"sync_token": "T1", "items": [item("R2", "2026-10-06", "Oct 6", false, "2026-09-20T00:00:00Z")]})))
+            .await.unwrap();
+        let id = task(&pool, "R2").await.id;
+        crate::db::tasks::update_local_task(&pool, &id, set_rule("every week")).await.unwrap();
+        assert_eq!(task(&pool, "R2").await.recurrence_rule.as_deref(), Some("every week"));
+        // Local-only.
+        let pool = test_pool().await;
+        let id = owned(&pool).await;
+        crate::db::tasks::update_local_task(&pool, &id, crate::types::UpdateTaskInput {
+            sync_policy: Some("local_only".into()), ..Default::default()
+        }).await.unwrap();
+        crate::db::tasks::update_local_task(&pool, &id, crate::types::UpdateTaskInput { clear_recurrence: true, ..Default::default() })
+            .await.unwrap();
+        assert_eq!(task(&pool, "R1").await.recurrence_rule, None);
+    }
+
+    #[tokio::test]
+    async fn repair_leaves_local_only_rows_alone() {
+        let pool = test_pool().await;
+        let id = seed_legacy(&pool, &[("R1", "2026-10-04", true)]).await.remove(0);
+        sqlx::query("UPDATE local_tasks SET sync_policy = 'local_only' WHERE id = ?").bind(&id).execute(&pool).await.unwrap();
+        let report = apply_pull(&pool, &resp(json!({"items": []}))).await.unwrap();
+        let t = task(&pool, "R1").await;
+        assert!(t.completed && t.recurrence_rule.is_none());
+        assert_eq!(report.updated, 0);
+    }
+
     #[tokio::test]
     async fn repair_leaves_a_completion_whose_close_is_undelivered() {
         let pool = test_pool().await;
