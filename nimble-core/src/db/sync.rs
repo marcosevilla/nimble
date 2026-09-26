@@ -1104,6 +1104,14 @@ fn build_data_mutation_requests(
                 // Epoch changes require a separate stopped-owner takeover.
                 sql.push_str(" WHERE focus_replica.writer_device_id=excluded.writer_device_id AND focus_replica.owner_epoch=excluded.owner_epoch AND excluded.revision>focus_replica.revision");
             }
+            // schema-v26, mirroring the pull-side guard in apply_remote_change:
+            // a plain brief shell (a second Mac's first open) never overwrites
+            // the remote composed row for that date. Only when the shell names
+            // `composed_at` itself, so a pre-v26 remote never sees the column
+            // through this WHERE alone.
+            if table_name == "briefs" && obj.get("composed_at").is_some_and(serde_json::Value::is_null) && sql.contains("DO UPDATE") {
+                sql.push_str(" WHERE briefs.composed_at IS NULL");
+            }
 
             let args: Vec<serde_json::Value> = columns
                 .iter()
@@ -3489,6 +3497,49 @@ mod v19_sync_tests {
         super::apply_remote_change(&pool, "briefs", "2026-09-26", "UPDATE", Some(&composed)).await.unwrap();
         let b = crate::db::briefs::get_brief(&pool, "2026-09-26").await.unwrap().unwrap();
         assert_eq!((b.version, b.snapshot["compose"]["summary"].as_str()), (2, Some("Theirs.")));
+    }
+
+    /// Run pushed statements against a local pool standing in for Turso.
+    async fn exec_pushed(pool: &sqlx::SqlitePool, reqs: &[serde_json::Value]) {
+        for r in reqs {
+            let sql = r.pointer("/stmt/sql").and_then(|v| v.as_str()).unwrap();
+            let mut q = sqlx::query(sql);
+            for a in r.pointer("/stmt/args").and_then(|v| v.as_array()).unwrap() {
+                let v = a["value"].as_str().map(str::to_string);
+                q = match a["type"].as_str().unwrap() {
+                    "null" => q.bind(None::<String>),
+                    "integer" => q.bind(v.unwrap().parse::<i64>().unwrap()),
+                    "float" => q.bind(v.unwrap().parse::<f64>().unwrap()),
+                    _ => q.bind(v),
+                };
+            }
+            q.execute(pool).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pushed_shell_never_overwrites_a_remote_composed_brief() { // schema-v26
+        let remote = test_pool().await;
+        let push = |snap: serde_json::Value| super::build_data_mutation_requests("briefs", "2026-09-26", "UPDATE", &Some(snap.to_string()));
+        let composed = serde_json::json!({"date":"2026-09-26","version":2,"status":"ready","source":"nimble",
+            "layout_json":"[]","snapshot_json":"{\"compose\":{\"summary\":\"Calm.\"}}","snapshot_schema":1,
+            "composed_at":"2026-09-26 06:30:00","generated_at":"g","updated_at":"u1"});
+        exec_pushed(&remote, &push(composed)).await;
+        // A second Mac's first open: a plain shell for the same date.
+        let shell = serde_json::json!({"date":"2026-09-26","version":1,"status":"ready","source":"nimble",
+            "layout_json":"[]","snapshot_json":"{}","snapshot_schema":1,"composed_at":null,
+            "generated_at":"2026-09-26 06:40:00","updated_at":"2026-09-26 06:40:00"});
+        exec_pushed(&remote, &push(shell)).await;
+        let b = crate::db::briefs::get_brief(&remote, "2026-09-26").await.unwrap().unwrap();
+        assert_eq!(b.composed_at.as_deref(), Some("2026-09-26 06:30:00"));
+        assert_eq!(b.snapshot["compose"]["summary"], "Calm.");
+        // Another composed row still lands (LWW decides, as on pull).
+        let theirs = serde_json::json!({"date":"2026-09-26","version":3,"status":"ready","source":"nimble",
+            "layout_json":"[]","snapshot_json":"{\"compose\":{\"summary\":\"Theirs.\"}}","snapshot_schema":1,
+            "composed_at":"2026-09-26 06:31:00","generated_at":"g","updated_at":"u2"});
+        exec_pushed(&remote, &push(theirs)).await;
+        let b = crate::db::briefs::get_brief(&remote, "2026-09-26").await.unwrap().unwrap();
+        assert_eq!((b.version, b.snapshot["compose"]["summary"].as_str()), (3, Some("Theirs.")));
     }
 
     #[tokio::test]
