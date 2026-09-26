@@ -52,7 +52,7 @@ export function CollapsibleSection({
           </CollapsibleTrigger>
         </SectionTitle>
         {action && (
-          <div className="opacity-0 transition-opacity group-hover/section:opacity-100">
+          <div className="opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100">
             {action}
           </div>
         )}

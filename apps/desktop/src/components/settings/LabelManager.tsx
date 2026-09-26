@@ -442,7 +442,7 @@ function SortableRow({
           data-manager-grip={id}
           aria-label={gripLabel}
           aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-          className="flex size-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 outline-none transition-opacity duration-(--transition-fast) group-hover/row:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+          className="flex size-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-(--transition-fast) group-hover/row:opacity-100 group-focus-within/row:opacity-100 focus-ring active:cursor-grabbing"
         >
           <GripVertical className="size-3.5" aria-hidden />
         </button>
@@ -629,7 +629,7 @@ function LabelRow({
           render={
             <IconButton
               tone="destructive"
-              className="opacity-0 group-hover:opacity-100"
+              className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
               aria-label={`Delete label ${label.name}`}
             >
               <Trash2 className="size-3" />

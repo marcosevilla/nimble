@@ -205,7 +205,7 @@ export function BreakdownPanel({ task, loading, items, onEdit, onRemove, onConfi
                     value={item}
                     aria-label={`Step ${i + 1}`}
                     onChange={(e) => onEdit(i, e.target.value)}
-                    className="flex-1 rounded-md bg-muted/30 px-2 py-1 text-body outline-none focus:ring-1 focus:ring-accent-blue/40"
+                    className="focus-ring-inset flex-1 rounded-md bg-muted/30 px-2 py-1 text-body"
                   />
                   <button
                     type="button"

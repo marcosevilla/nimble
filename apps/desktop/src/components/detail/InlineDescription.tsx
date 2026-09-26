@@ -53,7 +53,10 @@ export function InlineDescription({ value, onSave }: InlineDescriptionProps) {
           onBlur={save}
           onKeyDown={handleKeyDown}
           placeholder="Add a description..."
-          className="w-full resize-none bg-transparent text-body text-muted-foreground leading-relaxed outline-none placeholder:text-muted-foreground"
+          aria-label="Description"
+          // field-ghost: the shared ghost-field focus well (index.css);
+          // -my-1 cancels its py-1 so display → edit doesn't move the page.
+          className="field-ghost -my-1 w-full resize-none text-body text-muted-foreground leading-relaxed placeholder:text-muted-foreground"
           rows={2}
         />
       </>
@@ -63,9 +66,17 @@ export function InlineDescription({ value, onSave }: InlineDescriptionProps) {
   return (
     <>
       {/* leading-relaxed: deliberate prose override — rendered description is read like body copy */}
+      {/* Click-to-edit, keyboard too (loop 4 P2-13): a button role, a Tab
+          stop, Enter / Space to edit. */}
       <p
+        role="button"
+        tabIndex={0}
+        aria-label={value ? 'Edit description' : undefined}
         onClick={startEditing}
-        className="text-body leading-relaxed cursor-text hover:bg-hover rounded-md -mx-1 px-1 transition-colors min-h-[24px]"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEditing() }
+        }}
+        className="focus-ring text-body leading-relaxed cursor-text hover:bg-hover rounded-md -mx-1 px-1 transition-colors min-h-[24px]"
       >
         {value ? (
           <span className="text-muted-foreground">{value}</span>

@@ -202,7 +202,7 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
         'group relative flex h-9 items-center min-w-0 transition-colors hover:bg-hover cursor-default',
         // Inset ring: the row spans the column, so an outside offset would
         // paint over its neighbours.
-        'focus-visible:-outline-offset-2',
+        'focus-ring-inset',
         focused && 'bg-accent/10',
         isSelected && 'bg-accent-blue/10',
         isCompleting && 'animate-task-complete',
@@ -230,7 +230,7 @@ export function TaskItem({ task, onOpen, allIds, focused, navId, onFocusRow, cla
             <button
               type="button"
               aria-label="Drag to reorder"
-              className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:transition-none focus-visible:-outline-offset-2"
+              className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:transition-none focus-ring-inset"
               onClick={(e) => e.stopPropagation()}
               {...dragHandleProps}
             >

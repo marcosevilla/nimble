@@ -495,7 +495,7 @@ function InboxNoteRow({
       // tint, hover beats both, as before).
       className={cn(
         'group relative flex h-9 items-center min-w-0 transition-colors bg-(--row-tint) cursor-default',
-        'focus-visible:-outline-offset-2 hover:[--row-tint:var(--hover)]',
+        'focus-ring-inset hover:[--row-tint:var(--hover)]',
         isSelected
           ? '[--row-tint:color-mix(in_oklab,var(--accent-blue)_10%,transparent)]'
           : focused

@@ -148,6 +148,11 @@
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+    /* An element with no radius of its own takes its parent's, so the ring
+       on an unrounded child of a rounded card / pill follows that shape
+       instead of squaring off (loop 4 P2-13). Any `rounded-*` utility
+       (utilities layer) still wins. */
+    border-radius: inherit;
     }
   /* Rendered height of PageHeader's main row (40px min-height + 1px
      border). Anything that sticks or scroll-margins beneath the header
@@ -217,6 +222,15 @@
      it), so the ring has to be calm enough to show on every click. */
   .focus-ring-inset {
     @apply focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring;
+  }
+
+  /* Roving-focus rows — a list whose own keys move focus by script (the
+     Today boxes list, the focus queue). Same inset ring, but on :focus:
+     WebKit drops :focus-visible when script re-focuses a row the mouse
+     focused first, so a ⌥↓ reorder after a click would lose its ring
+     (loop 4 P2-13 — this replaces those rows' two ad hoc recipes). */
+  .focus-ring-roving {
+    @apply focus:outline-2 focus:-outline-offset-2 focus:outline-ring;
   }
 
   /* Ghost text fields — borderless title/description fields that read as
