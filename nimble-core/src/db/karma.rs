@@ -803,10 +803,21 @@ pub async fn claim_backfill() -> tokio::sync::MutexGuard<'static, ()> {
     BACKFILL_GATE.lock().await
 }
 
-/// Wait for a launch backfill in flight; returns at once when none is.
-/// Never starts one (the brief stays read-only).
+/// How long the brief waits for a launch backfill before reading the ledger
+/// as it is: a long rebuild must never hold up the first v27 brief.
+pub const BACKFILL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Wait (up to [`BACKFILL_WAIT`]) for a launch backfill in flight; returns at
+/// once when none is. Never starts one (the brief stays read-only).
 pub async fn backfill_settled() {
-    drop(BACKFILL_GATE.lock().await);
+    if !backfill_settled_within(BACKFILL_WAIT).await {
+        log::warn!("momentum: backfill still running after {BACKFILL_WAIT:?}; the brief reads the ledger as it is");
+    }
+}
+
+/// True when no backfill holds the gate within `wait`.
+pub async fn backfill_settled_within(wait: std::time::Duration) -> bool {
+    tokio::time::timeout(wait, BACKFILL_GATE.lock()).await.is_ok()
 }
 
 /// The launch hook, for the caller to spawn. It takes the gate *before*
@@ -823,15 +834,10 @@ pub fn launch_backfill(pool: SqlitePool) -> impl std::future::Future<Output = ()
     }
 }
 
-/// Launch hook: rebuild until one run succeeds for this `BACKFILL_VERSION`
-/// (stamped in `momentum.backfill_version` only after a fully successful run).
-/// A non-empty ledger is no signal: a live completion can land first. The
+/// Rebuild until one run succeeds for this `BACKFILL_VERSION` (stamped in
+/// `momentum.backfill_version` only after a fully successful run). A
+/// non-empty ledger is no signal: a live completion can land first. The
 /// backfill is idempotent by id, so a retry is harmless. Fire-and-forget.
-pub async fn backfill_if_needed(pool: &SqlitePool) {
-    let _gate = claim_backfill().await;
-    backfill_if_needed_claimed(pool).await
-}
-
 async fn backfill_if_needed_claimed(pool: &SqlitePool) {
     match get_setting(pool, K_BACKFILL).await {
         Ok(Some(v)) if v == BACKFILL_VERSION => return,
@@ -853,6 +859,17 @@ async fn backfill_if_needed_claimed(pool: &SqlitePool) {
 mod ledger_tests {
     use super::*;
     use crate::test_util::test_pool;
+
+    #[tokio::test]
+    async fn waiting_for_the_backfill_gives_up_after_its_timeout() {
+        let gate = claim_backfill().await;
+        let started = std::time::Instant::now();
+        assert!(!backfill_settled_within(std::time::Duration::from_millis(50)).await, "still running: gave up");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        drop(gate);
+        assert!(backfill_settled_within(std::time::Duration::from_secs(5)).await, "done: settled");
+        assert!(BACKFILL_WAIT <= std::time::Duration::from_secs(5));
+    }
 
     fn ev(id: &str) -> KarmaEvent {
         KarmaEvent { id: id.into(), date: "2026-09-25".into(), kind: "task".into(), points: 1,
