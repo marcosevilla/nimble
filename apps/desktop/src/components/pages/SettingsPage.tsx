@@ -69,6 +69,7 @@ import { useSettingsNavStore } from '@/stores/settingsNavStore'
 import { settingsFailure, settingsMessage } from '@/lib/settingsMessage'
 import type { SettingsFailure } from '@/lib/settingsMessage'
 import { validateRoutePrefix } from '@/lib/captureRoutes'
+import { formatSyncTime } from '@/lib/syncTime'
 import { useDeferredDeletes } from '@/hooks/useDeferredDeletes'
 import { FailureNote, SECTION_CLASS, SectionHeader, SettingFieldRow, type FieldState, type SettingField } from '@/components/settings/SettingsFields'
 
@@ -1052,8 +1053,8 @@ function SyncSection() {
           </div>
           <div className="flex items-center justify-between">
             <span className="text-body text-muted-foreground">Last synced</span>
-            <span className="text-body font-mono">
-              {status.last_sync ?? 'Never'}
+            <span className="text-body tabular-nums">
+              {status.last_sync ? formatSyncTime(status.last_sync) : 'Never'}
             </span>
           </div>
         </div>
