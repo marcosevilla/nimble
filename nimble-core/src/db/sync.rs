@@ -2047,16 +2047,25 @@ pub async fn apply_remote_rows_with_focus(
     }
     write.commit(&effects).await?;
 
+    // A completion flip is pushed once per task per chunk, judged against the
+    // task's state before the chunk (a second row for it carries no flip).
+    let mut status_pushed: std::collections::HashSet<String> = std::collections::HashSet::new();
     for plan in &applied_rows {
         let row = plan.row;
+        let was_completed = if row.table_name == "local_tasks" && status_pushed.insert(row.row_id.clone()) {
+            was_complete.get(&row.row_id).copied()
+        } else {
+            None
+        };
         // Todoist mutation observer: best-effort, mirrors phone-originated changes
-        crate::integrations::todoist::observer::on_turso_row_applied(
+        crate::integrations::todoist::observer::on_turso_row_applied_with_status(
             pool,
             &row.table_name,
             &row.row_id,
             plan.pre_delete_external_id.clone(),
             plan.pre_delete_sync_policy.clone(),
             row.operation == "DELETE",
+            was_completed,
         )
         .await;
         // Vault: a note row applied from another device needs its device-local

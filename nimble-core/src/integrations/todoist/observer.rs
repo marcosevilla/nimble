@@ -215,6 +215,23 @@ pub async fn on_turso_row_applied(
     pre_delete_sync_policy: Option<String>,
     deleted: bool,
 ) {
+    on_turso_row_applied_with_status(pool, table, row_id, pre_delete_external_id, pre_delete_sync_policy, deleted, None).await
+}
+
+/// `on_turso_row_applied`, plus the task's completion state before the
+/// apply chunk (`was_completed`, given once per task per chunk): a flip is
+/// pushed as `item_close` / `item_uncomplete`, exactly like a local status
+/// change. For a Todoist-recurring task that close is what advances it, so
+/// the full update leaves its date out — Todoist owns the next date.
+pub async fn on_turso_row_applied_with_status(
+    pool: &SqlitePool,
+    table: &str,
+    row_id: &str,
+    pre_delete_external_id: Option<String>,
+    pre_delete_sync_policy: Option<String>,
+    deleted: bool,
+    was_completed: Option<bool>,
+) {
     if table == "local_tasks" && !deleted {
         let policy: Option<String> = sqlx::query_scalar("SELECT sync_policy FROM local_tasks WHERE id=?")
             .bind(row_id).fetch_optional(pool).await.ok().flatten();
@@ -248,12 +265,18 @@ pub async fn on_turso_row_applied(
         if task.external_id.is_none() {
             on_task_mutation(pool, TaskMutation::Created(&task)).await;
         } else {
+            let todoist_recurring = super::recurrence::snapshot_is_recurring(&task);
             let fields: Vec<String> = ["content", "description", "due_date", "priority", "project_id"]
-                .iter().map(|s| s.to_string()).collect();
+                .iter()
+                .filter(|f| !(todoist_recurring && **f == "due_date"))
+                .map(|s| s.to_string())
+                .collect();
             on_task_mutation(pool, TaskMutation::Updated { task: &task, fields_changed: &fields }).await;
-            // completion state may have flipped on the phone; close/reopen is
-            // resolved by the push builder comparing task.completed to the
-            // stored snapshot's checked (Task 10), not enqueued blindly here.
+            if let Some(was) = was_completed {
+                if was != task.completed {
+                    on_task_mutation(pool, TaskMutation::StatusChanged { task: &task, was_completed: was }).await;
+                }
+            }
         }
     }
 }
@@ -555,5 +578,59 @@ mod tests {
         // idempotent
         let (again, _) = seed_outbox_for_unlinked(&pool).await.unwrap();
         assert_eq!(again, 0);
+    }
+
+    /// A linked row as the Todoist pull leaves it, then completed on the web
+    /// (Turso) — the apply sets the columns directly, no observer.
+    async fn linked_completed_on_web(pool: &sqlx::SqlitePool, recurring: bool) -> String {
+        let t = crate::db::tasks::create_local_task(pool, CreateTaskInput { content: "Certify".into(), ..Default::default() })
+            .await.unwrap();
+        let due = if recurring {
+            serde_json::json!({"date": "2026-10-04", "string": "every 2 weeks @ 09:00", "is_recurring": true})
+        } else {
+            serde_json::json!({"date": "2026-10-04", "string": "Oct 4", "is_recurring": false})
+        };
+        let snap = serde_json::json!({"content": "Certify", "due_date": "2026-10-04", "due": due, "checked": false});
+        sqlx::query("UPDATE local_tasks SET external_id='R1', external_source='todoist', due_date='2026-10-04', synced_snapshot=?, completed=1, status='complete' WHERE id=?")
+            .bind(snap.to_string()).bind(&t.id).execute(pool).await.unwrap();
+        t.id
+    }
+    async fn ops(pool: &sqlx::SqlitePool, id: &str) -> Vec<(String, serde_json::Value)> {
+        let rows: Vec<(String, String)> = sqlx::query_as("SELECT op, payload_json FROM todoist_outbox WHERE local_id=? ORDER BY rowid")
+            .bind(id).fetch_all(pool).await.unwrap();
+        rows.into_iter().map(|(op, p)| (op, serde_json::from_str(&p).unwrap())).collect()
+    }
+
+    #[tokio::test]
+    async fn a_web_completion_of_a_linked_task_pushes_item_close_once() {
+        let pool = test_pool().await;
+        let id = linked_completed_on_web(&pool, false).await; // created before activation: no create op
+        activate(&pool).await;
+        on_turso_row_applied_with_status(&pool, "local_tasks", &id, None, None, false, Some(false)).await;
+        // A second row for the same task in the chunk carries no flip.
+        on_turso_row_applied_with_status(&pool, "local_tasks", &id, None, None, false, None).await;
+        let closes = ops(&pool, &id).await.into_iter().filter(|(op, _)| op == "close").count();
+        assert_eq!(closes, 1);
+    }
+
+    #[tokio::test]
+    async fn a_web_completion_of_a_todoist_recurring_task_closes_without_pushing_its_date() {
+        let pool = test_pool().await;
+        let id = linked_completed_on_web(&pool, true).await;
+        activate(&pool).await;
+        on_turso_row_applied_with_status(&pool, "local_tasks", &id, None, None, false, Some(false)).await;
+        let ops = ops(&pool, &id).await;
+        assert!(ops.iter().any(|(op, _)| op == "close"), "{ops:?}");
+        assert!(ops.iter().all(|(_, p)| p.get("due_date").is_none()), "Todoist owns the date: {ops:?}");
+    }
+
+    #[tokio::test]
+    async fn a_web_reopen_pushes_reopen() {
+        let pool = test_pool().await;
+        let id = linked_completed_on_web(&pool, false).await;
+        sqlx::query("UPDATE local_tasks SET completed=0, status='todo' WHERE id=?").bind(&id).execute(&pool).await.unwrap();
+        activate(&pool).await;
+        on_turso_row_applied_with_status(&pool, "local_tasks", &id, None, None, false, Some(true)).await;
+        assert!(ops(&pool, &id).await.iter().any(|(op, _)| op == "reopen"));
     }
 }
